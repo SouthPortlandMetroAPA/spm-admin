@@ -465,35 +465,63 @@ input:focus, select:focus, textarea:focus {
          ══════════════════════════════════════════════════════════════ -->
     <div id="tab-uploads" class="tab-panel">
 
+      <!-- Player import — flexible, any mix of supported columns -->
       <div class="card">
-        <h2>How to paste</h2>
+        <h2>Import Player Data</h2>
         <p class="hint">
-          From the APA admin web interface, select a report&rsquo;s table rows, Ctrl+C copy,
-          and paste into the matching box below. The tool auto-detects which report you
-          pasted by its header row, previews the parse, and commits on confirm.
+          Paste tab-separated data from the APA admin web interface. First row = headers.
+          <strong>Any subset</strong> of the supported columns is fine — paste the "Current Player Addresses" export one time,
+          the "Player Details" (SL + phone) export another, the membership status export a third; each run merges into the player
+          record on <code>Member Number</code>.
         </p>
-        <ul class="hint" style="margin-left: 18px; margin-top: 4px;">
-          <li>Divisions &amp; teams are scoped to the current session (shown in the pill above).</li>
-          <li>Player records are global (not session-scoped) &mdash; keyed by APA member number.</li>
-          <li>Captains / co-captains from Team Data paste are resolved to a player record by name; unresolved names show as "unmatched" in Email HQ.</li>
-        </ul>
+        <p class="hint" style="margin-top: 6px">
+          Supported columns:
+          <strong>Member Number</strong>, First Name, Nickname, Last Name, Email Address, Cell Phone, Home Phone,
+          Work Phone, Alt Phone, Gender, 8-Ball Skill Level, 9-Ball Skill Level, Address 1, Address 2, City, State, Zip,
+          Membership Revoked, Membership Promotion, Period Joined, Referred By, Date Marked Paid, Past Due, Deceased,
+          Member Type, Date Started, Last Date Played 8-Ball, Last Date Played 9-Ball, Member Status.
+          Unmapped columns are ignored.
+        </p>
+        <textarea id="playerImportBox" placeholder="Paste tab-separated data here..." style="margin-top:8px"></textarea>
+        <div id="playerImportPreview"></div>
+        <div id="playerImportStatus" class="status-line"></div>
+        <div class="actions">
+          <button class="btn btn-outline" onclick="previewPlayerImport()">Preview</button>
+          <button class="btn btn-primary" id="playerImportBtn" onclick="executePlayerImport()">Import</button>
+          <button class="btn btn-outline" onclick="clearPlayerImport()">Clear</button>
+        </div>
       </div>
 
+      <!-- County lookup — run after an import that included zip -->
       <div class="card">
-        <h2>Paste a report</h2>
-        <div class="form-row">
-          <div style="flex: 0 0 240px">
-            <label for="uploadOperator">Operator (for Divisions paste)</label>
+        <h2>County Lookup</h2>
+        <p class="hint">
+          Fills in missing <code>county</code> on player records using zippopotam.us (zip &rarr; lat/long) +
+          FCC Census geocoder (lat/long &rarr; county). Free, no API keys, runs in your browser. One lookup per
+          unique zip so 5,000 players with 600 unique zips = 600 HTTP calls.
+        </p>
+        <div id="countyStatus" class="status-line"></div>
+        <div class="actions">
+          <button class="btn btn-primary" id="countyBtn" onclick="runCountyLookup()">Lookup missing counties</button>
+        </div>
+      </div>
+
+      <!-- Session-scoped reports — Divisions / Teams / Bonus -->
+      <div class="card">
+        <h2>Import Divisions / Teams / Bonus Points</h2>
+        <p class="hint">
+          Session-scoped. Pick the operator (used only when a Division Listing is pasted), paste the report, hit Commit.
+          Currently selected session: <strong id="sessionScopedLabel">—</strong>.
+        </p>
+        <div class="form-row" style="margin-top:8px">
+          <div style="flex: 0 0 260px">
+            <label for="uploadOperator">Operator (Division Listing only)</label>
             <select id="uploadOperator"></select>
-          </div>
-          <div>
-            <label>&nbsp;</label>
-            <p class="hint" style="margin:0">Applies to Division Listing paste only. Ignored for other reports.</p>
           </div>
         </div>
 
-        <label for="uploadBox">Paste tab-separated data (first line = header row)</label>
-        <textarea id="uploadBox" placeholder="Paste a Current Player Addresses / Player Details / Division Listing / Team Data / Team Bonus Points report here…" oninput="detectAndPreview()"></textarea>
+        <label for="uploadBox" style="margin-top:8px">Paste tab-separated data (first line = header row)</label>
+        <textarea id="uploadBox" placeholder="Paste a Division Listing / Team Data / Team Bonus Points report here…" oninput="detectAndPreview()"></textarea>
 
         <div id="uploadPreview" class="hidden" style="margin-top: 12px">
           <div id="detectedReportLine"></div>
@@ -504,7 +532,7 @@ input:focus, select:focus, textarea:focus {
             <button class="btn btn-outline" onclick="clearUpload()">Clear</button>
           </div>
         </div>
-        <div id="uploadError" class="status-line err"></div>
+        <div id="uploadError" class="status-line"></div>
       </div>
 
       <div class="card">
@@ -564,22 +592,10 @@ const HEADERS_READ  = SB_KEY
 const HEADERS_WRITE = { ...HEADERS_READ, 'Content-Type': 'application/json', Prefer: 'return=representation' };
 
 /* ══════════════════════════════════════════════════════════════════════
-   PASTE REPORT REGISTRY
-   (Mirrors the GAS-era PASTE_REPORTS but targets Postgres tables.)
+   SESSION-SCOPED REPORT DETECTION (Divisions / Teams / Bonus)
+   Player data import uses a separate, flexible COLUMN_MAP flow below.
    ══════════════════════════════════════════════════════════════════════ */
 const REPORT_SPECS = [
-  {
-    name: 'PlayerData',
-    reportName: 'Current Player Addresses',
-    required: ['Member Number','First Name','Last Name'],
-    handler: 'commitPlayerData'
-  },
-  {
-    name: 'PlayerDetails',
-    reportName: 'Player Details (SL + phone)',
-    required: ['Member Number','8-Ball Skill Level'],
-    handler: 'commitPlayerDetails'
-  },
   {
     name: 'Divisions',
     reportName: 'Division Listing',
@@ -593,16 +609,325 @@ const REPORT_SPECS = [
     handler: 'commitTeamBonusPoints'
   },
   {
-    // NOTE: TeamData must appear AFTER TeamBonusPoints in this array
-    // because the TeamData report also contains "Total Team Bonus Points"
-    // column; we want first-match on the more-specific TeamBonusPoints
-    // report when the paste has only the 3 columns of TeamBonusPoints.
+    // NOTE: TeamData must appear AFTER TeamBonusPoints because the
+    // Team Data report also contains "Total Team Bonus Points"; first
+    // match wins when headers intersect.
     name: 'TeamData',
     reportName: 'Team Data',
     required: ['Team Number','Team Name','Team Captain'],
     handler: 'commitTeamData'
   }
 ];
+
+/* ══════════════════════════════════════════════════════════════════════
+   PLAYER IMPORT — COLUMN_MAP flow (mirrors TeamRegistration's admin)
+
+   Any subset of supported columns works. The textarea auto-routes
+   each header to its target column in the flat `players` table. Member
+   Number is the only hard requirement.
+
+   Unmapped columns are silently ignored (shown red in the preview).
+   ══════════════════════════════════════════════════════════════════════ */
+
+// Normalize an APA member number. Spm-apa's player_full stores some
+// member numbers with a "972"-prefix (area code), where the canonical
+// form is the trailing integer without leading zeros. We accept both
+// formats on paste and return the canonical.
+function normalizeApa(raw) {
+  const digits = String(raw || '').replace(/\D/g, '');
+  if (!digits) return '';
+  // 8-digit 972-prefix → canonical local number
+  if (digits.length === 8 && digits.indexOf('972') === 0) {
+    const local = parseInt(digits.substring(3), 10);
+    return isNaN(local) ? '' : String(local);
+  }
+  const num = parseInt(digits, 10);
+  return isNaN(num) ? '' : String(num);
+}
+
+// Header (lowercased) → column in `players` table.
+// Nulls/unknown headers are ignored at import time.
+const COLUMN_MAP = {
+  'member number':           'member_number',
+  'first name':              'first_name',
+  'nickname':                'nickname',
+  'last name':               'last_name',
+  'email address':           'email',
+  'cell phone':              'cell_phone',
+  'home phone':              'home_phone',
+  'work phone':              'work_phone',
+  'alt phone':               'alt_phone',
+  'alternate phone':         'alt_phone',
+  'daytime phone':           'work_phone',
+  'gender':                  'gender',
+  '8-ball skill level':      'sl_8ball',
+  '9-ball skill level':      'sl_9ball',
+  'address 1':               'address1',
+  'address 2':               'address2',
+  'city':                    'city',
+  'state':                   'state',
+  'zip':                     'zip',
+  'county':                  'county',
+  'membership revoked':      'membership_revoked',
+  'membership promotion':    'membership_promotion',
+  'period joined':           'period_joined',
+  'referred by':             'referred_by',
+  'date marked paid':        'date_marked_paid',
+  'past due':                'past_due',
+  'deceased':                'deceased',
+  'member type':             'member_type',
+  'date started':            'date_started',
+  'last date played 8-ball': 'last_played_8',
+  'last date played 9-ball': 'last_played_9',
+  'member status':           'member_status'
+};
+
+// Player-import parse state — reset on each Preview/Import cycle.
+let _pHeaders = [];
+let _pRows    = [];
+let _pMemIdx  = -1;
+
+function parsePlayerData() {
+  const raw = document.getElementById('playerImportBox').value.trim();
+  if (!raw) { setStatus('playerImportStatus', 'Paste data first.', 'err'); return null; }
+
+  const lines = raw.split(/\r?\n/);
+  if (lines.length < 2) { setStatus('playerImportStatus', 'Need at least a header row and one data row.', 'err'); return null; }
+
+  // Normalize headers: strip non-breaking spaces / zero-widths, collapse runs.
+  _pHeaders = lines[0].split('\t').map(h =>
+    String(h).replace(/[\u00A0\u2000-\u200B\uFEFF]/g, ' ').replace(/\s+/g, ' ').trim()
+  );
+
+  let mapped = 0;
+  _pMemIdx = -1;
+  for (let i = 0; i < _pHeaders.length; i++) {
+    const key = _pHeaders[i].toLowerCase();
+    if (COLUMN_MAP[key]) mapped++;
+    if (key === 'member number') _pMemIdx = i;
+  }
+  if (_pMemIdx === -1) { setStatus('playerImportStatus', 'No "Member Number" column found.', 'err'); return null; }
+
+  _pRows = [];
+  for (let r = 1; r < lines.length; r++) {
+    const line = lines[r].trim();
+    if (!line) continue;
+    _pRows.push(line.split('\t'));
+  }
+
+  let valid = 0, junk = 0;
+  for (const row of _pRows) {
+    const d = String(row[_pMemIdx] || '').replace(/\D/g, '');
+    if (d.length >= 7 && d.length <= 9) valid++; else junk++;
+  }
+  return { valid, junk, mapped, total: _pHeaders.length };
+}
+
+function previewPlayerImport() {
+  const stats = parsePlayerData();
+  if (!stats) return;
+
+  const previewArea = document.getElementById('playerImportPreview');
+  let html = '<p style="font-size:0.9rem;margin:12px 0 6px"><strong>' + stats.valid + '</strong> valid rows · <strong>'
+    + stats.mapped + '/' + stats.total + '</strong> columns mapped';
+  if (stats.junk > 0) html += ' <span style="color:var(--spm-primary)">(' + stats.junk + ' rows with bad APA# will be skipped)</span>';
+  html += '</p>';
+
+  html += '<div style="overflow-x:auto;border:1px solid var(--border);border-radius:10px"><table class="table" style="margin:0;font-size:0.78rem"><thead><tr>';
+  for (const h of _pHeaders) {
+    const isMapped = !!COLUMN_MAP[h.toLowerCase()];
+    html += '<th style="' + (isMapped ? '' : 'color:var(--spm-primary);text-decoration:line-through') + '">' + esc(h) + '</th>';
+  }
+  html += '</tr></thead><tbody>';
+  let count = 0;
+  for (const row of _pRows) {
+    if (count >= 5) break;
+    const d = String(row[_pMemIdx] || '').replace(/\D/g, '');
+    if (d.length < 7 || d.length > 9) continue;
+    count++;
+    html += '<tr>';
+    for (let c = 0; c < _pHeaders.length; c++) html += '<td>' + esc(row[c] || '') + '</td>';
+    html += '</tr>';
+  }
+  if (stats.valid > 5) html += '<tr><td colspan="' + _pHeaders.length + '" style="color:var(--muted)">… and ' + (stats.valid - 5) + ' more valid rows</td></tr>';
+  html += '</tbody></table></div>';
+
+  previewArea.innerHTML = html;
+  setStatus('playerImportStatus', 'Preview ready. Click Import to write ' + stats.valid + ' players.', 'ok');
+}
+
+async function executePlayerImport() {
+  // Auto-parse if the admin clicked Import without Preview first.
+  if (!_pRows.length) {
+    const stats = parsePlayerData();
+    if (!stats) return;
+  }
+
+  const btn = document.getElementById('playerImportBtn');
+  btn.disabled = true;
+
+  // Build per-member_number upsert rows, keeping only mapped columns.
+  const byMember = new Map();
+  let junk = 0;
+  for (const row of _pRows) {
+    const rawMn = String(row[_pMemIdx] || '').replace(/\D/g, '');
+    if (rawMn.length < 7 || rawMn.length > 9) { junk++; continue; }
+    const mn = normalizeApa(rawMn);
+    if (!mn) { junk++; continue; }
+
+    const obj = byMember.get(mn) || { member_number: mn };
+    for (let c = 0; c < _pHeaders.length; c++) {
+      const col = COLUMN_MAP[_pHeaders[c].toLowerCase()];
+      if (!col || col === 'member_number') continue;
+      let val = String(row[c] || '').trim();
+      // Small normalizations carried over from TeamReg admin:
+      if (col === 'email') val = val.replace(/\s/g, '').toLowerCase();
+      if (col === 'sl_8ball' || col === 'sl_9ball') {
+        const n = parseInt(val, 10);
+        val = isNaN(n) ? null : n;
+      } else if (val === '') {
+        val = null;
+      }
+      obj[col] = val;
+    }
+    byMember.set(mn, obj);
+  }
+
+  const payload = [...byMember.values()];
+  if (!payload.length) {
+    btn.disabled = false;
+    return setStatus('playerImportStatus', 'Nothing to import.', 'err');
+  }
+
+  // Ensure NOT NULL name defaults if this paste doesn't include names
+  // for a brand-new player — harmless for existing rows (merge keeps
+  // their current values; we only set "-" on insert).
+  for (const p of payload) {
+    if (!('first_name' in p)) p.first_name = '-';
+    if (!('last_name'  in p)) p.last_name  = '-';
+  }
+
+  try {
+    const BATCH = 500;
+    for (let i = 0; i < payload.length; i += BATCH) {
+      const chunk = payload.slice(i, i + BATCH);
+      setStatus('playerImportStatus',
+        'Importing ' + Math.min(i + BATCH, payload.length) + ' / ' + payload.length + '…', 'ok');
+      await sb('POST', 'players?on_conflict=member_number', chunk,
+        { Prefer: 'resolution=merge-duplicates,return=minimal' });
+    }
+    const msg = payload.length + ' players upserted.'
+      + (junk ? ' ' + junk + ' row(s) skipped (bad APA#).' : '')
+      + ' Run County Lookup next if addresses were included.';
+    setStatus('playerImportStatus', msg, 'ok');
+    await refreshCounts();
+  } catch (e) {
+    setStatus('playerImportStatus', 'Import failed: ' + esc(e.message), 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function clearPlayerImport() {
+  document.getElementById('playerImportBox').value = '';
+  document.getElementById('playerImportPreview').innerHTML = '';
+  hideStatus('playerImportStatus');
+  _pHeaders = []; _pRows = []; _pMemIdx = -1;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   COUNTY LOOKUP — zip → lat/long → county (free APIs, no keys)
+   Copied from TeamRegistration/site/admin.html lookupCounties().
+
+   1. Pull players with zip but county null/empty
+   2. Unique the zips
+   3. Each zip → zippopotam.us (lat/lon) → FCC Census geocoder (county)
+   4. Batch-update players with resolved county
+   ══════════════════════════════════════════════════════════════════════ */
+async function runCountyLookup() {
+  const btn = document.getElementById('countyBtn');
+  btn.disabled = true;
+  setStatus('countyStatus', 'Fetching players missing county…', 'ok');
+
+  try {
+    // Pull all players with zip present and county missing. PostgREST
+    // defaults cap at 1000 rows — paginate if we have more.
+    const missing = [];
+    const PAGE = 1000;
+    let offset = 0;
+    while (true) {
+      const q = 'players?select=member_number,zip&zip=not.is.null&zip=neq.&or=(county.is.null,county.eq.)'
+              + '&order=member_number.asc&limit=' + PAGE + '&offset=' + offset;
+      const rows = await sb('GET', q);
+      missing.push(...rows);
+      if (rows.length < PAGE) break;
+      offset += PAGE;
+    }
+
+    if (!missing.length) {
+      setStatus('countyStatus', 'No players missing county. Nothing to do.', 'ok');
+      return;
+    }
+
+    // Group member_numbers by 5-digit zip.
+    const zipToMembers = {};
+    for (const r of missing) {
+      const z = String(r.zip || '').trim().substring(0, 5);
+      if (!z || z.length < 5) continue;
+      (zipToMembers[z] = zipToMembers[z] || []).push(r.member_number);
+    }
+    const zips = Object.keys(zipToMembers);
+    setStatus('countyStatus', 'Resolving ' + zips.length + ' unique zip(s) for ' + missing.length + ' player(s)…', 'ok');
+
+    const zipToCounty = {};
+    for (let z = 0; z < zips.length; z++) {
+      const zip5 = zips[z];
+      setStatus('countyStatus', 'Zip ' + (z + 1) + ' / ' + zips.length + ' (' + zip5 + ')…', 'ok');
+      try {
+        const zResp = await fetch('https://api.zippopotam.us/us/' + zip5);
+        if (!zResp.ok) continue;
+        const zData = await zResp.json();
+        const place = (zData.places && zData.places[0]) || null;
+        if (!place) continue;
+        const fResp = await fetch('https://geo.fcc.gov/api/census/area?lat=' + place.latitude + '&lon=' + place.longitude + '&format=json');
+        if (!fResp.ok) continue;
+        const fData = await fResp.json();
+        const county = fData.results && fData.results[0] ? fData.results[0].county_name : '';
+        if (county) zipToCounty[zip5] = county;
+      } catch (_) { /* skip silently */ }
+    }
+
+    // Batch-update players with resolved county.
+    let updated = 0;
+    const resolvedZips = Object.keys(zipToCounty);
+    for (let i = 0; i < resolvedZips.length; i++) {
+      const zip = resolvedZips[i];
+      const county = zipToCounty[zip];
+      const members = zipToMembers[zip];
+      for (let m = 0; m < members.length; m += 200) {
+        const batch = members.slice(m, m + 200);
+        await sb('PATCH',
+          'players?member_number=in.(' + batch.map(encodeURIComponent).join(',') + ')',
+          { county },
+          { Prefer: 'return=minimal' });
+        updated += batch.length;
+      }
+    }
+
+    const unresolved = missing.length - updated;
+    let msg = 'Resolved county for ' + updated + ' player(s) across ' + resolvedZips.length + ' unique zip(s).';
+    if (unresolved) msg += ' ' + unresolved + ' player(s) couldn\u2019t be resolved (zip not recognized / API error).';
+    setStatus('countyStatus', msg, 'ok');
+  } catch (e) {
+    setStatus('countyStatus', 'County lookup failed: ' + esc(e.message), 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+window.runCountyLookup   = runCountyLookup;
+window.previewPlayerImport = previewPlayerImport;
+window.executePlayerImport = executePlayerImport;
+window.clearPlayerImport   = clearPlayerImport;
 
 /* ══════════════════════════════════════════════════════════════════════
    STATE
@@ -767,6 +1092,8 @@ async function loadSessions() {
 function renderSessionPill() {
   const el = document.getElementById('sessionPill');
   el.textContent = currentSession ? ('Current: ' + currentSession.name) : 'No current session';
+  const scopeEl = document.getElementById('sessionScopedLabel');
+  if (scopeEl) scopeEl.textContent = currentSession ? currentSession.name : '(none)';
 }
 
 function renderSessions() {
@@ -907,7 +1234,10 @@ async function commitUpload() {
   }
 }
 
-/* ──── Handler: PlayerData (upsert on member_number) ──────────── */
+/* ──── Legacy: PlayerData handler (retained for completeness; not
+ * reachable now that player import flows through the dedicated
+ * COLUMN_MAP-based Import Player Data card). Kept as a reference;
+ * safe to delete once confidence in the new flow is high. */
 window.commitPlayerData = async function(headers, rows) {
   const idx = {};
   const cols = ['Member Number','First Name','Nickname','Last Name','Address 1','Address 2','City','State','Zip','Email Address'];
