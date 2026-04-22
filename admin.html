@@ -734,11 +734,18 @@ window.commitPlayerData = async function(headers, rows) {
   cols.forEach(c => idx[c] = headers.indexOf(c));
   if (idx['Member Number'] < 0) throw new Error('Missing Member Number');
 
-  const payload = [];
+  // Build per-member_number map. Duplicates in the paste are normal
+  // (same player appears under multiple league memberships in APA
+  // exports). "Last write wins" — later rows overwrite earlier ones,
+  // which typically means the more specific/recent entry takes
+  // precedence. Postgres upsert can't handle duplicate conflict
+  // targets in one statement (error 21000), so dedup is required.
+  const byMember = new Map();
+  let skippedBlank = 0;
   for (const r of rows) {
     const mn = String(r[idx['Member Number']] || '').trim();
-    if (!mn) continue;
-    payload.push({
+    if (!mn) { skippedBlank++; continue; }
+    byMember.set(mn, {
       member_number: mn,
       first_name: idx['First Name'] >= 0 ? (r[idx['First Name']] || '').trim() : '',
       nickname:   idx['Nickname']   >= 0 ? ((r[idx['Nickname']]   || '').trim() || null) : null,
@@ -751,13 +758,35 @@ window.commitPlayerData = async function(headers, rows) {
       zip:        idx['Zip']       >= 0 ? ((r[idx['Zip']]       || '').trim() || null) : null
     });
   }
+  const payload = [...byMember.values()];
+  const dupSkipped = rows.length - byMember.size - skippedBlank;
   if (!payload.length) return 'Nothing to commit (no valid rows).';
-  await sb('POST', 'players?on_conflict=member_number', payload,
-    { Prefer: 'resolution=merge-duplicates,return=minimal' });
-  return payload.length + ' player(s) upserted.';
+
+  // Batch to stay under Supabase's payload ceiling and keep the
+  // upsert statement small enough. 500 rows per batch * ~250 bytes
+  // each = ~125 KB, comfortably under any limit.
+  const BATCH = 500;
+  const btn = document.getElementById('commitBtn');
+  for (let i = 0; i < payload.length; i += BATCH) {
+    const chunk = payload.slice(i, i + BATCH);
+    btn.textContent = 'Committing ' + (i + chunk.length) + '/' + payload.length + '…';
+    await sb('POST', 'players?on_conflict=member_number', chunk,
+      { Prefer: 'resolution=merge-duplicates,return=minimal' });
+  }
+
+  let msg = payload.length + ' player(s) upserted.';
+  if (dupSkipped)   msg += ' ' + dupSkipped + ' duplicate member# row(s) collapsed (last-write-wins).';
+  if (skippedBlank) msg += ' ' + skippedBlank + ' row(s) skipped (blank member#).';
+  return msg;
 };
 
 /* ──── Handler: PlayerDetails (SL + phone merge) ──────────────── */
+// Strategy: dedup by member_number, build a map of enrichments,
+// pre-query which member_numbers already exist in players, then
+// batch-upsert (merge-duplicates) ONLY those that exist — so we
+// don't try to insert a new row without the NOT NULL name fields.
+// Rows whose member# isn't in players get counted as "skipped"
+// (they'll pick up SL + phone next time after a PlayerData paste).
 window.commitPlayerDetails = async function(headers, rows) {
   const idx = {
     mn:    headers.indexOf('Member Number'),
@@ -767,36 +796,65 @@ window.commitPlayerDetails = async function(headers, rows) {
   };
   if (idx.mn < 0) throw new Error('Missing Member Number');
 
-  let updated = 0;
-  let skipped = 0;
-  // We PATCH one by one to respect that these rows might not exist in
-  // players yet. If a PATCH hits zero rows, we do a targeted insert
-  // with only the fields from this paste.
+  const byMember = new Map();   // mn → { partial upsert row }
+  let blank = 0;
   for (const r of rows) {
     const mn = String(r[idx.mn] || '').trim();
-    if (!mn) { skipped++; continue; }
-    const patch = { updated_at: new Date().toISOString() };
+    if (!mn) { blank++; continue; }
+    const row = { member_number: mn };
     if (idx.sl8 >= 0) {
       const v = parseInt(r[idx.sl8], 10);
-      patch.sl_8ball = isNaN(v) ? null : v;
+      row.sl_8ball = isNaN(v) ? null : v;
     }
     if (idx.sl9 >= 0) {
       const v = parseInt(r[idx.sl9], 10);
-      patch.sl_9ball = isNaN(v) ? null : v;
+      row.sl_9ball = isNaN(v) ? null : v;
     }
     if (idx.phone >= 0) {
       const v = String(r[idx.phone] || '').trim();
-      patch.cell_phone = v || null;
+      row.cell_phone = v || null;
     }
-    try {
-      const resp = await sb('PATCH', 'players?member_number=eq.' + encodeURIComponent(mn), patch);
-      if (Array.isArray(resp) && resp.length) updated++;
-      else skipped++;
-    } catch (e) {
-      skipped++;
-    }
+    byMember.set(mn, row);
   }
-  return updated + ' updated, ' + skipped + ' skipped (not in Player Addresses yet).';
+  const uniqueRows = [...byMember.values()];
+  const dupCollapsed = rows.length - byMember.size - blank;
+  if (!uniqueRows.length) return 'Nothing to commit.';
+
+  // Pre-filter to only member_numbers already in the players table.
+  // The existing check is batched via `member_number=in.(...)` — URL
+  // length forces us to chunk it too.
+  const existingSet = new Set();
+  const ids = [...byMember.keys()];
+  const CHECK_BATCH = 200;
+  const btn = document.getElementById('commitBtn');
+  for (let i = 0; i < ids.length; i += CHECK_BATCH) {
+    const chunk = ids.slice(i, i + CHECK_BATCH);
+    btn.textContent = 'Checking ' + Math.min(i + CHECK_BATCH, ids.length) + '/' + ids.length + '…';
+    const q = 'players?select=member_number&member_number=in.(' + chunk.map(encodeURIComponent).join(',') + ')';
+    const found = await sb('GET', q);
+    for (const p of (found || [])) existingSet.add(p.member_number);
+  }
+
+  const eligible = uniqueRows.filter(r => existingSet.has(r.member_number));
+  const skippedMissing = uniqueRows.length - eligible.length;
+  if (!eligible.length) {
+    return '0 updated, ' + skippedMissing + ' skipped (no matching player records yet — paste Current Player Addresses first).';
+  }
+
+  // Batch upsert with merge-duplicates → only the sl_* / cell_phone
+  // columns in each payload get updated on existing rows.
+  const UPSERT_BATCH = 500;
+  for (let i = 0; i < eligible.length; i += UPSERT_BATCH) {
+    const chunk = eligible.slice(i, i + UPSERT_BATCH);
+    btn.textContent = 'Updating ' + Math.min(i + UPSERT_BATCH, eligible.length) + '/' + eligible.length + '…';
+    await sb('POST', 'players?on_conflict=member_number', chunk,
+      { Prefer: 'resolution=merge-duplicates,return=minimal' });
+  }
+
+  let msg = eligible.length + ' updated, ' + skippedMissing + ' skipped (not in player table).';
+  if (dupCollapsed) msg += ' ' + dupCollapsed + ' duplicate member# rows collapsed.';
+  if (blank)        msg += ' ' + blank + ' blank row(s) ignored.';
+  return msg;
 };
 
 /* ──── Handler: Divisions (upsert on session+operator+division#) ─ */
