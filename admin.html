@@ -477,6 +477,21 @@ function pad5(x) { x = String(x || '').trim(); while (x.length < 5) x = '0' + x;
 function normName(s) {
   return String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 }
+/**
+ * Clean + validate an APA member number from a pasted cell.
+ * Returns the cleaned 7-9-digit string, or '' if the value is garbage
+ * (e.g., "972" — a 3-digit artifact from an APA export header line,
+ * or anything with letters / punctuation / wrong length).
+ *
+ * APA member numbers are typically 8 digits. We accept 7-9 to be
+ * tolerant of any legacy variations, but anything shorter is almost
+ * certainly malformed.
+ */
+function cleanMemberNumber(raw) {
+  const digits = String(raw || '').replace(/\D/g, '');
+  if (digits.length < 7 || digits.length > 9) return '';
+  return digits;
+}
 function setStatus(id, msg, kind) {
   const el = document.getElementById(id);
   el.className = 'status-line shown ' + (kind || 'ok');
@@ -742,9 +757,12 @@ window.commitPlayerData = async function(headers, rows) {
   // targets in one statement (error 21000), so dedup is required.
   const byMember = new Map();
   let skippedBlank = 0;
+  let skippedGarbage = 0;
   for (const r of rows) {
-    const mn = String(r[idx['Member Number']] || '').trim();
-    if (!mn) { skippedBlank++; continue; }
+    const raw = String(r[idx['Member Number']] || '').trim();
+    if (!raw) { skippedBlank++; continue; }
+    const mn = cleanMemberNumber(raw);
+    if (!mn) { skippedGarbage++; continue; }   // wrong length, non-numeric, etc.
     byMember.set(mn, {
       member_number: mn,
       first_name: idx['First Name'] >= 0 ? (r[idx['First Name']] || '').trim() : '',
@@ -759,7 +777,7 @@ window.commitPlayerData = async function(headers, rows) {
     });
   }
   const payload = [...byMember.values()];
-  const dupSkipped = rows.length - byMember.size - skippedBlank;
+  const dupSkipped = rows.length - byMember.size - skippedBlank - skippedGarbage;
   if (!payload.length) return 'Nothing to commit (no valid rows).';
 
   // Batch to stay under Supabase's payload ceiling and keep the
@@ -775,8 +793,9 @@ window.commitPlayerData = async function(headers, rows) {
   }
 
   let msg = payload.length + ' player(s) upserted.';
-  if (dupSkipped)   msg += ' ' + dupSkipped + ' duplicate member# row(s) collapsed (last-write-wins).';
-  if (skippedBlank) msg += ' ' + skippedBlank + ' row(s) skipped (blank member#).';
+  if (dupSkipped)     msg += ' ' + dupSkipped + ' duplicate member# row(s) collapsed (last-write-wins).';
+  if (skippedGarbage) msg += ' ' + skippedGarbage + ' garbage row(s) skipped (bad member#, e.g. "972").';
+  if (skippedBlank)   msg += ' ' + skippedBlank + ' row(s) skipped (blank member#).';
   return msg;
 };
 
@@ -798,9 +817,12 @@ window.commitPlayerDetails = async function(headers, rows) {
 
   const byMember = new Map();   // mn → { partial upsert row }
   let blank = 0;
+  let garbage = 0;
   for (const r of rows) {
-    const mn = String(r[idx.mn] || '').trim();
-    if (!mn) { blank++; continue; }
+    const raw = String(r[idx.mn] || '').trim();
+    if (!raw) { blank++; continue; }
+    const mn = cleanMemberNumber(raw);
+    if (!mn) { garbage++; continue; }
     const row = { member_number: mn };
     if (idx.sl8 >= 0) {
       const v = parseInt(r[idx.sl8], 10);
@@ -817,7 +839,7 @@ window.commitPlayerDetails = async function(headers, rows) {
     byMember.set(mn, row);
   }
   const uniqueRows = [...byMember.values()];
-  const dupCollapsed = rows.length - byMember.size - blank;
+  const dupCollapsed = rows.length - byMember.size - blank - garbage;
   if (!uniqueRows.length) return 'Nothing to commit.';
 
   // Pre-filter to only member_numbers already in the players table.
@@ -853,6 +875,7 @@ window.commitPlayerDetails = async function(headers, rows) {
 
   let msg = eligible.length + ' updated, ' + skippedMissing + ' skipped (not in player table).';
   if (dupCollapsed) msg += ' ' + dupCollapsed + ' duplicate member# rows collapsed.';
+  if (garbage)      msg += ' ' + garbage + ' garbage row(s) ignored (bad member#).';
   if (blank)        msg += ' ' + blank + ' blank row(s) ignored.';
   return msg;
 };
