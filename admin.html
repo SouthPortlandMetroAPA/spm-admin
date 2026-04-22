@@ -811,17 +811,43 @@ async function executePlayerImport() {
   }
 
   try {
+    // Pre-query which of the member_numbers in this paste already
+    // exist, so the post-import summary can report "created" vs
+    // "updated" accurately. Chunk by URL length since `in.(...)`
+    // can get long.
+    const mns = payload.map(p => p.member_number);
+    const existing = new Set();
+    const CHECK_BATCH = 200;
+    for (let i = 0; i < mns.length; i += CHECK_BATCH) {
+      const chunk = mns.slice(i, i + CHECK_BATCH);
+      setStatus('playerImportStatus',
+        'Checking ' + Math.min(i + CHECK_BATCH, mns.length) + ' / ' + mns.length + ' member#s…',
+        'progress');
+      const rows = await sb('GET',
+        'players?select=member_number&member_number=in.(' + chunk.map(encodeURIComponent).join(',') + ')');
+      for (const r of (rows || [])) existing.add(r.member_number);
+    }
+
+    // Upsert in 500-row batches.
     const BATCH = 500;
+    let imported = 0;
     for (let i = 0; i < payload.length; i += BATCH) {
       const chunk = payload.slice(i, i + BATCH);
+      imported = Math.min(i + BATCH, payload.length);
       setStatus('playerImportStatus',
-        'Importing ' + Math.min(i + BATCH, payload.length) + ' / ' + payload.length + '…', 'ok');
+        'Importing ' + imported + ' / ' + payload.length + '…',
+        'progress');
       await sb('POST', 'players?on_conflict=member_number', chunk,
         { Prefer: 'resolution=merge-duplicates,return=minimal' });
     }
-    const msg = payload.length + ' players upserted.'
-      + (junk ? ' ' + junk + ' row(s) skipped (bad APA#).' : '')
-      + ' Run County Lookup next if addresses were included.';
+
+    const updatedCount = existing.size;
+    const createdCount = payload.length - updatedCount;
+    let msg =
+      'Imported <strong>' + payload.length + '</strong> of ' + _pRows.length + ' records. '
+      + '<strong>' + createdCount + '</strong> records created. '
+      + '<strong>' + updatedCount + '</strong> records updated.';
+    if (junk) msg += ' ' + junk + ' row(s) skipped (bad APA#).';
     setStatus('playerImportStatus', msg, 'ok');
     await refreshCounts();
   } catch (e) {
@@ -850,7 +876,7 @@ function clearPlayerImport() {
 async function runCountyLookup() {
   const btn = document.getElementById('countyBtn');
   btn.disabled = true;
-  setStatus('countyStatus', 'Fetching players missing county…', 'ok');
+  setStatus('countyStatus', 'Fetching players missing county…', 'progress');
 
   try {
     // Pull all players with zip present and county missing. PostgREST
@@ -880,12 +906,12 @@ async function runCountyLookup() {
       (zipToMembers[z] = zipToMembers[z] || []).push(r.member_number);
     }
     const zips = Object.keys(zipToMembers);
-    setStatus('countyStatus', 'Resolving ' + zips.length + ' unique zip(s) for ' + missing.length + ' player(s)…', 'ok');
+    setStatus('countyStatus', 'Resolving ' + zips.length + ' unique zip(s) for ' + missing.length + ' player(s)…', 'progress');
 
     const zipToCounty = {};
     for (let z = 0; z < zips.length; z++) {
       const zip5 = zips[z];
-      setStatus('countyStatus', 'Zip ' + (z + 1) + ' / ' + zips.length + ' (' + zip5 + ')…', 'ok');
+      setStatus('countyStatus', 'Zip ' + (z + 1) + ' / ' + zips.length + ' (' + zip5 + ')…', 'progress');
       try {
         const zResp = await fetch('https://api.zippopotam.us/us/' + zip5);
         if (!zResp.ok) continue;
@@ -965,13 +991,40 @@ function cleanMemberNumber(raw) {
   if (digits.length < 7 || digits.length > 9) return '';
   return digits;
 }
+/**
+ * Per-element auto-clear timers so rapid setStatus calls during an
+ * import don't race (each prior call's 4.5s timer was firing
+ * independently and collapsing the banner between progress updates,
+ * causing UI jitter). Every call to setStatus cancels the pending
+ * timer for that element first, then schedules a fresh one (or none
+ * at all if the kind shouldn't auto-clear).
+ *
+ * kind values:
+ *   'ok'       → green banner, auto-clears after 4.5s
+ *   'err'      → red banner, stays until replaced or hideStatus()
+ *   'warn'     → amber banner, stays until replaced
+ *   'progress' → green banner, stays until replaced (no auto-clear).
+ *                Use during long-running ops (import, county lookup).
+ */
+const _statusTimers = {};
 function setStatus(id, msg, kind) {
   const el = document.getElementById(id);
-  el.className = 'status-line shown ' + (kind || 'ok');
+  // green visual for both 'ok' and 'progress' — the only difference
+  // between them is whether the banner auto-clears.
+  const cssKind = (kind === 'progress') ? 'ok' : (kind || 'ok');
+  el.className = 'status-line shown ' + cssKind;
   el.innerHTML = msg;
-  if (kind === 'ok') setTimeout(() => { el.className = 'status-line'; el.innerHTML = ''; }, 4500);
+  if (_statusTimers[id]) { clearTimeout(_statusTimers[id]); _statusTimers[id] = null; }
+  if (kind === 'ok') {
+    _statusTimers[id] = setTimeout(() => {
+      el.className = 'status-line';
+      el.innerHTML = '';
+      _statusTimers[id] = null;
+    }, 4500);
+  }
 }
 function hideStatus(id) {
+  if (_statusTimers[id]) { clearTimeout(_statusTimers[id]); _statusTimers[id] = null; }
   const el = document.getElementById(id); el.className = 'status-line'; el.innerHTML = '';
 }
 function showGlobal(msg, kind) { setStatus('globalStatus', msg, kind); }
