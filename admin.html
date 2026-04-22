@@ -843,8 +843,17 @@ async function executePlayerImport() {
 
     const updatedCount = existing.size;
     const createdCount = payload.length - updatedCount;
+    const totalRows    = _pRows.length;   // capture before we clear
+
+    // Clear the textarea + preview on success so the admin can paste
+    // another report into an empty box immediately. Status message is
+    // set AFTER the clear so it stays visible for the 4.5s auto-clear.
+    document.getElementById('playerImportBox').value = '';
+    document.getElementById('playerImportPreview').innerHTML = '';
+    _pHeaders = []; _pRows = []; _pMemIdx = -1;
+
     let msg =
-      'Imported <strong>' + payload.length + '</strong> of ' + _pRows.length + ' records. '
+      'Imported <strong>' + payload.length + '</strong> of ' + totalRows + ' records. '
       + '<strong>' + createdCount + '</strong> records created. '
       + '<strong>' + updatedCount + '</strong> records updated.';
     if (junk) msg += ' ' + junk + ' row(s) skipped (bad APA#).';
