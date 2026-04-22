@@ -658,6 +658,26 @@ async function sb(method, path, body, extraHeaders) {
   return null;
 }
 
+/**
+ * Accurate row count against any table/view. PostgREST caps GET bodies
+ * at max-rows (1000 by default), so doing `GET /players` and reading
+ * .length gives a wrong answer once you're past that ceiling. This
+ * asks PostgREST for a count and reads the true total from the
+ * Content-Range header (format: "0-0/26087").
+ */
+async function sbCount(path) {
+  const joiner = path.includes('?') ? '&' : '?';
+  const url = SB_URL + '/rest/v1/' + path + joiner + 'limit=1';
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: { ...HEADERS_READ, Prefer: 'count=exact' }
+  });
+  if (!res.ok) throw new Error('Supabase ' + res.status + ': ' + (await res.text()));
+  const range = res.headers.get('content-range') || '';
+  const total = range.split('/')[1];
+  return total && total !== '*' ? parseInt(total, 10) : 0;
+}
+
 /* Parse tab-separated paste into { headers: [...], rows: [[...]] } */
 function parseTsv(raw) {
   const text = String(raw || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
@@ -1247,22 +1267,25 @@ async function refreshCounts() {
   const out = document.getElementById('dataCounts');
   out.textContent = 'Loading…';
   try {
-    const [ players, divisions, teams, memberships ] = await Promise.all([
-      sb('GET', 'players?select=member_number', null, { Prefer: 'count=exact' }),
-      currentSession ? sb('GET', 'divisions?select=id&session_id=eq.' + currentSession.id, null, { Prefer: 'count=exact' }) : Promise.resolve([]),
-      currentSession ? sb('GET', 'teams?select=id,division:divisions!inner(session_id)&division.session_id=eq.' + currentSession.id) : Promise.resolve([]),
-      currentSession ? sb('GET', 'team_memberships?select=id,role,team:teams!inner(division:divisions!inner(session_id))&team.division.session_id=eq.' + currentSession.id) : Promise.resolve([])
+    // Count queries use Content-Range headers so we get true totals
+    // even past the 1000-row PostgREST cap.
+    const sid = currentSession ? currentSession.id : null;
+    const [ playersCount, divisionsCount, teamsCount, capCount, coCapCount ] = await Promise.all([
+      sbCount('players?select=member_number'),
+      sid ? sbCount('divisions?select=id&session_id=eq.' + sid) : Promise.resolve(0),
+      sid ? sbCount('teams?select=id,division:divisions!inner(session_id)&division.session_id=eq.' + sid) : Promise.resolve(0),
+      sid ? sbCount('team_memberships?select=id,role,team:teams!inner(division:divisions!inner(session_id))&role=eq.Captain&team.division.session_id=eq.' + sid) : Promise.resolve(0),
+      sid ? sbCount('team_memberships?select=id,role,team:teams!inner(division:divisions!inner(session_id))&role=eq.Co-Captain&team.division.session_id=eq.' + sid) : Promise.resolve(0)
     ]);
-    const capCount = (memberships || []).filter(m => m.role === 'Captain').length;
-    const coCapCount = (memberships || []).filter(m => m.role === 'Co-Captain').length;
+    const fmt = n => new Intl.NumberFormat().format(n);
     out.innerHTML =
-      '<strong>' + (players ? players.length : 0) + '</strong> players (global registry) &middot; '
-      + '<strong>' + (divisions ? divisions.length : 0) + '</strong> divisions (current session) &middot; '
-      + '<strong>' + (teams ? teams.length : 0) + '</strong> teams &middot; '
-      + '<strong>' + capCount + '</strong> captains &middot; '
-      + '<strong>' + coCapCount + '</strong> co-captains';
+      '<strong>' + fmt(playersCount) + '</strong> players (global registry) &middot; '
+      + '<strong>' + fmt(divisionsCount) + '</strong> divisions (current session) &middot; '
+      + '<strong>' + fmt(teamsCount) + '</strong> teams &middot; '
+      + '<strong>' + fmt(capCount) + '</strong> captains &middot; '
+      + '<strong>' + fmt(coCapCount) + '</strong> co-captains';
   } catch (e) {
-    out.innerHTML = '<span style="color:var(--danger)">Count failed: ' + esc(e.message) + '</span>';
+    out.innerHTML = '<span style="color:var(--error)">Count failed: ' + esc(e.message) + '</span>';
   }
 }
 
