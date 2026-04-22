@@ -5,21 +5,69 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SPM Admin</title>
 <style>
-  body { font-family: system-ui, sans-serif; background: #f5f0e8; color: #111;
-         display: flex; min-height: 100vh; align-items: center; justify-content: center; padding: 20px; margin: 0; }
-  .card { background: #fff; border: 1px solid #d4c9a8; border-radius: 10px;
-          padding: 32px 28px; max-width: 460px; box-shadow: 0 4px 16px rgba(0,0,0,0.08); text-align: center; }
-  h1 { margin: 0 0 12px; font-size: 1.3rem; color: #3b2f5e; letter-spacing: 0.04em; text-transform: uppercase; }
-  p { margin: 0 0 10px; line-height: 1.5; color: #444; font-size: 0.95rem; }
-  code { background: #f2ecd8; padding: 1px 6px; border-radius: 4px; font-size: 0.9em; }
-  a { color: #3b2f5e; font-weight: 700; }
+  :root {
+    --spm-primary: #ea002a;
+    --spm-accent:  #0031a1;
+    --bg:          #f3f3f3;
+    --text:        #1a1a1a;
+    --muted:       #888;
+    --card-radius: 22px;
+    --pill-radius: 999px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    font-family: system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .card {
+    background: #fff;
+    border-radius: var(--card-radius);
+    padding: 32px 28px;
+    max-width: 460px;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.14);
+    text-align: center;
+  }
+  .head {
+    background: linear-gradient(135deg, var(--spm-primary), var(--spm-accent));
+    color: #fff;
+    border-radius: var(--card-radius);
+    padding: 20px 16px;
+    margin: -32px -28px 24px;
+    font-size: 1.35rem;
+    font-weight: 900;
+    letter-spacing: 0.02em;
+  }
+  p { margin: 0 0 12px; line-height: 1.5; color: #444; font-size: 0.95rem; }
+  code { background: #eef1f7; padding: 2px 8px; border-radius: 4px; font-size: 0.9em; color: var(--spm-accent); font-weight: 700; }
+  .go {
+    display: inline-block;
+    margin-top: 8px;
+    padding: 12px 28px;
+    border-radius: var(--pill-radius);
+    background: var(--spm-accent);
+    color: #fff;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-size: 0.85rem;
+    text-decoration: none;
+  }
+  .go:hover { opacity: 0.88; }
 </style>
 </head>
 <body>
 <div class="card">
-  <h1>SPM Admin</h1>
-  <p>This is an admin-only tool. Use the bookmarked URL with your service-role key, or add <code>?key=&lt;service_role&gt;</code> to the admin URL.</p>
-  <p><a href="admin.html">Go to Admin →</a></p>
+  <div class="head">SPM Admin</div>
+  <p>This is an admin-only tool. Use your bookmarked URL with the service-role key, or append <code>?key=&lt;service_role&gt;</code> to the admin URL.</p>
+  <a class="go" href="admin.html">Go to Admin →</a>
 </div>
 </body>
 </html>
