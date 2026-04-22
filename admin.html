@@ -1,0 +1,1162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!--
+============================================================================
+SPM Admin v2 — GAS-free successor, Supabase-backed
+============================================================================
+
+PURPOSE (Phase 1):
+  Replace the Captains / Email HQ page of the legacy GAS SPM Admin with
+  a Supabase-backed version. Admin pastes the APA reports into textareas
+  on this page; they get parsed client-side, resolved against existing
+  data, and upserted via Supabase REST. The Email HQ view then reads
+  back from Supabase.
+
+SECTIONS:
+  (1) SESSIONS — create / pick the current session
+  (2) UPLOADS  — 5 paste boxes, one per APA report:
+                   Current Player Addresses  → players (upsert)
+                   Player Details            → players (SL + phone merge)
+                   Division Listing          → divisions (upsert, op picker)
+                   Team Data                 → teams + memberships (upsert)
+                   Team Bonus Points         → teams (bonus update)
+  (3) EMAIL HQ — current session, divisions → teams → captain/co-captain
+
+AUTH:
+  ?key=SERVICE_ROLE in the URL. All writes use it. No anon access.
+
+DATA MODEL (see schema.sql):
+  operators · sessions · players · divisions · teams · team_memberships
+  3NF/BCNF, natural PKs where possible (member_number, team_number/div).
+============================================================================
+-->
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SPM Admin</title>
+<style>
+*,*::before,*::after { box-sizing: border-box; margin:0; padding:0; }
+:root {
+  --primary: #c2b280;
+  --primary-dark: #b5a574;
+  --bg: #f5f0e8;
+  --text: #111;
+  --card: #fff;
+  --muted: #666;
+  --border: #d4c9a8;
+  --radius: 10px;
+  --success: #2e7d32;
+  --danger: #c0392b;
+  --warn: #8a6d1b;
+  --accent: #3b2f5e;
+  --shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+html,body {
+  margin:0; padding:0;
+  font-family: system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  font-size: 16px; line-height: 1.5;
+  background: var(--bg); color: var(--text);
+}
+.page { max-width: 1200px; margin: 0 auto; padding: 16px; }
+.hidden { display: none !important; }
+
+/* Header */
+.header {
+  background: var(--primary);
+  padding: 20px 16px 24px;
+  text-align: center;
+  border-radius: var(--radius);
+  margin-bottom: 16px;
+  position: relative;
+}
+.header h1 { font-size: 1.4rem; font-weight: 800; letter-spacing: 0.01em; }
+.header .subtitle { font-size: 0.95rem; color: rgba(0,0,0,0.6); margin-top: 2px; }
+.admin-badge {
+  position: absolute; top: 8px; right: 10px;
+  background: var(--danger); color: #fff;
+  font-size: 0.7rem; font-weight: 700;
+  padding: 3px 8px; border-radius: 999px;
+  letter-spacing: 0.06em;
+}
+.session-pill {
+  position: absolute; top: 8px; left: 10px;
+  background: rgba(0,0,0,0.08); color: #111;
+  font-size: 0.75rem; font-weight: 600;
+  padding: 4px 10px; border-radius: 999px;
+}
+
+/* Key gate */
+.key-gate { text-align: center; padding: 40px 16px; }
+.key-gate .card { max-width: 440px; margin: 0 auto; }
+
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 2px solid var(--border);
+  margin-bottom: 16px;
+  overflow-x: auto;
+}
+.tab {
+  background: transparent;
+  border: none;
+  padding: 10px 16px;
+  font: inherit;
+  font-weight: 700;
+  color: var(--muted);
+  cursor: pointer;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -2px;
+}
+.tab.active { color: var(--text); border-bottom-color: var(--primary); }
+.tab:hover:not(.active) { color: var(--text); }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+/* Cards */
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 16px;
+  box-shadow: var(--shadow);
+}
+.card h2 {
+  margin: 0 0 10px;
+  font-size: 0.95rem;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 800;
+}
+.card h3 { font-size: 1rem; margin: 8px 0 6px; color: var(--text); font-weight: 700; }
+.hint { font-size: 0.85rem; color: var(--muted); line-height: 1.5; }
+.hint code { background: #f2ecd8; padding: 1px 6px; border-radius: 4px; font-size: 0.85em; }
+
+/* Form */
+.form-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; margin-bottom: 10px; }
+.form-row > * { flex: 1 1 150px; }
+label { display: block; font-weight: 600; font-size: 0.85rem; margin-bottom: 3px; }
+input[type="text"], input[type="number"], input[type="date"], select, textarea {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 10px;
+  font: inherit;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text);
+}
+textarea {
+  min-height: 180px;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  white-space: pre;
+  overflow: auto;
+}
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--primary); outline-offset: 1px; }
+
+/* Buttons */
+.btn {
+  min-height: 40px;
+  padding: 8px 16px;
+  font: inherit; font-weight: 700; font-size: 0.9rem;
+  border-radius: 8px; border: none; cursor: pointer;
+  transition: background 0.12s;
+}
+.btn-primary { background: var(--primary); color: #111; }
+.btn-primary:hover:not(:disabled) { background: var(--primary-dark); }
+.btn-primary:disabled { background: #ddd; color: #888; cursor: not-allowed; }
+.btn-outline { background: #fff; border: 1px solid var(--border); color: var(--text); }
+.btn-outline:hover:not(:disabled) { background: #faf8f3; }
+.btn-danger { background: var(--danger); color: #fff; }
+.btn-danger:hover:not(:disabled) { background: #9a221a; }
+.btn-sm { min-height: 30px; padding: 4px 10px; font-size: 0.78rem; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+
+/* Status banner */
+.status-line {
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  display: none;
+  margin-bottom: 10px;
+}
+.status-line.shown { display: block; }
+.status-line.ok  { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+.status-line.err { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+.status-line.warn { background: #fff4d6; color: var(--warn); border: 1px solid #f0dfa3; }
+
+/* Table */
+.table-wrap { overflow-x: auto; }
+.table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.table th, .table td { padding: 6px 10px; text-align: left; vertical-align: top; border-bottom: 1px solid #f0e9d4; }
+.table th { background: #faf8f3; font-weight: 800; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent); }
+.table tr:hover td { background: #fdfbf3; }
+
+/* Badges */
+.badge { display: inline-block; font-size: 0.7rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; letter-spacing: 0.04em; }
+.badge.gold  { background: var(--primary); color: #111; }
+.badge.ok    { background: #d4edda; color: #155724; }
+.badge.muted { background: #ddd; color: #555; }
+.badge.warn  { background: #fff4d6; color: var(--warn); }
+
+/* Email HQ specifics */
+.division-card { margin-bottom: 12px; }
+.division-card .division-head {
+  display: flex; justify-content: space-between; align-items: center;
+  padding-bottom: 6px; border-bottom: 2px solid var(--primary);
+  margin-bottom: 8px;
+}
+.division-card .division-head h3 { font-size: 1.05rem; margin: 0; }
+.division-card .division-meta { font-size: 0.8rem; color: var(--muted); }
+.team-row { display: flex; gap: 16px; padding: 6px 0; border-bottom: 1px dashed var(--border); flex-wrap: wrap; }
+.team-row:last-child { border-bottom: none; }
+.team-row .team-num { font-weight: 800; color: var(--accent); min-width: 48px; }
+.team-row .team-name { font-weight: 600; min-width: 160px; }
+.team-row .contact { font-size: 0.9rem; }
+.team-row .contact .label { color: var(--muted); margin-right: 4px; }
+.team-row .contact .email { color: var(--text); }
+.team-row .contact .unmatched { color: var(--warn); font-style: italic; }
+.copy-btn {
+  background: transparent; border: 1px solid var(--border);
+  padding: 2px 8px; font-size: 0.75rem; border-radius: 6px;
+  margin-left: 6px; cursor: pointer;
+}
+.copy-btn:hover { background: #faf8f3; border-color: var(--primary); }
+
+/* Footer */
+.footer { text-align: center; padding: 12px; font-size: 0.75rem; color: var(--muted); }
+
+/* Diff summary (preview) */
+.diff-summary { display: flex; gap: 16px; margin: 8px 0; font-size: 0.9rem; }
+.diff-summary .item strong { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <div class="header">
+    <div class="admin-badge">ADMIN</div>
+    <div class="session-pill" id="sessionPill">—</div>
+    <h1>SPM Admin</h1>
+    <div class="subtitle">Paste APA reports · captain directory · Supabase-backed</div>
+  </div>
+
+  <!-- Key gate -->
+  <div id="keyGate" class="key-gate hidden">
+    <div class="card">
+      <h2 id="keyGateTitle">Admin key required</h2>
+      <p class="hint" id="keyGateMsg">Append <code>?key=&lt;service_role&gt;</code> to the URL.</p>
+    </div>
+  </div>
+
+  <!-- Main UI -->
+  <div id="adminMain" class="hidden">
+
+    <div class="tabs" role="tablist">
+      <button class="tab active" data-tab="sessions">Sessions</button>
+      <button class="tab" data-tab="uploads">Uploads</button>
+      <button class="tab" data-tab="emailhq">Email HQ</button>
+    </div>
+
+    <div id="globalStatus" class="status-line"></div>
+
+    <!-- ══════════════════════════════════════════════════════════════
+         TAB: SESSIONS
+         ══════════════════════════════════════════════════════════════ -->
+    <div id="tab-sessions" class="tab-panel active">
+
+      <div class="card">
+        <h2>Create session</h2>
+        <div class="form-row">
+          <div>
+            <label for="newSessionYear">Year</label>
+            <input type="number" id="newSessionYear" value="2026" min="2020" max="2099">
+          </div>
+          <div>
+            <label for="newSessionSeason">Season</label>
+            <select id="newSessionSeason">
+              <option value="spring">Spring</option>
+              <option value="summer" selected>Summer</option>
+              <option value="fall">Fall</option>
+              <option value="winter">Winter</option>
+            </select>
+          </div>
+          <div>
+            <label for="newSessionName">Display name</label>
+            <input type="text" id="newSessionName" placeholder="Summer 2026">
+          </div>
+          <div>
+            <label for="newSessionStart">Start date</label>
+            <input type="date" id="newSessionStart" value="2026-05-04">
+          </div>
+          <div>
+            <label>&nbsp;</label>
+            <button class="btn btn-primary" onclick="createSession()">Create</button>
+          </div>
+        </div>
+        <p class="hint">The first session you create is auto-set as current.</p>
+      </div>
+
+      <div class="card">
+        <h2>Sessions</h2>
+        <div id="sessionsStatus" class="status-line"></div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>Name</th><th>Season</th><th>Year</th><th>Start</th><th>Current?</th><th></th></tr></thead>
+            <tbody id="sessionsBody"><tr><td colspan="6" class="hint">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════════
+         TAB: UPLOADS
+         ══════════════════════════════════════════════════════════════ -->
+    <div id="tab-uploads" class="tab-panel">
+
+      <div class="card">
+        <h2>How to paste</h2>
+        <p class="hint">
+          From the APA admin web interface, select a report&rsquo;s table rows, Ctrl+C copy,
+          and paste into the matching box below. The tool auto-detects which report you
+          pasted by its header row, previews the parse, and commits on confirm.
+        </p>
+        <ul class="hint" style="margin-left: 18px; margin-top: 4px;">
+          <li>Divisions &amp; teams are scoped to the current session (shown in the pill above).</li>
+          <li>Player records are global (not session-scoped) &mdash; keyed by APA member number.</li>
+          <li>Captains / co-captains from Team Data paste are resolved to a player record by name; unresolved names show as "unmatched" in Email HQ.</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h2>Paste a report</h2>
+        <div class="form-row">
+          <div style="flex: 0 0 240px">
+            <label for="uploadOperator">Operator (for Divisions paste)</label>
+            <select id="uploadOperator"></select>
+          </div>
+          <div>
+            <label>&nbsp;</label>
+            <p class="hint" style="margin:0">Applies to Division Listing paste only. Ignored for other reports.</p>
+          </div>
+        </div>
+
+        <label for="uploadBox">Paste tab-separated data (first line = header row)</label>
+        <textarea id="uploadBox" placeholder="Paste a Current Player Addresses / Player Details / Division Listing / Team Data / Team Bonus Points report here…" oninput="detectAndPreview()"></textarea>
+
+        <div id="uploadPreview" class="hidden" style="margin-top: 12px">
+          <div id="detectedReportLine"></div>
+          <div id="diffSummary" class="diff-summary"></div>
+          <div id="uploadStatus" class="status-line"></div>
+          <div class="actions">
+            <button class="btn btn-primary" id="commitBtn" onclick="commitUpload()">Commit</button>
+            <button class="btn btn-outline" onclick="clearUpload()">Clear</button>
+          </div>
+        </div>
+        <div id="uploadError" class="status-line err"></div>
+      </div>
+
+      <div class="card">
+        <h2>Current data counts</h2>
+        <div id="dataCounts" class="hint">Loading…</div>
+        <button class="btn btn-outline btn-sm" onclick="refreshCounts()" style="margin-top:8px">Refresh</button>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════════
+         TAB: EMAIL HQ
+         ══════════════════════════════════════════════════════════════ -->
+    <div id="tab-emailhq" class="tab-panel">
+      <div class="card">
+        <h2>Email HQ</h2>
+        <p class="hint">Captain and co-captain email directory for the current session.</p>
+        <div class="form-row" style="margin-top: 10px">
+          <div>
+            <label for="emailFilterOp">Operator</label>
+            <select id="emailFilterOp" onchange="renderEmailHQ()"><option value="">All</option></select>
+          </div>
+          <div>
+            <label for="emailFilterNight">Night</label>
+            <select id="emailFilterNight" onchange="renderEmailHQ()"><option value="">All</option></select>
+          </div>
+          <div>
+            <label for="emailSearch">Search</label>
+            <input type="text" id="emailSearch" placeholder="team, captain, email…" oninput="renderEmailHQ()">
+          </div>
+          <div>
+            <label>&nbsp;</label>
+            <button class="btn btn-outline btn-sm" onclick="loadEmailHQ()">Reload</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="emailHqOutput"></div>
+    </div>
+
+  </div>
+
+  <div class="footer">SPM Admin v0.1 · Phase 1 · Supabase-backed</div>
+</div>
+
+<script>
+/* ══════════════════════════════════════════════════════════════════════
+   CONFIG
+   ══════════════════════════════════════════════════════════════════════ */
+const SB_URL  = 'https://vcjghwgoxnmtnihcbuiz.supabase.co';
+const SB_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZjamdod2dveG5tdG5paGNidWl6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY4ODE2MjksImV4cCI6MjA5MjQ1NzYyOX0.KCzC8VtF4eGCAClw2idqH6B81T1sRjPIr-UTUXpFkaU';
+const params = new URLSearchParams(location.search);
+const SB_KEY = params.get('key') || '';
+
+const HEADERS_READ  = SB_KEY
+  ? { apikey: SB_KEY,   Authorization: 'Bearer ' + SB_KEY }
+  : { apikey: SB_ANON,  Authorization: 'Bearer ' + SB_ANON };
+const HEADERS_WRITE = { ...HEADERS_READ, 'Content-Type': 'application/json', Prefer: 'return=representation' };
+
+/* ══════════════════════════════════════════════════════════════════════
+   PASTE REPORT REGISTRY
+   (Mirrors the GAS-era PASTE_REPORTS but targets Postgres tables.)
+   ══════════════════════════════════════════════════════════════════════ */
+const REPORT_SPECS = [
+  {
+    name: 'PlayerData',
+    reportName: 'Current Player Addresses',
+    required: ['Member Number','First Name','Last Name'],
+    handler: 'commitPlayerData'
+  },
+  {
+    name: 'PlayerDetails',
+    reportName: 'Player Details (SL + phone)',
+    required: ['Member Number','8-Ball Skill Level'],
+    handler: 'commitPlayerDetails'
+  },
+  {
+    name: 'Divisions',
+    reportName: 'Division Listing',
+    required: ['Division Number','Division Name','Night Of Play'],
+    handler: 'commitDivisions'
+  },
+  {
+    name: 'TeamBonusPoints',
+    reportName: 'Team Bonus Points',
+    required: ['Team Number','Total Team Bonus Points'],
+    handler: 'commitTeamBonusPoints'
+  },
+  {
+    // NOTE: TeamData must appear AFTER TeamBonusPoints in this array
+    // because the TeamData report also contains "Total Team Bonus Points"
+    // column; we want first-match on the more-specific TeamBonusPoints
+    // report when the paste has only the 3 columns of TeamBonusPoints.
+    name: 'TeamData',
+    reportName: 'Team Data',
+    required: ['Team Number','Team Name','Team Captain'],
+    handler: 'commitTeamData'
+  }
+];
+
+/* ══════════════════════════════════════════════════════════════════════
+   STATE
+   ══════════════════════════════════════════════════════════════════════ */
+let operators        = [];  // [{id, name, short_code}]
+let sessions         = [];  // [{id, year, season, name, start_date, is_current}]
+let currentSession   = null;
+
+// Upload-tab in-flight parse
+let _parsed = null;  // { report, headers, rows, operatorId? }
+
+/* ══════════════════════════════════════════════════════════════════════
+   UTILITIES
+   ══════════════════════════════════════════════════════════════════════ */
+function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+function pad5(x) { x = String(x || '').trim(); while (x.length < 5) x = '0' + x; return x; }
+function normName(s) {
+  return String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+function setStatus(id, msg, kind) {
+  const el = document.getElementById(id);
+  el.className = 'status-line shown ' + (kind || 'ok');
+  el.innerHTML = msg;
+  if (kind === 'ok') setTimeout(() => { el.className = 'status-line'; el.innerHTML = ''; }, 4500);
+}
+function hideStatus(id) {
+  const el = document.getElementById(id); el.className = 'status-line'; el.innerHTML = '';
+}
+function showGlobal(msg, kind) { setStatus('globalStatus', msg, kind); }
+
+async function sb(method, path, body, extraHeaders) {
+  const opts = { method, headers: { ...HEADERS_WRITE, ...(extraHeaders || {}) } };
+  if (body != null && method !== 'GET' && method !== 'DELETE') opts.body = JSON.stringify(body);
+  const res = await fetch(SB_URL + '/rest/v1/' + path, opts);
+  if (!res.ok) throw new Error('Supabase ' + res.status + ': ' + (await res.text()));
+  const ct = res.headers.get('content-type') || '';
+  if (ct.includes('json') && res.status !== 204) return res.json();
+  return null;
+}
+
+/* Parse tab-separated paste into { headers: [...], rows: [[...]] } */
+function parseTsv(raw) {
+  const text = String(raw || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+  if (!text) return { headers: [], rows: [] };
+  const lines = text.split('\n').filter(l => l.length > 0);
+  const headers = lines[0].split('\t').map(h => h.trim());
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cells = lines[i].split('\t');
+    while (cells.length < headers.length) cells.push('');
+    rows.push(cells.map(c => String(c || '').trim()));
+  }
+  return { headers, rows };
+}
+
+function detectReport(headers) {
+  const set = new Set(headers);
+  for (const spec of REPORT_SPECS) {
+    if (spec.required.every(h => set.has(h))) return spec;
+  }
+  return null;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   INIT
+   ══════════════════════════════════════════════════════════════════════ */
+document.addEventListener('DOMContentLoaded', init);
+
+async function init() {
+  if (!SB_KEY) { document.getElementById('keyGate').classList.remove('hidden'); return; }
+  try {
+    const r = await fetch(SB_URL + '/rest/v1/operators?select=id&limit=1', { headers: HEADERS_READ });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+  } catch (e) {
+    const g = document.getElementById('keyGate');
+    g.classList.remove('hidden');
+    document.getElementById('keyGateTitle').textContent = 'Access Denied';
+    document.getElementById('keyGateMsg').innerHTML =
+      '<strong style="color:var(--danger)">Admin key is invalid or expired.</strong><br>Double-check <code>?key=</code>.';
+    return;
+  }
+
+  document.getElementById('adminMain').classList.remove('hidden');
+
+  // Wire tab switching
+  document.querySelectorAll('.tab').forEach(btn => {
+    btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+  });
+
+  await loadOperators();
+  await loadSessions();
+  await refreshCounts();
+}
+
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + name));
+  if (name === 'emailhq') loadEmailHQ();
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   OPERATORS (read-only, seeded by schema)
+   ══════════════════════════════════════════════════════════════════════ */
+async function loadOperators() {
+  operators = await sb('GET', 'operators?select=id,name,short_code&order=name.asc');
+  const sel = document.getElementById('uploadOperator');
+  sel.innerHTML = operators.map(o => `<option value="${o.id}">${esc(o.name)}</option>`).join('');
+  // Default to SPM if present
+  const spm = operators.find(o => o.short_code === 'SPM');
+  if (spm) sel.value = spm.id;
+
+  const emSel = document.getElementById('emailFilterOp');
+  emSel.innerHTML = '<option value="">All operators</option>'
+    + operators.map(o => `<option value="${o.id}">${esc(o.name)}</option>`).join('');
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   SESSIONS
+   ══════════════════════════════════════════════════════════════════════ */
+async function loadSessions() {
+  sessions = await sb('GET', 'sessions?select=*&order=year.desc,season.asc');
+  currentSession = sessions.find(s => s.is_current) || null;
+  renderSessions();
+  renderSessionPill();
+}
+
+function renderSessionPill() {
+  const el = document.getElementById('sessionPill');
+  el.textContent = currentSession ? ('Current: ' + currentSession.name) : 'No current session';
+}
+
+function renderSessions() {
+  const body = document.getElementById('sessionsBody');
+  if (!sessions.length) {
+    body.innerHTML = '<tr><td colspan="6" class="hint">No sessions yet. Create one above to get started.</td></tr>';
+    return;
+  }
+  body.innerHTML = sessions.map(s => `
+    <tr>
+      <td>${esc(s.name)}</td>
+      <td style="text-transform: capitalize">${esc(s.season)}</td>
+      <td>${esc(s.year)}</td>
+      <td>${esc(s.start_date || '')}</td>
+      <td>${s.is_current ? '<span class="badge gold">CURRENT</span>' : '<span class="badge muted">—</span>'}</td>
+      <td>
+        ${s.is_current
+          ? '<button class="btn btn-outline btn-sm" disabled>Current</button>'
+          : `<button class="btn btn-outline btn-sm" onclick="setCurrentSession(${s.id})">Make current</button>`}
+        <button class="btn btn-danger btn-sm" onclick="deleteSession(${s.id},'${esc(s.name).replace(/'/g,"&#39;")}')">Delete</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function createSession() {
+  hideStatus('sessionsStatus');
+  const year   = parseInt(document.getElementById('newSessionYear').value, 10);
+  const season = document.getElementById('newSessionSeason').value;
+  const name   = document.getElementById('newSessionName').value.trim() || (season.charAt(0).toUpperCase() + season.slice(1) + ' ' + year);
+  const start  = document.getElementById('newSessionStart').value || null;
+  if (!year || !season) return setStatus('sessionsStatus', 'Year and season required.', 'err');
+
+  try {
+    const makeCurrent = sessions.length === 0;
+    const row = { year, season, name, start_date: start, is_current: makeCurrent };
+    await sb('POST', 'sessions', row);
+    setStatus('sessionsStatus', 'Session created' + (makeCurrent ? ' and set as current.' : '.'), 'ok');
+    await loadSessions();
+  } catch (e) {
+    setStatus('sessionsStatus', 'Failed: ' + esc(e.message), 'err');
+  }
+}
+
+async function setCurrentSession(id) {
+  try {
+    // Clear current on all, then set this one. Partial unique index allows only one current,
+    // so we must un-set the old one in the same logical op; use two calls.
+    await sb('PATCH', 'sessions?is_current=is.true', { is_current: false });
+    await sb('PATCH', 'sessions?id=eq.' + id, { is_current: true });
+    setStatus('sessionsStatus', 'Set as current session.', 'ok');
+    await loadSessions();
+    await refreshCounts();
+  } catch (e) {
+    setStatus('sessionsStatus', 'Failed: ' + esc(e.message), 'err');
+    await loadSessions();
+  }
+}
+
+async function deleteSession(id, name) {
+  if (!confirm('Delete "' + name + '"?\n\nThis cascades to all its divisions, teams, and memberships. Players stay (they\u2019re global).')) return;
+  try {
+    await sb('DELETE', 'sessions?id=eq.' + id);
+    setStatus('sessionsStatus', 'Deleted ' + name + '.', 'ok');
+    await loadSessions();
+    await refreshCounts();
+  } catch (e) {
+    setStatus('sessionsStatus', 'Delete failed: ' + esc(e.message), 'err');
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   UPLOADS — detect + preview + commit
+   ══════════════════════════════════════════════════════════════════════ */
+
+function clearUpload() {
+  document.getElementById('uploadBox').value = '';
+  document.getElementById('uploadPreview').classList.add('hidden');
+  document.getElementById('uploadError').className = 'status-line';
+  document.getElementById('uploadError').innerHTML = '';
+  _parsed = null;
+}
+
+function detectAndPreview() {
+  document.getElementById('uploadError').className = 'status-line';
+  document.getElementById('uploadError').innerHTML = '';
+  const raw = document.getElementById('uploadBox').value;
+  if (!raw.trim()) {
+    document.getElementById('uploadPreview').classList.add('hidden');
+    _parsed = null;
+    return;
+  }
+  const { headers, rows } = parseTsv(raw);
+  if (!headers.length) {
+    document.getElementById('uploadPreview').classList.add('hidden');
+    return;
+  }
+  const spec = detectReport(headers);
+  if (!spec) {
+    document.getElementById('uploadPreview').classList.add('hidden');
+    const missingInfo = REPORT_SPECS.map(s => s.reportName + ' → needs: ' + s.required.join(', ')).join('<br>');
+    document.getElementById('uploadError').className = 'status-line shown err';
+    document.getElementById('uploadError').innerHTML =
+      '<strong>Unrecognized header row.</strong><br>'
+      + 'Got: <code>' + esc(headers.join(' · ')) + '</code><br>'
+      + 'Expected one of:<br>' + missingInfo;
+    return;
+  }
+
+  _parsed = { spec, headers, rows };
+  document.getElementById('uploadPreview').classList.remove('hidden');
+  document.getElementById('detectedReportLine').innerHTML =
+    '<strong>Detected:</strong> ' + esc(spec.reportName)
+    + ' · <span class="badge ok">' + rows.length + ' row' + (rows.length === 1 ? '' : 's') + '</span>';
+
+  // Simple diff preview — per-report summary shown by its handler at commit time.
+  document.getElementById('diffSummary').innerHTML = '';
+}
+
+async function commitUpload() {
+  if (!_parsed) return;
+  hideStatus('uploadStatus');
+  const btn = document.getElementById('commitBtn');
+  btn.disabled = true;
+  btn.textContent = 'Committing…';
+  try {
+    const handler = window[_parsed.spec.handler];
+    if (typeof handler !== 'function') throw new Error('No handler for ' + _parsed.spec.name);
+    const summary = await handler(_parsed.headers, _parsed.rows);
+    setStatus('uploadStatus', 'Committed. ' + summary, 'ok');
+    clearUpload();
+    await refreshCounts();
+  } catch (e) {
+    setStatus('uploadStatus', 'Commit failed: ' + esc(e.message), 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Commit';
+  }
+}
+
+/* ──── Handler: PlayerData (upsert on member_number) ──────────── */
+window.commitPlayerData = async function(headers, rows) {
+  const idx = {};
+  const cols = ['Member Number','First Name','Nickname','Last Name','Address 1','Address 2','City','State','Zip','Email Address'];
+  cols.forEach(c => idx[c] = headers.indexOf(c));
+  if (idx['Member Number'] < 0) throw new Error('Missing Member Number');
+
+  const payload = [];
+  for (const r of rows) {
+    const mn = String(r[idx['Member Number']] || '').trim();
+    if (!mn) continue;
+    payload.push({
+      member_number: mn,
+      first_name: idx['First Name'] >= 0 ? (r[idx['First Name']] || '').trim() : '',
+      nickname:   idx['Nickname']   >= 0 ? ((r[idx['Nickname']]   || '').trim() || null) : null,
+      last_name:  idx['Last Name']  >= 0 ? (r[idx['Last Name']]  || '').trim() : '',
+      email:      idx['Email Address'] >= 0 ? ((r[idx['Email Address']] || '').trim() || null) : null,
+      address1:   idx['Address 1'] >= 0 ? ((r[idx['Address 1']] || '').trim() || null) : null,
+      address2:   idx['Address 2'] >= 0 ? ((r[idx['Address 2']] || '').trim() || null) : null,
+      city:       idx['City']      >= 0 ? ((r[idx['City']]      || '').trim() || null) : null,
+      state:      idx['State']     >= 0 ? ((r[idx['State']]     || '').trim() || null) : null,
+      zip:        idx['Zip']       >= 0 ? ((r[idx['Zip']]       || '').trim() || null) : null
+    });
+  }
+  if (!payload.length) return 'Nothing to commit (no valid rows).';
+  await sb('POST', 'players?on_conflict=member_number', payload,
+    { Prefer: 'resolution=merge-duplicates,return=minimal' });
+  return payload.length + ' player(s) upserted.';
+};
+
+/* ──── Handler: PlayerDetails (SL + phone merge) ──────────────── */
+window.commitPlayerDetails = async function(headers, rows) {
+  const idx = {
+    mn:    headers.indexOf('Member Number'),
+    sl8:   headers.indexOf('8-Ball Skill Level'),
+    sl9:   headers.indexOf('9-Ball Skill Level'),
+    phone: headers.indexOf('Cell Phone')
+  };
+  if (idx.mn < 0) throw new Error('Missing Member Number');
+
+  let updated = 0;
+  let skipped = 0;
+  // We PATCH one by one to respect that these rows might not exist in
+  // players yet. If a PATCH hits zero rows, we do a targeted insert
+  // with only the fields from this paste.
+  for (const r of rows) {
+    const mn = String(r[idx.mn] || '').trim();
+    if (!mn) { skipped++; continue; }
+    const patch = { updated_at: new Date().toISOString() };
+    if (idx.sl8 >= 0) {
+      const v = parseInt(r[idx.sl8], 10);
+      patch.sl_8ball = isNaN(v) ? null : v;
+    }
+    if (idx.sl9 >= 0) {
+      const v = parseInt(r[idx.sl9], 10);
+      patch.sl_9ball = isNaN(v) ? null : v;
+    }
+    if (idx.phone >= 0) {
+      const v = String(r[idx.phone] || '').trim();
+      patch.cell_phone = v || null;
+    }
+    try {
+      const resp = await sb('PATCH', 'players?member_number=eq.' + encodeURIComponent(mn), patch);
+      if (Array.isArray(resp) && resp.length) updated++;
+      else skipped++;
+    } catch (e) {
+      skipped++;
+    }
+  }
+  return updated + ' updated, ' + skipped + ' skipped (not in Player Addresses yet).';
+};
+
+/* ──── Handler: Divisions (upsert on session+operator+division#) ─ */
+window.commitDivisions = async function(headers, rows) {
+  if (!currentSession) throw new Error('No current session. Create + select one on the Sessions tab first.');
+  const opId = parseInt(document.getElementById('uploadOperator').value, 10);
+  if (!opId) throw new Error('Pick an operator for this paste.');
+
+  const idx = {
+    num:   headers.indexOf('Division Number'),
+    name:  headers.indexOf('Division Name'),
+    night: headers.indexOf('Night Of Play'),
+    fmt:   headers.indexOf('Format'),
+    start: headers.indexOf('Start Date'),
+    teams: headers.indexOf('Number Of Teams'),
+    weeks: headers.indexOf('Number Of Weeks'),
+    pf:    headers.indexOf('Player Fund'),
+    bf:    headers.indexOf('Basic Fee')
+  };
+  const payload = [];
+  for (const r of rows) {
+    const num = String(r[idx.num] || '').trim();
+    if (!num) continue;
+    payload.push({
+      session_id:      currentSession.id,
+      operator_id:     opId,
+      division_number: num,
+      name:            idx.name  >= 0 ? (r[idx.name]  || '').trim() : 'Division ' + num,
+      format:          idx.fmt   >= 0 ? ((r[idx.fmt]   || '').trim() || null) : null,
+      night_of_play:   idx.night >= 0 ? ((r[idx.night] || '').trim() || null) : null,
+      start_date:      idx.start >= 0 ? (parseDate(r[idx.start])) : null,
+      num_teams:       idx.teams >= 0 ? (parseInt(r[idx.teams], 10) || null) : null,
+      num_weeks:       idx.weeks >= 0 ? (parseInt(r[idx.weeks], 10) || null) : null,
+      player_fund:     idx.pf    >= 0 ? (parseFloat(String(r[idx.pf] || '').replace(/[^0-9.\-]/g,'')) || null) : null,
+      basic_fee:       idx.bf    >= 0 ? (parseFloat(String(r[idx.bf] || '').replace(/[^0-9.\-]/g,'')) || null) : null
+    });
+  }
+  if (!payload.length) return 'Nothing to commit.';
+  await sb('POST', 'divisions?on_conflict=session_id,operator_id,division_number', payload,
+    { Prefer: 'resolution=merge-duplicates,return=minimal' });
+  return payload.length + ' division(s) upserted for this session.';
+};
+
+function parseDate(s) {
+  if (!s) return null;
+  const t = String(s).trim();
+  if (!t) return null;
+  // APA usually exports MM/DD/YYYY or M/D/YYYY
+  const m = t.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})/);
+  if (m) {
+    let [ , mo, da, yr ] = m;
+    if (yr.length === 2) yr = '20' + yr;
+    return yr + '-' + String(mo).padStart(2,'0') + '-' + String(da).padStart(2,'0');
+  }
+  // ISO already
+  if (/^\d{4}-\d{2}-\d{2}/.test(t)) return t.substring(0,10);
+  return null;
+}
+
+/* ──── Handler: TeamData (teams + captain/co-cap memberships) ── */
+window.commitTeamData = async function(headers, rows) {
+  if (!currentSession) throw new Error('No current session. Create + select one first.');
+  const idx = {
+    num:      headers.indexOf('Team Number'),
+    name:     headers.indexOf('Team Name'),
+    cap:      headers.indexOf('Team Captain'),
+    coCap:    headers.indexOf('Team Co-Captain'),
+    nPlayers: headers.indexOf('Number of Players'),
+    bonus:    headers.indexOf('Total Team Bonus Points'),
+    played:   headers.indexOf('Matches Played'),
+    ou:       headers.indexOf('Over/Under Session'),
+    regNot:   headers.indexOf('Registered Not Playing Next Session'),
+    regPlay:  headers.indexOf('Registered Playing Next Session')
+  };
+  if (idx.num < 0 || idx.name < 0) throw new Error('Missing Team Number / Team Name');
+
+  // Look up all divisions in the current session to map team_number (first 3 digits) → division_id
+  const divs = await sb('GET', 'divisions?select=id,operator_id,division_number&session_id=eq.' + currentSession.id);
+  // Build a lookup by division_number (stripped of leading zeros) since team_number prefix is typically unpadded int-equivalent
+  const divByNum = {};
+  for (const d of divs) divByNum[String(parseInt(d.division_number,10))] = d;
+
+  // Pre-fetch players so we can resolve captain/co-cap names to member_number
+  const allPlayers = await sb('GET', 'players?select=member_number,first_name,nickname,last_name');
+  const nameIndex = new Map();  // normName → member_number (first match wins)
+  for (const p of allPlayers) {
+    const last = (p.last_name || '').trim();
+    const first = (p.first_name || '').trim();
+    const nick  = (p.nickname || '').trim();
+    if (last && first) {
+      const k = normName(first + ' ' + last);
+      if (!nameIndex.has(k)) nameIndex.set(k, p.member_number);
+    }
+    if (last && nick) {
+      const k = normName(nick + ' ' + last);
+      if (!nameIndex.has(k)) nameIndex.set(k, p.member_number);
+    }
+  }
+
+  const teamUpserts = [];
+  const membershipOps = [];     // { team_number, division_id, role, name, member_number? }
+  let unmatchedCaptains = 0;
+  let missingDivisions = 0;
+
+  for (const r of rows) {
+    const tn = pad5(r[idx.num]);
+    if (!tn || tn === '00000') continue;
+    const divNum = String(parseInt(tn.substring(0,3), 10));
+    const div = divByNum[divNum];
+    if (!div) { missingDivisions++; continue; }
+
+    teamUpserts.push({
+      division_id: div.id,
+      team_number: tn,
+      team_name: (r[idx.name] || '').trim(),
+      num_players:       idx.nPlayers >= 0 ? (parseInt(r[idx.nPlayers], 10) || null) : null,
+      total_bonus_points: idx.bonus   >= 0 ? (parseInt(r[idx.bonus], 10)   || null) : null,
+      matches_played:    idx.played   >= 0 ? (parseInt(r[idx.played], 10)  || null) : null,
+      over_under_session: idx.ou      >= 0 ? (parseInt(r[idx.ou], 10)       || null) : null,
+      reg_not_playing_next: idx.regNot >= 0 ? (parseInt(r[idx.regNot], 10) || null) : null,
+      reg_playing_next:     idx.regPlay >= 0 ? (parseInt(r[idx.regPlay], 10) || null) : null
+    });
+
+    const capName = idx.cap >= 0 ? (r[idx.cap] || '').trim() : '';
+    if (capName) {
+      const mn = nameIndex.get(normName(capName)) || null;
+      if (!mn) unmatchedCaptains++;
+      membershipOps.push({ team_number: tn, division_id: div.id, role: 'Captain', name_raw: capName, member_number: mn });
+    }
+    const coCapName = idx.coCap >= 0 ? (r[idx.coCap] || '').trim() : '';
+    if (coCapName) {
+      const mn = nameIndex.get(normName(coCapName)) || null;
+      if (!mn) unmatchedCaptains++;
+      membershipOps.push({ team_number: tn, division_id: div.id, role: 'Co-Captain', name_raw: coCapName, member_number: mn });
+    }
+  }
+
+  if (!teamUpserts.length) {
+    return 'No teams imported. ' + (missingDivisions ? missingDivisions + ' rows skipped — their divisions aren\u2019t in this session. Paste Divisions first.' : '');
+  }
+
+  // Upsert teams
+  await sb('POST', 'teams?on_conflict=division_id,team_number', teamUpserts,
+    { Prefer: 'resolution=merge-duplicates,return=minimal' });
+
+  // To wire memberships we need the team IDs. Fetch them back.
+  const teamIdsArr = await sb('GET',
+    'teams?select=id,division_id,team_number&' +
+    'division_id=in.(' + [...new Set(teamUpserts.map(t => t.division_id))].join(',') + ')'
+  );
+  const teamIdByKey = new Map();  // "divId:team_number" → id
+  for (const t of teamIdsArr) teamIdByKey.set(t.division_id + ':' + t.team_number, t.id);
+
+  // For each (team, role) in membershipOps, upsert the membership. We can't
+  // rely on a single ON CONFLICT target because the unique-when-matched index
+  // skips NULL member_numbers. So we:
+  //   1. Wipe any existing Captain/Co-Captain rows for this team
+  //   2. Insert fresh rows from the paste
+  // This keeps the captain record authoritative to the most recent TeamData paste.
+  const teamIdsInThisPaste = [...new Set(membershipOps.map(m => teamIdByKey.get(m.division_id + ':' + m.team_number)).filter(Boolean))];
+  if (teamIdsInThisPaste.length) {
+    await sb('DELETE',
+      'team_memberships?team_id=in.(' + teamIdsInThisPaste.join(',') + ')&role=in.(Captain,Co-Captain)');
+  }
+
+  const membershipRows = [];
+  for (const m of membershipOps) {
+    const team_id = teamIdByKey.get(m.division_id + ':' + m.team_number);
+    if (!team_id) continue;
+    membershipRows.push({
+      team_id,
+      role: m.role,
+      member_number: m.member_number,
+      name_raw: m.name_raw
+    });
+  }
+  if (membershipRows.length) {
+    await sb('POST', 'team_memberships', membershipRows, { Prefer: 'return=minimal' });
+  }
+
+  let msg = teamUpserts.length + ' team(s) upserted, ' + membershipRows.length + ' captain/co-captain membership(s) written.';
+  if (unmatchedCaptains) msg += ' ⚠ ' + unmatchedCaptains + ' captain name(s) didn\u2019t match a player — shown as unmatched in Email HQ.';
+  if (missingDivisions)  msg += ' ⚠ ' + missingDivisions + ' team row(s) skipped (division not found in current session).';
+  return msg;
+};
+
+/* ──── Handler: TeamBonusPoints (update only) ───────────────── */
+window.commitTeamBonusPoints = async function(headers, rows) {
+  if (!currentSession) throw new Error('No current session.');
+  const idx = {
+    num:   headers.indexOf('Team Number'),
+    bonus: headers.indexOf('Total Team Bonus Points')
+  };
+  if (idx.num < 0 || idx.bonus < 0) throw new Error('Missing required columns');
+
+  const divs = await sb('GET', 'divisions?select=id,division_number&session_id=eq.' + currentSession.id);
+  const divIdByNum = {};
+  for (const d of divs) divIdByNum[String(parseInt(d.division_number,10))] = d.id;
+
+  let updated = 0, skipped = 0;
+  for (const r of rows) {
+    const tn = pad5(r[idx.num]);
+    if (!tn || tn === '00000') { skipped++; continue; }
+    const divNum = String(parseInt(tn.substring(0,3), 10));
+    const div = divIdByNum[divNum];
+    if (!div) { skipped++; continue; }
+    const bonus = parseInt(r[idx.bonus], 10);
+    if (isNaN(bonus)) { skipped++; continue; }
+    const resp = await sb('PATCH',
+      'teams?division_id=eq.' + div + '&team_number=eq.' + encodeURIComponent(tn),
+      { total_bonus_points: bonus }
+    );
+    if (Array.isArray(resp) && resp.length) updated++; else skipped++;
+  }
+  return updated + ' team(s) updated, ' + skipped + ' skipped.';
+};
+
+/* ══════════════════════════════════════════════════════════════════════
+   DATA COUNTS (bottom of Uploads tab)
+   ══════════════════════════════════════════════════════════════════════ */
+async function refreshCounts() {
+  const out = document.getElementById('dataCounts');
+  out.textContent = 'Loading…';
+  try {
+    const [ players, divisions, teams, memberships ] = await Promise.all([
+      sb('GET', 'players?select=member_number', null, { Prefer: 'count=exact' }),
+      currentSession ? sb('GET', 'divisions?select=id&session_id=eq.' + currentSession.id, null, { Prefer: 'count=exact' }) : Promise.resolve([]),
+      currentSession ? sb('GET', 'teams?select=id,division:divisions!inner(session_id)&division.session_id=eq.' + currentSession.id) : Promise.resolve([]),
+      currentSession ? sb('GET', 'team_memberships?select=id,role,team:teams!inner(division:divisions!inner(session_id))&team.division.session_id=eq.' + currentSession.id) : Promise.resolve([])
+    ]);
+    const capCount = (memberships || []).filter(m => m.role === 'Captain').length;
+    const coCapCount = (memberships || []).filter(m => m.role === 'Co-Captain').length;
+    out.innerHTML =
+      '<strong>' + (players ? players.length : 0) + '</strong> players (global registry) &middot; '
+      + '<strong>' + (divisions ? divisions.length : 0) + '</strong> divisions (current session) &middot; '
+      + '<strong>' + (teams ? teams.length : 0) + '</strong> teams &middot; '
+      + '<strong>' + capCount + '</strong> captains &middot; '
+      + '<strong>' + coCapCount + '</strong> co-captains';
+  } catch (e) {
+    out.innerHTML = '<span style="color:var(--danger)">Count failed: ' + esc(e.message) + '</span>';
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   EMAIL HQ VIEW
+   ══════════════════════════════════════════════════════════════════════ */
+let _emailData = null;
+
+async function loadEmailHQ() {
+  const out = document.getElementById('emailHqOutput');
+  if (!currentSession) {
+    out.innerHTML = '<div class="card"><p class="hint">No current session. Create one on the Sessions tab.</p></div>';
+    return;
+  }
+  out.innerHTML = '<div class="card"><p class="hint">Loading…</p></div>';
+
+  try {
+    // One big query — divisions in current session, with teams, with memberships (Captain/Co-Captain only), with players joined.
+    const url =
+      'divisions?select='
+      + 'id,division_number,name,format,night_of_play,operator:operators!inner(id,name),'
+      + 'teams(id,team_number,team_name,'
+        + 'memberships:team_memberships(role,name_raw,player:players(member_number,first_name,nickname,last_name,email))'
+      + ')'
+      + '&session_id=eq.' + currentSession.id
+      + '&order=division_number.asc';
+    _emailData = await sb('GET', url);
+
+    // Populate night filter
+    const nights = [...new Set(_emailData.map(d => d.night_of_play).filter(Boolean))];
+    const nightSel = document.getElementById('emailFilterNight');
+    nightSel.innerHTML = '<option value="">All nights</option>' + nights.sort().map(n => `<option>${esc(n)}</option>`).join('');
+
+    renderEmailHQ();
+  } catch (e) {
+    out.innerHTML = '<div class="card"><p class="status-line shown err">Failed: ' + esc(e.message) + '</p></div>';
+  }
+}
+
+function renderEmailHQ() {
+  const out = document.getElementById('emailHqOutput');
+  if (!_emailData) { out.innerHTML = ''; return; }
+  const opFilter    = document.getElementById('emailFilterOp').value;
+  const nightFilter = document.getElementById('emailFilterNight').value;
+  const q = (document.getElementById('emailSearch').value || '').toLowerCase().trim();
+
+  const filtered = _emailData.filter(d => {
+    if (opFilter && String(d.operator.id) !== opFilter) return false;
+    if (nightFilter && d.night_of_play !== nightFilter) return false;
+    return true;
+  });
+
+  if (!filtered.length) { out.innerHTML = '<div class="card"><p class="hint">No divisions match filters.</p></div>'; return; }
+
+  let html = '';
+  let totalTeams = 0;
+  for (const d of filtered) {
+    const teams = (d.teams || []).slice().sort((a,b) => a.team_number.localeCompare(b.team_number));
+    // Apply text search at the team level
+    const matchedTeams = q ? teams.filter(t => {
+      const hay = [
+        t.team_number, t.team_name,
+        ...(t.memberships || []).map(m => (m.player ? (m.player.first_name + ' ' + m.player.last_name) : (m.name_raw || '')) + ' ' + (m.player ? (m.player.email || '') : ''))
+      ].join(' ').toLowerCase();
+      return hay.indexOf(q) !== -1;
+    }) : teams;
+    if (!matchedTeams.length) continue;
+    totalTeams += matchedTeams.length;
+
+    html += `
+      <div class="card division-card">
+        <div class="division-head">
+          <h3>Division ${esc(d.division_number)} — ${esc(d.name)}</h3>
+          <div class="division-meta">
+            ${esc(d.operator.name)} · ${esc(d.night_of_play || '')} · ${esc(d.format || '')} · ${matchedTeams.length} team${matchedTeams.length===1?'':'s'}
+          </div>
+        </div>
+        ${matchedTeams.map(t => renderTeamRow(t)).join('')}
+      </div>
+    `;
+  }
+  if (!totalTeams) { out.innerHTML = '<div class="card"><p class="hint">No teams match your search.</p></div>'; return; }
+  out.innerHTML = html;
+}
+
+function renderTeamRow(t) {
+  const cap = (t.memberships || []).find(m => m.role === 'Captain');
+  const coCap = (t.memberships || []).find(m => m.role === 'Co-Captain');
+  return `
+    <div class="team-row">
+      <div class="team-num">#${esc(t.team_number)}</div>
+      <div class="team-name">${esc(t.team_name)}</div>
+      <div class="contact">${renderMembership('Cap', cap)}</div>
+      <div class="contact">${renderMembership('Co', coCap)}</div>
+    </div>
+  `;
+}
+
+function renderMembership(label, m) {
+  if (!m) return `<span class="label">${label}:</span> <span class="unmatched">—</span>`;
+  const displayName = m.player
+    ? [m.player.first_name, m.player.last_name].filter(Boolean).join(' ')
+    : (m.name_raw || '—');
+  if (m.player && m.player.email) {
+    const em = m.player.email;
+    return `<span class="label">${label}:</span> ${esc(displayName)} &lt;<span class="email">${esc(em)}</span>&gt;`
+      + `<button class="copy-btn" onclick="copyEmail('${esc(em).replace(/'/g,"&#39;")}', this)">copy</button>`;
+  }
+  const why = m.player ? 'no email on record' : 'name didn\u2019t match a player';
+  return `<span class="label">${label}:</span> ${esc(displayName)} <span class="unmatched">(${esc(why)})</span>`;
+}
+
+function copyEmail(em, btn) {
+  navigator.clipboard.writeText(em).then(() => {
+    const old = btn.textContent;
+    btn.textContent = '✓';
+    setTimeout(() => { btn.textContent = old; }, 1200);
+  });
+}
+window.copyEmail = copyEmail;
+</script>
+</body>
+</html>
