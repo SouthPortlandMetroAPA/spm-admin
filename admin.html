@@ -1520,8 +1520,20 @@ window.commitTeamData = async function(headers, rows) {
   const divByNum = {};
   for (const d of divs) divByNum[String(parseInt(d.division_number,10))] = d;
 
-  // Pre-fetch players so we can resolve captain/co-cap names to member_number
-  const allPlayers = await sb('GET', 'players?select=member_number,first_name,nickname,last_name');
+  // Pre-fetch ALL players (paginated) so we can resolve captain/co-cap names
+  // to member_number. PostgREST caps bodies at 1000 rows per request; a 26k-
+  // row players table would blind 96% of our captain lookups without pagination.
+  const allPlayers = [];
+  const PLAYER_PAGE = 1000;
+  let _pOff = 0;
+  while (true) {
+    const chunk = await sb('GET',
+      'players?select=member_number,first_name,nickname,last_name'
+      + '&order=member_number.asc&limit=' + PLAYER_PAGE + '&offset=' + _pOff);
+    allPlayers.push(...(chunk || []));
+    if (!chunk || chunk.length < PLAYER_PAGE) break;
+    _pOff += PLAYER_PAGE;
+  }
   const nameIndex = new Map();  // normName → member_number (first match wins)
   for (const p of allPlayers) {
     const last = (p.last_name || '').trim();
