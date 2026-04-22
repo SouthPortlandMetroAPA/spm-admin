@@ -629,20 +629,24 @@ const REPORT_SPECS = [
    Unmapped columns are silently ignored (shown red in the preview).
    ══════════════════════════════════════════════════════════════════════ */
 
-// Normalize an APA member number. Spm-apa's player_full stores some
-// member numbers with a "972"-prefix (area code), where the canonical
-// form is the trailing integer without leading zeros. We accept both
-// formats on paste and return the canonical.
+/**
+ * Normalize an APA member number from a pasted cell.
+ *
+ * Strict 8-digit enforcement. Strips non-digits, rejects anything
+ * that isn't exactly 8 digits. Does NOT run parseInt (which would
+ * eat leading zeros — "00001234" is a different APA# from "1234")
+ * and does NOT strip the "972" prefix (which in SPM's data is part
+ * of the canonical number, not a separable area code).
+ *
+ * TeamRegistration's admin strips 972 + leading zeros for its own
+ * data shape. Copying that behavior here mixed formats between the
+ * first paste (stored 8-digit) and later pastes (collapsed to 5-digit),
+ * causing the on_conflict upsert to miss and inflating the row count.
+ * Past-self: sorry.
+ */
 function normalizeApa(raw) {
   const digits = String(raw || '').replace(/\D/g, '');
-  if (!digits) return '';
-  // 8-digit 972-prefix → canonical local number
-  if (digits.length === 8 && digits.indexOf('972') === 0) {
-    const local = parseInt(digits.substring(3), 10);
-    return isNaN(local) ? '' : String(local);
-  }
-  const num = parseInt(digits, 10);
-  return isNaN(num) ? '' : String(num);
+  return digits.length === 8 ? digits : '';
 }
 
 // Header (lowercased) → column in `players` table.
@@ -718,7 +722,7 @@ function parsePlayerData() {
   let valid = 0, junk = 0;
   for (const row of _pRows) {
     const d = String(row[_pMemIdx] || '').replace(/\D/g, '');
-    if (d.length >= 7 && d.length <= 9) valid++; else junk++;
+    if (d.length === 8) valid++; else junk++;
   }
   return { valid, junk, mapped, total: _pHeaders.length };
 }
@@ -743,7 +747,7 @@ function previewPlayerImport() {
   for (const row of _pRows) {
     if (count >= 5) break;
     const d = String(row[_pMemIdx] || '').replace(/\D/g, '');
-    if (d.length < 7 || d.length > 9) continue;
+    if (d.length !== 8) continue;
     count++;
     html += '<tr>';
     for (let c = 0; c < _pHeaders.length; c++) html += '<td>' + esc(row[c] || '') + '</td>';
@@ -767,12 +771,11 @@ async function executePlayerImport() {
   btn.disabled = true;
 
   // Build per-member_number upsert rows, keeping only mapped columns.
+  // Strict 8-digit gate — anything else is garbage and gets dropped.
   const byMember = new Map();
   let junk = 0;
   for (const row of _pRows) {
-    const rawMn = String(row[_pMemIdx] || '').replace(/\D/g, '');
-    if (rawMn.length < 7 || rawMn.length > 9) { junk++; continue; }
-    const mn = normalizeApa(rawMn);
+    const mn = normalizeApa(row[_pMemIdx]);
     if (!mn) { junk++; continue; }
 
     const obj = byMember.get(mn) || { member_number: mn };
