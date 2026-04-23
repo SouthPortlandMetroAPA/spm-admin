@@ -916,6 +916,259 @@ function clearPlayerImport() {
 }
 
 /* ══════════════════════════════════════════════════════════════════════
+   TEAM SCREEN PDF IMPORT — per-team rosters from APA admin's "Team
+   Screen" multi-page PDF. Each page is one team; header is:
+     "Team Screen for:"
+     "<5-digit team#>  <team name>"
+   followed by a table of player rows:
+     <5-digit local#> <LastName, FirstName>  <phones…>
+
+   Player local numbers are prepended with "972" and zero-padded to 5
+   for the canonical 8-digit APA member number. Teams are upserted
+   into `teams` (stripped team_number form). Member-role memberships
+   for the affected teams are wiped and reinserted from the PDF;
+   Captain/Co-Captain rows from the Team Data paste are preserved.
+   ══════════════════════════════════════════════════════════════════════ */
+
+// pdf.js lazy-loaded from jsdelivr on first use, same pattern as TrophyCase.
+const PDFJS_VERSION = '4.8.69';
+const PDFJS_URL     = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@' + PDFJS_VERSION + '/build/pdf.min.mjs';
+const PDFJS_WORKER  = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@' + PDFJS_VERSION + '/build/pdf.worker.min.mjs';
+let _pdfJsPromise = null;
+function ensurePdfJs() {
+  if (!_pdfJsPromise) {
+    _pdfJsPromise = import(PDFJS_URL).then(mod => {
+      mod.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
+      return mod;
+    });
+  }
+  return _pdfJsPromise;
+}
+
+/**
+ * Cluster pdf.js text items into visual lines by Y-coordinate.
+ * pdf.js gives you items with .str and .transform = [a,b,c,d,e,f]
+ * where (e, f) is the origin of the item on the page (Y grows upward).
+ * Items on the same visual line share a Y within a few points.
+ */
+function groupIntoLines(items, yTolerance = 2) {
+  const sorted = items.slice().sort((a, b) => b.transform[5] - a.transform[5]);
+  const lines = [];
+  for (const item of sorted) {
+    const y = item.transform[5];
+    const last = lines[lines.length - 1];
+    if (last && Math.abs(y - last.y) <= yTolerance) {
+      last.items.push(item);
+    } else {
+      lines.push({ y, items: [item] });
+    }
+  }
+  for (const line of lines) {
+    line.items.sort((a, b) => a.transform[4] - b.transform[4]);
+    line.text = line.items.map(it => it.str).join(' ').replace(/\s+/g, ' ').trim();
+  }
+  return lines;
+}
+
+/** Parse one page → { team_number, team_name, players: [{member_number, name}] } or null. */
+async function parseTeamScreenPage(page) {
+  const content = await page.getTextContent();
+  const lines = groupIntoLines(content.items);
+
+  // Header marker — "Team Screen for:"
+  let markerIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (/Team\s+Screen\s+for/i.test(lines[i].text)) { markerIdx = i; break; }
+  }
+  if (markerIdx < 0) return null;
+
+  // Next 1-3 lines should contain "<digits>  <name>"
+  let team_number = null, team_name = null;
+  for (let i = markerIdx + 1; i < Math.min(markerIdx + 5, lines.length); i++) {
+    const m = lines[i].text.match(/^\s*(\d{1,5})\s+(\S.*?)\s*$/);
+    if (m) {
+      team_number = stripTeamNum(m[1]);   // "00301" → "301"
+      team_name   = m[2].trim();
+      break;
+    }
+  }
+  if (!team_number) return null;
+
+  // Player rows — 3-5 leading digits, then name, then "(" (first phone cell)
+  const players = [];
+  const seen = new Set();
+  for (const line of lines) {
+    const m = line.text.match(/^(\d{3,5})\s+([^(]+?)\s+\(/);
+    if (!m) continue;
+    const mn = localToCanonicalApa(m[1]);
+    if (!mn) continue;
+    if (seen.has(mn)) continue;   // guard against dupe rows on same page
+    seen.add(mn);
+    players.push({ member_number: mn, name: m[2].trim() });
+  }
+
+  return { team_number, team_name, players };
+}
+
+/** Parse every page, returning [{team_number, team_name, players}…]. */
+async function parseTeamScreenPdf(file, onProgress) {
+  const pdfjsLib = await ensurePdfJs();
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  const teams = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    if (onProgress) onProgress(i, pdf.numPages);
+    const page = await pdf.getPage(i);
+    const parsed = await parseTeamScreenPage(page);
+    if (parsed) teams.push(parsed);
+  }
+  return teams;
+}
+
+/** Orchestration: parse the chosen PDF, upsert teams, rebuild Member rows. */
+async function runTeamScreenImport() {
+  hideStatus('pdfProgress');
+  if (!currentSession) {
+    return setStatus('pdfProgress', 'No current session. Create one on the Sessions tab first.', 'err');
+  }
+  const input = document.getElementById('pdfFileInput');
+  const file = input.files && input.files[0];
+  if (!file) return setStatus('pdfProgress', 'Choose a Team Screen PDF first.', 'err');
+
+  const btn = document.getElementById('pdfImportBtn');
+  btn.disabled = true;
+
+  try {
+    // 1. Parse the PDF page by page.
+    setStatus('pdfProgress', 'Loading PDF…', 'progress');
+    const teams = await parseTeamScreenPdf(file, (i, total) => {
+      setStatus('pdfProgress', 'Parsing page ' + i + ' / ' + total + '…', 'progress');
+    });
+    if (!teams.length) {
+      return setStatus('pdfProgress',
+        'No team pages detected. Is this the Team Screen report? Header should read "Team Screen for:".', 'err');
+    }
+
+    // 2. Load every division in the current session so we can map team → division.
+    setStatus('pdfProgress', 'Looking up ' + teams.length + ' teams against session divisions…', 'progress');
+    const divs = await sb('GET',
+      'divisions?select=id,division_number&session_id=eq.' + currentSession.id + '&order=division_number.asc');
+    const divByNum = new Map();
+    for (const d of divs) divByNum.set(String(parseInt(d.division_number, 10)), d);
+
+    // 3. Build team upserts; collect per-team player lists keyed by (div_id, team_number).
+    const teamUpserts = [];
+    const perTeam = [];   // [{ div_id, team_number, players }]
+    const missingDivs = new Set();
+    for (const t of teams) {
+      // Division from first 3 digits of 5-digit padded team number.
+      const divNum = String(parseInt(pad5(t.team_number).substring(0, 3), 10));
+      const div = divByNum.get(divNum);
+      if (!div) { missingDivs.add(divNum); continue; }
+      teamUpserts.push({
+        division_id: div.id,
+        team_number: t.team_number,
+        team_name:   t.team_name
+      });
+      perTeam.push({ div_id: div.id, team_number: t.team_number, players: t.players });
+    }
+    if (!teamUpserts.length) {
+      return setStatus('pdfProgress',
+        'No teams matched any division in the current session. '
+        + 'Paste the Division Listing first, then retry. '
+        + 'Unmatched division numbers: ' + [...missingDivs].join(', '), 'err');
+    }
+
+    // 4. Upsert teams in 500-row batches.
+    setStatus('pdfProgress', 'Upserting ' + teamUpserts.length + ' teams…', 'progress');
+    for (let i = 0; i < teamUpserts.length; i += 500) {
+      await sb('POST', 'teams?on_conflict=division_id,team_number',
+        teamUpserts.slice(i, i + 500),
+        { Prefer: 'resolution=merge-duplicates,return=minimal' });
+    }
+
+    // 5. Fetch team IDs back so we can attach memberships.
+    const divIds = [...new Set(perTeam.map(t => t.div_id))];
+    const teamRows = [];
+    for (let i = 0; i < divIds.length; i += 100) {
+      const chunk = divIds.slice(i, i + 100);
+      const rows = await sb('GET',
+        'teams?select=id,division_id,team_number&division_id=in.(' + chunk.join(',') + ')');
+      teamRows.push(...(rows || []));
+    }
+    const teamIdByKey = new Map();
+    for (const t of teamRows) teamIdByKey.set(t.division_id + ':' + t.team_number, t.id);
+
+    // 6. Pre-check which canonical member_numbers exist in `players`.
+    //    Players not yet imported will be stored as name_raw with null FK.
+    const allMembers = [...new Set(perTeam.flatMap(t => t.players.map(p => p.member_number)))];
+    const existingSet = new Set();
+    const CHECK_BATCH = 200;
+    for (let i = 0; i < allMembers.length; i += CHECK_BATCH) {
+      const chunk = allMembers.slice(i, i + CHECK_BATCH);
+      setStatus('pdfProgress',
+        'Checking ' + Math.min(i + CHECK_BATCH, allMembers.length) + ' / ' + allMembers.length + ' player member#s…',
+        'progress');
+      const rows = await sb('GET',
+        'players?select=member_number&member_number=in.(' + chunk.map(encodeURIComponent).join(',') + ')');
+      for (const r of (rows || [])) existingSet.add(r.member_number);
+    }
+
+    // 7. Wipe existing Member-role memberships for teams in this paste.
+    //    (Captain/Co-Captain rows from Team Data paste are preserved.)
+    const teamIds = [...teamIdByKey.values()];
+    setStatus('pdfProgress', 'Clearing old Member rows on ' + teamIds.length + ' teams…', 'progress');
+    for (let i = 0; i < teamIds.length; i += 100) {
+      const chunk = teamIds.slice(i, i + 100);
+      await sb('DELETE',
+        'team_memberships?team_id=in.(' + chunk.join(',') + ')&role=eq.Member');
+    }
+
+    // 8. Build new membership rows. Matched → FK to players. Unmatched →
+    //    name_raw only, null member_number (schema CHECK allows this).
+    const membershipRows = [];
+    let unmatched = 0;
+    for (const t of perTeam) {
+      const team_id = teamIdByKey.get(t.div_id + ':' + t.team_number);
+      if (!team_id) continue;
+      for (const p of t.players) {
+        if (existingSet.has(p.member_number)) {
+          membershipRows.push({ team_id, role: 'Member', member_number: p.member_number, name_raw: null });
+        } else {
+          membershipRows.push({ team_id, role: 'Member', member_number: null, name_raw: p.name });
+          unmatched++;
+        }
+      }
+    }
+
+    // 9. Batch-insert memberships.
+    setStatus('pdfProgress', 'Inserting ' + membershipRows.length + ' memberships…', 'progress');
+    for (let i = 0; i < membershipRows.length; i += 500) {
+      await sb('POST', 'team_memberships',
+        membershipRows.slice(i, i + 500),
+        { Prefer: 'return=minimal' });
+    }
+
+    // 10. Summary.
+    let msg =
+      'Imported <strong>' + teamUpserts.length + '</strong> team(s). '
+      + '<strong>' + (membershipRows.length - unmatched) + '</strong> member(s) matched to player records, '
+      + '<strong>' + unmatched + '</strong> stored as name-only (not yet in player table).';
+    if (missingDivs.size) msg += ' ' + missingDivs.size + ' division(s) from the PDF didn\u2019t exist in this session — skipped.';
+
+    // Clear the file input so re-picking works.
+    input.value = '';
+    setStatus('pdfProgress', msg, 'ok');
+    await refreshCounts();
+  } catch (e) {
+    setStatus('pdfProgress', 'Import failed: ' + esc(e.message), 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+window.runTeamScreenImport = runTeamScreenImport;
+
+/* ══════════════════════════════════════════════════════════════════════
    COUNTY LOOKUP — zip → lat/long → county (free APIs, no keys)
    Copied from TeamRegistration/site/admin.html lookupCounties().
 
@@ -1024,6 +1277,27 @@ let _parsed = null;  // { report, headers, rows, operatorId? }
    ══════════════════════════════════════════════════════════════════════ */
 function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
 function pad5(x) { x = String(x || '').trim(); while (x.length < 5) x = '0' + x; return x; }
+/**
+ * Canonical team_number form: integer string, no leading zeros.
+ * "00301" and "301" both become "301". Division number (first 3 of the
+ * 5-digit form) is derived via pad5 at lookup time.
+ */
+function stripTeamNum(raw) {
+  const digits = String(raw || '').replace(/\D/g, '');
+  if (!digits) return '';
+  const n = parseInt(digits, 10);
+  return isNaN(n) ? '' : String(n);
+}
+/**
+ * Team-screen PDF stores player numbers as 5-digit local codes (e.g.
+ * 23806). SPM's canonical APA number is the 972-prefixed 8-digit form
+ * ("97223806"). Zero-pads the local part to 5 before prepending 972.
+ */
+function localToCanonicalApa(raw) {
+  const digits = String(raw || '').replace(/\D/g, '');
+  if (!digits || digits.length > 5) return '';
+  return '972' + digits.padStart(5, '0');
+}
 function normName(s) {
   return String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 }
@@ -1608,9 +1882,11 @@ window.commitTeamData = async function(headers, rows) {
   let missingDivisions = 0;
 
   for (const r of rows) {
-    const tn = pad5(r[idx.num]);
-    if (!tn || tn === '00000') continue;
-    const divNum = String(parseInt(tn.substring(0,3), 10));
+    const tn = stripTeamNum(r[idx.num]);
+    if (!tn || tn === '0') continue;
+    // Division number comes from the first 3 digits of the 5-digit
+    // team number. Pad, extract, re-strip so "301" → "00301" → "003" → "3".
+    const divNum = String(parseInt(pad5(tn).substring(0, 3), 10));
     const div = divByNum[divNum];
     if (!div) { missingDivisions++; continue; }
 
@@ -1704,9 +1980,9 @@ window.commitTeamBonusPoints = async function(headers, rows) {
 
   let updated = 0, skipped = 0;
   for (const r of rows) {
-    const tn = pad5(r[idx.num]);
-    if (!tn || tn === '00000') { skipped++; continue; }
-    const divNum = String(parseInt(tn.substring(0,3), 10));
+    const tn = stripTeamNum(r[idx.num]);
+    if (!tn || tn === '0') { skipped++; continue; }
+    const divNum = String(parseInt(pad5(tn).substring(0, 3), 10));
     const div = divIdByNum[divNum];
     if (!div) { skipped++; continue; }
     const bonus = parseInt(r[idx.bonus], 10);
