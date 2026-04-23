@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SPM Admin</title>
+<title>Slate</title>
 <style>
   :root {
     --spm-primary: #ea002a;
@@ -65,9 +65,15 @@
 </head>
 <body>
 <div class="card">
-  <div class="head">SPM Admin</div>
+  <div class="head" id="appNameHead">Slate</div>
   <p>This is an admin-only tool. Use your bookmarked URL with the service-role key, or append <code>?key=&lt;service_role&gt;</code> to the admin URL.</p>
   <a class="go" href="admin.html">Go to Admin →</a>
 </div>
+<script>
+  // Single-source-of-truth rebrand: change APP_NAME to rename everywhere.
+  const APP_NAME = 'Slate';
+  document.title = APP_NAME;
+  document.getElementById('appNameHead').textContent = APP_NAME;
+</script>
 </body>
 </html>

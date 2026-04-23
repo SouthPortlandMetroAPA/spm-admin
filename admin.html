@@ -33,7 +33,11 @@ DATA MODEL (see schema.sql):
 -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SPM Admin</title>
+<!-- Display name populated from APP_NAME constant at init. To rebrand
+     this app, edit APP_NAME once in the <script> block below; every
+     user-visible string (title, header, footer, status messages) is
+     generated from it. Never hard-code the product name again. -->
+<title>Slate</title>
 <style>
 /* ──────────────────────────────────────────────────────────────────────
    SPM Admin brand styling
@@ -388,7 +392,7 @@ input:focus, select:focus, textarea:focus {
   <div class="header">
     <div class="admin-badge">ADMIN</div>
     <div class="session-pill" id="sessionPill">—</div>
-    <h1>SPM Admin</h1>
+    <h1 id="appNameH1">Slate</h1>
     <div class="subtitle">Paste APA reports · captain directory · Supabase-backed</div>
   </div>
 
@@ -506,6 +510,33 @@ input:focus, select:focus, textarea:focus {
         </div>
       </div>
 
+      <!-- Team Screen PDF import — rosters (Member rows) -->
+      <div class="card">
+        <h2>Import Team Screen PDF (rosters)</h2>
+        <p class="hint">
+          Parses a multi-page <strong>Team Screen</strong> PDF from the APA admin site (one team per page). For each
+          team it upserts the team row (division + team number) and <strong>replaces the Member-role rows</strong>
+          in <code>team_memberships</code> with the PDF's player list. Captain/Co-Captain rows created by the
+          Team Data paste are preserved and untouched.
+        </p>
+        <p class="hint">
+          Player numbers in the PDF are 5-digit local codes. We prepend <code>972</code> and zero-pad the local
+          part to form the canonical 8-digit APA member number (e.g. <code>23806</code> &rarr; <code>97223806</code>).
+          Players whose canonical isn't yet in the <code>players</code> table are stored with <code>name_raw</code>
+          from the PDF plus <code>member_number = null</code>, so they still show up in Email HQ.
+        </p>
+        <div class="form-row" style="margin-top:8px">
+          <div>
+            <label for="pdfFileInput">Team Screen PDF</label>
+            <input type="file" id="pdfFileInput" accept="application/pdf">
+          </div>
+        </div>
+        <div id="pdfProgress" class="status-line"></div>
+        <div class="actions">
+          <button class="btn btn-primary" id="pdfImportBtn" onclick="runTeamScreenImport()">Parse &amp; Import</button>
+        </div>
+      </div>
+
       <!-- Session-scoped reports — Divisions / Teams / Bonus -->
       <div class="card">
         <h2>Import Divisions / Teams / Bonus Points</h2>
@@ -574,10 +605,21 @@ input:focus, select:focus, textarea:focus {
 
   </div>
 
-  <div class="footer">SPM Admin v0.1 · Phase 1 · Supabase-backed</div>
+  <div class="footer" id="appFooter">Slate v0.1 · Phase 1 · Supabase-backed</div>
 </div>
 
 <script>
+/* ══════════════════════════════════════════════════════════════════════
+   APP IDENTITY
+   Change APP_NAME in ONE place to rebrand everywhere. All user-visible
+   strings (document title, header H1, footer version line) are
+   hydrated from these constants at init time.
+   ══════════════════════════════════════════════════════════════════════ */
+const APP_NAME    = 'Slate';
+const APP_VERSION = '0.1';
+const APP_PHASE   = 'Phase 1';
+const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
+
 /* ══════════════════════════════════════════════════════════════════════
    CONFIG
    ══════════════════════════════════════════════════════════════════════ */
@@ -1096,7 +1138,18 @@ function detectReport(headers) {
    ══════════════════════════════════════════════════════════════════════ */
 document.addEventListener('DOMContentLoaded', init);
 
+/* Hydrate every user-visible string from APP_NAME / APP_VERSION.
+ * Runs before any auth check so even the key gate shows the right name. */
+function applyAppIdentity() {
+  document.title = APP_NAME;
+  const h1 = document.getElementById('appNameH1');
+  if (h1) h1.textContent = APP_NAME;
+  const footer = document.getElementById('appFooter');
+  if (footer) footer.textContent = APP_NAME + ' v' + APP_VERSION + ' · ' + APP_PHASE + ' · ' + APP_TAGLINE;
+}
+
 async function init() {
+  applyAppIdentity();
   if (!SB_KEY) { document.getElementById('keyGate').classList.remove('hidden'); return; }
   try {
     const r = await fetch(SB_URL + '/rest/v1/operators?select=id&limit=1', { headers: HEADERS_READ });
