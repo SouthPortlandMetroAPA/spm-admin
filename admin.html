@@ -1069,7 +1069,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '1.2';
+const APP_VERSION = '1.3';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -3406,15 +3406,36 @@ function _renderEhqFilters() {
   });
 }
 
+/* Returns true when a facet is ACTIVELY RESTRICTING results.
+ * False cases (no restriction applied):
+ *   - filter set is empty (nothing active)
+ *   - every pill in the facet is active ("All" state — same as empty)
+ * The "every pill active" case is what makes the All button actually
+ * show everything, including divisions with NULL operator/format/night. */
+function _ehqFacetRestricts(facet) {
+  const active = _ehqFilters[facet].size;
+  if (active === 0) return false;
+  const allBtns = document.querySelectorAll('.ehq-toolbar-card .ehq-btn[data-facet="' + facet + '"]');
+  if (allBtns.length === 0) return false;
+  if (active >= allBtns.length) return false;   // all pills active = no restriction
+  return true;
+}
+
 function renderEmailHQ() {
   const out = document.getElementById('emailHqOutput');
   if (!_emailData) { out.innerHTML = ''; return; }
 
-  // Filter divisions by active filter sets. Empty set = don't restrict.
+  // Filter divisions by active filter sets. A facet only restricts when
+  // some-but-not-all of its pills are active. Empty or fully-active
+  // facets are treated as "no restriction" so All shows everything
+  // including rows with NULL operator/format/night_of_play.
+  const opR = _ehqFacetRestricts('operator');
+  const fmR = _ehqFacetRestricts('format');
+  const niR = _ehqFacetRestricts('night');
   const filtered = _emailData.filter(d => {
-    if (_ehqFilters.operator.size && !_ehqFilters.operator.has(String(d.operator_id))) return false;
-    if (_ehqFilters.format.size   && !_ehqFilters.format.has(d.format || '')) return false;
-    if (_ehqFilters.night.size    && !_ehqFilters.night.has(d.night_of_play || '')) return false;
+    if (opR && !_ehqFilters.operator.has(String(d.operator_id))) return false;
+    if (fmR && !_ehqFilters.format.has(d.format || '')) return false;
+    if (niR && !_ehqFilters.night.has(d.night_of_play || '')) return false;
     return true;
   });
 
@@ -3698,19 +3719,23 @@ function _ehqRenderPlayersCell(divId, teamId, players) {
 function _ehqCollectEmails() {
   if (!_emailData) return [];
   const emails = new Set();
+  const opR = _ehqFacetRestricts('operator');
+  const fmR = _ehqFacetRestricts('format');
+  const niR = _ehqFacetRestricts('night');
+  const roR = _ehqFacetRestricts('role');
   for (const d of _emailData) {
     // Re-apply filter toolbar — a cell selected before the user narrowed
-    // the filters shouldn't sneak into the copy.
-    if (_ehqFilters.operator.size && !_ehqFilters.operator.has(String(d.operator_id))) continue;
-    if (_ehqFilters.format.size   && !_ehqFilters.format.has(d.format || '')) continue;
-    if (_ehqFilters.night.size    && !_ehqFilters.night.has(d.night_of_play || '')) continue;
+    // the filters shouldn't sneak into the copy. Full-activation of a
+    // facet = no restriction (same semantic as render).
+    if (opR && !_ehqFilters.operator.has(String(d.operator_id))) continue;
+    if (fmR && !_ehqFilters.format.has(d.format || '')) continue;
+    if (niR && !_ehqFilters.night.has(d.night_of_play || '')) continue;
     for (const t of (d.teams || [])) {
       for (const m of (t.memberships || [])) {
         if (!m.player || !m.player.email) continue;
         const key = _ehqCellKey(d.id, t.id, m.role);
         if (!_ehqSel.has(key)) continue;
-        // Role filter (if any active) further restricts
-        if (_ehqFilters.role.size && !_ehqFilters.role.has(m.role)) continue;
+        if (roR && !_ehqFilters.role.has(m.role)) continue;
         emails.add(m.player.email.trim().toLowerCase());
       }
     }
@@ -3819,6 +3844,8 @@ function ehqSelectAll() {
 }
 
 function ehqSelectNone() {
+  // Deactivate every pill, clear every facet, and clear per-cell
+  // selections. Equivalent to "clear the slate, start over."
   document.querySelectorAll('.ehq-toolbar-card .ehq-btn[data-facet]').forEach(btn => {
     btn.classList.remove('active');
   });
@@ -3826,13 +3853,18 @@ function ehqSelectNone() {
   _ehqFilters.role.clear();
   _ehqFilters.format.clear();
   _ehqFilters.night.clear();
+  _ehqSel.clear();
   renderEmailHQ();
 }
 
 function ehqReset() {
+  // Same as None, plus also clears the "Paste Team Numbers" textarea
+  // and its feedback banner. "Full wipe to defaults."
   ehqSelectNone();
-  _ehqSel.clear();
-  renderEmailHQ();
+  const box = document.getElementById('ehqPasteBox');
+  if (box) box.value = '';
+  const fb = document.getElementById('ehqPasteFeedback');
+  if (fb) { fb.textContent = ''; fb.className = 'ehq-paste-feedback'; }
 }
 
 function copyEmail(em, btn) {
