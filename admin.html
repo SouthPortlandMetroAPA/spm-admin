@@ -1336,14 +1336,17 @@ window.runTeamScreenImport = runTeamScreenImport;
  * matches because we only accept format tokens in the slot that comes
  * right before the integer team count.
  */
+// Real vocabulary from the APA "All Division Information List" PDF.
+// The format column uses these exact strings (verified against a live
+// Spring 2026 Division Information List PDF on 2026-04-23).
 const DIVISION_FORMATS = [
-  '8-Ball',
-  '9-Ball',
+  '8-Ball Open',
+  '9-Ball Open',
+  '8-Ball Doubles',
+  '9-Ball Doubles',
+  '8-Ball Ladies',
+  '9-Ball Ladies',
   'Masters',
-  'Doubles 8-Ball',
-  'Doubles 9-Ball',
-  'Ladies 8-Ball',
-  'Ladies 9-Ball',
   'Jack & Jill 8-Ball',
   'Jack & Jill 9-Ball'
 ];
@@ -1373,20 +1376,26 @@ function parseDivisionLine(text) {
   const divNumStr = m[1];
   let rest = m[2];
 
-  // Pull Yes|No off the end.
+  // The "Has A Bye Team" column is OPTIONAL — APA leaves it blank when
+  // false (no "No" token, just nothing). So only strip a trailing Yes
+  // or No; absence is fine.
   const byeMatch = rest.match(/\s+(Yes|No)$/i);
-  if (!byeMatch) return null;
-  rest = rest.slice(0, rest.length - byeMatch[0].length).trim();
+  if (byeMatch) {
+    rest = rest.slice(0, rest.length - byeMatch[0].length).trim();
+  }
 
-  // Pull integer team count off the end.
+  // Team count (integer) is required and always second-from-last
+  // (or last, when bye column is blank).
   const teamsMatch = rest.match(/\s+(\d+)$/);
   if (!teamsMatch) return null;
   const numTeams = parseInt(teamsMatch[1], 10);
   rest = rest.slice(0, rest.length - teamsMatch[0].length).trim();
 
-  // Peel the format off the end against the known vocabulary.
+  // Peel the format off the end against the known vocabulary
+  // (longest match first, so "8-Ball Doubles" beats "8-Ball Open"
+  // when the input is a Doubles division).
   const peeled = peelFormatFromEnd(rest);
-  if (!peeled) return null;    // unknown format → bail loudly rather than guess
+  if (!peeled) return null;    // unknown format → surface via console.warn below
   const format = peeled.format;
   const name = peeled.rest;
   if (!name) return null;
