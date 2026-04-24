@@ -488,6 +488,32 @@ input:focus, select:focus, textarea:focus {
    color (Operator red/blue, Role purple, Format green, Night amber).
    ══════════════════════════════════════════════════════════════════════ */
 .ehq-toolbar-card { margin-bottom: 16px; padding: 18px 20px; }
+.ehq-paste-card { margin-bottom: 14px; padding: 16px 20px; }
+.ehq-paste-title {
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--spm-accent);
+  margin-bottom: 2px;
+}
+.ehq-paste-box {
+  width: 100%;
+  min-height: 72px;
+  max-height: 180px;
+  resize: vertical;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1.5px solid var(--border);
+  font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+  font-size: 0.85rem;
+  margin-bottom: 10px;
+}
+.ehq-paste-box:focus { outline: none; border-color: var(--spm-accent); box-shadow: 0 0 0 2px rgba(0, 49, 161, 0.15); }
+.ehq-paste-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ehq-paste-feedback { font-size: 0.8rem; font-weight: 600; color: var(--muted); }
+.ehq-paste-feedback.ok { color: var(--success); }
+.ehq-paste-feedback.warn { color: var(--amber); }
 .ehq-filter-row {
   display: flex;
   align-items: center;
@@ -944,6 +970,20 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
          TAB: EMAIL HQ — pill filters + stacked division cards + copy
          ══════════════════════════════════════════════════════════════ -->
     <div id="tab-emailhq" class="tab-panel">
+      <div class="card ehq-paste-card">
+        <h3 class="ehq-paste-title">Paste Team Numbers</h3>
+        <p class="hint" style="margin:4px 0 8px;font-size:0.8rem">
+          Drop in a list of team numbers (any whitespace, commas, or newlines between them).
+          Matching teams get checked in the tables below. Then use the <strong>Role</strong> filter pills to pick any combination of Captain / Co-Captain / Players for the copy.
+        </p>
+        <textarea id="ehqPasteBox" class="ehq-paste-box" placeholder="e.g.&#10;1001&#10;1002, 1003&#10;5801 5802 5803"></textarea>
+        <div class="ehq-paste-actions">
+          <button class="ehq-btn ehq-primary" onclick="ehqSelectByPaste()">Select Teams</button>
+          <button class="ehq-btn" onclick="ehqClearPaste()">Clear</button>
+          <span class="ehq-paste-feedback" id="ehqPasteFeedback"></span>
+        </div>
+      </div>
+
       <div class="card ehq-toolbar-card">
         <div class="ehq-filter-row">
           <span class="ehq-filter-label">Operator</span>
@@ -991,7 +1031,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '0.6';
+const APP_VERSION = '0.7';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -3253,15 +3293,16 @@ function _renderEhqFilters() {
     return '<button class="ehq-btn" data-facet="operator" data-brand="' + brand + '" data-value="' + o.id + '">' + esc(o.name) + '</button>';
   }).join('');
 
-  // Format / Night values come from the loaded data
-  const fmts   = [...new Set((_emailData || []).map(d => d.format).filter(Boolean))].sort();
-  const nights = [...new Set((_emailData || []).map(d => d.night_of_play).filter(Boolean))];
-  const dayOrder = { Monday:1, Tuesday:2, Wednesday:3, Thursday:4, Friday:5, Saturday:6, Sunday:7 };
-  nights.sort((a, b) => (dayOrder[a] || 99) - (dayOrder[b] || 99));
+  // Format values come from the loaded data. Night buttons show all 7
+  // days of the week even when night_of_play is empty on the divisions —
+  // the user can still filter-by-intent, and once a Division Listing paste
+  // fills the column the filter starts actually narrowing.
+  const fmts = [...new Set((_emailData || []).map(d => d.format).filter(Boolean))].sort();
+  const ALL_NIGHTS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 
   document.getElementById('ehqFormatBtns').innerHTML = fmts.map(f =>
     '<button class="ehq-btn" data-facet="format" data-value="' + esc(f) + '">' + esc(f) + '</button>').join('');
-  document.getElementById('ehqNightBtns').innerHTML = nights.map(n =>
+  document.getElementById('ehqNightBtns').innerHTML = ALL_NIGHTS.map(n =>
     '<button class="ehq-btn" data-facet="night" data-value="' + esc(n) + '">' + esc(n) + '</button>').join('');
 
   // One delegated click handler on the whole toolbar card.
@@ -3620,6 +3661,70 @@ async function ehqCopyEmails() {
   } catch (e) {
     alert('Copy failed: ' + e.message + '\n\nEmails:\n' + text);
   }
+}
+
+/* ═══════ Paste team numbers → bulk-select matching teams ═══════
+ * Parses any whitespace/comma/newline-delimited list, normalizes each
+ * token via stripTeamNum (matches the team_number form stored in slate),
+ * scans _emailData for matches, and toggles every emailable role cell
+ * on each matched team as if the team master checkbox had been clicked.
+ * Unmatched tokens are reported in the feedback banner.
+ * ═══════════════════════════════════════════════════════════════════ */
+function ehqSelectByPaste() {
+  const box = document.getElementById('ehqPasteBox');
+  const raw = (box.value || '').trim();
+  const fb = document.getElementById('ehqPasteFeedback');
+  if (!_emailData) { fb.textContent = 'Email HQ data hasn\u2019t loaded yet.'; fb.className = 'ehq-paste-feedback warn'; return; }
+  if (!raw) { fb.textContent = 'Paste team numbers first.'; fb.className = 'ehq-paste-feedback warn'; return; }
+
+  // Tokenize on any non-digit, then normalize via stripTeamNum.
+  const tokens = raw.split(/[^\d]+/).map(t => stripTeamNum(t)).filter(Boolean);
+  if (!tokens.length) { fb.textContent = 'No team numbers found in the paste.'; fb.className = 'ehq-paste-feedback warn'; return; }
+
+  // Build a fast lookup: stripped team_number → { divId, team } across all divisions.
+  // Team numbers are globally unique within a session (division prefix is embedded
+  // in the number), so one bucket is enough.
+  const teamByNum = new Map();
+  for (const d of _emailData) {
+    for (const t of (d.teams || [])) {
+      const key = stripTeamNum(t.team_number);
+      if (key) teamByNum.set(key, { divId: d.id, team: t });
+    }
+  }
+
+  const requested = new Set(tokens);
+  let matched = 0, unmatched = 0;
+  const missingTokens = [];
+  for (const tn of requested) {
+    const hit = teamByNum.get(tn);
+    if (!hit) { unmatched++; missingTokens.push(tn); continue; }
+    matched++;
+    for (const m of (hit.team.memberships || [])) {
+      if (m.player && m.player.email) {
+        _ehqSel.add(_ehqCellKey(hit.divId, hit.team.id, m.role));
+      }
+    }
+  }
+
+  renderEmailHQ();   // full re-render so division-card checkmarks paint correctly
+
+  const parts = [];
+  parts.push('Selected ' + matched + ' team' + (matched === 1 ? '' : 's') + '.');
+  if (unmatched) {
+    parts.push(unmatched + ' team# not found: '
+      + (missingTokens.slice(0, 8).join(', '))
+      + (missingTokens.length > 8 ? ', \u2026 +' + (missingTokens.length - 8) + ' more' : ''));
+  }
+  fb.textContent = parts.join(' ');
+  fb.className = 'ehq-paste-feedback ' + (unmatched ? 'warn' : 'ok');
+}
+
+function ehqClearPaste() {
+  const box = document.getElementById('ehqPasteBox');
+  box.value = '';
+  const fb = document.getElementById('ehqPasteFeedback');
+  fb.textContent = '';
+  fb.className = 'ehq-paste-feedback';
 }
 
 /* All / None / Reset — these manipulate FILTER PILLS, not division cells
