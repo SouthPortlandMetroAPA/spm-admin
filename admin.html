@@ -481,6 +481,42 @@ input:focus, select:focus, textarea:focus {
 
 /* ── Email HQ specifics ── */
 /* ══════════════════════════════════════════════════════════════════════
+   REPORTS REGISTRY CARD — traffic-light list of known import sources
+   ══════════════════════════════════════════════════════════════════════ */
+.reports-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+.report-row {
+  display: grid;
+  grid-template-columns: 14px 1fr 160px;
+  gap: 12px;
+  align-items: start;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #fafafa;
+  border: 1px solid var(--border);
+}
+.report-row .dot {
+  width: 12px; height: 12px; border-radius: 50%;
+  margin-top: 4px;
+}
+.report-row.green  .dot { background: #16a34a; box-shadow: 0 0 0 2px rgba(22,163,74,0.2); }
+.report-row.yellow .dot { background: #f59e0b; box-shadow: 0 0 0 2px rgba(245,158,11,0.2); }
+.report-row.red    .dot { background: var(--spm-primary); box-shadow: 0 0 0 2px rgba(234,0,42,0.18); }
+.report-row .report-main { min-width: 0; }
+.report-row .report-key { font-weight: 700; font-size: 0.9rem; }
+.report-row .report-path { color: var(--muted); font-size: 0.78rem; margin-top: 2px; }
+.report-row .report-path code { background: transparent; padding: 0; color: var(--spm-accent); font-weight: 600; }
+.report-row .report-summary { color: var(--muted); font-size: 0.72rem; margin-top: 2px; font-style: italic; }
+.report-row .report-age { font-size: 0.78rem; text-align: right; font-weight: 600; color: var(--text); }
+.report-row.green  .report-age { color: #15803d; }
+.report-row.yellow .report-age { color: #b45309; }
+.report-row.red    .report-age { color: var(--spm-primary); }
+
+/* ══════════════════════════════════════════════════════════════════════
    EMAIL HQ — pill-button filter toolbar + stacked division cards
    Mirrors the layout of the legacy SpmAdmin Email HQ: one filter row per
    facet (Operator / Role / Format / Night), each with a label on the left
@@ -850,6 +886,17 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
          ══════════════════════════════════════════════════════════════ -->
     <div id="tab-uploads" class="tab-panel">
 
+      <!-- Reports registry — every known import source + last upload -->
+      <div class="card">
+        <h2>Reports</h2>
+        <p class="hint">
+          Every report Slate accepts for the current session. Green = uploaded in the last 48 hours, yellow = 2 &ndash; 7 days old, red = older than 7 days or never uploaded.
+          Paste one in the <strong>Paste Data</strong> box below or drop a Team Screen PDF in the <strong>PDF Import</strong> card and this list updates automatically.
+        </p>
+        <div id="reportsListStatus" class="status-line"></div>
+        <div id="reportsList" class="reports-list"></div>
+      </div>
+
       <!-- Universal paste — auto-detects Player / Division / Team / Bonus -->
       <div class="card">
         <h2>Paste Data</h2>
@@ -857,20 +904,9 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           Paste any supported APA report here. First row = headers. Slate inspects the headers and auto-routes to the
           right importer. Currently selected session: <strong id="sessionScopedLabel">—</strong>.
         </p>
-        <ul class="hint" style="margin: 4px 0 10px 18px; line-height: 1.6">
-          <li><strong>Player Data</strong> — any subset of player columns. Merges on <code>Member Number</code>. Sources:
-            <code>Nexus &rarr; Players &rarr; Report List &rarr; Current Player Addresses</code> (names + addresses + email),
-            <code>Nexus &rarr; Players &rarr; Report List &rarr; Player Details</code> (SL + phones),
-            <code>Nexus &rarr; Players &rarr; Report List &rarr; Member Status</code> (status fields).
-            Paste any of them; each run merges into the player record.</li>
-          <li><strong>Division Listing</strong> — imports/updates divisions for the current session (division #, name, format,
-            night, start date, team count, weeks, fees). Operator stays NULL; assign on the <strong>Divisions</strong> tab.
-            Source: <code>Nexus &rarr; Divisions &rarr; Report Viewer &rarr; APP - All Divisions</code>.</li>
-          <li><strong>Team Data</strong> — imports/updates teams with their captains, co-captains, and session stats.
-            Source: <code>Nexus &rarr; Teams &rarr; Report List &rarr; Team Data</code>.</li>
-          <li><strong>Team Bonus Points</strong> — updates the bonus-point total on existing teams.
-            Source: <code>Nexus &rarr; Teams &rarr; Report List &rarr; Team Bonus Points</code>.</li>
-        </ul>
+        <p class="hint" style="margin-top:6px">
+          Each paste is identified by its header row. See the <strong>Reports</strong> card above for the full list and freshness status.
+        </p>
         <p class="hint" style="margin-top:6px;font-size:0.78rem">
           Supported player columns: Member Number, First Name, Nickname, Last Name, Email Address, Cell Phone, Home Phone,
           Work Phone, Alt Phone, Gender, 8-Ball Skill Level, 9-Ball Skill Level, Address 1, Address 2, City, State, Zip,
@@ -1033,7 +1069,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '0.9';
+const APP_VERSION = '1.0';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -1067,32 +1103,106 @@ const HEADERS_READ  = SB_KEY
 const HEADERS_WRITE = { ...HEADERS_READ, 'Content-Type': 'application/json', 'Content-Profile': SB_SCHEMA, Prefer: 'return=representation' };
 
 /* ══════════════════════════════════════════════════════════════════════
-   SESSION-SCOPED REPORT DETECTION (Divisions / Teams / Bonus)
-   Player data import uses a separate, flexible COLUMN_MAP flow below.
+   REPORTS REGISTRY — every import source Slate knows about
+   ══════════════════════════════════════════════════════════════════════
+   Each spec's `key` is the canonical APA report name, used both for the
+   Reports status card AND as the identifier logged in slate.report_uploads
+   when an import succeeds. `playerLike: true` means the paste is a slice
+   of player attributes and runs through the COLUMN_MAP merge flow rather
+   than a per-row handler. Order matters only when header sets overlap —
+   the first spec whose `required` columns are all present wins detection.
    ══════════════════════════════════════════════════════════════════════ */
 const REPORT_SPECS = [
+  // ── Player reports (COLUMN_MAP merge, tracked individually) ──
   {
-    name: 'Divisions',
-    reportName: 'Division Listing',
+    key: 'DB - All Players -1',
+    path: 'Nexus \u2192 Players \u2192 Report Viewer \u2192 DB - All Players -1',
+    required: ['Member Number','First Name','Nickname','Last Name','Gender'],
+    kind: 'paste',
+    playerLike: true
+  },
+  {
+    key: 'DB - All Players -2',
+    path: 'Nexus \u2192 Players \u2192 Report Viewer \u2192 DB - All Players -2',
+    required: ['Member Number','Date Marked Paid','Past Due','Member Status'],
+    kind: 'paste',
+    playerLike: true
+  },
+  {
+    key: 'DB - All Players -3',
+    path: 'Nexus \u2192 Players \u2192 Report Viewer \u2192 DB - All Players -3',
+    required: ['Member Number','8-Ball Skill Level','9-Ball Skill Level'],
+    kind: 'paste',
+    playerLike: true
+  },
+  {
+    key: 'DB - All Players -4',
+    path: 'Nexus \u2192 Players \u2192 Report Viewer \u2192 DB - All Players -4',
+    required: ['Member Number','Address 1','Membership Revoked','Period Joined'],
+    kind: 'paste',
+    playerLike: true
+  },
+  // ── Division reports ──
+  {
+    key: 'APP - All Divisions',
+    path: 'Nexus \u2192 Divisions \u2192 Report Viewer \u2192 APP - All Divisions',
     required: ['Division Number','Division Name','Night Of Play'],
-    handler: 'commitDivisions'
+    handler: 'commitDivisions',
+    kind: 'paste'
   },
+  // ── Team reports ──
   {
-    name: 'TeamBonusPoints',
-    reportName: 'Team Bonus Points',
+    // NOTE: DB - All Teams must be matched AFTER Team Bonus Points
+    // if both appear — but All Teams has Team Name which Bonus Points
+    // lacks, so order-dependent matching isn't strictly needed. Still,
+    // put Bonus Points first for defensive robustness.
+    key: 'Team Bonus Points',
+    path: 'Nexus \u2192 Teams \u2192 Report List \u2192 Team Bonus Points',
     required: ['Team Number','Total Team Bonus Points'],
-    handler: 'commitTeamBonusPoints'
+    handler: 'commitTeamBonusPoints',
+    kind: 'paste'
   },
   {
-    // NOTE: TeamData must appear AFTER TeamBonusPoints because the
-    // Team Data report also contains "Total Team Bonus Points"; first
-    // match wins when headers intersect.
-    name: 'TeamData',
-    reportName: 'Team Data',
+    key: 'DB - All Teams',
+    path: 'Nexus \u2192 Teams \u2192 Report Viewer \u2192 DB - All Teams',
     required: ['Team Number','Team Name','Team Captain'],
-    handler: 'commitTeamData'
+    handler: 'commitTeamData',
+    kind: 'paste'
+  },
+  // ── PDF-only ──
+  {
+    key: 'Team Screen',
+    path: 'Nexus \u2192 Teams \u2192 Report List \u2192 Team Screen',
+    required: [],   // detection happens by first-page marker, not headers
+    kind: 'pdf'
   }
 ];
+
+/* Helper: find the spec that matches a given header set. Returns null
+ * if no spec's required columns are all present. */
+function detectReport(headers) {
+  const set = new Set(headers);
+  for (const spec of REPORT_SPECS) {
+    if (spec.kind !== 'paste') continue;
+    if (spec.required.every(h => set.has(h))) return spec;
+  }
+  return null;
+}
+
+/* Helper: stamp a successful import in slate.report_uploads. Swallows
+ * errors silently — tracking failures shouldn't fail user-facing
+ * imports. */
+async function logReportUpload(reportKey, rowCount, summary) {
+  if (!currentSession) return;
+  try {
+    await sb('POST', 'report_uploads', {
+      session_id: currentSession.id,
+      report_key: reportKey,
+      row_count: rowCount == null ? null : rowCount,
+      summary: summary || null
+    }, { Prefer: 'return=minimal' });
+  } catch (_) { /* tracking is best-effort */ }
+}
 
 /* ══════════════════════════════════════════════════════════════════════
    PLAYER IMPORT — COLUMN_MAP flow (mirrors TeamRegistration's admin)
@@ -1204,11 +1314,18 @@ function parsePlayerData() {
     if (key === 'member number') _pMemIdx = i;
   }
 
-  if (_pMemIdx === -1) {
-    // No Member Number — see if it's a report.
-    const spec = detectReport(_pHeaders);
-    if (!spec) {
-      const expected = REPORT_SPECS.map(s => s.reportName + ' (needs: ' + s.required.join(', ') + ')').join('<br>');
+  // First, try matching a specific REPORT_SPEC by header set. This catches
+  // all 4 player reports (DB - All Players -1..-4), Division Listing,
+  // Team Data, Team Bonus Points, etc.
+  const spec = detectReport(_pHeaders);
+
+  if (!spec) {
+    // No specific spec matched. If Member Number is present we can still
+    // run the generic COLUMN_MAP merge (call it "Player Data (generic)"
+    // for tracking); otherwise the paste is unrecognized.
+    if (_pMemIdx === -1) {
+      const expected = REPORT_SPECS.filter(s => s.kind === 'paste')
+        .map(s => s.key + ' (needs: ' + s.required.join(', ') + ')').join('<br>');
       setStatus('playerImportStatus',
         '<strong>Unrecognized headers.</strong><br>'
         + 'Got: <code>' + esc(_pHeaders.join(' \u00b7 ')) + '</code><br>'
@@ -1216,35 +1333,48 @@ function parsePlayerData() {
         'err');
       return null;
     }
-    _pKind = 'report';
-    _pSpec = spec;
+    _pKind = 'player';
+    _pSpec = null;        // no specific report matched — generic merge
     _pRows = [];
     for (let r = 1; r < lines.length; r++) {
-      const line = lines[r];
-      if (!line.trim()) continue;
-      // Pad short rows so headers.indexOf lookups don't fall off the end
-      const cells = line.split('\t').map(c => String(c || '').trim());
-      while (cells.length < _pHeaders.length) cells.push('');
-      _pRows.push(cells);
+      const line = lines[r].trim();
+      if (!line) continue;
+      _pRows.push(line.split('\t'));
     }
-    return { kind: 'report', spec, headers: _pHeaders, rowCount: _pRows.length };
+    let valid = 0, junk = 0;
+    for (const row of _pRows) {
+      const d = String(row[_pMemIdx] || '').replace(/\D/g, '');
+      if (d.length === 8) valid++; else junk++;
+    }
+    return { kind: 'player', generic: true, valid, junk, mapped, total: _pHeaders.length };
   }
 
-  _pKind = 'player';
-  _pSpec = null;
+  // Spec matched. Two sub-kinds:
+  //   playerLike → COLUMN_MAP merge (same code path as generic Player Data,
+  //                just with spec.key recorded for report-status tracking)
+  //   otherwise  → spec.handler(headers, rows)
+  _pSpec = spec;
   _pRows = [];
   for (let r = 1; r < lines.length; r++) {
-    const line = lines[r].trim();
-    if (!line) continue;
-    _pRows.push(line.split('\t'));
+    const line = lines[r];
+    if (!line.trim()) continue;
+    const cells = line.split('\t').map(c => String(c || '').trim());
+    while (cells.length < _pHeaders.length) cells.push('');
+    _pRows.push(cells);
   }
 
-  let valid = 0, junk = 0;
-  for (const row of _pRows) {
-    const d = String(row[_pMemIdx] || '').replace(/\D/g, '');
-    if (d.length === 8) valid++; else junk++;
+  if (spec.playerLike) {
+    _pKind = 'player';
+    let valid = 0, junk = 0;
+    for (const row of _pRows) {
+      const d = String(row[_pMemIdx] || '').replace(/\D/g, '');
+      if (d.length === 8) valid++; else junk++;
+    }
+    return { kind: 'player', spec, valid, junk, mapped, total: _pHeaders.length };
   }
-  return { kind: 'player', valid, junk, mapped, total: _pHeaders.length };
+
+  _pKind = 'report';
+  return { kind: 'report', spec, headers: _pHeaders, rowCount: _pRows.length };
 }
 
 function previewPlayerImport() {
@@ -1315,14 +1445,16 @@ async function executePlayerImport() {
   if (_pKind === 'report') {
     const btn = document.getElementById('playerImportBtn');
     btn.disabled = true;
-    setStatus('playerImportStatus', 'Committing ' + esc(_pSpec.reportName) + '\u2026', 'progress');
+    setStatus('playerImportStatus', 'Committing ' + esc(_pSpec.key) + '\u2026', 'progress');
     try {
       const handler = window[_pSpec.handler];
-      if (typeof handler !== 'function') throw new Error('No handler wired for ' + _pSpec.name);
+      if (typeof handler !== 'function') throw new Error('No handler wired for ' + _pSpec.key);
       const summary = await handler(_pHeaders, _pRows);
-      setStatus('playerImportStatus', esc(_pSpec.reportName) + ' committed. ' + summary, 'ok');
+      await logReportUpload(_pSpec.key, _pRows.length, summary);
+      setStatus('playerImportStatus', esc(_pSpec.key) + ' committed. ' + summary, 'ok');
       clearPlayerImport();
       await refreshCounts();
+      await loadReportStatus();
     } catch (e) {
       setStatus('playerImportStatus', 'Commit failed: ' + esc(e.message), 'err');
     } finally {
@@ -1432,20 +1564,29 @@ async function executePlayerImport() {
     const createdCount = payload.length - updatedCount;
     const totalRows    = _pRows.length;   // capture before we clear
 
+    // Stamp the upload in the reports log. Specific spec.key if we detected
+    // one (DB - All Players -1..-4), else "Player Data (generic)".
+    const reportKey = _pSpec && _pSpec.key ? _pSpec.key : 'Player Data (generic)';
+    const summary = payload.length + ' players (' + createdCount + ' new, ' + updatedCount + ' updated)'
+      + (junk ? ', ' + junk + ' junk skipped' : '');
+    await logReportUpload(reportKey, totalRows, summary);
+
     // Clear the textarea + preview on success so the admin can paste
     // another report into an empty box immediately. Status message is
     // set AFTER the clear so it stays visible for the 4.5s auto-clear.
     document.getElementById('playerImportBox').value = '';
     document.getElementById('playerImportPreview').innerHTML = '';
-    _pHeaders = []; _pRows = []; _pMemIdx = -1;
+    _pHeaders = []; _pRows = []; _pMemIdx = -1; _pKind = null; _pSpec = null;
 
     let msg =
-      'Imported <strong>' + payload.length + '</strong> of ' + totalRows + ' records. '
+      (_pSpec ? esc(reportKey) + ': imported ' : 'Imported ')
+      + '<strong>' + payload.length + '</strong> of ' + totalRows + ' records. '
       + '<strong>' + createdCount + '</strong> records created. '
       + '<strong>' + updatedCount + '</strong> records updated.';
     if (junk) msg += ' ' + junk + ' row(s) skipped (bad APA#).';
     setStatus('playerImportStatus', msg, 'ok');
     await refreshCounts();
+    await loadReportStatus();
   } catch (e) {
     setStatus('playerImportStatus', 'Import failed: ' + esc(e.message), 'err');
   } finally {
@@ -1783,7 +1924,11 @@ async function runTeamScreenImport(file, pdf) {
     }
 
     setStatus('pdfProgress', msg, 'ok');
+    await logReportUpload('Team Screen', teamUpserts.length,
+      teamUpserts.length + ' team(s), ' + matched + ' members matched, '
+      + unmatched + ' stored as name-only');
     await refreshCounts();
+    await loadReportStatus();
   } catch (e) {
     setStatus('pdfProgress', 'Import failed: ' + esc(e.message), 'err');
   }
@@ -2094,14 +2239,6 @@ function parseTsv(raw) {
   return { headers, rows };
 }
 
-function detectReport(headers) {
-  const set = new Set(headers);
-  for (const spec of REPORT_SPECS) {
-    if (spec.required.every(h => set.has(h))) return spec;
-  }
-  return null;
-}
-
 /* ══════════════════════════════════════════════════════════════════════
    AUTO-UPDATE (version-check poll)
    ══════════════════════════════════════════════════════════════════════
@@ -2205,6 +2342,7 @@ async function init() {
   await loadOperators();
   await loadSessions();
   await refreshCounts();
+  await loadReportStatus();
 }
 
 const TAB_LABEL = {
@@ -2221,6 +2359,7 @@ function switchTab(name) {
   if (sub) sub.textContent = TAB_LABEL[name] || '';
   if (name === 'emailhq') loadEmailHQ();
   if (name === 'divisions') renderDivisionsTab();
+  if (name === 'uploads') loadReportStatus();
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -2271,6 +2410,7 @@ async function setCurrentSessionFromHeader(newId) {
     await sb('PATCH', 'sessions?id=eq.' + id, { is_current: true });
     await loadSessions();   // re-populates dropdown + currentSession
     await refreshCounts();
+    await loadReportStatus();
     // If an email-hq or divisions view was rendered, refresh them
     if (document.getElementById('tab-emailhq').classList.contains('active')) await loadEmailHQ();
     if (document.getElementById('tab-divisions').classList.contains('active')) await renderDivisionsTab();
@@ -2771,6 +2911,80 @@ window.commitTeamBonusPoints = async function(headers, rows) {
 
   return payload.length + ' team(s) updated, ' + skipped + ' skipped.';
 };
+
+/* ══════════════════════════════════════════════════════════════════════
+   REPORTS REGISTRY — status card on the Uploads tab. Shows every spec
+   in REPORT_SPECS with a traffic-light dot for freshness:
+     green  = uploaded within the last 48 hours
+     yellow = 2 – 7 days
+     red    = older than 7 days OR never uploaded
+   ══════════════════════════════════════════════════════════════════════ */
+async function loadReportStatus() {
+  const list = document.getElementById('reportsList');
+  if (!list) return;
+  if (!currentSession) {
+    list.innerHTML = '<p class="hint" style="padding:4px 0">No current session. Create one on the Sessions tab first.</p>';
+    return;
+  }
+
+  // Pull the most-recent upload per report_key for the current session.
+  // Order by uploaded_at DESC so the first occurrence of each key is the latest.
+  let rows = [];
+  try {
+    rows = await sb('GET',
+      'report_uploads?session_id=eq.' + currentSession.id
+      + '&select=report_key,uploaded_at,row_count,summary'
+      + '&order=uploaded_at.desc');
+  } catch (e) {
+    list.innerHTML = '<p class="status-line shown err">Failed to load report status: ' + esc(e.message) + '</p>';
+    return;
+  }
+  const lastByKey = new Map();
+  for (const r of rows) {
+    if (!lastByKey.has(r.report_key)) lastByKey.set(r.report_key, r);
+  }
+
+  const now = Date.now();
+  const H48 = 48 * 3600 * 1000;
+  const D7  = 7  * 24 * 3600 * 1000;
+
+  list.innerHTML = REPORT_SPECS.map(spec => {
+    const last = lastByKey.get(spec.key);
+    let color = 'red';
+    let age   = 'never uploaded';
+    let summary = '';
+    if (last && last.uploaded_at) {
+      const ageMs = now - new Date(last.uploaded_at).getTime();
+      if      (ageMs < H48) color = 'green';
+      else if (ageMs < D7)  color = 'yellow';
+      age = _fmtRelativeAge(ageMs);
+      if (last.summary) summary = last.summary;
+    }
+    const kindLabel = spec.kind === 'pdf' ? ' <span class="hint" style="font-weight:600">(PDF)</span>' : '';
+    return (
+      '<div class="report-row ' + color + '">'
+      + '<div class="dot"></div>'
+      + '<div class="report-main">'
+      +   '<div class="report-key">' + esc(spec.key) + kindLabel + '</div>'
+      +   '<div class="report-path"><code>' + esc(spec.path) + '</code></div>'
+      +   (summary ? '<div class="report-summary">' + esc(summary) + '</div>' : '')
+      + '</div>'
+      + '<div class="report-age">' + esc(age) + '</div>'
+      + '</div>'
+    );
+  }).join('');
+}
+
+function _fmtRelativeAge(ms) {
+  const s = Math.round(ms / 1000);
+  if (s < 60) return s + 's ago';
+  const m = Math.round(s / 60);
+  if (m < 60) return m + 'm ago';
+  const h = Math.round(m / 60);
+  if (h < 24) return h + 'h ago';
+  const d = Math.round(h / 24);
+  return d + 'd ago';
+}
 
 /* ══════════════════════════════════════════════════════════════════════
    DATA COUNTS (bottom of Uploads tab)
