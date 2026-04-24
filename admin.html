@@ -290,6 +290,40 @@ input:focus, select:focus, textarea:focus {
   color: #fff;
 }
 
+/* ── Operator button group ── one-click tagging per row.
+   Three segmented buttons (Untagged / SPM / CRA). Active button gets the
+   operator's brand color as fill. Inactive buttons are outlined. */
+.op-btn-group {
+  display: inline-flex;
+  border-radius: 999px;
+  border: 1.5px solid var(--border);
+  overflow: hidden;
+  background: #fff;
+}
+.op-btn {
+  padding: 6px 14px;
+  min-height: 32px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  border: 0;
+  border-right: 1.5px solid var(--border);
+  background: #fff;
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.op-btn:last-child { border-right: 0; }
+.op-btn:hover:not(:disabled):not(.active) { background: #f5f5f5; }
+.op-btn:disabled { opacity: 0.5; cursor: progress; }
+.op-btn.active {
+  color: #fff;
+  background: var(--muted);    /* neutral fallback if no data-brand */
+}
+.op-btn.active[data-brand="spm"] { background: var(--spm-accent); }   /* blue */
+.op-btn.active[data-brand="cra"] { background: var(--spm-primary); }  /* red  */
+.op-btn.active[data-brand="none"] { background: var(--muted); color: #fff; }
+
 /* ── Status banner ── colored-border, pill-ish */
 .status-line {
   padding: 12px 16px;
@@ -2547,62 +2581,96 @@ function _renderDivisionsRows() {
     chip.textContent = base + ' (' + (counts[f] || 0) + ')';
   });
 
-  // Build table rows
+  // Build table rows. Two-button segmented control per row (SPM / CRA).
+  // No explicit "Untagged" button — a division with neither button active
+  // is untagged. Clicking the already-active button toggles it off.
   const rows = filtered.map(d => {
-    const opts = [
-      '<option value="">\u2014 Untagged \u2014</option>',
-      ...operators.map(o => {
-        const sel = (d.operator_id === o.id) ? ' selected' : '';
-        return '<option value="' + o.id + '"' + sel + '>' + esc(o.name) + '</option>';
-      })
-    ].join('');
+    const spmActive = (d.operator_id === spmId) ? ' active' : '';
+    const craActive = (d.operator_id === craId) ? ' active' : '';
+    const spmBtn = spmId == null ? '' :
+      '<button type="button" class="op-btn' + spmActive + '" data-brand="spm"'
+      + ' data-div-id="' + d.id + '" data-op-id="' + spmId + '"'
+      + ' aria-pressed="' + (spmActive ? 'true' : 'false') + '">SPM</button>';
+    const craBtn = craId == null ? '' :
+      '<button type="button" class="op-btn' + craActive + '" data-brand="cra"'
+      + ' data-div-id="' + d.id + '" data-op-id="' + craId + '"'
+      + ' aria-pressed="' + (craActive ? 'true' : 'false') + '">CRA</button>';
     return '<tr data-div-id="' + d.id + '">'
       + '<td style="font-weight:700;color:var(--spm-accent)">' + esc(d.division_number) + '</td>'
       + '<td>' + esc(d.name) + '</td>'
       + '<td>' + esc(d.format || '') + '</td>'
       + '<td>' + (d.num_teams == null ? '' : d.num_teams) + '</td>'
-      + '<td><select class="div-operator-select" data-div-id="' + d.id + '">' + opts + '</select></td>'
+      + '<td><div class="op-btn-group">' + spmBtn + craBtn + '</div></td>'
       + '</tr>';
   }).join('');
   body.innerHTML = rows;
 
-  // Wire each dropdown to PATCH on change
-  body.querySelectorAll('.div-operator-select').forEach(sel => {
-    sel.addEventListener('change', onDivisionOperatorChange);
-  });
+  // Single delegated click handler on the tbody (avoids attaching 134 listeners).
+  if (!body.dataset.delegationWired) {
+    body.addEventListener('click', onDivisionOperatorButtonClick);
+    body.dataset.delegationWired = '1';
+  }
 }
 
-async function onDivisionOperatorChange(ev) {
-  const sel = ev.target;
-  const divId = sel.dataset.divId;
-  const newVal = sel.value === '' ? null : parseInt(sel.value, 10);
-  const statusEl = document.getElementById('divisionsTabStatus');
+async function onDivisionOperatorButtonClick(ev) {
+  const btn = ev.target.closest('.op-btn');
+  if (!btn) return;
+  if (btn.disabled) return;
 
-  // Optimistic update in local cache
-  const row = _divisionsData.find(d => d.id === parseInt(divId, 10));
-  const prevVal = row ? row.operator_id : null;
-  if (row) row.operator_id = newVal;
+  const divId  = parseInt(btn.dataset.divId, 10);
+  const opId   = parseInt(btn.dataset.opId, 10);
+  const wasActive = btn.classList.contains('active');
+  // Toggle: clicking an inactive button tags that operator; clicking an
+  // already-active button untags (sets operator_id back to NULL).
+  const newVal = wasActive ? null : opId;
 
-  sel.disabled = true;
+  const row = _divisionsData.find(d => d.id === divId);
+  if (!row) return;
+  const prevVal = row.operator_id;
+  row.operator_id = newVal;
+
+  // Optimistic re-render of just this row's buttons (faster than full table)
+  _paintDivisionRowButtons(divId);
+
+  // Disable both buttons on this row while we wait for the server
+  const tr = btn.closest('tr');
+  const rowBtns = tr.querySelectorAll('.op-btn');
+  rowBtns.forEach(b => b.disabled = true);
+
   try {
     await sb('PATCH',
       'divisions?id=eq.' + encodeURIComponent(divId),
       { operator_id: newVal },
       { Prefer: 'return=minimal' });
+    const opLabel = newVal === null
+      ? 'Untagged'
+      : ((operators.find(o => o.id === newVal) || {}).name || 'Unknown');
     setStatus('divisionsTabStatus',
-      'Saved division ' + esc(String(row ? row.division_number : divId))
-      + ' \u2192 ' + (newVal === null ? 'Untagged' : esc((operators.find(o => o.id === newVal) || {}).name || 'Unknown')),
+      'Saved division ' + esc(String(row.division_number)) + ' \u2192 ' + esc(opLabel),
       'ok');
-    // Refresh chip counts without reloading the table
+    // Only re-render the whole table at the end, to refresh chip counts
     _renderDivisionsRows();
   } catch (e) {
-    // Roll back
-    if (row) row.operator_id = prevVal;
-    sel.value = prevVal === null ? '' : String(prevVal);
+    row.operator_id = prevVal;
+    _paintDivisionRowButtons(divId);
     setStatus('divisionsTabStatus', 'Save failed: ' + esc(e.message), 'err');
   } finally {
-    sel.disabled = false;
+    rowBtns.forEach(b => b.disabled = false);
   }
+}
+
+// Flip the .active class on a single row's op-btns to match the cached
+// operator_id. Avoids rebuilding the whole table for a one-cell change.
+function _paintDivisionRowButtons(divId) {
+  const row = _divisionsData.find(d => d.id === divId);
+  if (!row) return;
+  const tr = document.querySelector('#divisionsTabBody tr[data-div-id="' + divId + '"]');
+  if (!tr) return;
+  tr.querySelectorAll('.op-btn').forEach(b => {
+    const active = parseInt(b.dataset.opId, 10) === row.operator_id;
+    b.classList.toggle('active', active);
+    b.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
 }
 
 // Wire filter chips on DOMContentLoaded — keep global to avoid init()-order coupling.
