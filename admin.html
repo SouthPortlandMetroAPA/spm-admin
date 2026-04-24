@@ -290,6 +290,26 @@ input:focus, select:focus, textarea:focus {
   color: #fff;
 }
 
+/* ── Sortable table headers ── click to toggle asc/desc. */
+.table th.sortable {
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+  padding-right: 22px;   /* room for the arrow */
+}
+.table th.sortable:hover { color: var(--spm-accent); }
+.table th.sortable::after {
+  content: '\2195';       /* up-down arrow — neutral state */
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  opacity: 0.35;
+  font-size: 0.85em;
+}
+.table th.sortable.sort-asc::after  { content: '\25B2'; opacity: 1; color: var(--spm-accent); }
+.table th.sortable.sort-desc::after { content: '\25BC'; opacity: 1; color: var(--spm-accent); }
+
 /* ── Operator button group ── one-click tagging per row.
    Three segmented buttons (Untagged / SPM / CRA). Active button gets the
    operator's brand color as fill. Inactive buttons are outlined. */
@@ -663,13 +683,13 @@ input:focus, select:focus, textarea:focus {
         <div id="divisionsTabStatus" class="status-line"></div>
         <div class="table-wrap" style="margin-top:12px">
           <table class="table">
-            <thead>
+            <thead id="divisionsTabHead">
               <tr>
-                <th style="width:180px">Operator</th>
-                <th style="width:90px">Division #</th>
-                <th>Name</th>
-                <th style="width:140px">Format</th>
-                <th style="width:70px">Teams</th>
+                <th class="sortable" data-sort-key="operator"    style="width:180px">Operator</th>
+                <th class="sortable" data-sort-key="division_number" style="width:90px">Division #</th>
+                <th class="sortable" data-sort-key="name">Name</th>
+                <th class="sortable" data-sort-key="format"      style="width:140px">Format</th>
+                <th class="sortable" data-sort-key="num_teams"   style="width:70px">Teams</th>
               </tr>
             </thead>
             <tbody id="divisionsTabBody">
@@ -2457,26 +2477,73 @@ window.commitTeamBonusPoints = async function(headers, rows) {
   };
   if (idx.num < 0 || idx.bonus < 0) throw new Error('Missing required columns');
 
-  const divs = await sb('GET', 'divisions?select=id,division_number&session_id=eq.' + currentSession.id);
+  // Fetch all divisions AND all existing teams for the current session in two
+  // round-trips, then build the bulk-upsert payload client-side. The previous
+  // implementation did one PATCH per row (sequential) which meant ~640
+  // round-trips for a typical session — ~60s of wall time and a UI that
+  // looked stuck. Now it's two GETs + one POST regardless of team count.
+  const divs = await sb('GET',
+    'divisions?select=id,division_number&session_id=eq.' + currentSession.id);
   const divIdByNum = {};
-  for (const d of divs) divIdByNum[String(parseInt(d.division_number,10))] = d.id;
+  const divIds = [];
+  for (const d of divs) {
+    divIdByNum[String(parseInt(d.division_number, 10))] = d.id;
+    divIds.push(d.id);
+  }
 
-  let updated = 0, skipped = 0;
+  // Pull existing teams so we have their full row — the upsert payload has
+  // to include NOT NULL columns (team_name) for rows that don't exist yet
+  // on the server. Anything we don't include gets overwritten to NULL on
+  // merge-duplicates, so we send team_name back unchanged.
+  let existingTeams = [];
+  if (divIds.length) {
+    existingTeams = await sb('GET',
+      'teams?select=id,division_id,team_number,team_name'
+      + '&division_id=in.(' + divIds.join(',') + ')');
+  }
+  const teamKey = (divId, tn) => divId + ':' + tn;
+  const existingByKey = new Map();
+  for (const t of existingTeams) existingByKey.set(teamKey(t.division_id, t.team_number), t);
+
+  // Build the upsert payload. Only include teams whose rows already exist
+  // (we don't want to accidentally create team rows from a bonus-points
+  // paste that references a team we don't know about — likely a stale or
+  // mis-scoped export).
+  const payload = [];
+  let skipped = 0;
   for (const r of rows) {
     const tn = stripTeamNum(r[idx.num]);
     if (!tn || tn === '0') { skipped++; continue; }
     const divNum = String(parseInt(pad5(tn).substring(0, 3), 10));
-    const div = divIdByNum[divNum];
-    if (!div) { skipped++; continue; }
+    const divId = divIdByNum[divNum];
+    if (!divId) { skipped++; continue; }
     const bonus = parseInt(r[idx.bonus], 10);
     if (isNaN(bonus)) { skipped++; continue; }
-    const resp = await sb('PATCH',
-      'teams?division_id=eq.' + div + '&team_number=eq.' + encodeURIComponent(tn),
-      { total_bonus_points: bonus }
-    );
-    if (Array.isArray(resp) && resp.length) updated++; else skipped++;
+    const existing = existingByKey.get(teamKey(divId, tn));
+    if (!existing) { skipped++; continue; }
+    payload.push({
+      division_id:        divId,
+      team_number:        tn,
+      team_name:          existing.team_name,   // preserve NOT NULL
+      total_bonus_points: bonus
+    });
   }
-  return updated + ' team(s) updated, ' + skipped + ' skipped.';
+
+  if (!payload.length) {
+    return '0 team(s) updated, ' + skipped + ' skipped.';
+  }
+
+  // Single bulk upsert on the (division_id, team_number) unique key.
+  // merge-duplicates only touches the columns we sent, so other team fields
+  // (num_players, matches_played, over_under_session, etc.) are preserved.
+  const BATCH = 500;
+  for (let i = 0; i < payload.length; i += BATCH) {
+    await sb('POST', 'teams?on_conflict=division_id,team_number',
+      payload.slice(i, i + BATCH),
+      { Prefer: 'resolution=merge-duplicates,return=minimal' });
+  }
+
+  return payload.length + ' team(s) updated, ' + skipped + ' skipped.';
 };
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -2519,6 +2586,9 @@ async function refreshCounts() {
    ══════════════════════════════════════════════════════════════════════ */
 let _divisionsData = null;
 let _divisionsFilter = 'all';
+// Sort state for the Divisions table. Keys correspond to <th data-sort-key>.
+// division_number sorts numerically (it's TEXT in the DB but represents ints).
+let _divisionsSort = { key: 'division_number', dir: 'asc' };
 
 async function renderDivisionsTab() {
   const body = document.getElementById('divisionsTabBody');
@@ -2529,10 +2599,13 @@ async function renderDivisionsTab() {
   body.innerHTML = '<tr><td colspan="5" class="hint">Loading\u2026</td></tr>';
 
   try {
+    // Server-side ordering here is cosmetic — client-side sort in
+    // _renderDivisionsRows re-sorts for the active sort key (critical for
+    // division_number, which is TEXT on the server so asc gives 1,10,11,...
+    // instead of 1,2,3).
     _divisionsData = await sb('GET',
       'divisions?select=id,division_number,name,format,num_teams,operator_id'
-      + '&session_id=eq.' + currentSession.id
-      + '&order=division_number.asc');
+      + '&session_id=eq.' + currentSession.id);
   } catch (e) {
     body.innerHTML = '<tr><td colspan="5" class="err">Failed to load: ' + esc(e.message) + '</td></tr>';
     return;
@@ -2559,7 +2632,51 @@ function _renderDivisionsRows() {
     return true;
   });
 
-  if (!filtered.length) {
+  // Sort — driven by _divisionsSort. Keys:
+  //   division_number → numeric (it's TEXT but represents an int)
+  //   num_teams       → numeric (nulls last)
+  //   name, format    → case-insensitive string
+  //   operator        → operator name (alphabetical); NULL (untagged) sorts last on asc
+  const opNameById = new Map(operators.map(o => [o.id, o.name]));
+  const cmpStr = (a, b) => String(a || '').toLowerCase().localeCompare(String(b || '').toLowerCase());
+  const cmpNum = (a, b) => {
+    const aNum = (a === null || a === undefined || a === '') ? null : Number(a);
+    const bNum = (b === null || b === undefined || b === '') ? null : Number(b);
+    if (aNum === null && bNum === null) return 0;
+    if (aNum === null) return 1;   // nulls last in asc
+    if (bNum === null) return -1;
+    return aNum - bNum;
+  };
+  const sortedFiltered = filtered.slice().sort((a, b) => {
+    let r = 0;
+    switch (_divisionsSort.key) {
+      case 'division_number': r = cmpNum(a.division_number, b.division_number); break;
+      case 'num_teams':       r = cmpNum(a.num_teams, b.num_teams); break;
+      case 'name':            r = cmpStr(a.name, b.name); break;
+      case 'format':          r = cmpStr(a.format, b.format); break;
+      case 'operator': {
+        const an = a.operator_id === null ? null : opNameById.get(a.operator_id);
+        const bn = b.operator_id === null ? null : opNameById.get(b.operator_id);
+        // Untagged sorts last on asc (like a null name)
+        if (an === null && bn === null) { r = 0; break; }
+        if (an === null) { r = 1; break; }
+        if (bn === null) { r = -1; break; }
+        r = cmpStr(an, bn); break;
+      }
+      default: r = 0;
+    }
+    return _divisionsSort.dir === 'desc' ? -r : r;
+  });
+
+  // Paint header sort indicators
+  document.querySelectorAll('#divisionsTabHead th.sortable').forEach(th => {
+    th.classList.remove('sort-asc', 'sort-desc');
+    if (th.dataset.sortKey === _divisionsSort.key) {
+      th.classList.add(_divisionsSort.dir === 'asc' ? 'sort-asc' : 'sort-desc');
+    }
+  });
+
+  if (!sortedFiltered.length) {
     body.innerHTML = '<tr><td colspan="5" class="hint">No divisions match this filter.</td></tr>';
     return;
   }
@@ -2582,7 +2699,7 @@ function _renderDivisionsRows() {
   // Build table rows. Two-button segmented control per row (SPM / CRA).
   // No explicit "Untagged" button — a division with neither button active
   // is untagged. Clicking the already-active button toggles it off.
-  const rows = filtered.map(d => {
+  const rows = sortedFiltered.map(d => {
     const spmActive = (d.operator_id === spmId) ? ' active' : '';
     const craActive = (d.operator_id === craId) ? ' active' : '';
     const spmBtn = spmId == null ? '' :
@@ -2671,17 +2788,37 @@ function _paintDivisionRowButtons(divId) {
   });
 }
 
-// Wire filter chips on DOMContentLoaded — keep global to avoid init()-order coupling.
+// Wire filter chips and sortable headers on DOMContentLoaded —
+// keep global to avoid init()-order coupling.
 document.addEventListener('DOMContentLoaded', () => {
   const chips = document.getElementById('divisionsFilterChips');
-  if (!chips) return;
-  chips.addEventListener('click', (ev) => {
-    const chip = ev.target.closest('.chip');
-    if (!chip) return;
-    document.querySelectorAll('#divisionsFilterChips .chip').forEach(c => c.classList.toggle('active', c === chip));
-    _divisionsFilter = chip.dataset.filter;
-    _renderDivisionsRows();
-  });
+  if (chips) {
+    chips.addEventListener('click', (ev) => {
+      const chip = ev.target.closest('.chip');
+      if (!chip) return;
+      document.querySelectorAll('#divisionsFilterChips .chip').forEach(c => c.classList.toggle('active', c === chip));
+      _divisionsFilter = chip.dataset.filter;
+      _renderDivisionsRows();
+    });
+  }
+
+  // Sortable column headers on the Divisions tab. Click cycles asc/desc
+  // on the clicked column; clicking a new column resets to asc.
+  const head = document.getElementById('divisionsTabHead');
+  if (head) {
+    head.addEventListener('click', (ev) => {
+      const th = ev.target.closest('th.sortable');
+      if (!th) return;
+      const key = th.dataset.sortKey;
+      if (_divisionsSort.key === key) {
+        _divisionsSort.dir = _divisionsSort.dir === 'asc' ? 'desc' : 'asc';
+      } else {
+        _divisionsSort.key = key;
+        _divisionsSort.dir = 'asc';
+      }
+      _renderDivisionsRows();
+    });
+  }
 });
 
 /* ══════════════════════════════════════════════════════════════════════
