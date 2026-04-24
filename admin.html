@@ -1069,7 +1069,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '1.1';
+const APP_VERSION = '1.2';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -1828,26 +1828,51 @@ async function runTeamScreenImport(file, pdf) {
     }
 
     // 7. Wipe existing Member-role memberships for teams in this paste.
-    //    (Captain/Co-Captain rows from Team Data paste are preserved.)
+    //    (Captain/Co-Captain rows from Team Data paste are preserved —
+    //    role precedence is Captain > Co-Captain > Member, and 5NF-
+    //    correct one-row-per-(team,person) means we never demote.)
     const teamIds = [...teamIdByKey.values()];
-    setStatus('pdfProgress', 'Clearing old Member rows on ' + teamIds.length + ' teams…', 'progress');
+    setStatus('pdfProgress', 'Clearing old Member rows on ' + teamIds.length + ' teams\u2026', 'progress');
     for (let i = 0; i < teamIds.length; i += 100) {
       const chunk = teamIds.slice(i, i + 100);
       await sb('DELETE',
         'team_memberships?team_id=in.(' + chunk.join(',') + ')&role=eq.Member');
     }
 
+    // 7.5. Fetch existing Captain/Co-Captain pairs for affected teams so
+    //      we don't try to insert a Member row that would collide with a
+    //      higher-role row on the (team_id, member_number) unique index.
+    //      The unique index enforces 5NF: exactly one row per (team, person).
+    const captainPairs = new Set();
+    for (let i = 0; i < teamIds.length; i += 100) {
+      const chunk = teamIds.slice(i, i + 100);
+      const rows = await sb('GET',
+        'team_memberships?team_id=in.(' + chunk.join(',') + ')'
+        + '&role=in.(Captain,Co-Captain)'
+        + '&member_number=not.is.null'
+        + '&select=team_id,member_number');
+      for (const r of (rows || [])) {
+        captainPairs.add(r.team_id + ':' + r.member_number);
+      }
+    }
+
     // 8. Build new membership rows. Matched → FK to players. Unmatched →
     //    name_raw only, null member_number (schema CHECK allows this).
-    //    Track unmatched records (with context) so we can surface them
-    //    as a drill-down in the final summary banner.
+    //    If a matched player is already Captain/Co-Captain of that team,
+    //    skip the Member insert — their higher role is authoritative.
     const membershipRows = [];
     const unmatchedList = [];   // [{ team_number, team_name, member_number, name }]
+    let demotedSkipped = 0;
     for (const t of perTeam) {
       const team_id = teamIdByKey.get(t.div_id + ':' + t.team_number);
       if (!team_id) continue;
       for (const p of t.players) {
         if (existingSet.has(p.member_number)) {
+          // Matched to a real player — check for higher role first.
+          if (captainPairs.has(team_id + ':' + p.member_number)) {
+            demotedSkipped++;
+            continue;   // already Captain/Co-Captain on this team
+          }
           membershipRows.push({ team_id, role: 'Member', member_number: p.member_number, name_raw: null });
         } else {
           membershipRows.push({ team_id, role: 'Member', member_number: null, name_raw: p.name });
@@ -1877,6 +1902,7 @@ async function runTeamScreenImport(file, pdf) {
     let msg =
       'Imported <strong>' + teamUpserts.length + '</strong> team(s). '
       + '<strong>' + matched + '</strong> member(s) matched to player records. '
+      + (demotedSkipped ? '<strong>' + demotedSkipped + '</strong> already Captain/Co-Captain (kept as-is). ' : '')
       + '<strong>' + unmatched + '</strong> stored as name-only (not yet in player table).';
 
     if (unmatched) {
@@ -2803,12 +2829,14 @@ window.commitTeamData = async function(headers, rows) {
   const teamIdByKey = new Map();  // "divId:team_number" → id
   for (const t of teamIdsArr) teamIdByKey.set(t.division_id + ':' + t.team_number, t.id);
 
-  // For each (team, role) in membershipOps, upsert the membership. We can't
-  // rely on a single ON CONFLICT target because the unique-when-matched index
-  // skips NULL member_numbers. So we:
-  //   1. Wipe any existing Captain/Co-Captain rows for this team
-  //   2. Insert fresh rows from the paste
-  // This keeps the captain record authoritative to the most recent TeamData paste.
+  // Strategy for Captain/Co-Captain inserts with 5NF one-row-per-(team,person):
+  //   1. Wipe old Captain/Co-Captain rows for the teams in this paste.
+  //   2. For each new Captain/Co-Captain that has a matched member_number,
+  //      DELETE any existing Member row on the same team — they're about
+  //      to be upgraded. Batched per-team with member_number IN (...).
+  //   3. Insert the new Captain/Co-Captain rows fresh.
+  // Step 2 is what lets DB - All Teams land after Team Screen without
+  // violating the (team_id, member_number) unique index.
   const teamIdsInThisPaste = [...new Set(membershipOps.map(m => teamIdByKey.get(m.division_id + ':' + m.team_number)).filter(Boolean))];
   if (teamIdsInThisPaste.length) {
     await sb('DELETE',
@@ -2826,6 +2854,28 @@ window.commitTeamData = async function(headers, rows) {
       name_raw: m.name_raw
     });
   }
+
+  // Step 2: remove any existing Member row on the same team for each
+  // matched-captain member_number. Group by team_id to keep URLs short.
+  const memberPromoByTeam = new Map();
+  for (const m of membershipRows) {
+    if (m.member_number == null) continue;   // name-only captain, no FK conflict possible
+    if (!memberPromoByTeam.has(m.team_id)) memberPromoByTeam.set(m.team_id, new Set());
+    memberPromoByTeam.get(m.team_id).add(m.member_number);
+  }
+  for (const [team_id, mns] of memberPromoByTeam) {
+    const mnList = [...mns];
+    if (!mnList.length) continue;
+    // PostgREST URL length — chunk by 100 member_numbers per DELETE call.
+    for (let i = 0; i < mnList.length; i += 100) {
+      const chunk = mnList.slice(i, i + 100);
+      await sb('DELETE',
+        'team_memberships?team_id=eq.' + team_id
+        + '&member_number=in.(' + chunk.map(encodeURIComponent).join(',') + ')'
+        + '&role=eq.Member');
+    }
+  }
+
   if (membershipRows.length) {
     await sb('POST', 'team_memberships', membershipRows, { Prefer: 'return=minimal' });
   }
