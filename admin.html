@@ -383,6 +383,43 @@ input:focus, select:focus, textarea:focus {
 /* ── Diff summary (preview) ── */
 .diff-summary { display: flex; gap: 18px; margin: 10px 0; font-size: 0.88rem; flex-wrap: wrap; }
 .diff-summary .item strong { color: var(--spm-accent); }
+
+/* ── Drop zone (PDF import) ── */
+.drop-zone {
+  border: 3px dashed #c8c8c8;
+  border-radius: var(--card-radius);
+  padding: 32px 20px 28px;
+  text-align: center;
+  cursor: pointer;
+  background: #fafafa;
+  transition: border-color 0.15s, background 0.15s;
+  position: relative;
+}
+.drop-zone:hover { border-color: var(--spm-accent); background: #f4f6fb; }
+.drop-zone.drag-over {
+  border-color: var(--spm-accent);
+  background: rgba(0, 49, 161, 0.07);
+  border-style: solid;
+}
+.drop-zone:focus-visible {
+  outline: 3px solid var(--spm-accent);
+  outline-offset: 3px;
+}
+.drop-zone-icon { font-size: 2.4rem; line-height: 1; margin-bottom: 10px; }
+.drop-zone-text {
+  font-size: 1rem;
+  color: var(--text);
+  margin-bottom: 3px;
+}
+.drop-zone-text strong { color: var(--spm-accent); font-weight: 800; }
+.drop-zone-sub {
+  font-size: 0.78rem;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.drop-zone > * { pointer-events: none; }
+.drop-zone input[type="file"] { pointer-events: auto; }
 </style>
 </head>
 <body>
@@ -510,31 +547,34 @@ input:focus, select:focus, textarea:focus {
         </div>
       </div>
 
-      <!-- Team Screen PDF import — rosters (Member rows) -->
+      <!-- Universal PDF drop zone — auto-detects report type -->
       <div class="card">
-        <h2>Import Team Screen PDF (rosters)</h2>
+        <h2>PDF Import</h2>
         <p class="hint">
-          Parses a multi-page <strong>Team Screen</strong> PDF from the APA admin site (one team per page). For each
-          team it upserts the team row (division + team number) and <strong>replaces the Member-role rows</strong>
-          in <code>team_memberships</code> with the PDF's player list. Captain/Co-Captain rows created by the
-          Team Data paste are preserved and untouched.
+          Drag &amp; drop (or click to browse) any supported APA PDF. Slate inspects the first page, figures out
+          which report it is, and routes it to the right importer.
         </p>
-        <p class="hint">
-          Player numbers in the PDF are 5-digit local codes. We prepend <code>972</code> and zero-pad the local
-          part to form the canonical 8-digit APA member number (e.g. <code>23806</code> &rarr; <code>97223806</code>).
-          Players whose canonical isn't yet in the <code>players</code> table are stored with <code>name_raw</code>
-          from the PDF plus <code>member_number = null</code>, so they still show up in Email HQ.
-        </p>
-        <div class="form-row" style="margin-top:8px">
+        <ul class="hint" style="margin: 4px 0 12px 18px">
+          <li><strong>Team Screen</strong> — one team per page. Source: <code>Nexus &rarr; Teams &rarr; Team Screen</code>. Upserts teams &amp; rebuilds Member rosters. Captain/Co-Captain rows from Team Data paste preserved.</li>
+          <li><strong>All Division Information List</strong> — full division directory. Source: <code>Nexus &rarr; Divisions &rarr; Report List &rarr; Division Information List by Status</code>. Upserts divisions with name, format, team count. Operator is whatever you pick above; you can re-tag per-division later on the Divisions tab.</li>
+        </ul>
+        <div class="form-row" style="margin-bottom: 12px">
+          <div style="flex: 0 0 260px">
+            <label for="pdfDropOperator">Operator (used for Division PDFs)</label>
+            <select id="pdfDropOperator"></select>
+          </div>
           <div>
-            <label for="pdfFileInput">Team Screen PDF</label>
-            <input type="file" id="pdfFileInput" accept="application/pdf">
+            <label>&nbsp;</label>
+            <p class="hint" style="margin:0;font-size:0.8rem">Team Screen PDFs ignore this picker (teams inherit their division's operator).</p>
           </div>
         </div>
-        <div id="pdfProgress" class="status-line"></div>
-        <div class="actions">
-          <button class="btn btn-primary" id="pdfImportBtn" onclick="runTeamScreenImport()">Parse &amp; Import</button>
+        <div id="pdfDropZone" class="drop-zone" tabindex="0" role="button" aria-label="PDF drop zone">
+          <div class="drop-zone-icon">&#128228;</div>
+          <div class="drop-zone-text"><strong>Drop a PDF here</strong> or click to browse</div>
+          <div class="drop-zone-sub">Team Screen &middot; Division Info</div>
+          <input type="file" id="pdfFileInput" accept="application/pdf" style="display:none">
         </div>
+        <div id="pdfProgress" class="status-line"></div>
       </div>
 
       <!-- Session-scoped reports — Divisions / Teams / Bonus -->
@@ -1010,11 +1050,11 @@ async function parseTeamScreenPage(page) {
   return { team_number, team_name, players };
 }
 
-/** Parse every page, returning [{team_number, team_name, players}…]. */
-async function parseTeamScreenPdf(file, onProgress) {
-  const pdfjsLib = await ensurePdfJs();
-  const buf = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+/** Parse every page, returning [{team_number, team_name, players}…].
+ *  Accepts an already-loaded pdf.js Document so the drop-zone router
+ *  can inspect the first page for type detection without re-parsing
+ *  the file when it routes here. */
+async function parseTeamScreenPdf(pdf, onProgress) {
   const teams = [];
   for (let i = 1; i <= pdf.numPages; i++) {
     if (onProgress) onProgress(i, pdf.numPages);
@@ -1025,23 +1065,24 @@ async function parseTeamScreenPdf(file, onProgress) {
   return teams;
 }
 
-/** Orchestration: parse the chosen PDF, upsert teams, rebuild Member rows. */
-async function runTeamScreenImport() {
+/** Orchestration: parse the chosen PDF, upsert teams, rebuild Member rows.
+ *  Called by handleFileDrop when it detects a Team Screen PDF. */
+async function runTeamScreenImport(file, pdf) {
   hideStatus('pdfProgress');
   if (!currentSession) {
     return setStatus('pdfProgress', 'No current session. Create one on the Sessions tab first.', 'err');
   }
-  const input = document.getElementById('pdfFileInput');
-  const file = input.files && input.files[0];
-  if (!file) return setStatus('pdfProgress', 'Choose a Team Screen PDF first.', 'err');
-
-  const btn = document.getElementById('pdfImportBtn');
-  btn.disabled = true;
 
   try {
+    if (!pdf) {
+      const pdfjsLib = await ensurePdfJs();
+      const buf = await file.arrayBuffer();
+      pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+    }
+
     // 1. Parse the PDF page by page.
     setStatus('pdfProgress', 'Loading PDF…', 'progress');
-    const teams = await parseTeamScreenPdf(file, (i, total) => {
+    const teams = await parseTeamScreenPdf(pdf, (i, total) => {
       setStatus('pdfProgress', 'Parsing page ' + i + ' / ' + total + '…', 'progress');
     });
     if (!teams.length) {
@@ -1156,17 +1197,217 @@ async function runTeamScreenImport() {
       + '<strong>' + unmatched + '</strong> stored as name-only (not yet in player table).';
     if (missingDivs.size) msg += ' ' + missingDivs.size + ' division(s) from the PDF didn\u2019t exist in this session — skipped.';
 
-    // Clear the file input so re-picking works.
-    input.value = '';
     setStatus('pdfProgress', msg, 'ok');
     await refreshCounts();
   } catch (e) {
     setStatus('pdfProgress', 'Import failed: ' + esc(e.message), 'err');
-  } finally {
-    btn.disabled = false;
   }
 }
 window.runTeamScreenImport = runTeamScreenImport;
+
+/* ══════════════════════════════════════════════════════════════════════
+   DIVISION INFORMATION LIST PDF IMPORT
+   Source: Nexus → Divisions → Report List → Division Information List by
+   Status. Columnar table of all divisions in the session:
+     Division Number | Division Name | Format | Number Of Teams | Has A Bye Team
+   Upserts into `divisions` against (session_id, operator_id, division_number).
+   Night / start date / weeks / fees aren't in this report and stay null;
+   those can still be filled in via a Division Listing paste later.
+   ══════════════════════════════════════════════════════════════════════ */
+const DIVISION_FORMATS = [
+  '8-Ball Open', '9-Ball Open', 'Masters',
+  '8-Ball Ladies', '9-Ball Ladies',
+  '8-Ball Doubles', '9-Ball Doubles'
+];
+const DIVISION_FORMAT_RE = new RegExp(
+  '(' + DIVISION_FORMATS.map(f => f.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')).join('|') + ')'
+);
+
+async function parseDivisionInfoPdf(pdf, onProgress) {
+  const rows = [];
+  let pageSeenHeader = false;
+  for (let i = 1; i <= pdf.numPages; i++) {
+    if (onProgress) onProgress(i, pdf.numPages);
+    const page = await pdf.getPage(i);
+    const lines = groupIntoLines((await page.getTextContent()).items);
+    for (const line of lines) {
+      const text = line.text;
+      // Skip column-header row (always starts with "Division Number")
+      if (/^Division\s+Number/i.test(text)) { pageSeenHeader = true; continue; }
+      // Skip totals footer ("Total Divisions:", "Total Teams:")
+      if (/^Total\s+(Divisions|Teams):/i.test(text)) continue;
+
+      // Only accept lines that start with a 3-digit padded number.
+      const m = text.match(/^\s*(\d{3})\s+(.+)$/);
+      if (!m) continue;
+      const divNum = String(parseInt(m[1], 10));        // "001" → "1"
+      const rest = m[2];
+
+      // Find the format token; name is everything before it, team
+      // count + optional "Yes" (has bye) follow.
+      const fmt = rest.match(DIVISION_FORMAT_RE);
+      if (!fmt) continue;
+      const format = fmt[0];
+      const fmtIdx = rest.indexOf(format);
+      const name = rest.substring(0, fmtIdx).trim();
+      const tail = rest.substring(fmtIdx + format.length).trim();
+      const tm = tail.match(/^(\d+)(?:\s+(Yes))?/);
+      const numTeams = tm ? parseInt(tm[1], 10) : null;
+      if (!name) continue;
+      rows.push({
+        division_number: divNum,
+        name,
+        format,
+        num_teams: numTeams
+      });
+    }
+  }
+  return rows;
+}
+
+async function runDivisionInfoImport(file, pdf) {
+  hideStatus('pdfProgress');
+  if (!currentSession) {
+    return setStatus('pdfProgress', 'No current session. Create one on the Sessions tab first.', 'err');
+  }
+  const opId = parseInt(document.getElementById('pdfDropOperator').value, 10);
+  if (!opId) {
+    return setStatus('pdfProgress',
+      'Pick a default operator above before importing. You can re-tag divisions to CR or SPM later on the Divisions tab.', 'err');
+  }
+
+  try {
+    if (!pdf) {
+      const pdfjsLib = await ensurePdfJs();
+      const buf = await file.arrayBuffer();
+      pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+    }
+
+    setStatus('pdfProgress', 'Parsing Division Information List…', 'progress');
+    const rows = await parseDivisionInfoPdf(pdf, (i, total) => {
+      setStatus('pdfProgress', 'Parsing page ' + i + ' / ' + total + '…', 'progress');
+    });
+    if (!rows.length) {
+      return setStatus('pdfProgress', 'No division rows parsed. Check that this is the "Division Information List by Status" report.', 'err');
+    }
+
+    // De-dupe in case a division appears twice (shouldn't, but be safe).
+    const byNum = new Map();
+    for (const r of rows) byNum.set(r.division_number, r);
+    const payload = [...byNum.values()].map(r => ({
+      session_id: currentSession.id,
+      operator_id: opId,
+      division_number: r.division_number,
+      name: r.name,
+      format: r.format,
+      num_teams: r.num_teams
+    }));
+
+    setStatus('pdfProgress', 'Upserting ' + payload.length + ' division(s)…', 'progress');
+    for (let i = 0; i < payload.length; i += 500) {
+      await sb('POST',
+        'divisions?on_conflict=session_id,operator_id,division_number',
+        payload.slice(i, i + 500),
+        { Prefer: 'resolution=merge-duplicates,return=minimal' });
+    }
+
+    setStatus('pdfProgress',
+      'Imported <strong>' + payload.length + '</strong> divisions. '
+      + 'Night / start date / fees weren\u2019t in this report — paste a Division Listing separately if needed, '
+      + 'and re-tag operators on the Divisions tab.', 'ok');
+    await refreshCounts();
+  } catch (e) {
+    setStatus('pdfProgress', 'Import failed: ' + esc(e.message), 'err');
+  }
+}
+window.runDivisionInfoImport = runDivisionInfoImport;
+
+/* ══════════════════════════════════════════════════════════════════════
+   FILE DROP ROUTER — inspect first page of a dropped PDF, route to the
+   right importer. Extend this map when new PDF types are added.
+   ══════════════════════════════════════════════════════════════════════ */
+async function handleFileDrop(file) {
+  if (!file) return;
+  const looksPdf = /pdf/i.test(file.type || '') || /\.pdf$/i.test(file.name || '');
+  if (!looksPdf) {
+    return setStatus('pdfProgress', 'Only PDF files are supported here. Text reports go in the paste boxes below.', 'err');
+  }
+
+  setStatus('pdfProgress', 'Loading "' + (file.name || 'PDF') + '"…', 'progress');
+  try {
+    const pdfjsLib = await ensurePdfJs();
+    const buf = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+
+    const firstPage = await pdf.getPage(1);
+    const firstText = (await firstPage.getTextContent()).items.map(it => it.str).join(' ');
+
+    if (/Team\s+Screen\s+for/i.test(firstText)) {
+      return await runTeamScreenImport(file, pdf);
+    }
+    if (/Division\s+Information\s+List/i.test(firstText)) {
+      return await runDivisionInfoImport(file, pdf);
+    }
+    setStatus('pdfProgress',
+      'Unrecognized PDF. Expected "Team Screen for:" or "Division Information List". '
+      + 'First-page text starts with: "' + firstText.substring(0, 140).trim() + '…"',
+      'err');
+  } catch (e) {
+    setStatus('pdfProgress', 'Failed to open PDF: ' + esc(e.message), 'err');
+  }
+}
+window.handleFileDrop = handleFileDrop;
+
+/* Wire the drop zone to the router. Called from init() once DOM is ready. */
+function setupDropZone() {
+  const zone = document.getElementById('pdfDropZone');
+  const input = document.getElementById('pdfFileInput');
+  if (!zone || !input) return;
+
+  // Click anywhere in the zone → open the browse dialog.
+  zone.addEventListener('click', () => input.click());
+  // Keyboard accessibility.
+  zone.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); }
+  });
+
+  // Hover highlight for dragged files.
+  ['dragenter', 'dragover'].forEach(evt => {
+    zone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      zone.classList.add('drag-over');
+    });
+  });
+  ['dragleave', 'dragend'].forEach(evt => {
+    zone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      zone.classList.remove('drag-over');
+    });
+  });
+  zone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    zone.classList.remove('drag-over');
+    const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (file) {
+      // Reset the input so re-dropping the same file still triggers change if the
+      // admin later goes through the file picker.
+      input.value = '';
+      handleFileDrop(file);
+    }
+  });
+
+  // Fallback: if the admin uses the file picker via click, route through
+  // handleFileDrop as well, then clear so repeat picks trigger change.
+  input.addEventListener('change', () => {
+    const file = input.files && input.files[0];
+    if (file) {
+      handleFileDrop(file);
+      input.value = '';
+    }
+  });
+}
 
 /* ══════════════════════════════════════════════════════════════════════
    COUNTY LOOKUP — zip → lat/long → county (free APIs, no keys)
@@ -1444,6 +1685,9 @@ async function init() {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));
   });
 
+  // Wire the PDF drop zone now that its DOM is in place.
+  setupDropZone();
+
   await loadOperators();
   await loadSessions();
   await refreshCounts();
@@ -1460,15 +1704,21 @@ function switchTab(name) {
    ══════════════════════════════════════════════════════════════════════ */
 async function loadOperators() {
   operators = await sb('GET', 'operators?select=id,name,short_code&order=name.asc');
-  const sel = document.getElementById('uploadOperator');
-  sel.innerHTML = operators.map(o => `<option value="${o.id}">${esc(o.name)}</option>`).join('');
-  // Default to SPM if present
+  const opts = operators.map(o => `<option value="${o.id}">${esc(o.name)}</option>`).join('');
   const spm = operators.find(o => o.short_code === 'SPM');
+
+  const sel = document.getElementById('uploadOperator');
+  sel.innerHTML = opts;
   if (spm) sel.value = spm.id;
 
+  const drop = document.getElementById('pdfDropOperator');
+  if (drop) {
+    drop.innerHTML = opts;
+    if (spm) drop.value = spm.id;
+  }
+
   const emSel = document.getElementById('emailFilterOp');
-  emSel.innerHTML = '<option value="">All operators</option>'
-    + operators.map(o => `<option value="${o.id}">${esc(o.name)}</option>`).join('');
+  emSel.innerHTML = '<option value="">All operators</option>' + opts;
 }
 
 /* ══════════════════════════════════════════════════════════════════════
