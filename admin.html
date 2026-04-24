@@ -857,14 +857,19 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           Paste any supported APA report here. First row = headers. Slate inspects the headers and auto-routes to the
           right importer. Currently selected session: <strong id="sessionScopedLabel">—</strong>.
         </p>
-        <ul class="hint" style="margin: 4px 0 10px 18px">
-          <li><strong>Player Data</strong> — any subset of player columns. Merges on <code>Member Number</code>. Run the
-          "Current Player Addresses" export one time, "Player Details" (SL + phone) another, the membership status export
-          a third; each run merges into the player record.</li>
+        <ul class="hint" style="margin: 4px 0 10px 18px; line-height: 1.6">
+          <li><strong>Player Data</strong> — any subset of player columns. Merges on <code>Member Number</code>. Sources:
+            <code>Nexus &rarr; Players &rarr; Report List &rarr; Current Player Addresses</code> (names + addresses + email),
+            <code>Nexus &rarr; Players &rarr; Report List &rarr; Player Details</code> (SL + phones),
+            <code>Nexus &rarr; Players &rarr; Report List &rarr; Member Status</code> (status fields).
+            Paste any of them; each run merges into the player record.</li>
           <li><strong>Division Listing</strong> — imports/updates divisions for the current session (division #, name, format,
-          night, start date, team count, weeks, fees). Operator stays NULL; assign on the <strong>Divisions</strong> tab.</li>
-          <li><strong>Team Data</strong> — imports/updates teams with their captains, co-captains, and session stats.</li>
-          <li><strong>Team Bonus Points</strong> — updates the bonus-point total on existing teams.</li>
+            night, start date, team count, weeks, fees). Operator stays NULL; assign on the <strong>Divisions</strong> tab.
+            Source: <code>Nexus &rarr; Divisions &rarr; Report List &rarr; Division Listing</code>.</li>
+          <li><strong>Team Data</strong> — imports/updates teams with their captains, co-captains, and session stats.
+            Source: <code>Nexus &rarr; Teams &rarr; Report List &rarr; Team Data</code>.</li>
+          <li><strong>Team Bonus Points</strong> — updates the bonus-point total on existing teams.
+            Source: <code>Nexus &rarr; Teams &rarr; Report List &rarr; Team Bonus Points</code>.</li>
         </ul>
         <p class="hint" style="margin-top:6px;font-size:0.78rem">
           Supported player columns: Member Number, First Name, Nickname, Last Name, Email Address, Cell Phone, Home Phone,
@@ -1031,7 +1036,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '0.7';
+const APP_VERSION = '0.8';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
