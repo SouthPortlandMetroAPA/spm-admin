@@ -126,6 +126,50 @@ html,body {
 .key-gate { text-align: center; padding: 60px 16px; }
 .key-gate .card { max-width: 440px; margin: 0 auto; }
 
+/* ── Version update overlay ── blocks UI while new build propagates. */
+.update-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 20, 40, 0.72);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  padding: 24px;
+}
+.update-overlay.shown { display: flex; }
+.update-box {
+  background: #fff;
+  border-radius: var(--card-radius);
+  padding: 36px 32px;
+  max-width: 420px;
+  width: 100%;
+  text-align: center;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+}
+.update-spinner {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 18px;
+  border-radius: 50%;
+  border: 5px solid rgba(0, 49, 161, 0.15);
+  border-top-color: var(--spm-accent);
+  animation: update-spin 0.85s linear infinite;
+}
+@keyframes update-spin { to { transform: rotate(360deg); } }
+.update-title {
+  font-size: 1.3rem;
+  font-weight: 800;
+  margin-bottom: 6px;
+  color: var(--spm-accent);
+  letter-spacing: 0.01em;
+}
+.update-sub {
+  color: #444;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
 /* ── Nav tabs ── bottom-underline in SPM blue on active */
 .tabs {
   display: flex;
@@ -510,6 +554,18 @@ input:focus, select:focus, textarea:focus {
     <div class="subtitle">Paste APA reports · captain directory · Supabase-backed</div>
   </div>
 
+  <!-- Version-update overlay. Shown when the 30s version check finds that
+       apa_core.apps.version for this app differs from APP_VERSION. Blocks
+       the UI while we poll for the new HTML to appear on the GitHub Pages
+       CDN, then hard-reload. -->
+  <div id="updateOverlay" class="update-overlay">
+    <div class="update-box">
+      <div class="update-spinner" aria-hidden="true"></div>
+      <div class="update-title">Updating <span id="updateAppName">Slate</span></div>
+      <div class="update-sub">A new version is being deployed. This tab will reload automatically&hellip;</div>
+    </div>
+  </div>
+
   <!-- Key gate -->
   <div id="keyGate" class="key-gate hidden">
     <div class="card">
@@ -743,9 +799,16 @@ input:focus, select:focus, textarea:focus {
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '0.1';
+const APP_VERSION = '0.2';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
+
+/* Deploy sequence when bumping APP_VERSION:
+ *   1. Update apa_core.apps row: UPDATE apa_core.apps SET version='X.X' WHERE app_name='Slate';
+ *   2. Bump APP_VERSION above to match
+ *   3. git push
+ * Step 1 before 2-3 avoids a window where new HTML sees a stale DB
+ * version and triggers the update-reload loop on every new load. */
 
 /* ══════════════════════════════════════════════════════════════════════
    CONFIG
@@ -1972,6 +2035,59 @@ function detectReport(headers) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════
+   AUTO-UPDATE (version-check poll)
+   ══════════════════════════════════════════════════════════════════════
+   Every 30s, fetch apa_core.apps.version for this app. If it differs
+   from APP_VERSION, show a blocking overlay and start polling the
+   admin.html file itself (cache-busted) until the fetched HTML contains
+   the new version string — THEN hard-reload. This two-step avoids the
+   "GitHub Pages CDN hasn't caught up yet → reload gives stale HTML →
+   infinite reload" trap.
+   ══════════════════════════════════════════════════════════════════════ */
+let _versionMismatch = false;
+
+async function checkVersion() {
+  if (_versionMismatch) return;
+  try {
+    // Anon-only fetch — version lookup shouldn't require the admin key.
+    const r = await fetch(
+      SB_URL + '/rest/v1/apps?app_name=eq.' + encodeURIComponent(APP_NAME) + '&select=version',
+      { headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON, 'Accept-Profile': 'apa_core' } }
+    );
+    if (!r.ok) return;
+    const data = await r.json();
+    if (!data || !data.length) return;
+    const remote = data[0].version;
+    if (remote && remote !== APP_VERSION) {
+      _versionMismatch = true;
+      document.getElementById('updateAppName').textContent = APP_NAME;
+      document.getElementById('updateOverlay').classList.add('shown');
+      pollForDeploy(remote);
+    }
+  } catch (_) {
+    // Network hiccup or Supabase down — silently skip this tick.
+  }
+}
+
+function pollForDeploy(targetVersion) {
+  setTimeout(async () => {
+    try {
+      // Cache-bust with a timestamp. If GitHub Pages has the new HTML,
+      // the source will contain `APP_VERSION = 'X.X'` for the new X.X.
+      const resp = await fetch('admin.html?_=' + Date.now());
+      if (resp.ok) {
+        const html = await resp.text();
+        if (html.indexOf("APP_VERSION = '" + targetVersion + "'") !== -1) {
+          location.reload(true);
+          return;
+        }
+      }
+    } catch (_) { /* fall through to retry */ }
+    pollForDeploy(targetVersion);
+  }, 3000);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
    INIT
    ══════════════════════════════════════════════════════════════════════ */
 document.addEventListener('DOMContentLoaded', init);
@@ -1988,6 +2104,13 @@ function applyAppIdentity() {
 
 async function init() {
   applyAppIdentity();
+
+  // Kick off version check immediately, then every 30s. Runs regardless
+  // of whether the admin key is valid — the overlay blocks the whole
+  // page if a new build is out, independent of admin access.
+  checkVersion();
+  setInterval(checkVersion, 30000);
+
   if (!SB_KEY) { document.getElementById('keyGate').classList.remove('hidden'); return; }
   try {
     const r = await fetch(SB_URL + '/rest/v1/operators?select=id&limit=1', { headers: HEADERS_READ });
