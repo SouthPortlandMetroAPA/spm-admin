@@ -267,6 +267,29 @@ input:focus, select:focus, textarea:focus {
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
 
+/* ── Filter chips ── pill row for table filters */
+.filter-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 14px;
+  min-height: 32px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  border-radius: 999px;
+  border: 1.5px solid var(--border);
+  background: #fff;
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.chip:hover { background: #f5f5f5; }
+.chip.active {
+  background: var(--spm-accent);
+  border-color: var(--spm-accent);
+  color: #fff;
+}
+
 /* ── Status banner ── colored-border, pill-ish */
 .status-line {
   padding: 12px 16px;
@@ -447,6 +470,7 @@ input:focus, select:focus, textarea:focus {
     <div class="tabs" role="tablist">
       <button class="tab active" data-tab="sessions">Sessions</button>
       <button class="tab" data-tab="uploads">Uploads</button>
+      <button class="tab" data-tab="divisions">Divisions</button>
       <button class="tab" data-tab="emailhq">Email HQ</button>
     </div>
 
@@ -552,22 +576,13 @@ input:focus, select:focus, textarea:focus {
         <h2>PDF Import</h2>
         <p class="hint">
           Drag &amp; drop (or click to browse) any supported APA PDF. Slate inspects the first page, figures out
-          which report it is, and routes it to the right importer.
+          which report it is, and routes it to the right importer. Divisions import untagged — assign CR or SPM
+          on the <strong>Divisions</strong> tab after.
         </p>
         <ul class="hint" style="margin: 4px 0 12px 18px">
           <li><strong>Team Screen</strong> — one team per page. Source: <code>Nexus &rarr; Teams &rarr; Report List &rarr; Team Screen</code>. Upserts teams &amp; rebuilds Member rosters. Captain/Co-Captain rows from Team Data paste preserved.</li>
-          <li><strong>All Division Information List</strong> — full division directory. Source: <code>Nexus &rarr; Divisions &rarr; Report List &rarr; Division Information List by Status</code>. Upserts divisions with name, format, team count. Operator is whatever you pick above; you can re-tag per-division later on the Divisions tab.</li>
+          <li><strong>All Division Information List</strong> — full division directory. Source: <code>Nexus &rarr; Divisions &rarr; Report List &rarr; Division Information List by Status</code>. Upserts divisions with name, format, team count. Operator stays NULL on import; set it per-division on the Divisions tab.</li>
         </ul>
-        <div class="form-row" style="margin-bottom: 12px">
-          <div style="flex: 0 0 260px">
-            <label for="pdfDropOperator">Operator (used for Division PDFs)</label>
-            <select id="pdfDropOperator"></select>
-          </div>
-          <div>
-            <label>&nbsp;</label>
-            <p class="hint" style="margin:0;font-size:0.8rem">Team Screen PDFs ignore this picker (teams inherit their division's operator).</p>
-          </div>
-        </div>
         <div id="pdfDropZone" class="drop-zone" tabindex="0" role="button" aria-label="PDF drop zone">
           <div class="drop-zone-icon">&#128228;</div>
           <div class="drop-zone-text"><strong>Drop a PDF here</strong> or click to browse</div>
@@ -581,15 +596,9 @@ input:focus, select:focus, textarea:focus {
       <div class="card">
         <h2>Import Divisions / Teams / Bonus Points</h2>
         <p class="hint">
-          Session-scoped. Pick the operator (used only when a Division Listing is pasted), paste the report, hit Commit.
-          Currently selected session: <strong id="sessionScopedLabel">—</strong>.
+          Session-scoped. Paste the report, hit Commit. Pasted divisions import untagged — assign an operator on the
+          <strong>Divisions</strong> tab. Currently selected session: <strong id="sessionScopedLabel">—</strong>.
         </p>
-        <div class="form-row" style="margin-top:8px">
-          <div style="flex: 0 0 260px">
-            <label for="uploadOperator">Operator (Division Listing only)</label>
-            <select id="uploadOperator"></select>
-          </div>
-        </div>
 
         <label for="uploadBox" style="margin-top:8px">Paste tab-separated data (first line = header row)</label>
         <textarea id="uploadBox" placeholder="Paste a Division Listing / Team Data / Team Bonus Points report here…" oninput="detectAndPreview()"></textarea>
@@ -610,6 +619,48 @@ input:focus, select:focus, textarea:focus {
         <h2>Current data counts</h2>
         <div id="dataCounts" class="hint">Loading…</div>
         <button class="btn btn-outline btn-sm" onclick="refreshCounts()" style="margin-top:8px">Refresh</button>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════════
+         TAB: DIVISIONS — review, assign operator, see metadata
+         ══════════════════════════════════════════════════════════════ -->
+    <div id="tab-divisions" class="tab-panel">
+      <div class="card">
+        <h2>Divisions</h2>
+        <p class="hint">
+          All divisions for the current session. Use the <strong>Operator</strong> dropdown on each row to tag CR or SPM.
+          Changes save on selection. Untagged divisions show up in the <em>Untagged</em> filter — tag them so Stats and
+          Email HQ filters work correctly.
+        </p>
+        <div class="form-row" style="margin-top:10px;align-items:center">
+          <div class="filter-chips" id="divisionsFilterChips">
+            <button class="chip active" data-filter="all">All</button>
+            <button class="chip" data-filter="untagged">Untagged</button>
+            <button class="chip" data-filter="spm">South Portland Metro APA</button>
+            <button class="chip" data-filter="cra">Columbia River APA</button>
+          </div>
+          <div style="margin-left:auto">
+            <button class="btn btn-outline btn-sm" onclick="renderDivisionsTab()">Refresh</button>
+          </div>
+        </div>
+        <div id="divisionsTabStatus" class="status-line"></div>
+        <div class="table-wrap" style="margin-top:12px">
+          <table class="table">
+            <thead>
+              <tr>
+                <th style="width:90px">Division #</th>
+                <th>Name</th>
+                <th style="width:140px">Format</th>
+                <th style="width:70px">Teams</th>
+                <th style="width:240px">Operator</th>
+              </tr>
+            </thead>
+            <tbody id="divisionsTabBody">
+              <tr><td colspan="5" class="hint">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
 
@@ -1445,11 +1496,6 @@ async function runDivisionInfoImport(file, pdf) {
   if (!currentSession) {
     return setStatus('pdfProgress', 'No current session. Create one on the Sessions tab first.', 'err');
   }
-  const opId = parseInt(document.getElementById('pdfDropOperator').value, 10);
-  if (!opId) {
-    return setStatus('pdfProgress',
-      'Pick a default operator above before importing. You can re-tag divisions to CR or SPM later on the Divisions tab.', 'err');
-  }
 
   try {
     if (!pdf) {
@@ -1469,9 +1515,10 @@ async function runDivisionInfoImport(file, pdf) {
     // De-dupe in case a division appears twice (shouldn't, but be safe).
     const byNum = new Map();
     for (const r of rows) byNum.set(r.division_number, r);
+    // operator_id stays NULL on import — user tags each division on the Divisions tab.
+    // Upsert key is (session_id, division_number) now that operator_id is nullable.
     const payload = [...byNum.values()].map(r => ({
       session_id: currentSession.id,
-      operator_id: opId,
       division_number: r.division_number,
       name: r.name,
       format: r.format,
@@ -1481,15 +1528,15 @@ async function runDivisionInfoImport(file, pdf) {
     setStatus('pdfProgress', 'Upserting ' + payload.length + ' division(s)…', 'progress');
     for (let i = 0; i < payload.length; i += 500) {
       await sb('POST',
-        'divisions?on_conflict=session_id,operator_id,division_number',
+        'divisions?on_conflict=session_id,division_number',
         payload.slice(i, i + 500),
         { Prefer: 'resolution=merge-duplicates,return=minimal' });
     }
 
     setStatus('pdfProgress',
-      'Imported <strong>' + payload.length + '</strong> divisions. '
-      + 'Night / start date / fees weren\u2019t in this report — paste a Division Listing separately if needed, '
-      + 'and re-tag operators on the Divisions tab.', 'ok');
+      'Imported <strong>' + payload.length + '</strong> divisions (untagged). '
+      + 'Go to the <strong>Divisions</strong> tab to assign CR or SPM. '
+      + 'Night / start date / fees aren\u2019t in this report — paste a Division Listing if you need them.', 'ok');
     await refreshCounts();
   } catch (e) {
     setStatus('pdfProgress', 'Import failed: ' + esc(e.message), 'err');
@@ -1859,28 +1906,20 @@ function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + name));
   if (name === 'emailhq') loadEmailHQ();
+  if (name === 'divisions') renderDivisionsTab();
 }
 
 /* ══════════════════════════════════════════════════════════════════════
-   OPERATORS (read-only, seeded by schema)
+   OPERATORS (read-only, seeded by schema). Only Email HQ uses this now —
+   PDF Import and paste imports both leave operator_id NULL at import time;
+   the Divisions tab is where tagging happens.
    ══════════════════════════════════════════════════════════════════════ */
 async function loadOperators() {
   operators = await sb('GET', 'operators?select=id,name,short_code&order=name.asc');
   const opts = operators.map(o => `<option value="${o.id}">${esc(o.name)}</option>`).join('');
-  const spm = operators.find(o => o.short_code === 'SPM');
-
-  const sel = document.getElementById('uploadOperator');
-  sel.innerHTML = opts;
-  if (spm) sel.value = spm.id;
-
-  const drop = document.getElementById('pdfDropOperator');
-  if (drop) {
-    drop.innerHTML = opts;
-    if (spm) drop.value = spm.id;
-  }
 
   const emSel = document.getElementById('emailFilterOp');
-  emSel.innerHTML = '<option value="">All operators</option>' + opts;
+  if (emSel) emSel.innerHTML = '<option value="">All operators</option>' + opts;
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -2179,11 +2218,9 @@ window.commitPlayerDetails = async function(headers, rows) {
   return msg;
 };
 
-/* ──── Handler: Divisions (upsert on session+operator+division#) ─ */
+/* ──── Handler: Divisions (upsert on session+division#, operator tagged later) ─ */
 window.commitDivisions = async function(headers, rows) {
   if (!currentSession) throw new Error('No current session. Create + select one on the Sessions tab first.');
-  const opId = parseInt(document.getElementById('uploadOperator').value, 10);
-  if (!opId) throw new Error('Pick an operator for this paste.');
 
   const idx = {
     num:   headers.indexOf('Division Number'),
@@ -2200,9 +2237,11 @@ window.commitDivisions = async function(headers, rows) {
   for (const r of rows) {
     const num = String(r[idx.num] || '').trim();
     if (!num) continue;
+    // operator_id intentionally omitted — user tags on the Divisions tab.
+    // Existing divisions keep their operator_id (upsert merge-duplicates
+    // doesn't touch fields we don't send).
     payload.push({
       session_id:      currentSession.id,
-      operator_id:     opId,
       division_number: num,
       name:            idx.name  >= 0 ? (r[idx.name]  || '').trim() : 'Division ' + num,
       format:          idx.fmt   >= 0 ? ((r[idx.fmt]   || '').trim() || null) : null,
@@ -2215,7 +2254,7 @@ window.commitDivisions = async function(headers, rows) {
     });
   }
   if (!payload.length) return 'Nothing to commit.';
-  await sb('POST', 'divisions?on_conflict=session_id,operator_id,division_number', payload,
+  await sb('POST', 'divisions?on_conflict=session_id,division_number', payload,
     { Prefer: 'resolution=merge-duplicates,return=minimal' });
   return payload.length + ' division(s) upserted for this session.';
 };
@@ -2436,6 +2475,148 @@ async function refreshCounts() {
     out.innerHTML = '<span style="color:var(--error)">Count failed: ' + esc(e.message) + '</span>';
   }
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+   DIVISIONS TAB — operator re-tagging + per-division metadata view
+   ══════════════════════════════════════════════════════════════════════
+   Shows every division in the current session. Operator dropdown on each
+   row PATCHes that division's operator_id directly. Filter chips narrow
+   by operator tag (All / Untagged / SPM / CRA). No auto-tagging on import;
+   every division lands here untagged and stays that way until the user
+   says otherwise.
+   ══════════════════════════════════════════════════════════════════════ */
+let _divisionsData = null;
+let _divisionsFilter = 'all';
+
+async function renderDivisionsTab() {
+  const body = document.getElementById('divisionsTabBody');
+  if (!currentSession) {
+    body.innerHTML = '<tr><td colspan="5" class="hint">No current session. Create one on the Sessions tab.</td></tr>';
+    return;
+  }
+  body.innerHTML = '<tr><td colspan="5" class="hint">Loading\u2026</td></tr>';
+
+  try {
+    _divisionsData = await sb('GET',
+      'divisions?select=id,division_number,name,format,num_teams,operator_id'
+      + '&session_id=eq.' + currentSession.id
+      + '&order=division_number.asc');
+  } catch (e) {
+    body.innerHTML = '<tr><td colspan="5" class="err">Failed to load: ' + esc(e.message) + '</td></tr>';
+    return;
+  }
+
+  _renderDivisionsRows();
+}
+
+function _renderDivisionsRows() {
+  const body = document.getElementById('divisionsTabBody');
+  if (!_divisionsData) return;
+
+  const spm = operators.find(o => o.short_code === 'SPM');
+  const cra = operators.find(o => o.short_code === 'CRA');
+  const spmId = spm ? spm.id : null;
+  const craId = cra ? cra.id : null;
+
+  // Filter
+  const filtered = _divisionsData.filter(d => {
+    if (_divisionsFilter === 'all')      return true;
+    if (_divisionsFilter === 'untagged') return d.operator_id === null;
+    if (_divisionsFilter === 'spm')      return d.operator_id === spmId;
+    if (_divisionsFilter === 'cra')      return d.operator_id === craId;
+    return true;
+  });
+
+  if (!filtered.length) {
+    body.innerHTML = '<tr><td colspan="5" class="hint">No divisions match this filter.</td></tr>';
+    return;
+  }
+
+  // Counts (over the full unfiltered set — shown in filter chips)
+  const counts = { all: _divisionsData.length, untagged: 0, spm: 0, cra: 0 };
+  for (const d of _divisionsData) {
+    if (d.operator_id === null)  counts.untagged++;
+    else if (d.operator_id === spmId) counts.spm++;
+    else if (d.operator_id === craId) counts.cra++;
+  }
+  // Update chip labels with counts
+  document.querySelectorAll('#divisionsFilterChips .chip').forEach(chip => {
+    const f = chip.dataset.filter;
+    const base = chip.dataset.baseLabel || chip.textContent.replace(/\s*\(\d+\)\s*$/, '');
+    chip.dataset.baseLabel = base;
+    chip.textContent = base + ' (' + (counts[f] || 0) + ')';
+  });
+
+  // Build table rows
+  const rows = filtered.map(d => {
+    const opts = [
+      '<option value="">\u2014 Untagged \u2014</option>',
+      ...operators.map(o => {
+        const sel = (d.operator_id === o.id) ? ' selected' : '';
+        return '<option value="' + o.id + '"' + sel + '>' + esc(o.name) + '</option>';
+      })
+    ].join('');
+    return '<tr data-div-id="' + d.id + '">'
+      + '<td style="font-weight:700;color:var(--spm-accent)">' + esc(d.division_number) + '</td>'
+      + '<td>' + esc(d.name) + '</td>'
+      + '<td>' + esc(d.format || '') + '</td>'
+      + '<td>' + (d.num_teams == null ? '' : d.num_teams) + '</td>'
+      + '<td><select class="div-operator-select" data-div-id="' + d.id + '">' + opts + '</select></td>'
+      + '</tr>';
+  }).join('');
+  body.innerHTML = rows;
+
+  // Wire each dropdown to PATCH on change
+  body.querySelectorAll('.div-operator-select').forEach(sel => {
+    sel.addEventListener('change', onDivisionOperatorChange);
+  });
+}
+
+async function onDivisionOperatorChange(ev) {
+  const sel = ev.target;
+  const divId = sel.dataset.divId;
+  const newVal = sel.value === '' ? null : parseInt(sel.value, 10);
+  const statusEl = document.getElementById('divisionsTabStatus');
+
+  // Optimistic update in local cache
+  const row = _divisionsData.find(d => d.id === parseInt(divId, 10));
+  const prevVal = row ? row.operator_id : null;
+  if (row) row.operator_id = newVal;
+
+  sel.disabled = true;
+  try {
+    await sb('PATCH',
+      'divisions?id=eq.' + encodeURIComponent(divId),
+      { operator_id: newVal },
+      { Prefer: 'return=minimal' });
+    setStatus('divisionsTabStatus',
+      'Saved division ' + esc(String(row ? row.division_number : divId))
+      + ' \u2192 ' + (newVal === null ? 'Untagged' : esc((operators.find(o => o.id === newVal) || {}).name || 'Unknown')),
+      'ok');
+    // Refresh chip counts without reloading the table
+    _renderDivisionsRows();
+  } catch (e) {
+    // Roll back
+    if (row) row.operator_id = prevVal;
+    sel.value = prevVal === null ? '' : String(prevVal);
+    setStatus('divisionsTabStatus', 'Save failed: ' + esc(e.message), 'err');
+  } finally {
+    sel.disabled = false;
+  }
+}
+
+// Wire filter chips on DOMContentLoaded — keep global to avoid init()-order coupling.
+document.addEventListener('DOMContentLoaded', () => {
+  const chips = document.getElementById('divisionsFilterChips');
+  if (!chips) return;
+  chips.addEventListener('click', (ev) => {
+    const chip = ev.target.closest('.chip');
+    if (!chip) return;
+    document.querySelectorAll('#divisionsFilterChips .chip').forEach(c => c.classList.toggle('active', c === chip));
+    _divisionsFilter = chip.dataset.filter;
+    _renderDivisionsRows();
+  });
+});
 
 /* ══════════════════════════════════════════════════════════════════════
    EMAIL HQ VIEW
