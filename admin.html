@@ -1069,7 +1069,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '1.0';
+const APP_VERSION = '1.1';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -1151,22 +1151,24 @@ const REPORT_SPECS = [
     kind: 'paste'
   },
   // ── Team reports ──
+  // DB - All Teams must come BEFORE Team Bonus Points in detection
+  // order. Bonus Points only requires (Team Number, Total Team Bonus
+  // Points), which All Teams also satisfies — so a narrower-first
+  // ordering would mis-detect All Teams as Bonus Points. Always list
+  // the spec with the LONGER required-column set first so the more
+  // specific match wins.
   {
-    // NOTE: DB - All Teams must be matched AFTER Team Bonus Points
-    // if both appear — but All Teams has Team Name which Bonus Points
-    // lacks, so order-dependent matching isn't strictly needed. Still,
-    // put Bonus Points first for defensive robustness.
+    key: 'DB - All Teams',
+    path: 'Nexus \u2192 Teams \u2192 Report Viewer \u2192 DB - All Teams',
+    required: ['Team Number','Team Name','Team Captain','Total Team Bonus Points'],
+    handler: 'commitTeamData',
+    kind: 'paste'
+  },
+  {
     key: 'Team Bonus Points',
     path: 'Nexus \u2192 Teams \u2192 Report List \u2192 Team Bonus Points',
     required: ['Team Number','Total Team Bonus Points'],
     handler: 'commitTeamBonusPoints',
-    kind: 'paste'
-  },
-  {
-    key: 'DB - All Teams',
-    path: 'Nexus \u2192 Teams \u2192 Report Viewer \u2192 DB - All Teams',
-    required: ['Team Number','Team Name','Team Captain'],
-    handler: 'commitTeamData',
     kind: 'paste'
   },
   // ── PDF-only ──
