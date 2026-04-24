@@ -917,7 +917,7 @@ input:focus, select:focus, textarea:focus {
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '0.4';
+const APP_VERSION = '0.5';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -1274,17 +1274,32 @@ async function executePlayerImport() {
       if (!('last_name'  in p)) p.last_name  = '-';
     }
 
-    // Upsert in 500-row batches.
+    // PostgREST rejects bulk upserts where objects have different key sets
+    // ("All object keys must match", PGRST102). Since our skip-empty-cell
+    // logic means rows in the same paste can have different shapes (row A
+    // has an email, row B doesn't), we group rows by key signature and
+    // upsert each group separately. Typical pastes have 1-2 groups
+    // (one for existing members and one for new members with '-' defaults),
+    // so this is usually still ~1-2 requests.
+    const groups = new Map();
+    for (const p of payload) {
+      const sig = Object.keys(p).sort().join(',');
+      if (!groups.has(sig)) groups.set(sig, []);
+      groups.get(sig).push(p);
+    }
+
     const BATCH = 500;
     let imported = 0;
-    for (let i = 0; i < payload.length; i += BATCH) {
-      const chunk = payload.slice(i, i + BATCH);
-      imported = Math.min(i + BATCH, payload.length);
-      setStatus('playerImportStatus',
-        'Importing ' + imported + ' / ' + payload.length + '…',
-        'progress');
-      await sb('POST', 'players?on_conflict=member_number', chunk,
-        { Prefer: 'resolution=merge-duplicates,return=minimal' });
+    for (const group of groups.values()) {
+      for (let i = 0; i < group.length; i += BATCH) {
+        const chunk = group.slice(i, i + BATCH);
+        imported += chunk.length;
+        setStatus('playerImportStatus',
+          'Importing ' + imported + ' / ' + payload.length + '\u2026',
+          'progress');
+        await sb('POST', 'players?on_conflict=member_number', chunk,
+          { Prefer: 'resolution=merge-duplicates,return=minimal' });
+      }
     }
 
     const updatedCount = existing.size;
