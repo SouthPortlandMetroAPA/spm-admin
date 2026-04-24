@@ -917,7 +917,7 @@ input:focus, select:focus, textarea:focus {
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '0.3';
+const APP_VERSION = '0.4';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -1207,7 +1207,14 @@ async function executePlayerImport() {
   const btn = document.getElementById('playerImportBtn');
   btn.disabled = true;
 
-  // Build per-member_number upsert rows, keeping only mapped columns.
+  // Build per-member_number upsert rows, keeping only mapped columns
+  // WITH non-empty values. Empty cells don't touch the DB — a narrow
+  // paste (e.g., "Player Details" with only SL + phones) must never
+  // clobber data set by a prior wider paste (e.g., "Current Player
+  // Addresses" with names + addresses). Previously empty cells were
+  // written as nulls, which with merge-duplicates upsert would overwrite
+  // existing real values with NULL.
+  //
   // Strict 8-digit gate — anything else is garbage and gets dropped.
   const byMember = new Map();
   let junk = 0;
@@ -1224,9 +1231,10 @@ async function executePlayerImport() {
       if (col === 'email') val = val.replace(/\s/g, '').toLowerCase();
       if (col === 'sl_8ball' || col === 'sl_9ball') {
         const n = parseInt(val, 10);
-        val = isNaN(n) ? null : n;
+        if (isNaN(n)) continue;   // empty / non-numeric SL → don't touch
+        val = n;
       } else if (val === '') {
-        val = null;
+        continue;   // empty cell → leave existing DB value alone
       }
       obj[col] = val;
     }
@@ -1239,19 +1247,13 @@ async function executePlayerImport() {
     return setStatus('playerImportStatus', 'Nothing to import.', 'err');
   }
 
-  // Ensure NOT NULL name defaults if this paste doesn't include names
-  // for a brand-new player — harmless for existing rows (merge keeps
-  // their current values; we only set "-" on insert).
-  for (const p of payload) {
-    if (!('first_name' in p)) p.first_name = '-';
-    if (!('last_name'  in p)) p.last_name  = '-';
-  }
-
   try {
     // Pre-query which of the member_numbers in this paste already
-    // exist, so the post-import summary can report "created" vs
-    // "updated" accurately. Chunk by URL length since `in.(...)`
-    // can get long.
+    // exist. Used for two things:
+    //   1. Accurate created-vs-updated counts in the summary
+    //   2. Gating the '-' name default to INSERTs only, so a paste
+    //      without First/Last Name columns can never overwrite a
+    //      previously-set real name with '-'.
     const mns = payload.map(p => p.member_number);
     const existing = new Set();
     const CHECK_BATCH = 200;
@@ -1263,6 +1265,13 @@ async function executePlayerImport() {
       const rows = await sb('GET',
         'players?select=member_number&member_number=in.(' + chunk.map(encodeURIComponent).join(',') + ')');
       for (const r of (rows || [])) existing.add(r.member_number);
+    }
+
+    // NOT NULL defaults for NEW rows only. Existing rows stay untouched.
+    for (const p of payload) {
+      if (existing.has(p.member_number)) continue;
+      if (!('first_name' in p)) p.first_name = '-';
+      if (!('last_name'  in p)) p.last_name  = '-';
     }
 
     // Upsert in 500-row batches.
