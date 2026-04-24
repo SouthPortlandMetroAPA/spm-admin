@@ -575,6 +575,7 @@ input:focus, select:focus, textarea:focus {
   margin-top: 4px;
 }
 .ehq-action-row > .ehq-count { margin-left: auto; font-size: 0.78rem; color: var(--muted); font-weight: 600; }
+.ehq-action-row > .ehq-count.ehq-mode-filter { color: var(--spm-accent); font-style: italic; }
 .ehq-action-row > .ehq-feedback { font-size: 0.78rem; color: var(--success); font-weight: 700; display: none; }
 .ehq-action-row > .ehq-feedback.shown { display: inline; }
 
@@ -1069,7 +1070,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '1.3';
+const APP_VERSION = '1.4';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -3481,6 +3482,10 @@ function renderEmailHQ() {
         const divId = parseInt(divCb.dataset.divId, 10);
         const d = _emailData.find(x => x.id === divId);
         if (!d) { ev.stopPropagation(); return; }
+        // First click out of Mode 1 materializes the current visible+role-
+        // passing cell set into _ehqSel so the toggle operates on a
+        // coherent baseline (not "empty minus this one").
+        _ehqMaterializeMode1Selection();
         const target = divCb.checked;
         for (const t of (d.teams || [])) {
           for (const m of (t.memberships || [])) {
@@ -3504,6 +3509,7 @@ function renderEmailHQ() {
         const d = _emailData.find(x => x.id === divId);
         const t = d && (d.teams || []).find(x => x.id === teamId);
         if (!t) return;
+        _ehqMaterializeMode1Selection();
         const target = teamCb.checked;
         for (const m of (t.memberships || [])) {
           if (m.player && m.player.email) {
@@ -3522,6 +3528,7 @@ function renderEmailHQ() {
         const divId  = parseInt(roleCb.dataset.divId, 10);
         const teamId = parseInt(roleCb.dataset.teamId, 10);
         const role   = roleCb.dataset.role;
+        _ehqMaterializeMode1Selection();
         const key = _ehqCellKey(divId, teamId, role);
         if (roleCb.checked) _ehqSel.add(key); else _ehqSel.delete(key);
         _ehqPaintAllTeamParents(out);
@@ -3549,18 +3556,64 @@ function renderEmailHQ() {
   _updateEhqCount();
 }
 
-/* ═══════ Cell-key helpers and checkbox state derivation ═══════ */
-
+/* ═══════ Cell-key helpers, mode, and checkbox state derivation ═══════
+ *
+ * Two modes:
+ *   Mode 1 ("filter-driven"): _ehqSel is empty. Every email matching the
+ *     active filter toolbar contributes. Checkbox visuals are computed
+ *     from filters, not _ehqSel.
+ *   Cherry-pick: _ehqSel has entries. Only those entries contribute.
+ *     Clicking a checkbox in Mode 1 materializes _ehqSel with the
+ *     current Mode 1 set before processing the click, flipping us into
+ *     cherry-pick mode with a deliberate starting point.
+ */
 function _ehqCellKey(divId, teamId, role) { return divId + '_' + teamId + '_' + role; }
 
-// 'checked' | 'partial' | 'none' — for a division as a whole
+function _ehqIsMode1() { return _ehqSel.size === 0; }
+
+/* Would this role pass the current Role filter? Used when deciding which
+ * cells are "visually selected" in Mode 1 (role filter narrows the set).
+ * Returns true when no role restriction is active. */
+function _ehqRolePassesInMode1(role) {
+  if (!_ehqFacetRestricts('role')) return true;
+  return _ehqFilters.role.has(role);
+}
+
+/* Populate _ehqSel with every cell the Mode 1 filters would include,
+ * then return. Called on the first checkbox click to transition Mode 1 →
+ * cherry-pick with the correct starting state. */
+function _ehqMaterializeMode1Selection() {
+  if (_ehqSel.size !== 0) return;
+  const opR = _ehqFacetRestricts('operator');
+  const fmR = _ehqFacetRestricts('format');
+  const niR = _ehqFacetRestricts('night');
+  const roR = _ehqFacetRestricts('role');
+  for (const d of (_emailData || [])) {
+    if (opR && !_ehqFilters.operator.has(String(d.operator_id))) continue;
+    if (fmR && !_ehqFilters.format.has(d.format || '')) continue;
+    if (niR && !_ehqFilters.night.has(d.night_of_play || '')) continue;
+    for (const t of (d.teams || [])) {
+      for (const m of (t.memberships || [])) {
+        if (!m.player || !m.player.email) continue;
+        if (roR && !_ehqFilters.role.has(m.role)) continue;
+        _ehqSel.add(_ehqCellKey(d.id, t.id, m.role));
+      }
+    }
+  }
+}
+
+// 'checked' | 'partial' | 'unchecked' | 'none' — for a division as a whole
 function _ehqDivCheckState(d) {
+  const mode1 = _ehqIsMode1();
   let total = 0, selected = 0;
   for (const t of (d.teams || [])) {
     for (const m of (t.memberships || [])) {
       if (!m.player || !m.player.email) continue;
       total++;
-      if (_ehqSel.has(_ehqCellKey(d.id, t.id, m.role))) selected++;
+      const would = mode1
+        ? _ehqRolePassesInMode1(m.role)
+        : _ehqSel.has(_ehqCellKey(d.id, t.id, m.role));
+      if (would) selected++;
     }
   }
   if (total === 0) return 'none';
@@ -3571,16 +3624,27 @@ function _ehqDivCheckState(d) {
 
 // 'checked' | 'partial' | 'unchecked' | 'none' (no emailable members) — for a team
 function _ehqTeamCheckState(divId, team) {
+  const mode1 = _ehqIsMode1();
   let total = 0, selected = 0;
   for (const m of (team.memberships || [])) {
     if (!m.player || !m.player.email) continue;
     total++;
-    if (_ehqSel.has(_ehqCellKey(divId, team.id, m.role))) selected++;
+    const would = mode1
+      ? _ehqRolePassesInMode1(m.role)
+      : _ehqSel.has(_ehqCellKey(divId, team.id, m.role));
+    if (would) selected++;
   }
   if (total === 0) return 'none';
   if (selected === 0) return 'unchecked';
   if (selected === total) return 'checked';
   return 'partial';
+}
+
+// Boolean — for a single per-role cell
+function _ehqRoleCellChecked(divId, teamId, role) {
+  return _ehqIsMode1()
+    ? _ehqRolePassesInMode1(role)
+    : _ehqSel.has(_ehqCellKey(divId, teamId, role));
 }
 
 // Repaint every checkbox (division, team-master, per-role) against the
@@ -3604,12 +3668,14 @@ function _ehqPaintAllTeamParents(root) {
         tcb.checked = (s === 'checked');
         tcb.indeterminate = (s === 'partial');
       }
-      // Per-role checkboxes: one each for Captain, Co-Captain, Member
+      // Per-role checkboxes: one each for Captain, Co-Captain, Member.
+      // Uses _ehqRoleCellChecked so Mode 1 shows them auto-checked when
+      // the role passes the current Role filter.
       for (const role of ['Captain', 'Co-Captain', 'Member']) {
         const rcb = root.querySelector(
           '.ehq-role-cb[data-div-id="' + d.id + '"][data-team-id="' + t.id + '"][data-role="' + role + '"]');
         if (rcb && !rcb.disabled) {
-          rcb.checked = _ehqSel.has(_ehqCellKey(d.id, t.id, role));
+          rcb.checked = _ehqRoleCellChecked(d.id, t.id, role);
         }
       }
     }
@@ -3685,7 +3751,7 @@ function _ehqRenderRoleCell(divId, teamId, role, m) {
     : (m.name_raw || '\u2014');
   const em = m.player && m.player.email ? m.player.email : '';
   const disabled = !em;
-  const checked = _ehqSel.has(_ehqCellKey(divId, teamId, role));
+  const checked = !disabled && _ehqRoleCellChecked(divId, teamId, role);
   return (
     '<input type="checkbox" class="ehq-role-cb"'
     + ' data-div-id="' + divId + '" data-team-id="' + teamId + '" data-role="' + role + '"'
@@ -3702,7 +3768,7 @@ function _ehqRenderRoleCell(divId, teamId, role, m) {
 function _ehqRenderPlayersCell(divId, teamId, players) {
   if (!players.length) return '<span class="ehq-none">no roster</span>';
   const anyEmail = players.some(m => m.player && m.player.email);
-  const checked = _ehqSel.has(_ehqCellKey(divId, teamId, 'Member'));
+  const checked = anyEmail && _ehqRoleCellChecked(divId, teamId, 'Member');
   return (
     '<input type="checkbox" class="ehq-role-cb"'
     + ' data-div-id="' + divId + '" data-team-id="' + teamId + '" data-role="Member"'
@@ -3716,6 +3782,17 @@ function _ehqRenderPlayersCell(divId, teamId, players) {
 
 /* ═══════ Email collection / copy ═══════ */
 
+/* Email selection model:
+ *   DEFAULT (no per-cell checkboxes clicked, _ehqSel empty):
+ *     Every email in every visible division that matches the Role
+ *     filter contributes. Filters alone drive the copy — no clicking
+ *     required. This is what you want 95% of the time.
+ *   NARROW (any cell checkbox clicked, _ehqSel non-empty):
+ *     Only cells present in _ehqSel contribute. Use this to include
+ *     a specific subset (paste team numbers, or cherry-pick cells).
+ *
+ * The Role filter always restricts regardless of mode.
+ */
 function _ehqCollectEmails() {
   if (!_emailData) return [];
   const emails = new Set();
@@ -3723,18 +3800,15 @@ function _ehqCollectEmails() {
   const fmR = _ehqFacetRestricts('format');
   const niR = _ehqFacetRestricts('night');
   const roR = _ehqFacetRestricts('role');
+  const useExplicitSelection = _ehqSel.size > 0;
   for (const d of _emailData) {
-    // Re-apply filter toolbar — a cell selected before the user narrowed
-    // the filters shouldn't sneak into the copy. Full-activation of a
-    // facet = no restriction (same semantic as render).
     if (opR && !_ehqFilters.operator.has(String(d.operator_id))) continue;
     if (fmR && !_ehqFilters.format.has(d.format || '')) continue;
     if (niR && !_ehqFilters.night.has(d.night_of_play || '')) continue;
     for (const t of (d.teams || [])) {
       for (const m of (t.memberships || [])) {
         if (!m.player || !m.player.email) continue;
-        const key = _ehqCellKey(d.id, t.id, m.role);
-        if (!_ehqSel.has(key)) continue;
+        if (useExplicitSelection && !_ehqSel.has(_ehqCellKey(d.id, t.id, m.role))) continue;
         if (roR && !_ehqFilters.role.has(m.role)) continue;
         emails.add(m.player.email.trim().toLowerCase());
       }
@@ -3746,7 +3820,14 @@ function _ehqCollectEmails() {
 function _updateEhqCount() {
   const n = _ehqCollectEmails().length;
   const el = document.getElementById('ehqCount');
-  if (el) el.textContent = n + ' email' + (n === 1 ? '' : 's') + ' selected';
+  if (el) {
+    // Mode 1 (filter-driven, _ehqSel empty): "(all matching filters)"
+    // Cherry-pick: "selected". Makes the source of the count visible so
+    // the user knows whether it's auto-computed or explicit.
+    const tag = _ehqIsMode1() ? ' (all matching filters)' : ' selected';
+    el.textContent = n + ' email' + (n === 1 ? '' : 's') + tag;
+    el.classList.toggle('ehq-mode-filter', _ehqIsMode1());
+  }
   const btn = document.getElementById('ehqCopyBtn');
   if (btn) btn.disabled = n === 0;
 }
