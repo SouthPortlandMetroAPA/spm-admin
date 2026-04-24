@@ -662,16 +662,25 @@ const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
 /* ══════════════════════════════════════════════════════════════════════
    CONFIG
+   ══════════════════════════════════════════════════════════════════════
+   On 2026-04-23 Slate's backend was consolidated into spm-apa under the
+   `slate` Postgres schema. Every fetch sends Accept-Profile + Content-Profile
+   headers so PostgREST targets slate.* directly (no reliance on public
+   compatibility views). Service-role key in the `?key=` URL param must be
+   the spm-apa service_role (not the old spm-admin one). Bookmarks need
+   updating.
    ══════════════════════════════════════════════════════════════════════ */
-const SB_URL  = 'https://vcjghwgoxnmtnihcbuiz.supabase.co';
-const SB_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZjamdod2dveG5tdG5paGNidWl6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY4ODE2MjksImV4cCI6MjA5MjQ1NzYyOX0.KCzC8VtF4eGCAClw2idqH6B81T1sRjPIr-UTUXpFkaU';
+const SB_URL  = 'https://dqzbekoaysgaiqljueac.supabase.co';
+const SB_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRxemJla29heXNnYWlxbGp1ZWFjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUxNzA5NzgsImV4cCI6MjA5MDc0Njk3OH0.cCdGxZ4zEFzU_r6lWSDeoNWG67Q4MSYCAtpds035dfU';
+const SB_SCHEMA = 'slate';   // default schema for all fetch calls
+
 const params = new URLSearchParams(location.search);
 const SB_KEY = params.get('key') || '';
 
 const HEADERS_READ  = SB_KEY
-  ? { apikey: SB_KEY,   Authorization: 'Bearer ' + SB_KEY }
-  : { apikey: SB_ANON,  Authorization: 'Bearer ' + SB_ANON };
-const HEADERS_WRITE = { ...HEADERS_READ, 'Content-Type': 'application/json', Prefer: 'return=representation' };
+  ? { apikey: SB_KEY,   Authorization: 'Bearer ' + SB_KEY,  'Accept-Profile': SB_SCHEMA }
+  : { apikey: SB_ANON,  Authorization: 'Bearer ' + SB_ANON, 'Accept-Profile': SB_SCHEMA };
+const HEADERS_WRITE = { ...HEADERS_READ, 'Content-Type': 'application/json', 'Content-Profile': SB_SCHEMA, Prefer: 'return=representation' };
 
 /* ══════════════════════════════════════════════════════════════════════
    SESSION-SCOPED REPORT DETECTION (Divisions / Teams / Bonus)
