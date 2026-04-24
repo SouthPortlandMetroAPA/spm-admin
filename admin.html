@@ -1024,25 +1024,41 @@ async function parseTeamScreenPage(page) {
 
   // Next 1-3 lines should contain "<digits>  <name>"
   let team_number = null, team_name = null;
+  let teamHeaderIdx = -1;
   for (let i = markerIdx + 1; i < Math.min(markerIdx + 5, lines.length); i++) {
     const m = lines[i].text.match(/^\s*(\d{1,5})\s+(\S.*?)\s*$/);
     if (m) {
       team_number = stripTeamNum(m[1]);   // "00301" → "301"
       team_name   = m[2].trim();
+      teamHeaderIdx = i;
       break;
     }
   }
   if (!team_number) return null;
 
-  // Player rows — 3-5 leading digits, then name, then "(" (first phone cell)
+  // Find the table header line (NUMBER PLAYERS HOME PHONE …). The
+  // actual player rows sit below it. Scanning only that window avoids
+  // matching the team header line when the team name itself contains
+  // a "(" — e.g. "Let's Gooo (again)" — which otherwise looks enough
+  // like a player row to sneak through.
+  let tableHeaderIdx = -1;
+  for (let i = teamHeaderIdx + 1; i < lines.length; i++) {
+    if (/NUMBER\s+PLAYERS/i.test(lines[i].text)) { tableHeaderIdx = i; break; }
+  }
+  const playerStart = tableHeaderIdx >= 0 ? tableHeaderIdx + 1 : teamHeaderIdx + 1;
+
+  // Player row pattern: 3-5 leading digits, name, then a proper phone
+  // placeholder — (XXX) where XXX is 3 digits or 3 underscores. This
+  // rejects any "(" inside a team name from matching accidentally.
+  const playerRowRe = /^(\d{3,5})\s+([^(]+?)\s+\((?:\d{3}|_{3})\)/;
   const players = [];
   const seen = new Set();
-  for (const line of lines) {
-    const m = line.text.match(/^(\d{3,5})\s+([^(]+?)\s+\(/);
+  for (let i = playerStart; i < lines.length; i++) {
+    const m = lines[i].text.match(playerRowRe);
     if (!m) continue;
     const mn = localToCanonicalApa(m[1]);
     if (!mn) continue;
-    if (seen.has(mn)) continue;   // guard against dupe rows on same page
+    if (seen.has(mn)) continue;
     seen.add(mn);
     players.push({ member_number: mn, name: m[2].trim() });
   }
@@ -1277,48 +1293,120 @@ window.runTeamScreenImport = runTeamScreenImport;
    Night / start date / weeks / fees aren't in this report and stay null;
    those can still be filled in via a Division Listing paste later.
    ══════════════════════════════════════════════════════════════════════ */
-const DIVISION_FORMATS = [
-  '8-Ball Open', '9-Ball Open', 'Masters',
-  '8-Ball Ladies', '9-Ball Ladies',
-  '8-Ball Doubles', '9-Ball Doubles'
-];
-const DIVISION_FORMAT_RE = new RegExp(
-  '(' + DIVISION_FORMATS.map(f => f.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')).join('|') + ')'
-);
+/**
+ * Parse the Division Information List by detecting the column layout
+ * from the header row's X-coordinates, not by pattern-matching the
+ * joined text. The prior regex approach misread rows whose division
+ * NAME contained a format token ("Masters Mult-Wed", "Vancouver
+ * Masters 2.0", "Westside Masters") because it had no sense of
+ * column boundaries — "Masters" could be in column 1 (Name) or
+ * column 2 (Format) and regex couldn't tell them apart.
+ *
+ * The approach here:
+ *   1. Find the header line ("Division Number  Division Name  Format
+ *      Number Of Teams  Has A Bye Team"). Its text items are laid out
+ *      at stable X positions on every page.
+ *   2. Cluster header items into columns by X-gap (adjacent items
+ *      within 40pt belong to the same column label).
+ *   3. For each data line on the page, assign each of its text items
+ *      to the rightmost column whose start-X is <= item-X (small
+ *      tolerance for drift). Join items within a column with spaces.
+ *   4. Produce a row of { division#, name, format, num_teams, has_bye }.
+ *
+ * Immune to ambiguous tokens in any field because X-positioning
+ * tells us which column a token is in.
+ */
+function detectColumnsFromHeader(headerItems) {
+  // Sort left-to-right and cluster any items within 40pt of the
+  // previous into the same column group. The left edge of each
+  // column is the minX of its group.
+  const sorted = headerItems.slice().sort((a, b) => a.transform[4] - b.transform[4]);
+  const cols = [];
+  for (const it of sorted) {
+    const x = it.transform[4];
+    const prev = cols[cols.length - 1];
+    if (prev && x - prev.rightX < 40) {
+      prev.items.push(it);
+      prev.rightX = x + (it.width || 0);
+    } else {
+      cols.push({ x, rightX: x + (it.width || 0), items: [it] });
+    }
+  }
+  // Attach a readable label so we can pick out division_number / name / format / etc.
+  for (const c of cols) c.label = c.items.map(it => it.str).join(' ').trim();
+  return cols;
+}
+
+function bucketByColumns(lineItems, cols) {
+  const buckets = cols.map(() => []);
+  for (const it of lineItems) {
+    const x = it.transform[4];
+    let idx = 0;
+    for (let i = cols.length - 1; i >= 0; i--) {
+      if (cols[i].x - 3 <= x) { idx = i; break; }    // 3pt left-tolerance for kerning drift
+    }
+    buckets[idx].push(it);
+  }
+  return buckets.map(b =>
+    b.sort((a, b) => a.transform[4] - b.transform[4])
+      .map(it => it.str).join(' ').replace(/\s+/g, ' ').trim()
+  );
+}
 
 async function parseDivisionInfoPdf(pdf, onProgress) {
   const rows = [];
-  let pageSeenHeader = false;
-  for (let i = 1; i <= pdf.numPages; i++) {
-    if (onProgress) onProgress(i, pdf.numPages);
-    const page = await pdf.getPage(i);
+  for (let p = 1; p <= pdf.numPages; p++) {
+    if (onProgress) onProgress(p, pdf.numPages);
+    const page = await pdf.getPage(p);
     const lines = groupIntoLines((await page.getTextContent()).items);
-    for (const line of lines) {
-      const text = line.text;
-      // Skip column-header row (always starts with "Division Number")
-      if (/^Division\s+Number/i.test(text)) { pageSeenHeader = true; continue; }
-      // Skip totals footer ("Total Divisions:", "Total Teams:")
-      if (/^Total\s+(Divisions|Teams):/i.test(text)) continue;
 
-      // Only accept lines that start with a 3-digit padded number.
-      const m = text.match(/^\s*(\d{3})\s+(.+)$/);
-      if (!m) continue;
-      const divNum = String(parseInt(m[1], 10));        // "001" → "1"
-      const rest = m[2];
+    // Find the header row (contains all 5 column labels).
+    let headerIdx = -1;
+    for (let i = 0; i < lines.length; i++) {
+      const t = lines[i].text;
+      if (/Division\s+Number/i.test(t) && /Division\s+Name/i.test(t) && /Format/i.test(t)) {
+        headerIdx = i; break;
+      }
+    }
+    if (headerIdx < 0) continue;
 
-      // Find the format token; name is everything before it, team
-      // count + optional "Yes" (has bye) follow.
-      const fmt = rest.match(DIVISION_FORMAT_RE);
-      if (!fmt) continue;
-      const format = fmt[0];
-      const fmtIdx = rest.indexOf(format);
-      const name = rest.substring(0, fmtIdx).trim();
-      const tail = rest.substring(fmtIdx + format.length).trim();
-      const tm = tail.match(/^(\d+)(?:\s+(Yes))?/);
-      const numTeams = tm ? parseInt(tm[1], 10) : null;
+    const cols = detectColumnsFromHeader(lines[headerIdx].items);
+    if (cols.length < 4) continue;   // need at least #, name, format, teams
+
+    // Identify which column index holds which field by label prefix.
+    // Labels should be: "Division Number", "Division Name", "Format",
+    // "Number Of Teams", "Has A Bye Team". Default to positional if
+    // label matching fails on a future report variant.
+    const ix = {
+      num:    cols.findIndex(c => /Division\s+Number/i.test(c.label)),
+      name:   cols.findIndex(c => /Division\s+Name/i.test(c.label)),
+      format: cols.findIndex(c => /^Format/i.test(c.label)),
+      teams:  cols.findIndex(c => /(Number\s+Of\s+Teams|Teams)/i.test(c.label)),
+      bye:    cols.findIndex(c => /Bye/i.test(c.label))
+    };
+    if (ix.num < 0) ix.num = 0;
+    if (ix.name < 0) ix.name = 1;
+    if (ix.format < 0) ix.format = 2;
+    if (ix.teams < 0) ix.teams = 3;
+
+    // Parse every line below the header. Skip the header, the totals
+    // footer, and anything that doesn't start with a 3-digit number
+    // in its division# column.
+    for (let i = headerIdx + 1; i < lines.length; i++) {
+      const line = lines[i];
+      if (/^Total\s+(Divisions|Teams):/i.test(line.text)) continue;
+      const fields = bucketByColumns(line.items, cols);
+      const divNumStr = (fields[ix.num] || '').trim();
+      if (!/^\d{1,3}$/.test(divNumStr)) continue;
+
+      const name = (fields[ix.name] || '').trim();
+      const format = (fields[ix.format] || '').trim();
+      const teamsStr = (fields[ix.teams] || '').trim();
+      const numTeams = /^\d+$/.test(teamsStr) ? parseInt(teamsStr, 10) : null;
       if (!name) continue;
+
       rows.push({
-        division_number: divNum,
+        division_number: String(parseInt(divNumStr, 10)),
         name,
         format,
         num_teams: numTeams
