@@ -1294,124 +1294,130 @@ window.runTeamScreenImport = runTeamScreenImport;
    those can still be filled in via a Division Listing paste later.
    ══════════════════════════════════════════════════════════════════════ */
 /**
- * Parse the Division Information List by detecting the column layout
- * from the header row's X-coordinates, not by pattern-matching the
- * joined text. The prior regex approach misread rows whose division
- * NAME contained a format token ("Masters Mult-Wed", "Vancouver
- * Masters 2.0", "Westside Masters") because it had no sense of
- * column boundaries — "Masters" could be in column 1 (Name) or
- * column 2 (Format) and regex couldn't tell them apart.
+ * Parse the Division Information List using the predictable textual
+ * shape of every data row:
  *
- * The approach here:
- *   1. Find the header line ("Division Number  Division Name  Format
- *      Number Of Teams  Has A Bye Team"). Its text items are laid out
- *      at stable X positions on every page.
- *   2. Cluster header items into columns by X-gap (adjacent items
- *      within 40pt belong to the same column label).
- *   3. For each data line on the page, assign each of its text items
- *      to the rightmost column whose start-X is <= item-X (small
- *      tolerance for drift). Join items within a column with spaces.
- *   4. Produce a row of { division#, name, format, num_teams, has_bye }.
+ *   <3-digit div#>  <name>  <format>  <integer team count>  <Yes|No>
  *
- * Immune to ambiguous tokens in any field because X-positioning
- * tells us which column a token is in.
+ * We peel right-to-left: Yes/No, then the integer, then the format
+ * (matched against a closed APA vocabulary), then whatever remains
+ * after the 3-digit prefix is the name. That lets "Masters" inside
+ * a division name ("Westside Masters", "Vancouver Masters 2.0")
+ * pass through harmlessly — it only gets read as the format when
+ * it sits in the format slot (between the name and the integer).
  */
-function detectColumnsFromHeader(headerItems) {
-  // Sort left-to-right and cluster any items within 40pt of the
-  // previous into the same column group. The left edge of each
-  // column is the minX of its group.
-  const sorted = headerItems.slice().sort((a, b) => a.transform[4] - b.transform[4]);
-  const cols = [];
-  for (const it of sorted) {
-    const x = it.transform[4];
-    const prev = cols[cols.length - 1];
-    if (prev && x - prev.rightX < 40) {
-      prev.items.push(it);
-      prev.rightX = x + (it.width || 0);
-    } else {
-      cols.push({ x, rightX: x + (it.width || 0), items: [it] });
+/**
+ * Every data row has the same predictable textual shape:
+ *
+ *   <3-digit div#>  <division name (1+ words)>  <format>  <integer>  <Yes|No>
+ *
+ * Parse right-to-left so the ambiguous piece (the name, which can
+ * contain format-like words such as "Masters") is what's left over
+ * after the fixed-shape fields have been peeled off:
+ *
+ *   1. Last token  → bye flag (Yes/No)
+ *   2. Next token  → num_teams (integer)
+ *   3. Next token(s) that match a known format vocabulary → format
+ *   4. First token → division_number (3 digits, zero-padded)
+ *   5. Everything in between → division name
+ *
+ * Using a closed format vocabulary (rather than a regex) is the
+ * textual-structure lever: the report only ever emits formats from a
+ * finite list published by APA. A "Masters" in the name column never
+ * matches because we only accept format tokens in the slot that comes
+ * right before the integer team count.
+ */
+const DIVISION_FORMATS = [
+  '8-Ball',
+  '9-Ball',
+  'Masters',
+  'Doubles 8-Ball',
+  'Doubles 9-Ball',
+  'Ladies 8-Ball',
+  'Ladies 9-Ball',
+  'Jack & Jill 8-Ball',
+  'Jack & Jill 9-Ball'
+];
+// Sort longest-first so "Doubles 8-Ball" matches before "8-Ball".
+const DIVISION_FORMATS_SORTED = DIVISION_FORMATS.slice().sort((a, b) => b.length - a.length);
+
+function peelFormatFromEnd(s) {
+  for (const f of DIVISION_FORMATS_SORTED) {
+    if (s.endsWith(' ' + f) || s === f) {
+      return { format: f, rest: s.slice(0, s.length - f.length).trim() };
     }
   }
-  // Attach a readable label so we can pick out division_number / name / format / etc.
-  for (const c of cols) c.label = c.items.map(it => it.str).join(' ').trim();
-  return cols;
+  return null;
 }
 
-function bucketByColumns(lineItems, cols) {
-  const buckets = cols.map(() => []);
-  for (const it of lineItems) {
-    const x = it.transform[4];
-    let idx = 0;
-    for (let i = cols.length - 1; i >= 0; i--) {
-      if (cols[i].x - 3 <= x) { idx = i; break; }    // 3pt left-tolerance for kerning drift
-    }
-    buckets[idx].push(it);
-  }
-  return buckets.map(b =>
-    b.sort((a, b) => a.transform[4] - b.transform[4])
-      .map(it => it.str).join(' ').replace(/\s+/g, ' ').trim()
-  );
+/**
+ * Parse a single line's text into a row, or return null if the line
+ * isn't a data row (header, totals footer, blank, page chrome).
+ */
+function parseDivisionLine(text) {
+  const t = text.replace(/\s+/g, ' ').trim();
+  if (!t) return null;
+
+  // Must start with 3-digit division number.
+  const m = t.match(/^(\d{3})\s+(.+)$/);
+  if (!m) return null;
+  const divNumStr = m[1];
+  let rest = m[2];
+
+  // Pull Yes|No off the end.
+  const byeMatch = rest.match(/\s+(Yes|No)$/i);
+  if (!byeMatch) return null;
+  rest = rest.slice(0, rest.length - byeMatch[0].length).trim();
+
+  // Pull integer team count off the end.
+  const teamsMatch = rest.match(/\s+(\d+)$/);
+  if (!teamsMatch) return null;
+  const numTeams = parseInt(teamsMatch[1], 10);
+  rest = rest.slice(0, rest.length - teamsMatch[0].length).trim();
+
+  // Peel the format off the end against the known vocabulary.
+  const peeled = peelFormatFromEnd(rest);
+  if (!peeled) return null;    // unknown format → bail loudly rather than guess
+  const format = peeled.format;
+  const name = peeled.rest;
+  if (!name) return null;
+
+  return {
+    division_number: String(parseInt(divNumStr, 10)),
+    name,
+    format,
+    num_teams: numTeams
+  };
 }
 
 async function parseDivisionInfoPdf(pdf, onProgress) {
   const rows = [];
+  const unknownFormatLines = [];
   for (let p = 1; p <= pdf.numPages; p++) {
     if (onProgress) onProgress(p, pdf.numPages);
     const page = await pdf.getPage(p);
     const lines = groupIntoLines((await page.getTextContent()).items);
 
-    // Find the header row (contains all 5 column labels).
-    let headerIdx = -1;
-    for (let i = 0; i < lines.length; i++) {
-      const t = lines[i].text;
-      if (/Division\s+Number/i.test(t) && /Division\s+Name/i.test(t) && /Format/i.test(t)) {
-        headerIdx = i; break;
+    for (const line of lines) {
+      const t = line.text;
+      if (!t) continue;
+      if (/Division\s+Number/i.test(t) && /Division\s+Name/i.test(t)) continue;  // header
+      if (/^Total\s+(Divisions|Teams):/i.test(t)) continue;                       // footer
+      if (!/^\d{3}\s/.test(t)) continue;                                          // not a data row
+
+      const row = parseDivisionLine(t);
+      if (row) {
+        rows.push(row);
+      } else {
+        // Starts with a 3-digit number but didn't match known format
+        // vocabulary — surface it so we can extend DIVISION_FORMATS.
+        unknownFormatLines.push(t);
       }
     }
-    if (headerIdx < 0) continue;
-
-    const cols = detectColumnsFromHeader(lines[headerIdx].items);
-    if (cols.length < 4) continue;   // need at least #, name, format, teams
-
-    // Identify which column index holds which field by label prefix.
-    // Labels should be: "Division Number", "Division Name", "Format",
-    // "Number Of Teams", "Has A Bye Team". Default to positional if
-    // label matching fails on a future report variant.
-    const ix = {
-      num:    cols.findIndex(c => /Division\s+Number/i.test(c.label)),
-      name:   cols.findIndex(c => /Division\s+Name/i.test(c.label)),
-      format: cols.findIndex(c => /^Format/i.test(c.label)),
-      teams:  cols.findIndex(c => /(Number\s+Of\s+Teams|Teams)/i.test(c.label)),
-      bye:    cols.findIndex(c => /Bye/i.test(c.label))
-    };
-    if (ix.num < 0) ix.num = 0;
-    if (ix.name < 0) ix.name = 1;
-    if (ix.format < 0) ix.format = 2;
-    if (ix.teams < 0) ix.teams = 3;
-
-    // Parse every line below the header. Skip the header, the totals
-    // footer, and anything that doesn't start with a 3-digit number
-    // in its division# column.
-    for (let i = headerIdx + 1; i < lines.length; i++) {
-      const line = lines[i];
-      if (/^Total\s+(Divisions|Teams):/i.test(line.text)) continue;
-      const fields = bucketByColumns(line.items, cols);
-      const divNumStr = (fields[ix.num] || '').trim();
-      if (!/^\d{1,3}$/.test(divNumStr)) continue;
-
-      const name = (fields[ix.name] || '').trim();
-      const format = (fields[ix.format] || '').trim();
-      const teamsStr = (fields[ix.teams] || '').trim();
-      const numTeams = /^\d+$/.test(teamsStr) ? parseInt(teamsStr, 10) : null;
-      if (!name) continue;
-
-      rows.push({
-        division_number: String(parseInt(divNumStr, 10)),
-        name,
-        format,
-        num_teams: numTeams
-      });
-    }
+  }
+  if (unknownFormatLines.length) {
+    console.warn('[Division parser] Lines that looked like data rows but had unknown format:',
+      unknownFormatLines);
   }
   return rows;
 }
