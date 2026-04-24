@@ -564,24 +564,29 @@ input:focus, select:focus, textarea:focus {
          ══════════════════════════════════════════════════════════════ -->
     <div id="tab-uploads" class="tab-panel">
 
-      <!-- Player import — flexible, any mix of supported columns -->
+      <!-- Universal paste — auto-detects Player / Division / Team / Bonus -->
       <div class="card">
-        <h2>Import Player Data</h2>
+        <h2>Paste Data</h2>
         <p class="hint">
-          Paste tab-separated data from the APA admin web interface. First row = headers.
-          <strong>Any subset</strong> of the supported columns is fine — paste the "Current Player Addresses" export one time,
-          the "Player Details" (SL + phone) export another, the membership status export a third; each run merges into the player
-          record on <code>Member Number</code>.
+          Paste any supported APA report here. First row = headers. Slate inspects the headers and auto-routes to the
+          right importer. Currently selected session: <strong id="sessionScopedLabel">—</strong>.
         </p>
-        <p class="hint" style="margin-top: 6px">
-          Supported columns:
-          <strong>Member Number</strong>, First Name, Nickname, Last Name, Email Address, Cell Phone, Home Phone,
+        <ul class="hint" style="margin: 4px 0 10px 18px">
+          <li><strong>Player Data</strong> — any subset of player columns. Merges on <code>Member Number</code>. Run the
+          "Current Player Addresses" export one time, "Player Details" (SL + phone) another, the membership status export
+          a third; each run merges into the player record.</li>
+          <li><strong>Division Listing</strong> — imports/updates divisions for the current session (division #, name, format,
+          night, start date, team count, weeks, fees). Operator stays NULL; assign on the <strong>Divisions</strong> tab.</li>
+          <li><strong>Team Data</strong> — imports/updates teams with their captains, co-captains, and session stats.</li>
+          <li><strong>Team Bonus Points</strong> — updates the bonus-point total on existing teams.</li>
+        </ul>
+        <p class="hint" style="margin-top:6px;font-size:0.78rem">
+          Supported player columns: Member Number, First Name, Nickname, Last Name, Email Address, Cell Phone, Home Phone,
           Work Phone, Alt Phone, Gender, 8-Ball Skill Level, 9-Ball Skill Level, Address 1, Address 2, City, State, Zip,
           Membership Revoked, Membership Promotion, Period Joined, Referred By, Date Marked Paid, Past Due, Deceased,
-          Member Type, Date Started, Last Date Played 8-Ball, Last Date Played 9-Ball, Member Status.
-          Unmapped columns are ignored.
+          Member Type, Date Started, Last Date Played 8-Ball, Last Date Played 9-Ball, Member Status. Unmapped columns are ignored.
         </p>
-        <textarea id="playerImportBox" placeholder="Paste tab-separated data here..." style="margin-top:8px"></textarea>
+        <textarea id="playerImportBox" placeholder="Paste tab-separated data here (first row = headers)..." style="margin-top:8px"></textarea>
         <div id="playerImportPreview"></div>
         <div id="playerImportStatus" class="status-line"></div>
         <div class="actions">
@@ -626,29 +631,6 @@ input:focus, select:focus, textarea:focus {
         <div id="pdfProgress" class="status-line"></div>
       </div>
 
-      <!-- Session-scoped reports — Divisions / Teams / Bonus -->
-      <div class="card">
-        <h2>Import Divisions / Teams / Bonus Points</h2>
-        <p class="hint">
-          Session-scoped. Paste the report, hit Commit. Pasted divisions import untagged — assign an operator on the
-          <strong>Divisions</strong> tab. Currently selected session: <strong id="sessionScopedLabel">—</strong>.
-        </p>
-
-        <label for="uploadBox" style="margin-top:8px">Paste tab-separated data (first line = header row)</label>
-        <textarea id="uploadBox" placeholder="Paste a Division Listing / Team Data / Team Bonus Points report here…" oninput="detectAndPreview()"></textarea>
-
-        <div id="uploadPreview" class="hidden" style="margin-top: 12px">
-          <div id="detectedReportLine"></div>
-          <div id="diffSummary" class="diff-summary"></div>
-          <div id="uploadStatus" class="status-line"></div>
-          <div class="actions">
-            <button class="btn btn-primary" id="commitBtn" onclick="commitUpload()">Commit</button>
-            <button class="btn btn-outline" onclick="clearUpload()">Clear</button>
-          </div>
-        </div>
-        <div id="uploadError" class="status-line"></div>
-      </div>
-
       <div class="card">
         <h2>Current data counts</h2>
         <div id="dataCounts" class="hint">Loading…</div>
@@ -683,11 +665,11 @@ input:focus, select:focus, textarea:focus {
           <table class="table">
             <thead>
               <tr>
+                <th style="width:180px">Operator</th>
                 <th style="width:90px">Division #</th>
                 <th>Name</th>
                 <th style="width:140px">Format</th>
                 <th style="width:70px">Teams</th>
-                <th style="width:240px">Operator</th>
               </tr>
             </thead>
             <tbody id="divisionsTabBody">
@@ -862,10 +844,14 @@ const COLUMN_MAP = {
   'member status':           'member_status'
 };
 
-// Player-import parse state — reset on each Preview/Import cycle.
+// Universal paste state. One of: 'player' (COLUMN_MAP path) or 'report'
+// (REPORT_SPECS path). The textarea is the same — parsePlayerData decides
+// which flow to use by looking at the header row.
 let _pHeaders = [];
 let _pRows    = [];
-let _pMemIdx  = -1;
+let _pMemIdx  = -1;       // player-only: index of Member Number column
+let _pKind    = null;     // 'player' | 'report' | null
+let _pSpec    = null;     // report-only: matching entry from REPORT_SPECS
 
 function parsePlayerData() {
   const raw = document.getElementById('playerImportBox').value.trim();
@@ -879,6 +865,9 @@ function parsePlayerData() {
     String(h).replace(/[\u00A0\u2000-\u200B\uFEFF]/g, ' ').replace(/\s+/g, ' ').trim()
   );
 
+  // --- Detect flow ---
+  // Player Data wins if "Member Number" is present. Otherwise look for a
+  // REPORT_SPECS match (Division Listing / Team Data / Team Bonus Points).
   let mapped = 0;
   _pMemIdx = -1;
   for (let i = 0; i < _pHeaders.length; i++) {
@@ -886,8 +875,35 @@ function parsePlayerData() {
     if (COLUMN_MAP[key]) mapped++;
     if (key === 'member number') _pMemIdx = i;
   }
-  if (_pMemIdx === -1) { setStatus('playerImportStatus', 'No "Member Number" column found.', 'err'); return null; }
 
+  if (_pMemIdx === -1) {
+    // No Member Number — see if it's a report.
+    const spec = detectReport(_pHeaders);
+    if (!spec) {
+      const expected = REPORT_SPECS.map(s => s.reportName + ' (needs: ' + s.required.join(', ') + ')').join('<br>');
+      setStatus('playerImportStatus',
+        '<strong>Unrecognized headers.</strong><br>'
+        + 'Got: <code>' + esc(_pHeaders.join(' \u00b7 ')) + '</code><br>'
+        + 'Expected Player Data (with <code>Member Number</code>) or one of:<br>' + expected,
+        'err');
+      return null;
+    }
+    _pKind = 'report';
+    _pSpec = spec;
+    _pRows = [];
+    for (let r = 1; r < lines.length; r++) {
+      const line = lines[r];
+      if (!line.trim()) continue;
+      // Pad short rows so headers.indexOf lookups don't fall off the end
+      const cells = line.split('\t').map(c => String(c || '').trim());
+      while (cells.length < _pHeaders.length) cells.push('');
+      _pRows.push(cells);
+    }
+    return { kind: 'report', spec, headers: _pHeaders, rowCount: _pRows.length };
+  }
+
+  _pKind = 'player';
+  _pSpec = null;
   _pRows = [];
   for (let r = 1; r < lines.length; r++) {
     const line = lines[r].trim();
@@ -900,7 +916,7 @@ function parsePlayerData() {
     const d = String(row[_pMemIdx] || '').replace(/\D/g, '');
     if (d.length === 8) valid++; else junk++;
   }
-  return { valid, junk, mapped, total: _pHeaders.length };
+  return { kind: 'player', valid, junk, mapped, total: _pHeaders.length };
 }
 
 function previewPlayerImport() {
@@ -908,6 +924,30 @@ function previewPlayerImport() {
   if (!stats) return;
 
   const previewArea = document.getElementById('playerImportPreview');
+
+  if (stats.kind === 'report') {
+    // Simple preview for Division Listing / Team Data / Team Bonus Points
+    previewArea.innerHTML =
+      '<p style="font-size:0.9rem;margin:12px 0 6px">'
+      + '<strong>Detected:</strong> ' + esc(stats.spec.reportName)
+      + ' \u00b7 <strong>' + stats.rowCount + '</strong> row' + (stats.rowCount === 1 ? '' : 's')
+      + '</p>'
+      + '<div style="overflow-x:auto;border:1px solid var(--border);border-radius:10px">'
+      + '<table class="table" style="margin:0;font-size:0.78rem"><thead><tr>'
+      + _pHeaders.map(h => '<th>' + esc(h) + '</th>').join('')
+      + '</tr></thead><tbody>'
+      + _pRows.slice(0, 5).map(row =>
+          '<tr>' + _pHeaders.map((_, c) => '<td>' + esc(row[c] || '') + '</td>').join('') + '</tr>'
+        ).join('')
+      + (_pRows.length > 5 ? '<tr><td colspan="' + _pHeaders.length + '" style="color:var(--muted)">\u2026 and ' + (_pRows.length - 5) + ' more</td></tr>' : '')
+      + '</tbody></table></div>';
+    setStatus('playerImportStatus',
+      'Preview ready. Click Import to commit ' + stats.rowCount + ' ' + esc(stats.spec.reportName) + ' row' + (stats.rowCount === 1 ? '' : 's') + '.',
+      'ok');
+    return;
+  }
+
+  // Player Data preview
   let html = '<p style="font-size:0.9rem;margin:12px 0 6px"><strong>' + stats.valid + '</strong> valid rows · <strong>'
     + stats.mapped + '/' + stats.total + '</strong> columns mapped';
   if (stats.junk > 0) html += ' <span style="color:var(--spm-primary)">(' + stats.junk + ' rows with bad APA# will be skipped)</span>';
@@ -941,6 +981,26 @@ async function executePlayerImport() {
   if (!_pRows.length) {
     const stats = parsePlayerData();
     if (!stats) return;
+  }
+
+  // Report-type pastes route to their REPORT_SPECS handler.
+  if (_pKind === 'report') {
+    const btn = document.getElementById('playerImportBtn');
+    btn.disabled = true;
+    setStatus('playerImportStatus', 'Committing ' + esc(_pSpec.reportName) + '\u2026', 'progress');
+    try {
+      const handler = window[_pSpec.handler];
+      if (typeof handler !== 'function') throw new Error('No handler wired for ' + _pSpec.name);
+      const summary = await handler(_pHeaders, _pRows);
+      setStatus('playerImportStatus', esc(_pSpec.reportName) + ' committed. ' + summary, 'ok');
+      clearPlayerImport();
+      await refreshCounts();
+    } catch (e) {
+      setStatus('playerImportStatus', 'Commit failed: ' + esc(e.message), 'err');
+    } finally {
+      btn.disabled = false;
+    }
+    return;
   }
 
   const btn = document.getElementById('playerImportBtn');
@@ -1047,6 +1107,7 @@ function clearPlayerImport() {
   document.getElementById('playerImportPreview').innerHTML = '';
   hideStatus('playerImportStatus');
   _pHeaders = []; _pRows = []; _pMemIdx = -1;
+  _pKind = null; _pSpec = null;
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -1767,7 +1828,6 @@ let sessions         = [];  // [{id, year, season, name, start_date, is_current}
 let currentSession   = null;
 
 // Upload-tab in-flight parse
-let _parsed = null;  // { report, headers, rows, operatorId? }
 
 /* ══════════════════════════════════════════════════════════════════════
    UTILITIES
@@ -2043,78 +2103,16 @@ async function deleteSession(id, name) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════
-   UPLOADS — detect + preview + commit
+   UPLOADS — the single paste flow. previewPlayerImport / executePlayerImport
+   (defined above) now handle BOTH player data and report data (Division
+   Listing / Team Data / Team Bonus Points). The legacy second-card
+   workflow (detectAndPreview / commitUpload / clearUpload) was removed
+   when the second card was consolidated into the top one.
    ══════════════════════════════════════════════════════════════════════ */
 
-function clearUpload() {
-  document.getElementById('uploadBox').value = '';
-  document.getElementById('uploadPreview').classList.add('hidden');
-  document.getElementById('uploadError').className = 'status-line';
-  document.getElementById('uploadError').innerHTML = '';
-  _parsed = null;
-}
-
-function detectAndPreview() {
-  document.getElementById('uploadError').className = 'status-line';
-  document.getElementById('uploadError').innerHTML = '';
-  const raw = document.getElementById('uploadBox').value;
-  if (!raw.trim()) {
-    document.getElementById('uploadPreview').classList.add('hidden');
-    _parsed = null;
-    return;
-  }
-  const { headers, rows } = parseTsv(raw);
-  if (!headers.length) {
-    document.getElementById('uploadPreview').classList.add('hidden');
-    return;
-  }
-  const spec = detectReport(headers);
-  if (!spec) {
-    document.getElementById('uploadPreview').classList.add('hidden');
-    const missingInfo = REPORT_SPECS.map(s => s.reportName + ' → needs: ' + s.required.join(', ')).join('<br>');
-    document.getElementById('uploadError').className = 'status-line shown err';
-    document.getElementById('uploadError').innerHTML =
-      '<strong>Unrecognized header row.</strong><br>'
-      + 'Got: <code>' + esc(headers.join(' · ')) + '</code><br>'
-      + 'Expected one of:<br>' + missingInfo;
-    return;
-  }
-
-  _parsed = { spec, headers, rows };
-  document.getElementById('uploadPreview').classList.remove('hidden');
-  document.getElementById('detectedReportLine').innerHTML =
-    '<strong>Detected:</strong> ' + esc(spec.reportName)
-    + ' · <span class="badge ok">' + rows.length + ' row' + (rows.length === 1 ? '' : 's') + '</span>';
-
-  // Simple diff preview — per-report summary shown by its handler at commit time.
-  document.getElementById('diffSummary').innerHTML = '';
-}
-
-async function commitUpload() {
-  if (!_parsed) return;
-  hideStatus('uploadStatus');
-  const btn = document.getElementById('commitBtn');
-  btn.disabled = true;
-  btn.textContent = 'Committing…';
-  try {
-    const handler = window[_parsed.spec.handler];
-    if (typeof handler !== 'function') throw new Error('No handler for ' + _parsed.spec.name);
-    const summary = await handler(_parsed.headers, _parsed.rows);
-    setStatus('uploadStatus', 'Committed. ' + summary, 'ok');
-    clearUpload();
-    await refreshCounts();
-  } catch (e) {
-    setStatus('uploadStatus', 'Commit failed: ' + esc(e.message), 'err');
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Commit';
-  }
-}
-
-/* ──── Legacy: PlayerData handler (retained for completeness; not
- * reachable now that player import flows through the dedicated
- * COLUMN_MAP-based Import Player Data card). Kept as a reference;
- * safe to delete once confidence in the new flow is high. */
+/* ──── Legacy: PlayerData handler (dead — not in REPORT_SPECS, kept as a
+ * reference for a possible future migration where player data can be
+ * imported via a different paste format). Safe to delete. */
 window.commitPlayerData = async function(headers, rows) {
   const idx = {};
   const cols = ['Member Number','First Name','Nickname','Last Name','Address 1','Address 2','City','State','Zip','Email Address'];
@@ -2596,11 +2594,11 @@ function _renderDivisionsRows() {
       + ' data-div-id="' + d.id + '" data-op-id="' + craId + '"'
       + ' aria-pressed="' + (craActive ? 'true' : 'false') + '">CRA</button>';
     return '<tr data-div-id="' + d.id + '">'
+      + '<td><div class="op-btn-group">' + spmBtn + craBtn + '</div></td>'
       + '<td style="font-weight:700;color:var(--spm-accent)">' + esc(d.division_number) + '</td>'
       + '<td>' + esc(d.name) + '</td>'
       + '<td>' + esc(d.format || '') + '</td>'
       + '<td>' + (d.num_teams == null ? '' : d.num_teams) + '</td>'
-      + '<td><div class="op-btn-group">' + spmBtn + craBtn + '</div></td>'
       + '</tr>';
   }).join('');
   body.innerHTML = rows;
