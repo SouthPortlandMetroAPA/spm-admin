@@ -865,7 +865,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             Paste any of them; each run merges into the player record.</li>
           <li><strong>Division Listing</strong> — imports/updates divisions for the current session (division #, name, format,
             night, start date, team count, weeks, fees). Operator stays NULL; assign on the <strong>Divisions</strong> tab.
-            Source: <code>Nexus &rarr; Divisions &rarr; Report List &rarr; Division Listing</code>.</li>
+            Source: <code>Nexus &rarr; Divisions &rarr; Report Viewer &rarr; APP - All Divisions</code>.</li>
           <li><strong>Team Data</strong> — imports/updates teams with their captains, co-captains, and session stats.
             Source: <code>Nexus &rarr; Teams &rarr; Report List &rarr; Team Data</code>.</li>
           <li><strong>Team Bonus Points</strong> — updates the bonus-point total on existing teams.
@@ -905,18 +905,15 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <div class="card">
         <h2>PDF Import</h2>
         <p class="hint">
-          Drag &amp; drop (or click to browse) any supported APA PDF. Slate inspects the first page, figures out
-          which report it is, and routes it to the right importer. Divisions import untagged — assign CR or SPM
-          on the <strong>Divisions</strong> tab after.
+          Drag &amp; drop (or click to browse) a <strong>Team Screen</strong> PDF. One team per page.
+          Source: <code>Nexus &rarr; Teams &rarr; Report List &rarr; Team Screen</code>.
+          Upserts teams and rebuilds Member rosters from each page's roster. Captain/Co-Captain rows
+          from the Team Data paste are preserved across re-imports.
         </p>
-        <ul class="hint" style="margin: 4px 0 12px 18px">
-          <li><strong>Team Screen</strong> — one team per page. Source: <code>Nexus &rarr; Teams &rarr; Report List &rarr; Team Screen</code>. Upserts teams &amp; rebuilds Member rosters. Captain/Co-Captain rows from Team Data paste preserved.</li>
-          <li><strong>All Division Information List</strong> — full division directory. Source: <code>Nexus &rarr; Divisions &rarr; Report List &rarr; Division Information List by Status</code>. Upserts divisions with name, format, team count. Operator stays NULL on import; set it per-division on the Divisions tab.</li>
-        </ul>
         <div id="pdfDropZone" class="drop-zone" tabindex="0" role="button" aria-label="PDF drop zone">
           <div class="drop-zone-icon">&#128228;</div>
-          <div class="drop-zone-text"><strong>Drop a PDF here</strong> or click to browse</div>
-          <div class="drop-zone-sub">Team Screen &middot; Division Info</div>
+          <div class="drop-zone-text"><strong>Drop a Team Screen PDF here</strong> or click to browse</div>
+          <div class="drop-zone-sub">one team per page</div>
           <input type="file" id="pdfFileInput" accept="application/pdf" style="display:none">
         </div>
         <div id="pdfProgress" class="status-line"></div>
@@ -1036,7 +1033,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '0.8';
+const APP_VERSION = '0.9';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -1107,14 +1104,23 @@ const REPORT_SPECS = [
    Unmapped columns are silently ignored (shown red in the preview).
    ══════════════════════════════════════════════════════════════════════ */
 
+// APA garbage-threshold. Member numbers at or below this value are
+// placeholder / test / reserved records — never real players. SPM's
+// rule: anything <= 97200000 is garbage. 97200001 is the first real
+// member number.
+const APA_GARBAGE_MAX = 97200000;
+
 /**
  * Normalize an APA member number from a pasted cell.
  *
  * Strict 8-digit enforcement. Strips non-digits, rejects anything
- * that isn't exactly 8 digits. Does NOT run parseInt (which would
- * eat leading zeros — "00001234" is a different APA# from "1234")
- * and does NOT strip the "972" prefix (which in SPM's data is part
- * of the canonical number, not a separable area code).
+ * that isn't exactly 8 digits, and rejects any numeric value at or
+ * below APA_GARBAGE_MAX (placeholder / test records).
+ *
+ * Does NOT run parseInt to form the key (which would eat leading
+ * zeros — "00001234" is a different APA# from "1234") and does NOT
+ * strip the "972" prefix (which in SPM's data is part of the
+ * canonical number, not a separable area code).
  *
  * TeamRegistration's admin strips 972 + leading zeros for its own
  * data shape. Copying that behavior here mixed formats between the
@@ -1124,7 +1130,9 @@ const REPORT_SPECS = [
  */
 function normalizeApa(raw) {
   const digits = String(raw || '').replace(/\D/g, '');
-  return digits.length === 8 ? digits : '';
+  if (digits.length !== 8) return '';
+  if (parseInt(digits, 10) <= APA_GARBAGE_MAX) return '';
+  return digits;
 }
 
 // Header (lowercased) → column in `players` table.
@@ -1386,12 +1394,11 @@ async function executePlayerImport() {
       for (const r of (rows || [])) existing.add(r.member_number);
     }
 
-    // NOT NULL defaults for NEW rows only. Existing rows stay untouched.
-    for (const p of payload) {
-      if (existing.has(p.member_number)) continue;
-      if (!('first_name' in p)) p.first_name = '-';
-      if (!('last_name'  in p)) p.last_name  = '-';
-    }
+    // NOT NULL defaults for new rows live in the column definition on
+    // slate.players (DEFAULT '-'), so we don't need to pad the payload.
+    // Existing rows stay untouched because merge-duplicates only writes
+    // the fields we sent; new rows without first_name/last_name get
+    // auto-filled '-' by Postgres on INSERT.
 
     // PostgREST rejects bulk upserts where objects have different key sets
     // ("All object keys must match", PGRST102). Since our skip-empty-cell
@@ -1771,7 +1778,7 @@ async function runTeamScreenImport(file, pdf) {
                 ).join('')
           + '</tbody>'
         + '</table>'
-        + '<p class="hint" style="margin-top:6px">Paste the Division Listing for these division numbers, or drop an "All Division Information List" PDF, then re-import this Team Screen PDF to pick them up.</p>'
+        + '<p class="hint" style="margin-top:6px">Paste the Division Listing for these division numbers (Uploads tab &rarr; Paste Data), then re-import this Team Screen PDF to pick them up.</p>'
         + '</details></div>';
     }
 
@@ -1784,208 +1791,10 @@ async function runTeamScreenImport(file, pdf) {
 window.runTeamScreenImport = runTeamScreenImport;
 
 /* ══════════════════════════════════════════════════════════════════════
-   DIVISION INFORMATION LIST PDF IMPORT
-   Source: Nexus → Divisions → Report List → Division Information List by
-   Status. Columnar table of all divisions in the session:
-     Division Number | Division Name | Format | Number Of Teams | Has A Bye Team
-   Upserts into `divisions` against (session_id, operator_id, division_number).
-   Night / start date / weeks / fees aren't in this report and stay null;
-   those can still be filled in via a Division Listing paste later.
-   ══════════════════════════════════════════════════════════════════════ */
-/**
- * Parse the Division Information List using the predictable textual
- * shape of every data row:
- *
- *   <3-digit div#>  <name>  <format>  <integer team count>  <Yes|No>
- *
- * We peel right-to-left: Yes/No, then the integer, then the format
- * (matched against a closed APA vocabulary), then whatever remains
- * after the 3-digit prefix is the name. That lets "Masters" inside
- * a division name ("Westside Masters", "Vancouver Masters 2.0")
- * pass through harmlessly — it only gets read as the format when
- * it sits in the format slot (between the name and the integer).
- */
-/**
- * Every data row has the same predictable textual shape:
- *
- *   <3-digit div#>  <division name (1+ words)>  <format>  <integer>  <Yes|No>
- *
- * Parse right-to-left so the ambiguous piece (the name, which can
- * contain format-like words such as "Masters") is what's left over
- * after the fixed-shape fields have been peeled off:
- *
- *   1. Last token  → bye flag (Yes/No)
- *   2. Next token  → num_teams (integer)
- *   3. Next token(s) that match a known format vocabulary → format
- *   4. First token → division_number (3 digits, zero-padded)
- *   5. Everything in between → division name
- *
- * Using a closed format vocabulary (rather than a regex) is the
- * textual-structure lever: the report only ever emits formats from a
- * finite list published by APA. A "Masters" in the name column never
- * matches because we only accept format tokens in the slot that comes
- * right before the integer team count.
- */
-// Real vocabulary from the APA "All Division Information List" PDF.
-// The format column uses these exact strings (verified against a live
-// Spring 2026 Division Information List PDF on 2026-04-23).
-const DIVISION_FORMATS = [
-  '8-Ball Open',
-  '9-Ball Open',
-  '8-Ball Doubles',
-  '9-Ball Doubles',
-  '8-Ball Ladies',
-  '9-Ball Ladies',
-  'Masters',
-  'Jack & Jill 8-Ball',
-  'Jack & Jill 9-Ball'
-];
-// Sort longest-first so "Doubles 8-Ball" matches before "8-Ball".
-const DIVISION_FORMATS_SORTED = DIVISION_FORMATS.slice().sort((a, b) => b.length - a.length);
-
-function peelFormatFromEnd(s) {
-  for (const f of DIVISION_FORMATS_SORTED) {
-    if (s.endsWith(' ' + f) || s === f) {
-      return { format: f, rest: s.slice(0, s.length - f.length).trim() };
-    }
-  }
-  return null;
-}
-
-/**
- * Parse a single line's text into a row, or return null if the line
- * isn't a data row (header, totals footer, blank, page chrome).
- */
-function parseDivisionLine(text) {
-  const t = text.replace(/\s+/g, ' ').trim();
-  if (!t) return null;
-
-  // Must start with 3-digit division number.
-  const m = t.match(/^(\d{3})\s+(.+)$/);
-  if (!m) return null;
-  const divNumStr = m[1];
-  let rest = m[2];
-
-  // The "Has A Bye Team" column is OPTIONAL — APA leaves it blank when
-  // false (no "No" token, just nothing). So only strip a trailing Yes
-  // or No; absence is fine.
-  const byeMatch = rest.match(/\s+(Yes|No)$/i);
-  if (byeMatch) {
-    rest = rest.slice(0, rest.length - byeMatch[0].length).trim();
-  }
-
-  // Team count (integer) is required and always second-from-last
-  // (or last, when bye column is blank).
-  const teamsMatch = rest.match(/\s+(\d+)$/);
-  if (!teamsMatch) return null;
-  const numTeams = parseInt(teamsMatch[1], 10);
-  rest = rest.slice(0, rest.length - teamsMatch[0].length).trim();
-
-  // Peel the format off the end against the known vocabulary
-  // (longest match first, so "8-Ball Doubles" beats "8-Ball Open"
-  // when the input is a Doubles division).
-  const peeled = peelFormatFromEnd(rest);
-  if (!peeled) return null;    // unknown format → surface via console.warn below
-  const format = peeled.format;
-  const name = peeled.rest;
-  if (!name) return null;
-
-  return {
-    division_number: String(parseInt(divNumStr, 10)),
-    name,
-    format,
-    num_teams: numTeams
-  };
-}
-
-async function parseDivisionInfoPdf(pdf, onProgress) {
-  const rows = [];
-  const unknownFormatLines = [];
-  for (let p = 1; p <= pdf.numPages; p++) {
-    if (onProgress) onProgress(p, pdf.numPages);
-    const page = await pdf.getPage(p);
-    const lines = groupIntoLines((await page.getTextContent()).items);
-
-    for (const line of lines) {
-      const t = line.text;
-      if (!t) continue;
-      if (/Division\s+Number/i.test(t) && /Division\s+Name/i.test(t)) continue;  // header
-      if (/^Total\s+(Divisions|Teams):/i.test(t)) continue;                       // footer
-      if (!/^\d{3}\s/.test(t)) continue;                                          // not a data row
-
-      const row = parseDivisionLine(t);
-      if (row) {
-        rows.push(row);
-      } else {
-        // Starts with a 3-digit number but didn't match known format
-        // vocabulary — surface it so we can extend DIVISION_FORMATS.
-        unknownFormatLines.push(t);
-      }
-    }
-  }
-  if (unknownFormatLines.length) {
-    console.warn('[Division parser] Lines that looked like data rows but had unknown format:',
-      unknownFormatLines);
-  }
-  return rows;
-}
-
-async function runDivisionInfoImport(file, pdf) {
-  hideStatus('pdfProgress');
-  if (!currentSession) {
-    return setStatus('pdfProgress', 'No current session. Create one on the Sessions tab first.', 'err');
-  }
-
-  try {
-    if (!pdf) {
-      const pdfjsLib = await ensurePdfJs();
-      const buf = await file.arrayBuffer();
-      pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-    }
-
-    setStatus('pdfProgress', 'Parsing Division Information List…', 'progress');
-    const rows = await parseDivisionInfoPdf(pdf, (i, total) => {
-      setStatus('pdfProgress', 'Parsing page ' + i + ' / ' + total + '…', 'progress');
-    });
-    if (!rows.length) {
-      return setStatus('pdfProgress', 'No division rows parsed. Check that this is the "Division Information List by Status" report.', 'err');
-    }
-
-    // De-dupe in case a division appears twice (shouldn't, but be safe).
-    const byNum = new Map();
-    for (const r of rows) byNum.set(r.division_number, r);
-    // operator_id stays NULL on import — user tags each division on the Divisions tab.
-    // Upsert key is (session_id, division_number) now that operator_id is nullable.
-    const payload = [...byNum.values()].map(r => ({
-      session_id: currentSession.id,
-      division_number: r.division_number,
-      name: r.name,
-      format: r.format,
-      num_teams: r.num_teams
-    }));
-
-    setStatus('pdfProgress', 'Upserting ' + payload.length + ' division(s)…', 'progress');
-    for (let i = 0; i < payload.length; i += 500) {
-      await sb('POST',
-        'divisions?on_conflict=session_id,division_number',
-        payload.slice(i, i + 500),
-        { Prefer: 'resolution=merge-duplicates,return=minimal' });
-    }
-
-    setStatus('pdfProgress',
-      'Imported <strong>' + payload.length + '</strong> divisions (untagged). '
-      + 'Go to the <strong>Divisions</strong> tab to assign CR or SPM. '
-      + 'Night / start date / fees aren\u2019t in this report — paste a Division Listing if you need them.', 'ok');
-    await refreshCounts();
-  } catch (e) {
-    setStatus('pdfProgress', 'Import failed: ' + esc(e.message), 'err');
-  }
-}
-window.runDivisionInfoImport = runDivisionInfoImport;
-
-/* ══════════════════════════════════════════════════════════════════════
-   FILE DROP ROUTER — inspect first page of a dropped PDF, route to the
-   right importer. Extend this map when new PDF types are added.
+   FILE DROP ROUTER — currently only Team Screen PDFs are supported. The
+   old "All Division Information List" PDF path was removed because the
+   paste-based Division Listing flow covers everything the PDF did and
+   more (night / start date / weeks / fees, none of which the PDF had).
    ══════════════════════════════════════════════════════════════════════ */
 async function handleFileDrop(file) {
   if (!file) return;
@@ -1994,7 +1803,7 @@ async function handleFileDrop(file) {
     return setStatus('pdfProgress', 'Only PDF files are supported here. Text reports go in the paste boxes below.', 'err');
   }
 
-  setStatus('pdfProgress', 'Loading "' + (file.name || 'PDF') + '"…', 'progress');
+  setStatus('pdfProgress', 'Loading "' + (file.name || 'PDF') + '"\u2026', 'progress');
   try {
     const pdfjsLib = await ensurePdfJs();
     const buf = await file.arrayBuffer();
@@ -2006,12 +1815,10 @@ async function handleFileDrop(file) {
     if (/Team\s+Screen\s+for/i.test(firstText)) {
       return await runTeamScreenImport(file, pdf);
     }
-    if (/Division\s+Information\s+List/i.test(firstText)) {
-      return await runDivisionInfoImport(file, pdf);
-    }
     setStatus('pdfProgress',
-      'Unrecognized PDF. Expected "Team Screen for:" or "Division Information List". '
-      + 'First-page text starts with: "' + firstText.substring(0, 140).trim() + '…"',
+      'Unrecognized PDF. Expected "Team Screen for:" on the first page. '
+      + 'Division info is paste-only now \u2014 use the Paste Data card below. '
+      + 'First-page text starts with: "' + firstText.substring(0, 140).trim() + '\u2026"',
       'err');
   } catch (e) {
     setStatus('pdfProgress', 'Failed to open PDF: ' + esc(e.message), 'err');
