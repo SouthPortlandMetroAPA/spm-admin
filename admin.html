@@ -453,6 +453,116 @@ input:focus, select:focus, textarea:focus {
 .badge.warn  { background: rgba(243, 156, 18, 0.12); color: var(--amber); }
 
 /* ── Email HQ specifics ── */
+/* ══════════════════════════════════════════════════════════════════════
+   EMAIL HQ — pill-button filter toolbar + stacked division cards
+   Mirrors the layout of the legacy SpmAdmin Email HQ: one filter row per
+   facet (Operator / Role / Format / Night), each with a label on the left
+   and multi-select pill buttons. Active buttons get a per-facet brand
+   color (Operator red/blue, Role purple, Format green, Night amber).
+   ══════════════════════════════════════════════════════════════════════ */
+.ehq-toolbar-card { margin-bottom: 16px; padding: 18px 20px; }
+.ehq-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.ehq-filter-row:last-of-type { border-bottom: none; }
+.ehq-filter-label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  min-width: 72px;
+}
+.ehq-filter-btns { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; }
+.ehq-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}
+.ehq-action-row > .ehq-count { margin-left: auto; font-size: 0.78rem; color: var(--muted); font-weight: 600; }
+.ehq-action-row > .ehq-feedback { font-size: 0.78rem; color: var(--success); font-weight: 700; display: none; }
+.ehq-action-row > .ehq-feedback.shown { display: inline; }
+
+.ehq-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 16px;
+  min-height: 34px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  border-radius: 999px;
+  border: 1.5px solid var(--border);
+  background: #fff;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.ehq-btn:hover { background: #f5f5f5; border-color: #aaa; color: var(--text); }
+.ehq-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.ehq-btn.ehq-primary { background: var(--spm-accent); border-color: var(--spm-accent); color: #fff; }
+.ehq-btn.ehq-primary:hover:not(:disabled) { background: #1447b8; border-color: #1447b8; color: #fff; }
+.ehq-btn.ehq-primary:disabled { background: #93c5fd; border-color: #93c5fd; color: #fff; }
+
+/* Per-facet active-state colors — match legacy look */
+.ehq-btn.active[data-brand="cra"]  { background: #fef2f2; border-color: var(--spm-primary); color: var(--spm-primary); }
+.ehq-btn.active[data-brand="spm"]  { background: #eff6ff; border-color: var(--spm-accent);  color: var(--spm-accent); }
+.ehq-btn.active[data-facet="role"]  { background: #fdf4ff; border-color: #a855f7; color: #7e22ce; }
+.ehq-btn.active[data-facet="format"]{ background: #f0fdf4; border-color: #16a34a; color: #15803d; }
+.ehq-btn.active[data-facet="night"] { background: #fffbeb; border-color: #f59e0b; color: #b45309; }
+
+/* Division cards — stacked, click header to expand, checkbox for select */
+.ehq-div-card {
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+.ehq-div-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px;
+  cursor: pointer;
+  user-select: none;
+}
+.ehq-div-head:hover { background: #f8f9fb; }
+.ehq-div-cb { width: 18px; height: 18px; accent-color: var(--spm-accent); cursor: pointer; }
+.ehq-div-title { font-size: 0.95rem; font-weight: 800; flex: 1; }
+.ehq-div-meta  { font-size: 0.78rem; color: var(--muted); text-align: right; }
+.ehq-div-chev  { font-size: 0.8rem; color: var(--muted); transition: transform 0.2s; margin-left: 10px; }
+.ehq-div-card.expanded .ehq-div-chev { transform: rotate(90deg); }
+.ehq-div-body  { display: none; padding: 0 20px 16px; border-top: 1px solid var(--border); }
+.ehq-div-card.expanded .ehq-div-body { display: block; padding-top: 14px; }
+.ehq-team {
+  padding: 10px 0;
+  border-bottom: 1px dashed var(--border);
+  font-size: 0.84rem;
+}
+.ehq-team:last-child { border-bottom: none; }
+.ehq-team-name { font-weight: 700; }
+.ehq-team-meta { color: var(--muted); font-size: 0.75rem; }
+.ehq-member { margin: 3px 0; padding-left: 14px; }
+.ehq-member .role-tag {
+  display: inline-block;
+  min-width: 80px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+.ehq-member .email { color: var(--text); }
+.ehq-member .no-email { color: var(--muted); font-style: italic; }
+
 .division-card { margin-bottom: 14px; }
 .division-card .division-head {
   display: flex; justify-content: space-between; align-items: center;
@@ -757,33 +867,41 @@ input:focus, select:focus, textarea:focus {
     </div>
 
     <!-- ══════════════════════════════════════════════════════════════
-         TAB: EMAIL HQ
+         TAB: EMAIL HQ — pill filters + stacked division cards + copy
          ══════════════════════════════════════════════════════════════ -->
     <div id="tab-emailhq" class="tab-panel">
-      <div class="card">
-        <h2>Email HQ</h2>
-        <p class="hint">Captain and co-captain email directory for the current session.</p>
-        <div class="form-row" style="margin-top: 10px">
-          <div>
-            <label for="emailFilterOp">Operator</label>
-            <select id="emailFilterOp" onchange="renderEmailHQ()"><option value="">All</option></select>
+      <div class="card ehq-toolbar-card">
+        <div class="ehq-filter-row">
+          <span class="ehq-filter-label">Operator</span>
+          <div class="ehq-filter-btns" id="ehqOperatorBtns"></div>
+        </div>
+        <div class="ehq-filter-row">
+          <span class="ehq-filter-label">Role</span>
+          <div class="ehq-filter-btns" id="ehqRoleBtns">
+            <button class="ehq-btn" data-role="Captain">Captains</button>
+            <button class="ehq-btn" data-role="Co-Captain">Co-Captains</button>
+            <button class="ehq-btn" data-role="Member">Players</button>
           </div>
-          <div>
-            <label for="emailFilterNight">Night</label>
-            <select id="emailFilterNight" onchange="renderEmailHQ()"><option value="">All</option></select>
-          </div>
-          <div>
-            <label for="emailSearch">Search</label>
-            <input type="text" id="emailSearch" placeholder="team, captain, email…" oninput="renderEmailHQ()">
-          </div>
-          <div>
-            <label>&nbsp;</label>
-            <button class="btn btn-outline btn-sm" onclick="loadEmailHQ()">Reload</button>
-          </div>
+        </div>
+        <div class="ehq-filter-row">
+          <span class="ehq-filter-label">Format</span>
+          <div class="ehq-filter-btns" id="ehqFormatBtns"></div>
+        </div>
+        <div class="ehq-filter-row">
+          <span class="ehq-filter-label">Night</span>
+          <div class="ehq-filter-btns" id="ehqNightBtns"></div>
+        </div>
+        <div class="ehq-action-row">
+          <button class="ehq-btn" onclick="ehqSelectAll()">All</button>
+          <button class="ehq-btn" onclick="ehqSelectNone()">None</button>
+          <button class="ehq-btn" onclick="ehqReset()">Reset</button>
+          <button class="ehq-btn ehq-primary" id="ehqCopyBtn" onclick="ehqCopyEmails()">Copy Emails</button>
+          <span class="ehq-feedback" id="ehqCopyFeedback"></span>
+          <span class="ehq-count" id="ehqCount">0 emails selected</span>
         </div>
       </div>
 
-      <div id="emailHqOutput"></div>
+      <div id="emailHqOutput"><p class="hint" style="padding:16px">Loading&hellip;</p></div>
     </div>
 
   </div>
@@ -799,7 +917,7 @@ input:focus, select:focus, textarea:focus {
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '0.2';
+const APP_VERSION = '0.3';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -2945,112 +3063,252 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 /* ══════════════════════════════════════════════════════════════════════
-   EMAIL HQ VIEW
+   EMAIL HQ VIEW (legacy SpmAdmin "Email HQ" parity)
+   ══════════════════════════════════════════════════════════════════════
+   Pill-button filters (multi-select) for Operator / Role / Format / Night.
+   Stacked division cards with a checkbox + expand chevron. Clicking the
+   checkbox selects every matched-role email in that division. "Copy Emails"
+   collects the selected emails, dedupes, and copies to the clipboard.
    ══════════════════════════════════════════════════════════════════════ */
 let _emailData = null;
+// Active filter state. Multi-select — empty set = "all" for that facet.
+let _ehqFilters = { operator: new Set(), role: new Set(), format: new Set(), night: new Set() };
+// Per-division checkbox state: division_id → true/false
+let _ehqDivSelected = new Set();
 
 async function loadEmailHQ() {
   const out = document.getElementById('emailHqOutput');
   if (!currentSession) {
-    out.innerHTML = '<div class="card"><p class="hint">No current session. Create one on the Sessions tab.</p></div>';
+    out.innerHTML = '<p class="hint" style="padding:16px">No current session. Create one on the Sessions tab.</p>';
     return;
   }
-  out.innerHTML = '<div class="card"><p class="hint">Loading…</p></div>';
+  out.innerHTML = '<p class="hint" style="padding:16px">Loading\u2026</p>';
 
   try {
-    // One big query — divisions in current session, with teams, with memberships (Captain/Co-Captain only), with players joined.
+    // All divisions for the session (including untagged — operator_id may be NULL),
+    // with teams, memberships, and joined players. Role is captured per membership
+    // so the Role filter can later narrow what emails get selected.
     const url =
       'divisions?select='
-      + 'id,division_number,name,format,night_of_play,operator:operators!inner(id,name),'
+      + 'id,division_number,name,format,night_of_play,operator_id,'
       + 'teams(id,team_number,team_name,'
         + 'memberships:team_memberships(role,name_raw,player:players(member_number,first_name,nickname,last_name,email))'
       + ')'
       + '&session_id=eq.' + currentSession.id
       + '&order=division_number.asc';
     _emailData = await sb('GET', url);
+    // Numeric sort on division_number (it's TEXT in the DB but represents an int).
+    _emailData.sort((a, b) => parseInt(a.division_number, 10) - parseInt(b.division_number, 10));
 
-    // Populate night filter
-    const nights = [...new Set(_emailData.map(d => d.night_of_play).filter(Boolean))];
-    const nightSel = document.getElementById('emailFilterNight');
-    nightSel.innerHTML = '<option value="">All nights</option>' + nights.sort().map(n => `<option>${esc(n)}</option>`).join('');
-
+    _renderEhqFilters();
     renderEmailHQ();
   } catch (e) {
-    out.innerHTML = '<div class="card"><p class="status-line shown err">Failed: ' + esc(e.message) + '</p></div>';
+    out.innerHTML = '<p class="status-line shown err">Failed to load: ' + esc(e.message) + '</p>';
   }
+}
+
+/* Populate the filter toolbar's dynamic button groups (Operator / Format /
+ * Night) based on the data. Role buttons are static (declared in HTML). */
+function _renderEhqFilters() {
+  const opBtns = document.getElementById('ehqOperatorBtns');
+  opBtns.innerHTML = operators.map(o => {
+    const brand = o.short_code === 'SPM' ? 'spm' : (o.short_code === 'CRA' ? 'cra' : '');
+    return '<button class="ehq-btn" data-facet="operator" data-brand="' + brand + '" data-value="' + o.id + '">' + esc(o.name) + '</button>';
+  }).join('');
+
+  // Format / Night values come from the loaded data
+  const fmts   = [...new Set((_emailData || []).map(d => d.format).filter(Boolean))].sort();
+  const nights = [...new Set((_emailData || []).map(d => d.night_of_play).filter(Boolean))];
+  const dayOrder = { Monday:1, Tuesday:2, Wednesday:3, Thursday:4, Friday:5, Saturday:6, Sunday:7 };
+  nights.sort((a, b) => (dayOrder[a] || 99) - (dayOrder[b] || 99));
+
+  document.getElementById('ehqFormatBtns').innerHTML = fmts.map(f =>
+    '<button class="ehq-btn" data-facet="format" data-value="' + esc(f) + '">' + esc(f) + '</button>').join('');
+  document.getElementById('ehqNightBtns').innerHTML = nights.map(n =>
+    '<button class="ehq-btn" data-facet="night" data-value="' + esc(n) + '">' + esc(n) + '</button>').join('');
+
+  // One delegated click handler on the whole toolbar card.
+  const card = document.querySelector('.ehq-toolbar-card');
+  if (!card.dataset.wired) {
+    card.addEventListener('click', (ev) => {
+      const btn = ev.target.closest('.ehq-btn');
+      if (!btn || !btn.dataset.facet) return;
+      const facet = btn.dataset.facet;
+      const value = btn.dataset.value || btn.dataset.role;  // role uses data-role
+      const key = btn.dataset.role ? btn.dataset.role : value;
+      if (_ehqFilters[facet].has(key)) _ehqFilters[facet].delete(key);
+      else _ehqFilters[facet].add(key);
+      btn.classList.toggle('active');
+      renderEmailHQ();
+    });
+    card.dataset.wired = '1';
+  }
+
+  // Wire role buttons (they're static, no data-value but have data-role)
+  document.querySelectorAll('#ehqRoleBtns .ehq-btn').forEach(b => {
+    b.dataset.facet = 'role';
+  });
 }
 
 function renderEmailHQ() {
   const out = document.getElementById('emailHqOutput');
   if (!_emailData) { out.innerHTML = ''; return; }
-  const opFilter    = document.getElementById('emailFilterOp').value;
-  const nightFilter = document.getElementById('emailFilterNight').value;
-  const q = (document.getElementById('emailSearch').value || '').toLowerCase().trim();
 
+  // Filter divisions by active filter sets. Empty set = don't restrict.
   const filtered = _emailData.filter(d => {
-    if (opFilter && String(d.operator.id) !== opFilter) return false;
-    if (nightFilter && d.night_of_play !== nightFilter) return false;
+    if (_ehqFilters.operator.size && !_ehqFilters.operator.has(String(d.operator_id))) return false;
+    if (_ehqFilters.format.size   && !_ehqFilters.format.has(d.format || '')) return false;
+    if (_ehqFilters.night.size    && !_ehqFilters.night.has(d.night_of_play || '')) return false;
     return true;
   });
 
-  if (!filtered.length) { out.innerHTML = '<div class="card"><p class="hint">No divisions match filters.</p></div>'; return; }
+  if (!filtered.length) {
+    out.innerHTML = '<p class="hint" style="padding:16px">No divisions match these filters.</p>';
+    _updateEhqCount();
+    return;
+  }
 
   let html = '';
-  let totalTeams = 0;
   for (const d of filtered) {
-    const teams = (d.teams || []).slice().sort((a,b) => a.team_number.localeCompare(b.team_number));
-    // Apply text search at the team level
-    const matchedTeams = q ? teams.filter(t => {
-      const hay = [
-        t.team_number, t.team_name,
-        ...(t.memberships || []).map(m => (m.player ? (m.player.first_name + ' ' + m.player.last_name) : (m.name_raw || '')) + ' ' + (m.player ? (m.player.email || '') : ''))
-      ].join(' ').toLowerCase();
-      return hay.indexOf(q) !== -1;
-    }) : teams;
-    if (!matchedTeams.length) continue;
-    totalTeams += matchedTeams.length;
-
-    html += `
-      <div class="card division-card">
-        <div class="division-head">
-          <h3>Division ${esc(d.division_number)} — ${esc(d.name)}</h3>
-          <div class="division-meta">
-            ${esc(d.operator.name)} · ${esc(d.night_of_play || '')} · ${esc(d.format || '')} · ${matchedTeams.length} team${matchedTeams.length===1?'':'s'}
-          </div>
-        </div>
-        ${matchedTeams.map(t => renderTeamRow(t)).join('')}
-      </div>
-    `;
+    const teamCount = (d.teams || []).length;
+    const isSelected = _ehqDivSelected.has(d.id);
+    const meta = [d.format, d.night_of_play, teamCount + ' team' + (teamCount === 1 ? '' : 's')]
+      .filter(Boolean).join(' \u00b7 ');
+    html += '<div class="ehq-div-card" data-div-id="' + d.id + '">'
+      + '<div class="ehq-div-head">'
+      +   '<input type="checkbox" class="ehq-div-cb" data-div-id="' + d.id + '"' + (isSelected ? ' checked' : '') + '>'
+      +   '<div class="ehq-div-title">' + esc(d.name) + ' <span style="color:var(--muted);font-weight:600;font-size:0.8rem">#' + esc(d.division_number) + '</span></div>'
+      +   '<div class="ehq-div-meta">' + esc(meta) + '</div>'
+      +   '<div class="ehq-div-chev">\u25B6</div>'
+      + '</div>'
+      + '<div class="ehq-div-body">' + _ehqRenderTeams(d) + '</div>'
+      + '</div>';
   }
-  if (!totalTeams) { out.innerHTML = '<div class="card"><p class="hint">No teams match your search.</p></div>'; return; }
   out.innerHTML = html;
-}
 
-function renderTeamRow(t) {
-  const cap = (t.memberships || []).find(m => m.role === 'Captain');
-  const coCap = (t.memberships || []).find(m => m.role === 'Co-Captain');
-  return `
-    <div class="team-row">
-      <div class="team-num">#${esc(t.team_number)}</div>
-      <div class="team-name">${esc(t.team_name)}</div>
-      <div class="contact">${renderMembership('Cap', cap)}</div>
-      <div class="contact">${renderMembership('Co', coCap)}</div>
-    </div>
-  `;
-}
-
-function renderMembership(label, m) {
-  if (!m) return `<span class="label">${label}:</span> <span class="unmatched">—</span>`;
-  const displayName = m.player
-    ? [m.player.first_name, m.player.last_name].filter(Boolean).join(' ')
-    : (m.name_raw || '—');
-  if (m.player && m.player.email) {
-    const em = m.player.email;
-    return `<span class="label">${label}:</span> ${esc(displayName)} &lt;<span class="email">${esc(em)}</span>&gt;`
-      + `<button class="copy-btn" onclick="copyEmail('${esc(em).replace(/'/g,"&#39;")}', this)">copy</button>`;
+  // Wire division-card interactions (delegated; one listener).
+  if (!out.dataset.wired) {
+    out.addEventListener('click', (ev) => {
+      const cb = ev.target.closest('.ehq-div-cb');
+      if (cb) {
+        const divId = parseInt(cb.dataset.divId, 10);
+        if (cb.checked) _ehqDivSelected.add(divId); else _ehqDivSelected.delete(divId);
+        ev.stopPropagation();
+        _updateEhqCount();
+        return;
+      }
+      const head = ev.target.closest('.ehq-div-head');
+      if (head) {
+        const card = head.parentElement;
+        card.classList.toggle('expanded');
+      }
+    });
+    out.dataset.wired = '1';
   }
-  const why = m.player ? 'no email on record' : 'name didn\u2019t match a player';
-  return `<span class="label">${label}:</span> ${esc(displayName)} <span class="unmatched">(${esc(why)})</span>`;
+  _updateEhqCount();
+}
+
+function _ehqRenderTeams(div) {
+  const teams = (div.teams || []).slice().sort((a, b) =>
+    String(a.team_number || '').localeCompare(String(b.team_number || '')));
+  if (!teams.length) return '<p class="hint" style="padding:4px 0">No teams in this division yet.</p>';
+  return teams.map(t => {
+    const members = (t.memberships || []).slice().sort((a, b) => {
+      const order = { Captain: 1, 'Co-Captain': 2, Member: 3 };
+      return (order[a.role] || 9) - (order[b.role] || 9);
+    });
+    return '<div class="ehq-team">'
+      + '<div class="ehq-team-name">#' + esc(t.team_number || '') + ' ' + esc(t.team_name || '')
+        + ' <span class="ehq-team-meta">(' + members.length + ' member' + (members.length === 1 ? '' : 's') + ')</span></div>'
+      + members.map(m => {
+          const name = m.player
+            ? [m.player.first_name, m.player.last_name].filter(Boolean).join(' ')
+            : (m.name_raw || '\u2014');
+          const em = m.player && m.player.email ? m.player.email : '';
+          return '<div class="ehq-member">'
+            + '<span class="role-tag">' + esc(m.role) + '</span> '
+            + esc(name) + ' '
+            + (em
+                ? '<span class="email">&lt;' + esc(em) + '&gt;</span>'
+                : '<span class="no-email">(no email)</span>')
+            + '</div>';
+        }).join('')
+      + '</div>';
+  }).join('');
+}
+
+/* Emails that match: (division is selected) ∧ (role filter hits this member) ∧
+ * (player has an email). If no role filter is active, all roles contribute. */
+function _ehqCollectEmails() {
+  if (!_emailData) return [];
+  const emails = new Set();
+  const roleFilter = _ehqFilters.role;
+  const needRole = roleFilter.size > 0;
+  for (const d of _emailData) {
+    if (!_ehqDivSelected.has(d.id)) continue;
+    // Re-apply filter toolbar to the selection — don't include a division
+    // that's selected but currently hidden by a Format/Night filter.
+    if (_ehqFilters.operator.size && !_ehqFilters.operator.has(String(d.operator_id))) continue;
+    if (_ehqFilters.format.size   && !_ehqFilters.format.has(d.format || '')) continue;
+    if (_ehqFilters.night.size    && !_ehqFilters.night.has(d.night_of_play || '')) continue;
+    for (const t of (d.teams || [])) {
+      for (const m of (t.memberships || [])) {
+        if (needRole && !roleFilter.has(m.role)) continue;
+        if (m.player && m.player.email) emails.add(m.player.email.trim().toLowerCase());
+      }
+    }
+  }
+  return [...emails].sort();
+}
+
+function _updateEhqCount() {
+  const n = _ehqCollectEmails().length;
+  const el = document.getElementById('ehqCount');
+  if (el) el.textContent = n + ' email' + (n === 1 ? '' : 's') + ' selected';
+  const btn = document.getElementById('ehqCopyBtn');
+  if (btn) btn.disabled = n === 0;
+}
+
+async function ehqCopyEmails() {
+  const emails = _ehqCollectEmails();
+  if (!emails.length) return;
+  const text = emails.join(', ');
+  try {
+    await navigator.clipboard.writeText(text);
+    const fb = document.getElementById('ehqCopyFeedback');
+    fb.textContent = 'Copied ' + emails.length + ' email' + (emails.length === 1 ? '' : 's') + '!';
+    fb.classList.add('shown');
+    setTimeout(() => fb.classList.remove('shown'), 2000);
+  } catch (e) {
+    alert('Copy failed: ' + e.message + '\n\nEmails:\n' + text);
+  }
+}
+
+function ehqSelectAll() {
+  // Select every division currently visible under the filter toolbar.
+  if (!_emailData) return;
+  for (const d of _emailData) {
+    if (_ehqFilters.operator.size && !_ehqFilters.operator.has(String(d.operator_id))) continue;
+    if (_ehqFilters.format.size   && !_ehqFilters.format.has(d.format || '')) continue;
+    if (_ehqFilters.night.size    && !_ehqFilters.night.has(d.night_of_play || '')) continue;
+    _ehqDivSelected.add(d.id);
+  }
+  renderEmailHQ();
+}
+
+function ehqSelectNone() {
+  _ehqDivSelected.clear();
+  renderEmailHQ();
+}
+
+function ehqReset() {
+  _ehqFilters.operator.clear();
+  _ehqFilters.role.clear();
+  _ehqFilters.format.clear();
+  _ehqFilters.night.clear();
+  _ehqDivSelected.clear();
+  document.querySelectorAll('.ehq-toolbar-card .ehq-btn.active').forEach(b => b.classList.remove('active'));
+  renderEmailHQ();
 }
 
 function copyEmail(em, btn) {
