@@ -99,6 +99,13 @@ html,body {
   opacity: 0.95;
   margin-top: 4px;
 }
+.header .subpage {
+  font-size: 1.2rem;
+  font-weight: 500;
+  font-style: italic;
+  opacity: 0.85;
+  margin-left: 10px;
+}
 .admin-badge {
   position: absolute; top: 10px; right: 12px;
   display: inline-block;
@@ -112,8 +119,10 @@ html,body {
 }
 .session-pill {
   position: absolute; top: 10px; left: 12px;
-  display: inline-block;
-  padding: 4px 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px 4px 12px;
   border-radius: var(--pill-radius);
   font-size: 0.7rem; font-weight: 700;
   letter-spacing: 0.03em;
@@ -121,6 +130,24 @@ html,body {
   border: 1.5px solid rgba(255,255,255,0.5);
   color: #fff;
 }
+.session-pill .session-pill-label { font-size: 0.62rem; letter-spacing: 0.12em; opacity: 0.85; }
+.session-pill select.session-pill-select {
+  background: rgba(255,255,255,0.15);
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.45);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 22px;
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 10 10"><path fill="%23fff" d="M1 3l4 4 4-4z"/></svg>');
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+}
+.session-pill select.session-pill-select option { color: #1a1a1a; }
 
 /* ── Key gate ── */
 .key-gate { text-align: center; padding: 60px 16px; }
@@ -465,10 +492,8 @@ input:focus, select:focus, textarea:focus {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--border);
+  padding: 8px 0;
 }
-.ehq-filter-row:last-of-type { border-bottom: none; }
 .ehq-filter-label {
   font-size: 0.65rem;
   font-weight: 700;
@@ -498,7 +523,7 @@ input:focus, select:focus, textarea:focus {
   min-height: 34px;
   font-size: 0.78rem;
   font-weight: 700;
-  border-radius: 999px;
+  border-radius: 12px;
   border: 1.5px solid var(--border);
   background: #fff;
   color: var(--muted);
@@ -541,27 +566,74 @@ input:focus, select:focus, textarea:focus {
 .ehq-div-chev  { font-size: 0.8rem; color: var(--muted); transition: transform 0.2s; margin-left: 10px; }
 .ehq-div-card.expanded .ehq-div-chev { transform: rotate(90deg); }
 .ehq-div-body  { display: none; padding: 0 20px 16px; border-top: 1px solid var(--border); }
-.ehq-div-card.expanded .ehq-div-body { display: block; padding-top: 14px; }
-.ehq-team {
-  padding: 10px 0;
-  border-bottom: 1px dashed var(--border);
-  font-size: 0.84rem;
-}
-.ehq-team:last-child { border-bottom: none; }
-.ehq-team-name { font-weight: 700; }
-.ehq-team-meta { color: var(--muted); font-size: 0.75rem; }
-.ehq-member { margin: 3px 0; padding-left: 14px; }
-.ehq-member .role-tag {
-  display: inline-block;
-  min-width: 80px;
-  font-size: 0.65rem;
+.ehq-div-card.expanded .ehq-div-body { display: block; padding-top: 10px; }
+
+/* ── 4-column team table inside expanded division body ── */
+.ehq-team-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.ehq-team-table th {
+  text-align: left;
+  padding: 8px 6px;
+  border-bottom: 2px solid #e5e7eb;
+  color: #6b7280;
   font-weight: 700;
+  font-size: 0.68rem;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--muted);
+  letter-spacing: 0.06em;
 }
-.ehq-member .email { color: var(--text); }
-.ehq-member .no-email { color: var(--muted); font-style: italic; }
+.ehq-team-table td {
+  padding: 8px 6px;
+  border-bottom: 1px solid #f3f4f6;
+  vertical-align: top;
+}
+.ehq-team-table td:first-child { font-weight: 600; }
+.ehq-team-table input[type="checkbox"] {
+  width: 18px; height: 18px;
+  accent-color: var(--spm-accent);
+  cursor: pointer;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+.ehq-team-table input[type="checkbox"]:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.ehq-team-table .ehq-tn { font-weight: 700; color: var(--spm-accent); margin-right: 4px; }
+.ehq-mail {
+  display: block;
+  padding-left: 24px;
+  font-size: 0.72rem;
+  color: var(--spm-accent);
+  word-break: break-all;
+  margin-top: 2px;
+}
+.ehq-mail-missing {
+  display: block;
+  padding-left: 24px;
+  font-size: 0.72rem;
+  font-style: italic;
+  color: #d97706;
+  margin-top: 2px;
+}
+.ehq-none {
+  color: #9ca3af;
+  font-style: italic;
+  font-size: 0.75rem;
+}
+.ehq-player-count { color: var(--muted); font-size: 0.78rem; font-weight: 500; }
+
+/* Player detail sub-row: collapsed by default, shown when the team row is expanded */
+.ehq-player-detail { display: none; }
+tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
+.ehq-player-detail td {
+  padding: 2px 6px 10px !important;
+  font-size: 0.72rem;
+  color: #374151;
+}
+.ehq-player-detail .ehq-p-list { padding-left: 28px; line-height: 1.55; }
+.ehq-player-detail .ehq-p-entry { display: block; }
+.ehq-player-detail .ehq-p-name { font-weight: 500; color: #374151; }
+.ehq-player-detail .ehq-p-email { color: var(--spm-accent); margin-left: 4px; }
+.ehq-player-detail .ehq-p-noemail { color: #d97706; font-style: italic; margin-left: 4px; }
 
 .division-card { margin-bottom: 14px; }
 .division-card .division-head {
@@ -659,9 +731,11 @@ input:focus, select:focus, textarea:focus {
 
   <div class="header">
     <div class="admin-badge">ADMIN</div>
-    <div class="session-pill" id="sessionPill">—</div>
-    <h1 id="appNameH1">Slate</h1>
-    <div class="subtitle">Paste APA reports · captain directory · Supabase-backed</div>
+    <div class="session-pill" id="sessionPillWrap">
+      <span class="session-pill-label">SESSION</span>
+      <select class="session-pill-select" id="sessionPillSelect" onchange="setCurrentSessionFromHeader(this.value)"></select>
+    </div>
+    <h1 id="appNameH1">Slate <span class="subpage" id="appSubpage"></span></h1>
   </div>
 
   <!-- Version-update overlay. Shown when the 30s version check finds that
@@ -917,7 +991,7 @@ input:focus, select:focus, textarea:focus {
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '0.5';
+const APP_VERSION = '0.6';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -2281,9 +2355,18 @@ async function init() {
   await refreshCounts();
 }
 
+const TAB_LABEL = {
+  sessions:  'Sessions',
+  uploads:   'Uploads',
+  divisions: 'Divisions',
+  emailhq:   'Email HQ'
+};
+
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + name));
+  const sub = document.getElementById('appSubpage');
+  if (sub) sub.textContent = TAB_LABEL[name] || '';
   if (name === 'emailhq') loadEmailHQ();
   if (name === 'divisions') renderDivisionsTab();
 }
@@ -2312,10 +2395,36 @@ async function loadSessions() {
 }
 
 function renderSessionPill() {
-  const el = document.getElementById('sessionPill');
-  el.textContent = currentSession ? ('Current: ' + currentSession.name) : 'No current session';
+  const sel = document.getElementById('sessionPillSelect');
+  if (sel) {
+    sel.innerHTML = sessions.length
+      ? sessions.map(s => `<option value="${s.id}"${s.is_current ? ' selected' : ''}>${esc(s.name)}</option>`).join('')
+      : '<option value="">(none)</option>';
+  }
   const scopeEl = document.getElementById('sessionScopedLabel');
   if (scopeEl) scopeEl.textContent = currentSession ? currentSession.name : '(none)';
+}
+
+/* Header's session selector fires this. Flips is_current on the target
+ * session; the unique partial index on (is_current=true) forces exactly
+ * one row current, so we atomically flip everyone else to false in one
+ * query using a CASE expression. */
+async function setCurrentSessionFromHeader(newId) {
+  const id = parseInt(newId, 10);
+  if (!id || !currentSession || id === currentSession.id) return;
+  try {
+    // Un-current everything, then mark the selected row. Two PATCHes
+    // in sequence beats a race-prone single PATCH with subselect via REST.
+    await sb('PATCH', 'sessions?is_current=eq.true', { is_current: false });
+    await sb('PATCH', 'sessions?id=eq.' + id, { is_current: true });
+    await loadSessions();   // re-populates dropdown + currentSession
+    await refreshCounts();
+    // If an email-hq or divisions view was rendered, refresh them
+    if (document.getElementById('tab-emailhq').classList.contains('active')) await loadEmailHQ();
+    if (document.getElementById('tab-divisions').classList.contains('active')) await renderDivisionsTab();
+  } catch (e) {
+    alert('Could not switch session: ' + e.message);
+  }
 }
 
 function renderSessions() {
@@ -3097,8 +3206,12 @@ document.addEventListener('DOMContentLoaded', () => {
 let _emailData = null;
 // Active filter state. Multi-select — empty set = "all" for that facet.
 let _ehqFilters = { operator: new Set(), role: new Set(), format: new Set(), night: new Set() };
-// Per-division checkbox state: division_id → true/false
-let _ehqDivSelected = new Set();
+// Per-cell selection state. Keys: "<divId>_<teamId>_<role>" where role is
+// one of 'Captain' | 'Co-Captain' | 'Member'. A role entry is present
+// iff that cell is selected and contributes emails. Division-level and
+// team-level checkboxes are DERIVED (checked if all enabled children are
+// selected; indeterminate if some are).
+let _ehqSel = new Set();
 
 async function loadEmailHQ() {
   const out = document.getElementById('emailHqOutput');
@@ -3195,13 +3308,14 @@ function renderEmailHQ() {
   let html = '';
   for (const d of filtered) {
     const teamCount = (d.teams || []).length;
-    const isSelected = _ehqDivSelected.has(d.id);
     const meta = [d.format, d.night_of_play, teamCount + ' team' + (teamCount === 1 ? '' : 's')]
       .filter(Boolean).join(' \u00b7 ');
+    const divState = _ehqDivCheckState(d);
     html += '<div class="ehq-div-card" data-div-id="' + d.id + '">'
       + '<div class="ehq-div-head">'
-      +   '<input type="checkbox" class="ehq-div-cb" data-div-id="' + d.id + '"' + (isSelected ? ' checked' : '') + '>'
-      +   '<div class="ehq-div-title">' + esc(d.name) + ' <span style="color:var(--muted);font-weight:600;font-size:0.8rem">#' + esc(d.division_number) + '</span></div>'
+      +   '<input type="checkbox" class="ehq-div-cb" data-div-id="' + d.id + '"'
+      +     (divState === 'checked' ? ' checked' : '') + (divState === 'none' ? ' data-empty="1"' : '') + '>'
+      +   '<div class="ehq-div-title">' + esc(d.name) + '</div>'
       +   '<div class="ehq-div-meta">' + esc(meta) + '</div>'
       +   '<div class="ehq-div-chev">\u25B6</div>'
       + '</div>'
@@ -3210,75 +3324,275 @@ function renderEmailHQ() {
   }
   out.innerHTML = html;
 
-  // Wire division-card interactions (delegated; one listener).
+  // Set indeterminate state on division-level checkboxes after DOM exists.
+  for (const d of filtered) {
+    const cb = out.querySelector('.ehq-div-cb[data-div-id="' + d.id + '"]');
+    if (!cb) continue;
+    cb.indeterminate = _ehqDivCheckState(d) === 'partial';
+  }
+  _ehqPaintAllTeamParents(out);
+
+  // Delegated click handler for checkboxes + expand toggles.
   if (!out.dataset.wired) {
     out.addEventListener('click', (ev) => {
-      const cb = ev.target.closest('.ehq-div-cb');
-      if (cb) {
-        const divId = parseInt(cb.dataset.divId, 10);
-        if (cb.checked) _ehqDivSelected.add(divId); else _ehqDivSelected.delete(divId);
+      // Division-level checkbox → cascade to every role in every team (with email)
+      const divCb = ev.target.closest('.ehq-div-cb');
+      if (divCb) {
+        const divId = parseInt(divCb.dataset.divId, 10);
+        const d = _emailData.find(x => x.id === divId);
+        if (!d) { ev.stopPropagation(); return; }
+        const target = divCb.checked;
+        for (const t of (d.teams || [])) {
+          for (const m of (t.memberships || [])) {
+            if (m.player && m.player.email) {
+              const key = _ehqCellKey(divId, t.id, m.role);
+              if (target) _ehqSel.add(key); else _ehqSel.delete(key);
+            }
+          }
+        }
         ev.stopPropagation();
+        _ehqPaintAllTeamParents(out);
         _updateEhqCount();
         return;
       }
+
+      // Team-row master checkbox → cascade to all of that team's role cells
+      const teamCb = ev.target.closest('.ehq-team-cb');
+      if (teamCb) {
+        const divId  = parseInt(teamCb.dataset.divId, 10);
+        const teamId = parseInt(teamCb.dataset.teamId, 10);
+        const d = _emailData.find(x => x.id === divId);
+        const t = d && (d.teams || []).find(x => x.id === teamId);
+        if (!t) return;
+        const target = teamCb.checked;
+        for (const m of (t.memberships || [])) {
+          if (m.player && m.player.email) {
+            const key = _ehqCellKey(divId, teamId, m.role);
+            if (target) _ehqSel.add(key); else _ehqSel.delete(key);
+          }
+        }
+        _ehqPaintAllTeamParents(out);
+        _updateEhqCount();
+        return;
+      }
+
+      // Per-role checkbox (Captain / Co-Captain / Players — the "Members" cell)
+      const roleCb = ev.target.closest('.ehq-role-cb');
+      if (roleCb) {
+        const divId  = parseInt(roleCb.dataset.divId, 10);
+        const teamId = parseInt(roleCb.dataset.teamId, 10);
+        const role   = roleCb.dataset.role;
+        const key = _ehqCellKey(divId, teamId, role);
+        if (roleCb.checked) _ehqSel.add(key); else _ehqSel.delete(key);
+        _ehqPaintAllTeamParents(out);
+        _updateEhqCount();
+        return;
+      }
+
+      // Player-count area toggles the per-team player-detail sub-row
+      const countEl = ev.target.closest('.ehq-toggle-players');
+      if (countEl) {
+        const row = countEl.closest('tr.ehq-team-row');
+        if (row) row.classList.toggle('expanded');
+        return;
+      }
+
+      // Click on division header (away from checkbox) toggles card expansion
       const head = ev.target.closest('.ehq-div-head');
       if (head) {
-        const card = head.parentElement;
-        card.classList.toggle('expanded');
+        head.parentElement.classList.toggle('expanded');
       }
     });
     out.dataset.wired = '1';
   }
+
   _updateEhqCount();
 }
+
+/* ═══════ Cell-key helpers and checkbox state derivation ═══════ */
+
+function _ehqCellKey(divId, teamId, role) { return divId + '_' + teamId + '_' + role; }
+
+// 'checked' | 'partial' | 'none' — for a division as a whole
+function _ehqDivCheckState(d) {
+  let total = 0, selected = 0;
+  for (const t of (d.teams || [])) {
+    for (const m of (t.memberships || [])) {
+      if (!m.player || !m.player.email) continue;
+      total++;
+      if (_ehqSel.has(_ehqCellKey(d.id, t.id, m.role))) selected++;
+    }
+  }
+  if (total === 0) return 'none';
+  if (selected === 0) return 'unchecked';
+  if (selected === total) return 'checked';
+  return 'partial';
+}
+
+// 'checked' | 'partial' | 'unchecked' | 'none' (no emailable members) — for a team
+function _ehqTeamCheckState(divId, team) {
+  let total = 0, selected = 0;
+  for (const m of (team.memberships || [])) {
+    if (!m.player || !m.player.email) continue;
+    total++;
+    if (_ehqSel.has(_ehqCellKey(divId, team.id, m.role))) selected++;
+  }
+  if (total === 0) return 'none';
+  if (selected === 0) return 'unchecked';
+  if (selected === total) return 'checked';
+  return 'partial';
+}
+
+// Repaint every checkbox (division, team-master, per-role) against the
+// current _ehqSel set. Called after any change that mutates _ehqSel so
+// the UI stays consistent without a full re-render.
+function _ehqPaintAllTeamParents(root) {
+  if (!_emailData) return;
+  root = root || document.getElementById('emailHqOutput');
+  for (const d of _emailData) {
+    const divCb = root.querySelector('.ehq-div-cb[data-div-id="' + d.id + '"]');
+    if (divCb) {
+      const s = _ehqDivCheckState(d);
+      divCb.checked = (s === 'checked');
+      divCb.indeterminate = (s === 'partial');
+    }
+    for (const t of (d.teams || [])) {
+      const tcb = root.querySelector(
+        '.ehq-team-cb[data-div-id="' + d.id + '"][data-team-id="' + t.id + '"]');
+      if (tcb) {
+        const s = _ehqTeamCheckState(d.id, t);
+        tcb.checked = (s === 'checked');
+        tcb.indeterminate = (s === 'partial');
+      }
+      // Per-role checkboxes: one each for Captain, Co-Captain, Member
+      for (const role of ['Captain', 'Co-Captain', 'Member']) {
+        const rcb = root.querySelector(
+          '.ehq-role-cb[data-div-id="' + d.id + '"][data-team-id="' + t.id + '"][data-role="' + role + '"]');
+        if (rcb && !rcb.disabled) {
+          rcb.checked = _ehqSel.has(_ehqCellKey(d.id, t.id, role));
+        }
+      }
+    }
+  }
+}
+
+/* ═══════ Rendering the 4-column team table inside a division body ═══════ */
 
 function _ehqRenderTeams(div) {
   const teams = (div.teams || []).slice().sort((a, b) =>
     String(a.team_number || '').localeCompare(String(b.team_number || '')));
   if (!teams.length) return '<p class="hint" style="padding:4px 0">No teams in this division yet.</p>';
-  return teams.map(t => {
-    const members = (t.memberships || []).slice().sort((a, b) => {
-      const order = { Captain: 1, 'Co-Captain': 2, Member: 3 };
-      return (order[a.role] || 9) - (order[b.role] || 9);
-    });
-    return '<div class="ehq-team">'
-      + '<div class="ehq-team-name">#' + esc(t.team_number || '') + ' ' + esc(t.team_name || '')
-        + ' <span class="ehq-team-meta">(' + members.length + ' member' + (members.length === 1 ? '' : 's') + ')</span></div>'
-      + members.map(m => {
-          const name = m.player
-            ? [m.player.first_name, m.player.last_name].filter(Boolean).join(' ')
-            : (m.name_raw || '\u2014');
-          const em = m.player && m.player.email ? m.player.email : '';
-          return '<div class="ehq-member">'
-            + '<span class="role-tag">' + esc(m.role) + '</span> '
-            + esc(name) + ' '
-            + (em
-                ? '<span class="email">&lt;' + esc(em) + '&gt;</span>'
-                : '<span class="no-email">(no email)</span>')
-            + '</div>';
-        }).join('')
-      + '</div>';
-  }).join('');
+
+  let html =
+    '<table class="ehq-team-table">'
+    + '<thead><tr><th>Team</th><th>Captain</th><th>Co-Captain</th><th>Players</th></tr></thead>'
+    + '<tbody>';
+
+  for (const t of teams) {
+    const cap   = (t.memberships || []).find(m => m.role === 'Captain');
+    const coCap = (t.memberships || []).find(m => m.role === 'Co-Captain');
+    const players = (t.memberships || []).filter(m => m.role === 'Member');
+
+    const capEmail   = cap   && cap.player   && cap.player.email;
+    const coCapEmail = coCap && coCap.player && coCap.player.email;
+    const anyPlayerEmail = players.some(m => m.player && m.player.email);
+    const teamDisabled = !capEmail && !coCapEmail && !anyPlayerEmail;
+
+    html +=
+      '<tr class="ehq-team-row" data-div-id="' + div.id + '" data-team-id="' + t.id + '">'
+      + '<td>'
+      +   '<input type="checkbox" class="ehq-team-cb" data-div-id="' + div.id + '" data-team-id="' + t.id + '"'
+      +     (teamDisabled ? ' disabled' : '') + '>'
+      +   '<span class="ehq-tn">#' + esc(t.team_number || '') + '</span>'
+      +   esc(t.team_name || '')
+      + '</td>'
+      // Captain
+      + '<td>' + _ehqRenderRoleCell(div.id, t.id, 'Captain', cap) + '</td>'
+      // Co-Captain
+      + '<td>' + _ehqRenderRoleCell(div.id, t.id, 'Co-Captain', coCap) + '</td>'
+      // Players (count column; member individual checkbox collapsed into one "Members" selection)
+      + '<td>' + _ehqRenderPlayersCell(div.id, t.id, players) + '</td>'
+      + '</tr>';
+
+    // Sub-row with the full player roster, toggled by clicking the player count
+    if (players.length) {
+      html +=
+        '<tr class="ehq-player-detail">'
+        + '<td colspan="4"><div class="ehq-p-list">'
+        + players.map(m => {
+            const nm = m.player
+              ? [m.player.first_name, m.player.last_name].filter(Boolean).join(' ')
+              : (m.name_raw || '\u2014');
+            if (m.player && m.player.email) {
+              return '<span class="ehq-p-entry"><span class="ehq-p-name">' + esc(nm)
+                + ':</span><span class="ehq-p-email">' + esc(m.player.email) + '</span></span>';
+            }
+            return '<span class="ehq-p-entry"><span class="ehq-p-name">' + esc(nm)
+              + ':</span><span class="ehq-p-noemail">no email</span></span>';
+          }).join('')
+        + '</div></td>'
+        + '</tr>';
+    }
+  }
+  html += '</tbody></table>';
+  return html;
 }
 
-/* Emails that match: (division is selected) ∧ (role filter hits this member) ∧
- * (player has an email). If no role filter is active, all roles contribute. */
+function _ehqRenderRoleCell(divId, teamId, role, m) {
+  if (!m) return '<span class="ehq-none">none</span>';
+  const name = m.player
+    ? [m.player.first_name, m.player.last_name].filter(Boolean).join(' ')
+    : (m.name_raw || '\u2014');
+  const em = m.player && m.player.email ? m.player.email : '';
+  const disabled = !em;
+  const checked = _ehqSel.has(_ehqCellKey(divId, teamId, role));
+  return (
+    '<input type="checkbox" class="ehq-role-cb"'
+    + ' data-div-id="' + divId + '" data-team-id="' + teamId + '" data-role="' + role + '"'
+    + (disabled ? ' disabled' : '')
+    + (checked ? ' checked' : '') + '>'
+    + '<span>' + esc(name) + '</span>'
+    + (em
+        ? '<span class="ehq-mail">' + esc(em) + '</span>'
+        : (m.player ? '<span class="ehq-mail-missing">no email on record</span>'
+                    : '<span class="ehq-mail-missing">unmatched to a player</span>'))
+  );
+}
+
+function _ehqRenderPlayersCell(divId, teamId, players) {
+  if (!players.length) return '<span class="ehq-none">no roster</span>';
+  const anyEmail = players.some(m => m.player && m.player.email);
+  const checked = _ehqSel.has(_ehqCellKey(divId, teamId, 'Member'));
+  return (
+    '<input type="checkbox" class="ehq-role-cb"'
+    + ' data-div-id="' + divId + '" data-team-id="' + teamId + '" data-role="Member"'
+    + (anyEmail ? '' : ' disabled')
+    + (checked ? ' checked' : '') + '>'
+    + '<span class="ehq-player-count ehq-toggle-players" style="cursor:pointer;text-decoration:underline dotted">'
+    + players.length + ' player' + (players.length === 1 ? '' : 's')
+    + '</span>'
+  );
+}
+
+/* ═══════ Email collection / copy ═══════ */
+
 function _ehqCollectEmails() {
   if (!_emailData) return [];
   const emails = new Set();
-  const roleFilter = _ehqFilters.role;
-  const needRole = roleFilter.size > 0;
   for (const d of _emailData) {
-    if (!_ehqDivSelected.has(d.id)) continue;
-    // Re-apply filter toolbar to the selection — don't include a division
-    // that's selected but currently hidden by a Format/Night filter.
+    // Re-apply filter toolbar — a cell selected before the user narrowed
+    // the filters shouldn't sneak into the copy.
     if (_ehqFilters.operator.size && !_ehqFilters.operator.has(String(d.operator_id))) continue;
     if (_ehqFilters.format.size   && !_ehqFilters.format.has(d.format || '')) continue;
     if (_ehqFilters.night.size    && !_ehqFilters.night.has(d.night_of_play || '')) continue;
     for (const t of (d.teams || [])) {
       for (const m of (t.memberships || [])) {
-        if (needRole && !roleFilter.has(m.role)) continue;
-        if (m.player && m.player.email) emails.add(m.player.email.trim().toLowerCase());
+        if (!m.player || !m.player.email) continue;
+        const key = _ehqCellKey(d.id, t.id, m.role);
+        if (!_ehqSel.has(key)) continue;
+        // Role filter (if any active) further restricts
+        if (_ehqFilters.role.size && !_ehqFilters.role.has(m.role)) continue;
+        emails.add(m.player.email.trim().toLowerCase());
       }
     }
   }
@@ -3308,30 +3622,33 @@ async function ehqCopyEmails() {
   }
 }
 
+/* All / None / Reset — these manipulate FILTER PILLS, not division cells
+ * (matches legacy SpmAdmin Email HQ semantics). "Reset" additionally
+ * clears all per-cell selections. */
 function ehqSelectAll() {
-  // Select every division currently visible under the filter toolbar.
-  if (!_emailData) return;
-  for (const d of _emailData) {
-    if (_ehqFilters.operator.size && !_ehqFilters.operator.has(String(d.operator_id))) continue;
-    if (_ehqFilters.format.size   && !_ehqFilters.format.has(d.format || '')) continue;
-    if (_ehqFilters.night.size    && !_ehqFilters.night.has(d.night_of_play || '')) continue;
-    _ehqDivSelected.add(d.id);
-  }
+  document.querySelectorAll('.ehq-toolbar-card .ehq-btn[data-facet]').forEach(btn => {
+    btn.classList.add('active');
+    const facet = btn.dataset.facet;
+    const val = btn.dataset.role || btn.dataset.value;
+    if (val) _ehqFilters[facet].add(val);
+  });
   renderEmailHQ();
 }
 
 function ehqSelectNone() {
-  _ehqDivSelected.clear();
-  renderEmailHQ();
-}
-
-function ehqReset() {
+  document.querySelectorAll('.ehq-toolbar-card .ehq-btn[data-facet]').forEach(btn => {
+    btn.classList.remove('active');
+  });
   _ehqFilters.operator.clear();
   _ehqFilters.role.clear();
   _ehqFilters.format.clear();
   _ehqFilters.night.clear();
-  _ehqDivSelected.clear();
-  document.querySelectorAll('.ehq-toolbar-card .ehq-btn.active').forEach(b => b.classList.remove('active'));
+  renderEmailHQ();
+}
+
+function ehqReset() {
+  ehqSelectNone();
+  _ehqSel.clear();
   renderEmailHQ();
 }
 
