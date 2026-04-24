@@ -555,7 +555,7 @@ input:focus, select:focus, textarea:focus {
           which report it is, and routes it to the right importer.
         </p>
         <ul class="hint" style="margin: 4px 0 12px 18px">
-          <li><strong>Team Screen</strong> — one team per page. Source: <code>Nexus &rarr; Teams &rarr; Team Screen</code>. Upserts teams &amp; rebuilds Member rosters. Captain/Co-Captain rows from Team Data paste preserved.</li>
+          <li><strong>Team Screen</strong> — one team per page. Source: <code>Nexus &rarr; Teams &rarr; Report List &rarr; Team Screen</code>. Upserts teams &amp; rebuilds Member rosters. Captain/Co-Captain rows from Team Data paste preserved.</li>
           <li><strong>All Division Information List</strong> — full division directory. Source: <code>Nexus &rarr; Divisions &rarr; Report List &rarr; Division Information List by Status</code>. Upserts divisions with name, format, team count. Operator is whatever you pick above; you can re-tag per-division later on the Divisions tab.</li>
         </ul>
         <div class="form-row" style="margin-bottom: 12px">
@@ -1098,26 +1098,33 @@ async function runTeamScreenImport(file, pdf) {
     for (const d of divs) divByNum.set(String(parseInt(d.division_number, 10)), d);
 
     // 3. Build team upserts; collect per-team player lists keyed by (div_id, team_number).
+    //    Track the *teams* skipped per missing division (not just division numbers)
+    //    so the summary can show which specific rows got dropped.
     const teamUpserts = [];
-    const perTeam = [];   // [{ div_id, team_number, players }]
-    const missingDivs = new Set();
+    const perTeam = [];                 // [{ div_id, team_number, players }]
+    const missingDivsMap = new Map();   // divNum → [{ team_number, team_name }]
     for (const t of teams) {
-      // Division from first 3 digits of 5-digit padded team number.
       const divNum = String(parseInt(pad5(t.team_number).substring(0, 3), 10));
       const div = divByNum.get(divNum);
-      if (!div) { missingDivs.add(divNum); continue; }
+      if (!div) {
+        if (!missingDivsMap.has(divNum)) missingDivsMap.set(divNum, []);
+        missingDivsMap.get(divNum).push({ team_number: t.team_number, team_name: t.team_name });
+        continue;
+      }
       teamUpserts.push({
         division_id: div.id,
         team_number: t.team_number,
         team_name:   t.team_name
       });
-      perTeam.push({ div_id: div.id, team_number: t.team_number, players: t.players });
+      perTeam.push({ div_id: div.id, team_number: t.team_number, team_name: t.team_name, players: t.players });
     }
     if (!teamUpserts.length) {
+      const totalSkipped = [...missingDivsMap.values()].reduce((s, a) => s + a.length, 0);
       return setStatus('pdfProgress',
         'No teams matched any division in the current session. '
-        + 'Paste the Division Listing first, then retry. '
-        + 'Unmatched division numbers: ' + [...missingDivs].join(', '), 'err');
+        + totalSkipped + ' team(s) across ' + missingDivsMap.size
+        + ' missing division(s) skipped. Division numbers: '
+        + [...missingDivsMap.keys()].sort((a,b) => parseInt(a)-parseInt(b)).join(', '), 'err');
     }
 
     // 4. Upsert teams in 500-row batches.
@@ -1167,8 +1174,10 @@ async function runTeamScreenImport(file, pdf) {
 
     // 8. Build new membership rows. Matched → FK to players. Unmatched →
     //    name_raw only, null member_number (schema CHECK allows this).
+    //    Track unmatched records (with context) so we can surface them
+    //    as a drill-down in the final summary banner.
     const membershipRows = [];
-    let unmatched = 0;
+    const unmatchedList = [];   // [{ team_number, team_name, member_number, name }]
     for (const t of perTeam) {
       const team_id = teamIdByKey.get(t.div_id + ':' + t.team_number);
       if (!team_id) continue;
@@ -1177,10 +1186,16 @@ async function runTeamScreenImport(file, pdf) {
           membershipRows.push({ team_id, role: 'Member', member_number: p.member_number, name_raw: null });
         } else {
           membershipRows.push({ team_id, role: 'Member', member_number: null, name_raw: p.name });
-          unmatched++;
+          unmatchedList.push({
+            team_number: t.team_number,
+            team_name: t.team_name,
+            member_number: p.member_number,
+            name: p.name
+          });
         }
       }
     }
+    const unmatched = unmatchedList.length;
 
     // 9. Batch-insert memberships.
     setStatus('pdfProgress', 'Inserting ' + membershipRows.length + ' memberships…', 'progress');
@@ -1190,12 +1205,60 @@ async function runTeamScreenImport(file, pdf) {
         { Prefer: 'return=minimal' });
     }
 
-    // 10. Summary.
+    // 10. Summary. Counts with drill-down details for anything that
+    //     failed or needs admin attention. <details> is native HTML,
+    //     no JS needed — click the summary line to expand.
+    const matched = membershipRows.length - unmatched;
     let msg =
       'Imported <strong>' + teamUpserts.length + '</strong> team(s). '
-      + '<strong>' + (membershipRows.length - unmatched) + '</strong> member(s) matched to player records, '
+      + '<strong>' + matched + '</strong> member(s) matched to player records. '
       + '<strong>' + unmatched + '</strong> stored as name-only (not yet in player table).';
-    if (missingDivs.size) msg += ' ' + missingDivs.size + ' division(s) from the PDF didn\u2019t exist in this session — skipped.';
+
+    if (unmatched) {
+      msg += '<details style="margin-top:6px">'
+        + '<summary style="cursor:pointer;font-weight:700">Show the ' + unmatched + ' unmatched player(s)</summary>'
+        + '<table class="table" style="margin-top:6px;font-size:0.82rem">'
+          + '<thead><tr><th>Team #</th><th>Team</th><th>APA # (canonical)</th><th>Name from PDF</th></tr></thead>'
+          + '<tbody>'
+            + unmatchedList.slice(0, 200).map(u =>
+                '<tr>'
+                  + '<td>' + esc(u.team_number) + '</td>'
+                  + '<td>' + esc(u.team_name) + '</td>'
+                  + '<td><code>' + esc(u.member_number) + '</code></td>'
+                  + '<td>' + esc(u.name) + '</td>'
+                + '</tr>'
+              ).join('')
+            + (unmatchedList.length > 200 ? '<tr><td colspan="4" class="hint">…and ' + (unmatchedList.length - 200) + ' more</td></tr>' : '')
+          + '</tbody>'
+        + '</table>'
+        + '</details>';
+    }
+
+    if (missingDivsMap.size) {
+      const totalSkippedTeams = [...missingDivsMap.values()].reduce((s, a) => s + a.length, 0);
+      msg += '<div style="margin-top:6px"><strong>' + totalSkippedTeams + '</strong> team(s) skipped across <strong>'
+           + missingDivsMap.size + '</strong> missing division(s).';
+      msg += '<details style="margin-top:4px">'
+        + '<summary style="cursor:pointer;font-weight:700">Show the skipped teams</summary>'
+        + '<table class="table" style="margin-top:6px;font-size:0.82rem">'
+          + '<thead><tr><th>Division #</th><th>Team #</th><th>Team Name</th></tr></thead>'
+          + '<tbody>'
+            + [...missingDivsMap.entries()]
+                .sort((a, b) => parseInt(a[0]) - parseInt(b[0]))
+                .flatMap(([divNum, teamsArr]) =>
+                  teamsArr.map((t, i) =>
+                    '<tr>'
+                      + '<td>' + (i === 0 ? esc(divNum) + ' <span class="hint">(' + teamsArr.length + ')</span>' : '') + '</td>'
+                      + '<td>' + esc(t.team_number) + '</td>'
+                      + '<td>' + esc(t.team_name) + '</td>'
+                    + '</tr>'
+                  )
+                ).join('')
+          + '</tbody>'
+        + '</table>'
+        + '<p class="hint" style="margin-top:6px">Paste the Division Listing for these division numbers, or drop an "All Division Information List" PDF, then re-import this Team Screen PDF to pick them up.</p>'
+        + '</details></div>';
+    }
 
     setStatus('pdfProgress', msg, 'ok');
     await refreshCounts();
@@ -1558,40 +1621,27 @@ function cleanMemberNumber(raw) {
   return digits;
 }
 /**
- * Per-element auto-clear timers so rapid setStatus calls during an
- * import don't race (each prior call's 4.5s timer was firing
- * independently and collapsing the banner between progress updates,
- * causing UI jitter). Every call to setStatus cancels the pending
- * timer for that element first, then schedules a fresh one (or none
- * at all if the kind shouldn't auto-clear).
+ * Status banners never auto-clear — they persist until the NEXT call
+ * to setStatus / hideStatus on the same element. Per user rule: "no
+ * messages should disappear until another user operation." This
+ * makes the banner a durable audit trail of the last action.
  *
  * kind values:
- *   'ok'       → green banner, auto-clears after 4.5s
- *   'err'      → red banner, stays until replaced or hideStatus()
- *   'warn'     → amber banner, stays until replaced
- *   'progress' → green banner, stays until replaced (no auto-clear).
- *                Use during long-running ops (import, county lookup).
+ *   'ok'       → green (success summary)
+ *   'progress' → green (in-flight operation); visually same as 'ok'
+ *   'err'      → red
+ *   'warn'     → amber
  */
-const _statusTimers = {};
 function setStatus(id, msg, kind) {
   const el = document.getElementById(id);
-  // green visual for both 'ok' and 'progress' — the only difference
-  // between them is whether the banner auto-clears.
   const cssKind = (kind === 'progress') ? 'ok' : (kind || 'ok');
   el.className = 'status-line shown ' + cssKind;
   el.innerHTML = msg;
-  if (_statusTimers[id]) { clearTimeout(_statusTimers[id]); _statusTimers[id] = null; }
-  if (kind === 'ok') {
-    _statusTimers[id] = setTimeout(() => {
-      el.className = 'status-line';
-      el.innerHTML = '';
-      _statusTimers[id] = null;
-    }, 4500);
-  }
 }
 function hideStatus(id) {
-  if (_statusTimers[id]) { clearTimeout(_statusTimers[id]); _statusTimers[id] = null; }
-  const el = document.getElementById(id); el.className = 'status-line'; el.innerHTML = '';
+  const el = document.getElementById(id);
+  el.className = 'status-line';
+  el.innerHTML = '';
 }
 function showGlobal(msg, kind) { setStatus('globalStatus', msg, kind); }
 
