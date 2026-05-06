@@ -825,10 +825,10 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
   <div id="adminMain" class="hidden">
 
     <div class="tabs" role="tablist">
-      <button class="tab active" data-tab="sessions">Sessions</button>
+      <button class="tab" data-tab="sessions">Sessions</button>
       <button class="tab" data-tab="uploads">Uploads</button>
       <button class="tab" data-tab="divisions">Divisions</button>
-      <button class="tab" data-tab="emailhq">Email HQ</button>
+      <button class="tab active" data-tab="emailhq">Email HQ</button>
     </div>
 
     <div id="globalStatus" class="status-line"></div>
@@ -836,7 +836,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
     <!-- ══════════════════════════════════════════════════════════════
          TAB: SESSIONS
          ══════════════════════════════════════════════════════════════ -->
-    <div id="tab-sessions" class="tab-panel active">
+    <div id="tab-sessions" class="tab-panel">
 
       <div class="card">
         <h2>Create session</h2>
@@ -1008,7 +1008,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
     <!-- ══════════════════════════════════════════════════════════════
          TAB: EMAIL HQ — pill filters + stacked division cards + copy
          ══════════════════════════════════════════════════════════════ -->
-    <div id="tab-emailhq" class="tab-panel">
+    <div id="tab-emailhq" class="tab-panel active">
       <div class="card ehq-paste-card">
         <h3 class="ehq-paste-title">Paste Team Numbers</h3>
         <p class="hint" style="margin:4px 0 8px;font-size:0.8rem">
@@ -1080,7 +1080,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '1.6';
+const APP_VERSION = '1.7';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -2382,6 +2382,13 @@ async function init() {
   await loadSessions();
   await refreshCounts();
   await loadReportStatus();
+
+  // Email HQ is the default tab (the static `active` class on tab-emailhq
+  // is set, but the data needs to be loaded explicitly — switchTab() is
+  // what triggers loadEmailHQ() and we never called it on startup).
+  if (document.querySelector('.tab.active')?.dataset.tab === 'emailhq') {
+    loadEmailHQ();
+  }
 }
 
 const TAB_LABEL = {
@@ -3441,7 +3448,18 @@ function _renderEhqFilters() {
   // days of the week even when night_of_play is empty on the divisions —
   // the user can still filter-by-intent, and once a Division Listing paste
   // fills the column the filter starts actually narrowing.
-  const fmts = [...new Set((_emailData || []).map(d => d.format).filter(Boolean))].sort();
+  // Trim before deduping — duplicate "8-Ball Open" pills were appearing
+  // because some divisions had trailing whitespace in the format string
+  // (e.g. "8-Ball Open" vs "8-Ball Open "). Set() treats those as distinct.
+  // Normalize on .trim() and lowercase-comparison via a Map.
+  const fmtMap = new Map();
+  for (const d of (_emailData || [])) {
+    const raw = (d.format || '').trim();
+    if (!raw) continue;
+    const k = raw.toLowerCase();
+    if (!fmtMap.has(k)) fmtMap.set(k, raw);
+  }
+  const fmts = [...fmtMap.values()].sort();
   const ALL_NIGHTS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 
   document.getElementById('ehqFormatBtns').innerHTML = fmts.map(f =>
@@ -3497,9 +3515,11 @@ function _ehqDivPassesFilters(d) {
   if (!_ehqFacetActive('operator')) return false;
   if (!_ehqFilters.operator.has(String(d.operator_id))) return false;
   if (!_ehqFacetActive('format')) return false;
-  if (!_ehqFilters.format.has(d.format || '')) return false;
+  // Trim format value before lookup so divisions with stray whitespace
+  // (e.g. "8-Ball Open ") still match the deduped pill ("8-Ball Open").
+  if (!_ehqFilters.format.has((d.format || '').trim())) return false;
   if (!_ehqFacetActive('night')) return false;
-  if (!_ehqFilters.night.has(d.night_of_play || '')) return false;
+  if (!_ehqFilters.night.has((d.night_of_play || '').trim())) return false;
   return true;
 }
 
