@@ -1070,7 +1070,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '1.4';
+const APP_VERSION = '1.5';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -3338,6 +3338,19 @@ async function loadEmailHQ() {
     out.innerHTML = '<p class="hint" style="padding:16px">No current session. Create one on the Sessions tab.</p>';
     return;
   }
+  // Reset filter + cell state so a session switch doesn't carry stale
+  // operator/format pill values whose IDs no longer exist (or worse,
+  // collide with unrelated rows in the new session). Strip the .active
+  // class from any leftover pill DOM so the visual matches state.
+  // (Bug fix v1.5)
+  _ehqFilters.operator.clear();
+  _ehqFilters.role.clear();
+  _ehqFilters.format.clear();
+  _ehqFilters.night.clear();
+  _ehqSel.clear();
+  document.querySelectorAll('.ehq-toolbar-card .ehq-btn[data-facet]').forEach(btn => {
+    btn.classList.remove('active');
+  });
   out.innerHTML = '<p class="hint" style="padding:16px">Loading\u2026</p>';
 
   try {
@@ -3477,6 +3490,9 @@ function renderEmailHQ() {
   if (!out.dataset.wired) {
     out.addEventListener('click', (ev) => {
       // Division-level checkbox → cascade to every role in every team (with email)
+      // Respects the active Role filter so we don't silently add cells the
+      // copy step will exclude (which would leave checkboxes lit but emails
+      // missing from the result). (Bug fix v1.5)
       const divCb = ev.target.closest('.ehq-div-cb');
       if (divCb) {
         const divId = parseInt(divCb.dataset.divId, 10);
@@ -3486,13 +3502,14 @@ function renderEmailHQ() {
         // passing cell set into _ehqSel so the toggle operates on a
         // coherent baseline (not "empty minus this one").
         _ehqMaterializeMode1Selection();
+        const roR = _ehqFacetRestricts('role');
         const target = divCb.checked;
         for (const t of (d.teams || [])) {
           for (const m of (t.memberships || [])) {
-            if (m.player && m.player.email) {
-              const key = _ehqCellKey(divId, t.id, m.role);
-              if (target) _ehqSel.add(key); else _ehqSel.delete(key);
-            }
+            if (!m.player || !m.player.email) continue;
+            if (roR && !_ehqFilters.role.has(m.role)) continue;
+            const key = _ehqCellKey(divId, t.id, m.role);
+            if (target) _ehqSel.add(key); else _ehqSel.delete(key);
           }
         }
         ev.stopPropagation();
@@ -3502,6 +3519,7 @@ function renderEmailHQ() {
       }
 
       // Team-row master checkbox → cascade to all of that team's role cells
+      // Respects active Role filter (see div-cb cascade comment above).
       const teamCb = ev.target.closest('.ehq-team-cb');
       if (teamCb) {
         const divId  = parseInt(teamCb.dataset.divId, 10);
@@ -3510,12 +3528,13 @@ function renderEmailHQ() {
         const t = d && (d.teams || []).find(x => x.id === teamId);
         if (!t) return;
         _ehqMaterializeMode1Selection();
+        const roR = _ehqFacetRestricts('role');
         const target = teamCb.checked;
         for (const m of (t.memberships || [])) {
-          if (m.player && m.player.email) {
-            const key = _ehqCellKey(divId, teamId, m.role);
-            if (target) _ehqSel.add(key); else _ehqSel.delete(key);
-          }
+          if (!m.player || !m.player.email) continue;
+          if (roR && !_ehqFilters.role.has(m.role)) continue;
+          const key = _ehqCellKey(divId, teamId, m.role);
+          if (target) _ehqSel.add(key); else _ehqSel.delete(key);
         }
         _ehqPaintAllTeamParents(out);
         _updateEhqCount();
@@ -3685,8 +3704,17 @@ function _ehqPaintAllTeamParents(root) {
 /* ═══════ Rendering the 4-column team table inside a division body ═══════ */
 
 function _ehqRenderTeams(div) {
-  const teams = (div.teams || []).slice().sort((a, b) =>
-    String(a.team_number || '').localeCompare(String(b.team_number || '')));
+  // Numeric sort — team_number is a digit-string in slate ("1001", "999"),
+  // localeCompare orders lexically which puts "1001" before "999".
+  // (Bug fix v1.5)
+  const teams = (div.teams || []).slice().sort((a, b) => {
+    const an = parseInt(String(a.team_number || '').replace(/\D/g, ''), 10);
+    const bn = parseInt(String(b.team_number || '').replace(/\D/g, ''), 10);
+    if (isNaN(an) && isNaN(bn)) return 0;
+    if (isNaN(an)) return 1;
+    if (isNaN(bn)) return -1;
+    return an - bn;
+  });
   if (!teams.length) return '<p class="hint" style="padding:4px 0">No teams in this division yet.</p>';
 
   let html =
@@ -3810,7 +3838,11 @@ function _ehqCollectEmails() {
         if (!m.player || !m.player.email) continue;
         if (useExplicitSelection && !_ehqSel.has(_ehqCellKey(d.id, t.id, m.role))) continue;
         if (roR && !_ehqFilters.role.has(m.role)) continue;
-        emails.add(m.player.email.trim().toLowerCase());
+        // Skip whitespace-only emails so they don't pollute the deduped
+        // set with an empty string. (Bug fix v1.5)
+        const em = m.player.email.trim().toLowerCase();
+        if (!em) continue;
+        emails.add(em);
       }
     }
   }
@@ -3879,14 +3911,18 @@ function ehqSelectByPaste() {
   const requested = new Set(tokens);
   let matched = 0, unmatched = 0;
   const missingTokens = [];
+  // Respect the Role filter when materializing paste-driven selections so
+  // checkboxes in the resulting UI accurately reflect what will be copied.
+  // (Bug fix v1.5)
+  const roR = _ehqFacetRestricts('role');
   for (const tn of requested) {
     const hit = teamByNum.get(tn);
     if (!hit) { unmatched++; missingTokens.push(tn); continue; }
     matched++;
     for (const m of (hit.team.memberships || [])) {
-      if (m.player && m.player.email) {
-        _ehqSel.add(_ehqCellKey(hit.divId, hit.team.id, m.role));
-      }
+      if (!m.player || !m.player.email) continue;
+      if (roR && !_ehqFilters.role.has(m.role)) continue;
+      _ehqSel.add(_ehqCellKey(hit.divId, hit.team.id, m.role));
     }
   }
 
@@ -3921,6 +3957,11 @@ function ehqSelectAll() {
     const val = btn.dataset.role || btn.dataset.value;
     if (val) _ehqFilters[facet].add(val);
   });
+  // Clear cherry-pick state — "All" means "all matching emails," not
+  // "all-pills-active intersected with whatever cells were picked
+  // before." Without this, cherry-pick mode would persist and silently
+  // narrow the copy to the previously-clicked cells. (Bug fix v1.5)
+  _ehqSel.clear();
   renderEmailHQ();
 }
 
