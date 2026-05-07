@@ -1085,7 +1085,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '1.8';
+const APP_VERSION = '1.9';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -3849,6 +3849,14 @@ let _ehqManualUncheck = new Set();
 // Per-cell cherry-pick set, additive to the division-checked + role-filter
 // path. Keys: "<divId>_<teamId>_<role>".
 let _ehqSel = new Set();
+// v1.9: paste-team-numbers universe. When non-empty, the entire selection
+// engine treats this as the universe of teams under consideration; filters
+// (Op/Format/Night/Role) and manual checks operate WITHIN it. Outside-the-
+// paste teams contribute zero cells and read as 'unchecked' / 'none'.
+//   - Empty set → no paste active; v1.8 behavior unchanged.
+//   - Non-empty → paste sub-filtered by every other facet.
+// Populated by ehqSelectByPaste; cleared by ehqClearPaste / All / None / Reset.
+let _ehqPastedTeamIds = new Set();
 // Hide-CRA toggle, persisted in localStorage so it survives reload.
 const EHQ_HIDE_CRA_LS = 'ehq.hideCra.v1';
 let _ehqHideCra = (() => { try { return localStorage.getItem(EHQ_HIDE_CRA_LS) === '1'; } catch (e) { return false; } })();
@@ -3868,6 +3876,7 @@ async function loadEmailHQ() {
   _ehqManualCheck.clear();
   _ehqManualUncheck.clear();
   _ehqSel.clear();
+  _ehqPastedTeamIds.clear();
   document.querySelectorAll('.ehq-toolbar-card .ehq-btn[data-facet]').forEach(btn => {
     btn.classList.remove('active');
   });
@@ -4168,9 +4177,16 @@ function renderEmailHQ() {
  */
 function _ehqCellKey(divId, teamId, role) { return divId + '_' + teamId + '_' + role; }
 
+/* v1.9: when paste-team-numbers is active, only teams in the paste universe
+ * contribute. Empty paste universe → no restriction (v1.8 behavior). */
+function _ehqTeamPassesPaste(teamId) {
+  return _ehqPastedTeamIds.size === 0 || _ehqPastedTeamIds.has(teamId);
+}
+
 function _ehqCellSelected(d, teamId, role, hasEmail) {
   if (!hasEmail) return false;
   if (_ehqDivIsHiddenCRA(d)) return false;
+  if (!_ehqTeamPassesPaste(teamId)) return false;       // v1.9 paste universe
   if (_ehqSel.has(_ehqCellKey(d.id, teamId, role))) return true;
   return _ehqDivIsChecked(d) && _ehqRolePassesFilter(role);
 }
@@ -4183,6 +4199,7 @@ function _ehqCellSelected(d, teamId, role, hasEmail) {
 function _ehqDivCheckState(d) {
   let total = 0, selected = 0;
   for (const t of (d.teams || [])) {
+    if (!_ehqTeamPassesPaste(t.id)) continue;       // v1.9: outside paste universe
     for (const m of (t.memberships || [])) {
       const hasEmail = !!(m.player && m.player.email);
       if (!hasEmail) continue;
@@ -4197,6 +4214,8 @@ function _ehqDivCheckState(d) {
 }
 
 function _ehqTeamCheckState(d, team) {
+  // v1.9: outside paste universe = team contributes nothing → 'none'
+  if (!_ehqTeamPassesPaste(team.id)) return 'none';
   let total = 0, selected = 0;
   for (const m of (team.memberships || [])) {
     const hasEmail = !!(m.player && m.player.email);
@@ -4402,10 +4421,22 @@ async function ehqCopyEmails() {
   }
 }
 
-/* ═══════ Paste team numbers → bulk-select matching teams ═══════
- * Tokenizes the paste, matches each team_number against _emailData, and
- * adds every emailable cell of each matched team to _ehqSel. Bypasses
- * the role filter (the user explicitly named the team). */
+/* ═══════ Paste team numbers → narrow universe to those teams ═══════
+ * v1.9 SUB-FILTER MODEL:
+ *   Paste defines the UNIVERSE of teams under consideration. The Op /
+ *   Format / Night / Role filter pills + manual checks then sub-filter
+ *   WITHIN that universe. Outside-the-paste teams contribute nothing.
+ *
+ *   So: paste {1001, 1002} + Role=Captain → captains for those 2 teams.
+ *       paste {1001, 1002} + Operator=SPM + Role=Captain → captains for
+ *         the subset of {1001, 1002} that are SPM teams.
+ *       paste {1001, 1002} + (no Role pill lit) → 0 (Role still required).
+ *
+ *   Implementation: populate _ehqPastedTeamIds (Set of team_id). The cell
+ *   selection engine reads this set in _ehqTeamPassesPaste(). _ehqSel
+ *   (per-cell cherry-picks) is left untouched — those still apply but
+ *   are also gated by the paste universe.
+ */
 function ehqSelectByPaste() {
   const box = document.getElementById('ehqPasteBox');
   const raw = (box.value || '').trim();
@@ -4424,6 +4455,9 @@ function ehqSelectByPaste() {
     }
   }
 
+  // Replace (not append) the paste universe on each click so the user can
+  // edit the textarea and re-click without leftover IDs from a prior paste.
+  _ehqPastedTeamIds.clear();
   const requested = new Set(tokens);
   let matched = 0, unmatched = 0;
   const missingTokens = [];
@@ -4431,16 +4465,13 @@ function ehqSelectByPaste() {
     const hit = teamByNum.get(tn);
     if (!hit) { unmatched++; missingTokens.push(tn); continue; }
     matched++;
-    for (const m of (hit.team.memberships || [])) {
-      if (!m.player || !m.player.email) continue;
-      _ehqSel.add(_ehqCellKey(hit.divId, hit.team.id, m.role));
-    }
+    _ehqPastedTeamIds.add(hit.team.id);
   }
 
   renderEmailHQ();
 
   const parts = [];
-  parts.push('Selected ' + matched + ' team' + (matched === 1 ? '' : 's') + '.');
+  parts.push('Universe narrowed to ' + matched + ' team' + (matched === 1 ? '' : 's') + ' — filters now sub-filter within.');
   if (unmatched) {
     parts.push(unmatched + ' team# not found: '
       + (missingTokens.slice(0, 8).join(', '))
@@ -4456,6 +4487,10 @@ function ehqClearPaste() {
   const fb = document.getElementById('ehqPasteFeedback');
   fb.textContent = '';
   fb.className = 'ehq-paste-feedback';
+  // v1.9: also drop the paste universe so filters return to operating
+  // on the full session.
+  _ehqPastedTeamIds.clear();
+  renderEmailHQ();
 }
 
 /* All / None / Reset — v1.8 semantics.
@@ -4479,6 +4514,7 @@ function ehqSelectAll() {
   _ehqManualCheck.clear();
   _ehqManualUncheck.clear();
   _ehqSel.clear();
+  _ehqPastedTeamIds.clear();   // v1.9: All implies "every team" — drop paste universe
   renderEmailHQ();
 }
 
@@ -4493,6 +4529,7 @@ function ehqSelectNone() {
   _ehqManualCheck.clear();
   _ehqManualUncheck.clear();
   _ehqSel.clear();
+  _ehqPastedTeamIds.clear();   // v1.9: None clears everything including paste universe
   const box = document.getElementById('ehqPasteBox');
   if (box) box.value = '';
   const fb = document.getElementById('ehqPasteFeedback');
@@ -4508,6 +4545,7 @@ function _ehqApplyResetDefaults() {
   _ehqManualCheck.clear();
   _ehqManualUncheck.clear();
   _ehqSel.clear();
+  _ehqPastedTeamIds.clear();
   document.querySelectorAll('.ehq-toolbar-card .ehq-btn[data-facet]').forEach(btn => {
     btn.classList.remove('active');
   });
