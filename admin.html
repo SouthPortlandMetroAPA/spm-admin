@@ -944,8 +944,13 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         <p class="hint">
           Drag &amp; drop (or click to browse) a <strong>Team Screen</strong> PDF. One team per page.
           Source: <code>Nexus &rarr; Teams &rarr; Report List &rarr; Team Screen</code>.
-          Upserts teams and rebuilds Member rosters from each page's roster. Captain/Co-Captain rows
-          from the Team Data paste are preserved across re-imports.
+          Upserts teams and rebuilds Member rosters from each page's roster.
+          <br><strong>v1.8 workflow:</strong> Import <strong>Team Screen FIRST</strong>, then paste Team Data.
+          Team Data captain resolution looks up captain names against each team's own roster (not a
+          global player index), so a team must have its roster loaded before its captain can be
+          resolved. Re-importing Team Screen automatically re-resolves captain rows: any captain whose
+          member# vanished from the new roster is matched by name against the new roster, and the whole
+          import hard-aborts (with no DB changes) if any name can't be resolved.
         </p>
         <div id="pdfDropZone" class="drop-zone" tabindex="0" role="button" aria-label="PDF drop zone">
           <div class="drop-zone-icon">&#128228;</div>
@@ -1080,7 +1085,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '1.7';
+const APP_VERSION = '1.8';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -1720,7 +1725,17 @@ async function parseTeamScreenPage(page) {
     if (!mn) continue;
     if (seen.has(mn)) continue;
     seen.add(mn);
-    players.push({ member_number: mn, name: m[2].trim() });
+    // Store both:
+    //   name_raw   — the PDF cell verbatim ("Smith, Mary Jo Jr")
+    //   name_first_last — comma-flipped to "First Last" form, used by
+    //                     captain re-resolution as the comparison string
+    //                     when the player isn't yet in slate.players.
+    const rawName = m[2].trim();
+    players.push({
+      member_number:   mn,
+      name_raw:        rawName,
+      name_first_last: teamScreenNameToFirstLast(rawName) || rawName
+    });
   }
 
   return { team_number, team_name, players };
@@ -1839,11 +1854,29 @@ async function runTeamScreenImport(file, pdf) {
     }
 
     // 7. Wipe existing Member-role memberships for teams in this paste.
-    //    (Captain/Co-Captain rows from Team Data paste are preserved —
-    //    role precedence is Captain > Co-Captain > Member, and 5NF-
-    //    correct one-row-per-(team,person) means we never demote.)
+    //    Captain/Co-Captain rows are preserved here (and re-resolved against
+    //    the new roster after Step 9 finishes). Role precedence is still
+    //    Captain > Co-Captain > Member, and 5NF stays correct (one row per
+    //    (team, person)) because the demote step in Phase 8 also runs.
+    //
+    //    v1.8 atomicity: snapshot ALL memberships (Member + Captain +
+    //    Co-Captain) for these teams BEFORE any destructive write so the
+    //    catch-block can attempt a rollback on failure.
     const teamIds = [...teamIdByKey.values()];
-    setStatus('pdfProgress', 'Clearing old Member rows on ' + teamIds.length + ' teams\u2026', 'progress');
+    const _tsSnapshotMembers = [];
+    const _tsSnapshotCaptains = [];
+    setStatus('pdfProgress', 'Snapshotting current rosters for atomic rollback…', 'progress');
+    for (let i = 0; i < teamIds.length; i += 100) {
+      const chunk = teamIds.slice(i, i + 100);
+      const got = await sb('GET',
+        'team_memberships?select=team_id,role,member_number,name_raw'
+        + '&team_id=in.(' + chunk.join(',') + ')');
+      for (const r of (got || [])) {
+        if (r.role === 'Member') _tsSnapshotMembers.push(r);
+        else _tsSnapshotCaptains.push(r);
+      }
+    }
+    setStatus('pdfProgress', 'Clearing old Member rows on ' + teamIds.length + ' teams…', 'progress');
     for (let i = 0; i < teamIds.length; i += 100) {
       const chunk = teamIds.slice(i, i + 100);
       await sb('DELETE',
@@ -1884,14 +1917,24 @@ async function runTeamScreenImport(file, pdf) {
             demotedSkipped++;
             continue;   // already Captain/Co-Captain on this team
           }
-          membershipRows.push({ team_id, role: 'Member', member_number: p.member_number, name_raw: null });
+          // v1.8: store the comma-flipped "First Last" form on matched
+          // rows too, so name_raw is consistent across the table and
+          // captain re-resolution can fall back to it when player FK is
+          // present but stale. (For matched rows the player record is
+          // canonical, but recording name_raw is cheap and useful for
+          // audit / debugging.)
+          membershipRows.push({ team_id, role: 'Member', member_number: p.member_number, name_raw: p.name_first_last || p.name_raw || null });
         } else {
-          membershipRows.push({ team_id, role: 'Member', member_number: null, name_raw: p.name });
+          // v1.8: name_raw stores "First Last" form (comma-flipped from PDF)
+          // so it matches the All-Teams convention and the captain comparison
+          // string. teamScreenNameToFirstLast falls back to the raw PDF
+          // string if no comma is present.
+          membershipRows.push({ team_id, role: 'Member', member_number: null, name_raw: p.name_first_last || p.name_raw || '' });
           unmatchedList.push({
             team_number: t.team_number,
             team_name: t.team_name,
             member_number: p.member_number,
-            name: p.name
+            name: p.name_raw || p.name_first_last
           });
         }
       }
@@ -1904,6 +1947,154 @@ async function runTeamScreenImport(file, pdf) {
       await sb('POST', 'team_memberships',
         membershipRows.slice(i, i + 500),
         { Prefer: 'return=minimal' });
+    }
+
+    // 9.5. v1.8: Re-resolve Captain/Co-Captain rows whose member_number is
+    //      no longer in the team roster (Team Screen import may have removed
+    //      the player). Match captain.name_raw against the new roster's
+    //      "First Last" strings. Hard error -> rollback the import.
+    setStatus('pdfProgress', 'Re-resolving captain/co-captain rows against new rosters…', 'progress');
+    // Build a per-team set of valid member_numbers (after Step 9 inserts).
+    const _tsRosterMnByTeam = new Map();         // team_id -> Set(member_number)
+    const _tsRosterEntriesByTeam = new Map();    // team_id -> [{member_number,name_raw,player:{first_name,last_name}}]
+    {
+      // The new rosters are exactly what we just inserted (membershipRows)
+      // plus existing Captain/Co-Captain rows. Build from membershipRows
+      // (Member rows just inserted) and snapshot Captain rows (still alive).
+      for (const r of membershipRows) {
+        if (!r.member_number) continue;
+        if (!_tsRosterMnByTeam.has(r.team_id)) _tsRosterMnByTeam.set(r.team_id, new Set());
+        _tsRosterMnByTeam.get(r.team_id).add(r.member_number);
+      }
+      for (const r of _tsSnapshotCaptains) {
+        if (!r.member_number) continue;
+        if (!_tsRosterMnByTeam.has(r.team_id)) _tsRosterMnByTeam.set(r.team_id, new Set());
+        _tsRosterMnByTeam.get(r.team_id).add(r.member_number);
+      }
+      // Also fetch player records for the new member_numbers so the
+      // name index can use canonical first+last.
+      const _tsAllNewMns = [...new Set([...membershipRows].filter(r => r.member_number).map(r => r.member_number))];
+      const _tsPlayerByMn = new Map();
+      for (let i = 0; i < _tsAllNewMns.length; i += 200) {
+        const chunk = _tsAllNewMns.slice(i, i + 200);
+        const got = await sb('GET',
+          'players?select=member_number,first_name,last_name'
+          + '&member_number=in.(' + chunk.map(encodeURIComponent).join(',') + ')');
+        for (const p of (got || [])) _tsPlayerByMn.set(p.member_number, p);
+      }
+      for (const r of membershipRows) {
+        if (!_tsRosterEntriesByTeam.has(r.team_id)) _tsRosterEntriesByTeam.set(r.team_id, []);
+        _tsRosterEntriesByTeam.get(r.team_id).push({
+          member_number: r.member_number,
+          name_raw: r.name_raw,
+          player: r.member_number ? (_tsPlayerByMn.get(r.member_number) || null) : null
+        });
+      }
+    }
+
+    // For each captain snapshot row, decide:
+    //   - mn still in roster? Keep it as-is.
+    //   - mn removed? Re-resolve via name_raw match. Hard error if no match.
+    const _tsReresolveFailures = [];
+    const _tsCaptainPatches = [];   // [{ snapshotRow, newMn }]
+    for (const cap of _tsSnapshotCaptains) {
+      const validSet = _tsRosterMnByTeam.get(cap.team_id);
+      if (!cap.member_number) continue;   // name-only captain, nothing to verify
+      if (validSet && validSet.has(cap.member_number)) continue;   // still on roster
+      // Need to re-resolve via name_raw against the new roster.
+      const roster = _tsRosterEntriesByTeam.get(cap.team_id) || [];
+      const nameIdx = _slateBuildPerTeamNameIndex(roster);
+      const tryName = cap.name_raw || '';
+      let newMn = nameIdx.get(normName(tryName));
+      // Also try the comma-flipped form (in case name_raw is "Last, First")
+      if (!newMn) {
+        const flipped = teamScreenNameToFirstLast(tryName);
+        if (flipped) newMn = nameIdx.get(normName(flipped));
+      }
+      if (!newMn) {
+        _tsReresolveFailures.push('Team_id=' + cap.team_id + ' ' + cap.role + ' "' + tryName + '" (mn=' + cap.member_number + ') not found in new roster.');
+      } else {
+        _tsCaptainPatches.push({ snapshot: cap, newMn });
+      }
+    }
+
+    if (_tsReresolveFailures.length) {
+      // Hard error: roll back the import. Restore the snapshot.
+      const headMsg = _tsReresolveFailures.length + ' captain/co-captain row(s) cannot be re-resolved against the new Team Screen roster. Rolling back this Team Screen import.';
+      const detail = _tsReresolveFailures.slice(0, 50).join('\n');
+      const more = _tsReresolveFailures.length > 50 ? '\n…and ' + (_tsReresolveFailures.length - 50) + ' more.' : '';
+      // Roll back: delete what we just inserted, restore snapshot.
+      try {
+        for (let i = 0; i < teamIds.length; i += 100) {
+          const chunk = teamIds.slice(i, i + 100);
+          await sb('DELETE',
+            'team_memberships?team_id=in.(' + chunk.join(',') + ')&role=eq.Member');
+        }
+        if (_tsSnapshotMembers.length) {
+          for (let i = 0; i < _tsSnapshotMembers.length; i += 500) {
+            await sb('POST', 'team_memberships',
+              _tsSnapshotMembers.slice(i, i + 500),
+              { Prefer: 'return=minimal' });
+          }
+        }
+      } catch (rb) {
+        console.error('[Slate] Team Screen rollback FAILED:', rb);
+      }
+      throw new Error(headMsg + '\n\n' + detail + more);
+    }
+
+    // Apply captain patches: delete the stale captain row, insert a new
+    // one with the resolved member_number.
+    if (_tsCaptainPatches.length) {
+      setStatus('pdfProgress', 'Updating ' + _tsCaptainPatches.length + ' captain mn re-resolution(s)…', 'progress');
+      for (const p of _tsCaptainPatches) {
+        try {
+          await sb('DELETE',
+            'team_memberships?team_id=eq.' + p.snapshot.team_id
+            + '&role=eq.' + encodeURIComponent(p.snapshot.role)
+            + '&member_number=eq.' + encodeURIComponent(p.snapshot.member_number));
+          await sb('POST', 'team_memberships', [{
+            team_id: p.snapshot.team_id,
+            role: p.snapshot.role,
+            member_number: p.newMn,
+            name_raw: p.snapshot.name_raw
+          }], { Prefer: 'return=minimal' });
+          // Demote: remove any Member row on this team for the new mn
+          // (they were just inserted in Step 9 — captain rank trumps).
+          await sb('DELETE',
+            'team_memberships?team_id=eq.' + p.snapshot.team_id
+            + '&role=eq.Member'
+            + '&member_number=eq.' + encodeURIComponent(p.newMn));
+        } catch (patchErr) {
+          // Mid-stream patch failure - try to restore both snapshots.
+          try {
+            for (let i = 0; i < teamIds.length; i += 100) {
+              const chunk = teamIds.slice(i, i + 100);
+              await sb('DELETE',
+                'team_memberships?team_id=in.(' + chunk.join(',') + ')&role=eq.Member');
+              await sb('DELETE',
+                'team_memberships?team_id=in.(' + chunk.join(',') + ')&role=in.(Captain,Co-Captain)');
+            }
+            if (_tsSnapshotMembers.length) {
+              for (let i = 0; i < _tsSnapshotMembers.length; i += 500) {
+                await sb('POST', 'team_memberships',
+                  _tsSnapshotMembers.slice(i, i + 500),
+                  { Prefer: 'return=minimal' });
+              }
+            }
+            if (_tsSnapshotCaptains.length) {
+              for (let i = 0; i < _tsSnapshotCaptains.length; i += 500) {
+                await sb('POST', 'team_memberships',
+                  _tsSnapshotCaptains.slice(i, i + 500),
+                  { Prefer: 'return=minimal' });
+              }
+            }
+          } catch (rb) {
+            console.error('[Slate] Team Screen patch rollback FAILED:', rb);
+          }
+          throw new Error('Captain re-resolution patch failed mid-stream — rolled back. Cause: ' + patchErr.message);
+        }
+      }
     }
 
     // 10. Summary. Counts with drill-down details for anything that
@@ -2192,6 +2383,37 @@ function localToCanonicalApa(raw) {
 }
 function normName(s) {
   return String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+/**
+ * Team Screen PDF stores player names as "Last, First" (sometimes with
+ * a middle initial / suffix). The All-Teams report stores captain names
+ * as the full first-name-then-last-name string the league uses ("Mary Jo
+ * Smith Jr"). Captain resolution compares first+last from the players
+ * table (or, for unmatched-to-players entries, "First Last" parsed from
+ * the Team Screen PDF) against the All-Teams captain string.
+ *
+ * Per user rule (2026-05-05): names can have multiple spaces by design.
+ * Do NOT split the All-Teams captain name on space. Always build the
+ * comparison string from the player side via first+" "+last and compare
+ * to the captain string as-is. From the PDF side, split on the FIRST
+ * comma and reverse — anything after the first comma is treated as the
+ * first-name part, and any embedded spaces are preserved verbatim.
+ *
+ * Examples:
+ *   "Smith, Mary Jo Jr"   → "Mary Jo Jr Smith"
+ *   "Le, Phuong"          → "Phuong Le"
+ *   "O'Brien, John A."    → "John A. O'Brien"
+ *   "(no comma)"          → "" (caller should treat as parse failure)
+ */
+function teamScreenNameToFirstLast(s) {
+  const raw = String(s || '').trim();
+  if (!raw) return '';
+  const i = raw.indexOf(',');
+  if (i < 0) return '';
+  const last  = raw.substring(0, i).trim();
+  const first = raw.substring(i + 1).trim();
+  if (!last || !first) return '';
+  return first + ' ' + last;
 }
 /**
  * Clean + validate an APA member number from a pasted cell.
@@ -2582,16 +2804,55 @@ window.commitPlayerData = async function(headers, rows) {
   const dupSkipped = rows.length - byMember.size - skippedBlank - skippedGarbage;
   if (!payload.length) return 'Nothing to commit (no valid rows).';
 
-  // Batch to stay under Supabase's payload ceiling and keep the
-  // upsert statement small enough. 500 rows per batch * ~250 bytes
-  // each = ~125 KB, comfortably under any limit.
+  // v1.8 atomicity: snapshot existing player rows for every member_number
+  // we're about to upsert, so any mid-stream failure can restore prior
+  // state. Pre-existing rows are PATCH-restored; newly-inserted rows
+  // (no prior snapshot) get DELETE-rolled back.
+  const _pdMnList = payload.map(p => p.member_number);
+  const _pdSnapshotByMn = new Map();
+  const CHECK_BATCH = 200;
+  for (let i = 0; i < _pdMnList.length; i += CHECK_BATCH) {
+    const chunk = _pdMnList.slice(i, i + CHECK_BATCH);
+    const got = await sb('GET',
+      'players?select=member_number,first_name,nickname,last_name,email,address1,address2,city,state,zip'
+      + '&member_number=in.(' + chunk.map(encodeURIComponent).join(',') + ')');
+    for (const r of (got || [])) _pdSnapshotByMn.set(r.member_number, r);
+  }
+
   const BATCH = 500;
   const btn = document.getElementById('commitBtn');
-  for (let i = 0; i < payload.length; i += BATCH) {
-    const chunk = payload.slice(i, i + BATCH);
-    btn.textContent = 'Committing ' + (i + chunk.length) + '/' + payload.length + '…';
-    await sb('POST', 'players?on_conflict=member_number', chunk,
-      { Prefer: 'resolution=merge-duplicates,return=minimal' });
+  const _pdNewMns = [];   // mns that didn't exist before — to DELETE on rollback
+  for (const mn of _pdMnList) if (!_pdSnapshotByMn.has(mn)) _pdNewMns.push(mn);
+
+  try {
+    for (let i = 0; i < payload.length; i += BATCH) {
+      const chunk = payload.slice(i, i + BATCH);
+      btn.textContent = 'Committing ' + (i + chunk.length) + '/' + payload.length + '…';
+      await sb('POST', 'players?on_conflict=member_number', chunk,
+        { Prefer: 'resolution=merge-duplicates,return=minimal' });
+    }
+  } catch (writeErr) {
+    // Rollback: DELETE rows that didn't exist before, PATCH-restore the rest.
+    try {
+      if (_pdNewMns.length) {
+        for (let i = 0; i < _pdNewMns.length; i += 100) {
+          const chunk = _pdNewMns.slice(i, i + 100);
+          await sb('DELETE',
+            'players?member_number=in.(' + chunk.map(encodeURIComponent).join(',') + ')');
+        }
+      }
+      const snapshotRows = [..._pdSnapshotByMn.values()];
+      if (snapshotRows.length) {
+        for (let i = 0; i < snapshotRows.length; i += 500) {
+          await sb('POST', 'players?on_conflict=member_number',
+            snapshotRows.slice(i, i + 500),
+            { Prefer: 'resolution=merge-duplicates,return=minimal' });
+        }
+      }
+    } catch (rb) {
+      console.error('[Slate] Players paste rollback FAILED:', rb);
+    }
+    throw new Error('Players paste failed mid-stream — rolled back. Cause: ' + writeErr.message);
   }
 
   let msg = payload.length + ' player(s) upserted.';
@@ -2665,14 +2926,41 @@ window.commitPlayerDetails = async function(headers, rows) {
     return '0 updated, ' + skippedMissing + ' skipped (no matching player records yet — paste Current Player Addresses first).';
   }
 
+  // v1.8 atomicity: snapshot prior sl_8ball / sl_9ball / cell_phone for
+  // every eligible member_number so a mid-stream failure can restore them.
+  const _pdSnapshot = new Map();
+  const eligibleMns = eligible.map(r => r.member_number);
+  for (let i = 0; i < eligibleMns.length; i += 200) {
+    const chunk = eligibleMns.slice(i, i + 200);
+    const got = await sb('GET',
+      'players?select=member_number,sl_8ball,sl_9ball,cell_phone'
+      + '&member_number=in.(' + chunk.map(encodeURIComponent).join(',') + ')');
+    for (const r of (got || [])) _pdSnapshot.set(r.member_number, r);
+  }
+
   // Batch upsert with merge-duplicates → only the sl_* / cell_phone
   // columns in each payload get updated on existing rows.
   const UPSERT_BATCH = 500;
-  for (let i = 0; i < eligible.length; i += UPSERT_BATCH) {
-    const chunk = eligible.slice(i, i + UPSERT_BATCH);
-    btn.textContent = 'Updating ' + Math.min(i + UPSERT_BATCH, eligible.length) + '/' + eligible.length + '…';
-    await sb('POST', 'players?on_conflict=member_number', chunk,
-      { Prefer: 'resolution=merge-duplicates,return=minimal' });
+  try {
+    for (let i = 0; i < eligible.length; i += UPSERT_BATCH) {
+      const chunk = eligible.slice(i, i + UPSERT_BATCH);
+      btn.textContent = 'Updating ' + Math.min(i + UPSERT_BATCH, eligible.length) + '/' + eligible.length + '…';
+      await sb('POST', 'players?on_conflict=member_number', chunk,
+        { Prefer: 'resolution=merge-duplicates,return=minimal' });
+    }
+  } catch (writeErr) {
+    // Restore prior sl/phone values from snapshot.
+    try {
+      const snapshotRows = [..._pdSnapshot.values()];
+      for (let i = 0; i < snapshotRows.length; i += 500) {
+        await sb('POST', 'players?on_conflict=member_number',
+          snapshotRows.slice(i, i + 500),
+          { Prefer: 'resolution=merge-duplicates,return=minimal' });
+      }
+    } catch (rb) {
+      console.error('[Slate] Player Details rollback FAILED:', rb);
+    }
+    throw new Error('Player Details paste failed mid-stream — rolled back. Cause: ' + writeErr.message);
   }
 
   let msg = eligible.length + ' updated, ' + skippedMissing + ' skipped (not in player table).';
@@ -2739,7 +3027,31 @@ function parseDate(s) {
   return null;
 }
 
-/* ──── Handler: TeamData (teams + captain/co-cap memberships) ── */
+/* ──── Handler: TeamData (teams + captain/co-cap memberships) ──
+ *
+ * v1.8 — atomic + per-team-roster captain resolution
+ *
+ * RESOLUTION RULES (per user 2026-05-05):
+ *   - Team Screen import is the source of truth for which APA member numbers
+ *     belong to a team. Captain/Co-Captain names from the All-Teams paste
+ *     get resolved against EACH TEAM''S OWN ROSTER (not a global player
+ *     name index), eliminating wrong matches when two players share a name.
+ *   - Comparison string from the player side: first_name + " " + last_name.
+ *     Multi-word first names (e.g. "Mary Jo") are preserved verbatim — we
+ *     never split the captain string on space.
+ *   - Comparison is case-insensitive, whitespace-collapsed.
+ *   - Match must be EXACT (not partial / fuzzy).
+ *
+ * HARD-ERROR / ATOMICITY:
+ *   - PRE-VALIDATE every row first. If any captain or co-captain is unresolved,
+ *     abort with no membership writes and surface the full failure list.
+ *   - If a team has no roster at all (no Member rows in team_memberships),
+ *     captain resolution fails for that team — message tells the admin to
+ *     import Team Screen first.
+ *   - During the write phase, snapshot every Captain/Co-Captain row about
+ *     to be deleted and every Member row about to be promoted-out. If any
+ *     later step fails, attempt to restore the snapshot before re-throwing.
+ * ────────────────────────────────────────────────────────────── */
 window.commitTeamData = async function(headers, rows) {
   if (!currentSession) throw new Error('No current session. Create + select one first.');
   const idx = {
@@ -2756,51 +3068,17 @@ window.commitTeamData = async function(headers, rows) {
   };
   if (idx.num < 0 || idx.name < 0) throw new Error('Missing Team Number / Team Name');
 
-  // Look up all divisions in the current session to map team_number (first 3 digits) → division_id
+  // Phase A: shape paste into per-team work items.
   const divs = await sb('GET', 'divisions?select=id,operator_id,division_number&session_id=eq.' + currentSession.id);
-  // Build a lookup by division_number (stripped of leading zeros) since team_number prefix is typically unpadded int-equivalent
   const divByNum = {};
   for (const d of divs) divByNum[String(parseInt(d.division_number,10))] = d;
 
-  // Pre-fetch ALL players (paginated) so we can resolve captain/co-cap names
-  // to member_number. PostgREST caps bodies at 1000 rows per request; a 26k-
-  // row players table would blind 96% of our captain lookups without pagination.
-  const allPlayers = [];
-  const PLAYER_PAGE = 1000;
-  let _pOff = 0;
-  while (true) {
-    const chunk = await sb('GET',
-      'players?select=member_number,first_name,nickname,last_name'
-      + '&order=member_number.asc&limit=' + PLAYER_PAGE + '&offset=' + _pOff);
-    allPlayers.push(...(chunk || []));
-    if (!chunk || chunk.length < PLAYER_PAGE) break;
-    _pOff += PLAYER_PAGE;
-  }
-  const nameIndex = new Map();  // normName → member_number (first match wins)
-  for (const p of allPlayers) {
-    const last = (p.last_name || '').trim();
-    const first = (p.first_name || '').trim();
-    const nick  = (p.nickname || '').trim();
-    if (last && first) {
-      const k = normName(first + ' ' + last);
-      if (!nameIndex.has(k)) nameIndex.set(k, p.member_number);
-    }
-    if (last && nick) {
-      const k = normName(nick + ' ' + last);
-      if (!nameIndex.has(k)) nameIndex.set(k, p.member_number);
-    }
-  }
-
   const teamUpserts = [];
-  const membershipOps = [];     // { team_number, division_id, role, name, member_number? }
-  let unmatchedCaptains = 0;
+  const teamWork = [];           // [{ tn, divId, capName, coCapName }]
   let missingDivisions = 0;
-
   for (const r of rows) {
     const tn = stripTeamNum(r[idx.num]);
     if (!tn || tn === '0') continue;
-    // Division number comes from the first 3 digits of the 5-digit
-    // team number. Pad, extract, re-strip so "301" → "00301" → "003" → "3".
     const divNum = String(parseInt(pad5(tn).substring(0, 3), 10));
     const div = divByNum[divNum];
     if (!div) { missingDivisions++; continue; }
@@ -2816,93 +3094,226 @@ window.commitTeamData = async function(headers, rows) {
       reg_not_playing_next: idx.regNot >= 0 ? (parseInt(r[idx.regNot], 10) || null) : null,
       reg_playing_next:     idx.regPlay >= 0 ? (parseInt(r[idx.regPlay], 10) || null) : null
     });
-
-    const capName = idx.cap >= 0 ? (r[idx.cap] || '').trim() : '';
-    if (capName) {
-      const mn = nameIndex.get(normName(capName)) || null;
-      if (!mn) unmatchedCaptains++;
-      membershipOps.push({ team_number: tn, division_id: div.id, role: 'Captain', name_raw: capName, member_number: mn });
-    }
-    const coCapName = idx.coCap >= 0 ? (r[idx.coCap] || '').trim() : '';
-    if (coCapName) {
-      const mn = nameIndex.get(normName(coCapName)) || null;
-      if (!mn) unmatchedCaptains++;
-      membershipOps.push({ team_number: tn, division_id: div.id, role: 'Co-Captain', name_raw: coCapName, member_number: mn });
-    }
-  }
-
-  if (!teamUpserts.length) {
-    return 'No teams imported. ' + (missingDivisions ? missingDivisions + ' rows skipped — their divisions aren\u2019t in this session. Paste Divisions first.' : '');
-  }
-
-  // Upsert teams
-  await sb('POST', 'teams?on_conflict=division_id,team_number', teamUpserts,
-    { Prefer: 'resolution=merge-duplicates,return=minimal' });
-
-  // To wire memberships we need the team IDs. Fetch them back.
-  const teamIdsArr = await sb('GET',
-    'teams?select=id,division_id,team_number&' +
-    'division_id=in.(' + [...new Set(teamUpserts.map(t => t.division_id))].join(',') + ')'
-  );
-  const teamIdByKey = new Map();  // "divId:team_number" → id
-  for (const t of teamIdsArr) teamIdByKey.set(t.division_id + ':' + t.team_number, t.id);
-
-  // Strategy for Captain/Co-Captain inserts with 5NF one-row-per-(team,person):
-  //   1. Wipe old Captain/Co-Captain rows for the teams in this paste.
-  //   2. For each new Captain/Co-Captain that has a matched member_number,
-  //      DELETE any existing Member row on the same team — they're about
-  //      to be upgraded. Batched per-team with member_number IN (...).
-  //   3. Insert the new Captain/Co-Captain rows fresh.
-  // Step 2 is what lets DB - All Teams land after Team Screen without
-  // violating the (team_id, member_number) unique index.
-  const teamIdsInThisPaste = [...new Set(membershipOps.map(m => teamIdByKey.get(m.division_id + ':' + m.team_number)).filter(Boolean))];
-  if (teamIdsInThisPaste.length) {
-    await sb('DELETE',
-      'team_memberships?team_id=in.(' + teamIdsInThisPaste.join(',') + ')&role=in.(Captain,Co-Captain)');
-  }
-
-  const membershipRows = [];
-  for (const m of membershipOps) {
-    const team_id = teamIdByKey.get(m.division_id + ':' + m.team_number);
-    if (!team_id) continue;
-    membershipRows.push({
-      team_id,
-      role: m.role,
-      member_number: m.member_number,
-      name_raw: m.name_raw
+    teamWork.push({
+      tn,
+      divId: div.id,
+      capName:   idx.cap   >= 0 ? (r[idx.cap]   || '').trim() : '',
+      coCapName: idx.coCap >= 0 ? (r[idx.coCap] || '').trim() : ''
     });
   }
 
-  // Step 2: remove any existing Member row on the same team for each
-  // matched-captain member_number. Group by team_id to keep URLs short.
-  const memberPromoByTeam = new Map();
-  for (const m of membershipRows) {
-    if (m.member_number == null) continue;   // name-only captain, no FK conflict possible
-    if (!memberPromoByTeam.has(m.team_id)) memberPromoByTeam.set(m.team_id, new Set());
-    memberPromoByTeam.get(m.team_id).add(m.member_number);
+  if (!teamUpserts.length) {
+    return 'No teams imported. ' + (missingDivisions ? missingDivisions + ' rows skipped — their divisions aren’t in this session. Paste Divisions first.' : '');
   }
-  for (const [team_id, mns] of memberPromoByTeam) {
-    const mnList = [...mns];
-    if (!mnList.length) continue;
-    // PostgREST URL length — chunk by 100 member_numbers per DELETE call.
-    for (let i = 0; i < mnList.length; i += 100) {
-      const chunk = mnList.slice(i, i + 100);
-      await sb('DELETE',
-        'team_memberships?team_id=eq.' + team_id
-        + '&member_number=in.(' + chunk.map(encodeURIComponent).join(',') + ')'
-        + '&role=eq.Member');
+
+  // Phase B: upsert team rows so we know team_id for every paste row.
+  // (Bonus points / matches played / etc. are written regardless of captain
+  //  resolution — they are independent metadata.)
+  await sb('POST', 'teams?on_conflict=division_id,team_number', teamUpserts,
+    { Prefer: 'resolution=merge-duplicates,return=minimal' });
+
+  const divIdSet = [...new Set(teamUpserts.map(t => t.division_id))];
+  const teamIdsArr = await sb('GET',
+    'teams?select=id,division_id,team_number&division_id=in.(' + divIdSet.join(',') + ')');
+  const teamIdByKey = new Map();
+  for (const t of teamIdsArr) teamIdByKey.set(t.division_id + ':' + t.team_number, t.id);
+
+  // Phase C: load CURRENT team_memberships for every team in the paste so
+  //          we can resolve captain names against EACH TEAM''S OWN ROSTER.
+  const targetTeamIds = _slateTargetTeamIds(teamWork, teamIdByKey);
+  const rosterByTeamId = new Map();
+  if (targetTeamIds.length) {
+    for (let i = 0; i < targetTeamIds.length; i += 100) {
+      const chunk = targetTeamIds.slice(i, i + 100);
+      const got = await sb('GET',
+        'team_memberships?select=team_id,role,member_number,name_raw,'
+        + 'player:players(first_name,last_name)'
+        + '&team_id=in.(' + chunk.join(',') + ')');
+      for (const m of (got || [])) {
+        if (!rosterByTeamId.has(m.team_id)) rosterByTeamId.set(m.team_id, []);
+        rosterByTeamId.get(m.team_id).push(m);
+      }
     }
   }
 
-  if (membershipRows.length) {
-    await sb('POST', 'team_memberships', membershipRows, { Prefer: 'return=minimal' });
+  // Phase D: PRE-VALIDATE every captain/co-captain. Accumulate failures.
+  //          If any fail, throw with no membership writes (Team rows from
+  //          Phase B are non-destructive merge-upserts and stay).
+  const failures = [];
+  const resolvedOps = [];     // [{ team_id, role, mn, name_raw }]
+  for (const w of teamWork) {
+    const team_id = teamIdByKey.get(w.divId + ':' + w.tn);
+    if (!team_id) continue;
+    const roster = rosterByTeamId.get(team_id) || [];
+    const nameIndex = _slateBuildPerTeamNameIndex(roster);
+    const teamHasRoster = roster.length > 0;
+    const work = [];
+    if (w.capName)   work.push({ role: 'Captain',    name: w.capName });
+    if (w.coCapName) work.push({ role: 'Co-Captain', name: w.coCapName });
+    for (const cr of work) {
+      const mn = nameIndex.get(normName(cr.name));
+      if (!mn) {
+        if (!teamHasRoster) {
+          failures.push('Team ' + w.tn + ': ' + cr.role + ' "' + cr.name + '" — team has no roster yet. Import Team Screen for team ' + w.tn + ' before Team Data.');
+        } else {
+          failures.push('Team ' + w.tn + ': ' + cr.role + ' "' + cr.name + '" not found in team ' + w.tn + '’s roster.');
+        }
+        continue;
+      }
+      resolvedOps.push({ team_id, role: cr.role, mn, name_raw: cr.name });
+    }
   }
 
-  let msg = teamUpserts.length + ' team(s) upserted, ' + membershipRows.length + ' captain/co-captain membership(s) written.';
-  if (unmatchedCaptains) msg += ' ⚠ ' + unmatchedCaptains + ' captain name(s) didn\u2019t match a player — shown as unmatched in Email HQ.';
-  if (missingDivisions)  msg += ' ⚠ ' + missingDivisions + ' team row(s) skipped (division not found in current session).';
+  if (failures.length) {
+    const head = failures.length + ' captain/co-captain name(s) could not be resolved against team rosters. No membership changes were written.';
+    const detail = failures.slice(0, 50).join('\n');
+    const more = failures.length > 50 ? '\n…and ' + (failures.length - 50) + ' more.' : '';
+    throw new Error(head + '\n\n' + detail + more);
+  }
+
+  // Phase E: snapshot rollback state, then write. On any write failure,
+  //          attempt to restore the snapshot.
+  const opsByTeam = new Map();
+  for (const op of resolvedOps) {
+    if (!opsByTeam.has(op.team_id)) opsByTeam.set(op.team_id, []);
+    opsByTeam.get(op.team_id).push(op);
+  }
+  const teamIdsInPaste = [...opsByTeam.keys()];
+  const snapshot = { captainRows: [], demotedMemberRows: [] };
+  if (teamIdsInPaste.length) {
+    for (let i = 0; i < teamIdsInPaste.length; i += 100) {
+      const chunk = teamIdsInPaste.slice(i, i + 100);
+      const got = await sb('GET',
+        'team_memberships?select=team_id,role,member_number,name_raw'
+        + '&team_id=in.(' + chunk.join(',') + ')'
+        + '&role=in.(Captain,Co-Captain)');
+      snapshot.captainRows.push(...(got || []));
+    }
+    for (const [team_id, ops] of opsByTeam) {
+      const mnList = ops.map(o => o.mn);
+      for (let i = 0; i < mnList.length; i += 100) {
+        const chunk = mnList.slice(i, i + 100);
+        const got = await sb('GET',
+          'team_memberships?select=team_id,role,member_number,name_raw'
+          + '&team_id=eq.' + team_id
+          + '&member_number=in.(' + chunk.map(encodeURIComponent).join(',') + ')'
+          + '&role=eq.Member');
+        snapshot.demotedMemberRows.push(...(got || []));
+      }
+    }
+  }
+
+  const newCaptainRows = resolvedOps.map(op => ({
+    team_id: op.team_id,
+    role: op.role,
+    member_number: op.mn,
+    name_raw: op.name_raw
+  }));
+
+  async function _slateRollbackTeamData() {
+    try {
+      if (teamIdsInPaste.length) {
+        for (let i = 0; i < teamIdsInPaste.length; i += 100) {
+          const chunk = teamIdsInPaste.slice(i, i + 100);
+          await sb('DELETE',
+            'team_memberships?team_id=in.(' + chunk.join(',') + ')&role=in.(Captain,Co-Captain)');
+        }
+      }
+      if (snapshot.captainRows.length) {
+        for (let i = 0; i < snapshot.captainRows.length; i += 500) {
+          await sb('POST', 'team_memberships',
+            snapshot.captainRows.slice(i, i + 500),
+            { Prefer: 'return=minimal' });
+        }
+      }
+      if (snapshot.demotedMemberRows.length) {
+        for (let i = 0; i < snapshot.demotedMemberRows.length; i += 500) {
+          await sb('POST', 'team_memberships',
+            snapshot.demotedMemberRows.slice(i, i + 500),
+            { Prefer: 'return=minimal' });
+        }
+      }
+    } catch (rb) {
+      console.error('[Slate] Team Data rollback FAILED:', rb);
+    }
+  }
+
+  try {
+    if (teamIdsInPaste.length) {
+      for (let i = 0; i < teamIdsInPaste.length; i += 100) {
+        const chunk = teamIdsInPaste.slice(i, i + 100);
+        await sb('DELETE',
+          'team_memberships?team_id=in.(' + chunk.join(',') + ')&role=in.(Captain,Co-Captain)');
+      }
+    }
+    for (const [team_id, ops] of opsByTeam) {
+      const mnList = ops.map(o => o.mn);
+      for (let i = 0; i < mnList.length; i += 100) {
+        const chunk = mnList.slice(i, i + 100);
+        await sb('DELETE',
+          'team_memberships?team_id=eq.' + team_id
+          + '&member_number=in.(' + chunk.map(encodeURIComponent).join(',') + ')'
+          + '&role=eq.Member');
+      }
+    }
+    if (newCaptainRows.length) {
+      for (let i = 0; i < newCaptainRows.length; i += 500) {
+        await sb('POST', 'team_memberships',
+          newCaptainRows.slice(i, i + 500),
+          { Prefer: 'return=minimal' });
+      }
+    }
+  } catch (writeErr) {
+    await _slateRollbackTeamData();
+    throw new Error('Team Data write failed mid-stream — rolled back. Cause: ' + writeErr.message);
+  }
+
+  let msg = teamUpserts.length + ' team(s) upserted, ' + newCaptainRows.length + ' captain/co-captain membership(s) written.';
+  if (missingDivisions) msg += ' ⚠ ' + missingDivisions + ' team row(s) skipped (division not found in current session).';
   return msg;
 };
+
+/* Helper: Phase C target team_id list. Returns deduped list of team_ids
+ * from teamWork that have a known team_id in teamIdByKey. */
+function _slateTargetTeamIds(teamWork, teamIdByKey) {
+  const out = new Set();
+  for (const w of teamWork) {
+    const id = teamIdByKey.get(w.divId + ':' + w.tn);
+    if (id) out.add(id);
+  }
+  return [...out];
+}
+
+/* Helper: build per-team name index for captain resolution.
+ *   normName("First Last") -> member_number.
+ * Source preference per roster row:
+ *   1. Joined player record (first_name + ' ' + last_name)  ← canonical
+ *   2. name_raw verbatim (already "First Last" for v1.8 Team Screen imports)
+ *   3. name_raw flipped from "Last, First" via teamScreenNameToFirstLast
+ *      (covers legacy data written before v1.8 changed storage format).
+ * First write per key wins; Captain/Co-Captain rows in the roster get the
+ * same treatment as Member rows so a captain mid-rename still resolves. */
+function _slateBuildPerTeamNameIndex(roster) {
+  const idx = new Map();
+  for (const m of (roster || [])) {
+    const mn = m.member_number;
+    if (!mn) continue;
+    if (m.player && m.player.first_name && m.player.last_name) {
+      const k = normName(m.player.first_name + ' ' + m.player.last_name);
+      if (!idx.has(k)) idx.set(k, mn);
+    }
+    if (m.name_raw) {
+      const k1 = normName(m.name_raw);
+      if (!idx.has(k1)) idx.set(k1, mn);
+      const flipped = teamScreenNameToFirstLast(m.name_raw);
+      if (flipped) {
+        const k2 = normName(flipped);
+        if (!idx.has(k2)) idx.set(k2, mn);
+      }
+    }
+  }
+  return idx;
+}
 
 /* ──── Handler: TeamBonusPoints (update only) ───────────────── */
 window.commitTeamBonusPoints = async function(headers, rows) {
@@ -3368,17 +3779,75 @@ document.addEventListener('DOMContentLoaded', () => {
      from the email collection — even if they would otherwise pass
      filters or be in _ehqSel.
    ══════════════════════════════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════════════════════════════
+   v1.8 EMAIL HQ — wildcard-or-match auto-check + manual cherry-pick
+   ══════════════════════════════════════════════════════════════════════
+   PER-USER SPEC 2026-05-05:
+
+   "When no filters are selected in email hq it should show all divisions
+    (unless hidden cra by checkbox) so that I can checkmark each division
+    I want. The captain, co-captain, player filter should still work for
+    selecting individual divisions. That is to say if I select one or more
+    divisions and the captain and player filters then all team emails
+    except for the co-captain are selected."
+
+   FILTER MODEL — wildcardOrMatch (NEW in v1.8):
+     Operator / Format / Night facets:
+       - Empty facet  → WILDCARD (passes for any division)
+       - Lit facet    → restricts auto-check to divisions whose value
+                        is in the lit set
+     Role facet:
+       - Empty role   → no cells selected (zero emails)
+       - Lit role     → cells whose role is in the set are included for
+                        every CHECKED division
+
+   DIVISION CHECKED iff
+     (autoCheck(d) AND d NOT IN _ehqManualUncheck)
+        OR  d IN _ehqManualCheck
+   where autoCheck(d) = wildcardOrMatch(operator) AND wildcardOrMatch(format)
+                       AND wildcardOrMatch(night)
+
+   CELL SELECTED iff
+     (1) the cell has an email
+     (2) the cell's division is not Hide-CRA-excluded
+     AND
+     (3a) the cell's division is CHECKED  AND  the cell's role is in the
+          lit Role pills,
+     OR
+     (3b) the cell key is in _ehqSel (cherry-pick / paste).
+
+   RENDERING:
+     Render EVERY division (subject only to Hide-CRA). Even an empty filter
+     set shows every division, so the user can manually checkmark whichever
+     ones they want. Replaces v1.6/v1.7 "filter or selected" gating.
+
+   ALL / NONE / RESET:
+     All   → activate every pill in every facet, clear manual sets and
+             cherry-picks. Result: every division auto-checked, every role
+             selected, every email included (Hide-CRA still applies).
+     None  → deactivate every pill, clear manual sets and cherry-picks.
+             Result: 0 cells (Role facet empty -> 0 emails).
+     Reset → SPM operator + Captains role + every format + every night.
+             Clears manual sets, cherry-picks, and the paste box.
+   ══════════════════════════════════════════════════════════════════════ */
 let _emailData = null;
-// Active filter state — Sets of pill keys per facet.
+// Active filter pills per facet.
 //   operator: Set<string operator_id (stringified)>
 //   role:     Set<'Captain'|'Co-Captain'|'Member'>
 //   format:   Set<string format value>
 //   night:    Set<string day-of-week>
-// Empty facet means NO restriction-by-filter matches in that facet
-// (legacy behavior — empty facet → zero filter-driven results).
 let _ehqFilters = { operator: new Set(), role: new Set(), format: new Set(), night: new Set() };
-// Per-cell selection set, additive to filter results.
-// Keys: "<divId>_<teamId>_<role>"  role ∈ {Captain, Co-Captain, Member}.
+// v1.8: manual cherry-pick state for division-level checkboxes.
+//   _ehqManualCheck   — divisions the user explicitly checked (overrides
+//                       auto-uncheck when filters wouldn't auto-check)
+//   _ehqManualUncheck — divisions the user explicitly unchecked (overrides
+//                       auto-check when filters would auto-check)
+//   These are mutually exclusive per division — toggling moves the id
+//   between sets / clears it depending on the current effective state.
+let _ehqManualCheck = new Set();
+let _ehqManualUncheck = new Set();
+// Per-cell cherry-pick set, additive to the division-checked + role-filter
+// path. Keys: "<divId>_<teamId>_<role>".
 let _ehqSel = new Set();
 // Hide-CRA toggle, persisted in localStorage so it survives reload.
 const EHQ_HIDE_CRA_LS = 'ehq.hideCra.v1';
@@ -3390,28 +3859,25 @@ async function loadEmailHQ() {
     out.innerHTML = '<p class="hint" style="padding:16px">No current session. Create one on the Sessions tab.</p>';
     return;
   }
-  // Reset filter + cell state so a session switch doesn't carry stale
-  // operator/format pill values whose IDs no longer exist (or worse,
-  // collide with unrelated rows in the new session). Strip the .active
-  // class from any leftover pill DOM so the visual matches state.
-  // (Bug fix v1.5)
+  // Reset all filter + manual + cell state on session/tab entry so a stale
+  // session's IDs don't leak into the new render.
   _ehqFilters.operator.clear();
   _ehqFilters.role.clear();
   _ehqFilters.format.clear();
   _ehqFilters.night.clear();
+  _ehqManualCheck.clear();
+  _ehqManualUncheck.clear();
   _ehqSel.clear();
   document.querySelectorAll('.ehq-toolbar-card .ehq-btn[data-facet]').forEach(btn => {
     btn.classList.remove('active');
   });
-  // Sync the persisted Hide-CRA checkbox into the DOM. (v1.6)
   const _hideCb = document.getElementById('ehqHideCra');
   if (_hideCb) _hideCb.checked = _ehqHideCra;
-  out.innerHTML = '<p class="hint" style="padding:16px">Loading\u2026</p>';
+  out.innerHTML = '<p class="hint" style="padding:16px">Loading…</p>';
 
   try {
     // All divisions for the session (including untagged — operator_id may be NULL),
-    // with teams, memberships, and joined players. Role is captured per membership
-    // so the Role filter can later narrow what emails get selected.
+    // with teams, memberships, and joined players.
     const url =
       'divisions?select='
       + 'id,division_number,name,format,night_of_play,operator_id,'
@@ -3421,13 +3887,11 @@ async function loadEmailHQ() {
       + '&session_id=eq.' + currentSession.id
       + '&order=division_number.asc';
     _emailData = await sb('GET', url);
-    // Numeric sort on division_number (it's TEXT in the DB but represents an int).
     _emailData.sort((a, b) => parseInt(a.division_number, 10) - parseInt(b.division_number, 10));
 
     _renderEhqFilters();
-    // Apply the legacy "Reset" defaults on first load: SPM operator + Captains
-    // role + all formats + all nights. Mirrors Apps/SpmAdmin/Captains.html
-    // resetFilters() being the implicit "useful default" state. (v1.6)
+    // Useful default state: SPM operator + Captains role + all formats + all
+    // nights. Mirrors legacy GAS Captains.html resetFilters().
     _ehqApplyResetDefaults();
     renderEmailHQ();
   } catch (e) {
@@ -3444,14 +3908,7 @@ function _renderEhqFilters() {
     return '<button class="ehq-btn" data-facet="operator" data-brand="' + brand + '" data-value="' + o.id + '">' + esc(o.name) + '</button>';
   }).join('');
 
-  // Format values come from the loaded data. Night buttons show all 7
-  // days of the week even when night_of_play is empty on the divisions —
-  // the user can still filter-by-intent, and once a Division Listing paste
-  // fills the column the filter starts actually narrowing.
-  // Trim before deduping — duplicate "8-Ball Open" pills were appearing
-  // because some divisions had trailing whitespace in the format string
-  // (e.g. "8-Ball Open" vs "8-Ball Open "). Set() treats those as distinct.
-  // Normalize on .trim() and lowercase-comparison via a Map.
+  // Format values come from the loaded data. Night buttons show all 7 days.
   const fmtMap = new Map();
   for (const d of (_emailData || [])) {
     const raw = (d.format || '').trim();
@@ -3467,14 +3924,17 @@ function _renderEhqFilters() {
   document.getElementById('ehqNightBtns').innerHTML = ALL_NIGHTS.map(n =>
     '<button class="ehq-btn" data-facet="night" data-value="' + esc(n) + '">' + esc(n) + '</button>').join('');
 
-  // One delegated click handler on the whole toolbar card.
+  // One delegated click handler on the whole toolbar card. Toggles pill
+  // active state, then re-renders. Filter changes don't touch
+  // _ehqManualCheck / _ehqManualUncheck — manual division checks survive
+  // filter pill changes (per user request).
   const card = document.querySelector('.ehq-toolbar-card');
   if (!card.dataset.wired) {
     card.addEventListener('click', (ev) => {
       const btn = ev.target.closest('.ehq-btn');
       if (!btn || !btn.dataset.facet) return;
       const facet = btn.dataset.facet;
-      const value = btn.dataset.value || btn.dataset.role;  // role uses data-role
+      const value = btn.dataset.value || btn.dataset.role;
       const key = btn.dataset.role ? btn.dataset.role : value;
       if (_ehqFilters[facet].has(key)) _ehqFilters[facet].delete(key);
       else _ehqFilters[facet].add(key);
@@ -3484,133 +3944,98 @@ function _renderEhqFilters() {
     card.dataset.wired = '1';
   }
 
-  // Wire role buttons (they're static, no data-value but have data-role)
   document.querySelectorAll('#ehqRoleBtns .ehq-btn').forEach(b => {
     b.dataset.facet = 'role';
   });
 }
 
-/* ───────────────────────────────────────────────────────────────────────
- * v1.6 — LEGACY SEMANTICS (matches Apps/SpmAdmin/Captains.html):
- *   A facet is ALWAYS restricting. An empty facet matches NOTHING via
- *   the filter path. To match a division/cell through filters, EVERY
- *   facet (operator, role, format, night) must have at least one pill
- *   active AND the division/role must match one of the active pills.
- *
- *   This replaces v1.5's "all-pills-active = no restriction" rule, which
- *   was too lenient (empty facet returned ALL emails instead of zero).
- * ─────────────────────────────────────────────────────────────────────── */
+/* ─── v1.8 filter helpers (wildcardOrMatch) ─────────────────────────── */
 
-/* True if any pill is active in this facet. Empty facet → returns false.
- * NOTE the inversion vs v1.5: empty facet here is RESTRICTIVE (matches
- * nothing), not permissive. */
 function _ehqFacetActive(facet) {
   return _ehqFilters[facet].size > 0;
 }
 
-/* True if the given division passes the operator/format/night filters.
- * For each of those three facets: facet must be active AND division's
- * value must be in the active set. (Role is checked at the cell level.) */
-function _ehqDivPassesFilters(d) {
-  if (!_ehqFacetActive('operator')) return false;
-  if (!_ehqFilters.operator.has(String(d.operator_id))) return false;
-  if (!_ehqFacetActive('format')) return false;
-  // Trim format value before lookup so divisions with stray whitespace
-  // (e.g. "8-Ball Open ") still match the deduped pill ("8-Ball Open").
-  if (!_ehqFilters.format.has((d.format || '').trim())) return false;
-  if (!_ehqFacetActive('night')) return false;
-  if (!_ehqFilters.night.has((d.night_of_play || '').trim())) return false;
+/* True if the facet either has NO active pills (wildcard) OR the value
+ * is in the active set. Used for op/format/night auto-check semantics. */
+function _ehqWildcardOrMatch(facet, value) {
+  if (!_ehqFacetActive(facet)) return true;
+  return _ehqFilters[facet].has(value);
+}
+
+/* True if the division would be AUTO-CHECKED by the current filter pills.
+ * v1.8 RULE (from user verification scenarios 1, 2, 4):
+ *   Auto-check fires ONLY IF at least one of operator/format/night has a
+ *   lit pill. Otherwise (all three facets empty) NO division auto-checks
+ *   — the user must manually checkmark divisions.
+ *   When auto-check is "armed" (at least one op/format/night facet lit),
+ *   each empty facet is treated as wildcard-pass and each lit facet
+ *   restricts to its matching values. (Role facet is never part of the
+ *   auto-check decision; it only narrows cell-level selection within a
+ *   checked division.) */
+function _ehqDivAutoChecked(d) {
+  // Auto-check is only "armed" if at least one of op/format/night is lit.
+  if (!_ehqFacetActive('operator') && !_ehqFacetActive('format') && !_ehqFacetActive('night')) {
+    return false;
+  }
+  if (!_ehqWildcardOrMatch('operator', String(d.operator_id))) return false;
+  if (!_ehqWildcardOrMatch('format',   (d.format || '').trim())) return false;
+  if (!_ehqWildcardOrMatch('night',    (d.night_of_play || '').trim())) return false;
   return true;
 }
 
-/* True if the given role string passes the Role filter. Role facet must
- * be active AND the role string must be in the active set. */
+/* The effective division-checked state, combining auto-check with manual
+ * overrides:
+ *   - manualCheck wins if present
+ *   - manualUncheck wins if present
+ *   - otherwise fall back to auto
+ * (manualCheck and manualUncheck are mutually exclusive per division —
+ *  the toggle handler enforces that invariant.) */
+function _ehqDivIsChecked(d) {
+  if (_ehqManualUncheck.has(d.id)) return false;
+  if (_ehqManualCheck.has(d.id))   return true;
+  return _ehqDivAutoChecked(d);
+}
+
+/* True if the given role string is in the lit Role pills. Empty role
+ * facet = no cells selected via the division-checked path. */
 function _ehqRolePassesFilter(role) {
   if (!_ehqFacetActive('role')) return false;
   return _ehqFilters.role.has(role);
 }
 
-/* True if the given division is hidden by the Hide-CRA toggle. Looks up
- * the operator's short_code from the operators table. */
+/* True if the given division is hidden by the Hide-CRA toggle. */
 function _ehqDivIsHiddenCRA(d) {
   if (!_ehqHideCra) return false;
   const op = (operators || []).find(o => String(o.id) === String(d.operator_id));
   return !!(op && op.short_code === 'CRA');
 }
 
-/* True if any cell in this division is in _ehqSel. Used so paste-selected
- * divisions remain visible even when they don't match any filter pill. */
-function _ehqDivHasSelection(d) {
-  if (!_ehqSel.size) return false;
-  for (const t of (d.teams || [])) {
-    for (const m of (t.memberships || [])) {
-      if (_ehqSel.has(_ehqCellKey(d.id, t.id, m.role))) return true;
-    }
-  }
-  return false;
-}
+/* ─── Render ─────────────────────────────────────────────────────────── */
 
 function renderEmailHQ() {
   const out = document.getElementById('emailHqOutput');
   if (!_emailData) { out.innerHTML = ''; return; }
 
-  // VISIBLE = (passes filters) OR (has any cell in _ehqSel \u2014 keeps paste-
-  // selected divisions visible). Hide-CRA is a hard exclude on top.
-  // (v1.6: legacy semantics \u2014 empty facet is restrictive, not permissive.)
-  const filtered = _emailData.filter(d => {
-    if (_ehqDivIsHiddenCRA(d)) return false;
-    return _ehqDivPassesFilters(d) || _ehqDivHasSelection(d);
-  });
+  // v1.8: render ALL divisions (subject only to Hide-CRA). Filter pills
+  // change which ones are auto-checked, not which are visible. The user
+  // can manually check/uncheck any visible division.
+  const visible = _emailData.filter(d => !_ehqDivIsHiddenCRA(d));
 
-  if (!filtered.length) {
-    // Build a helpful message that names which facets are restricting and,
-    // if all four facets ARE active, lists the active pill values per facet
-    // so the user can see exactly what intersection produced zero divisions.
-    const inactive = ['operator', 'role', 'format', 'night']
-      .filter(f => !_ehqFacetActive(f));
-    let msg = 'No divisions match these filters.';
-    if (inactive.length) {
-      msg += ' ' + inactive.map(f => f[0].toUpperCase() + f.slice(1))
-                          .join(' / ') + ' has no active pills \u2014 '
-        + 'every facet needs at least one pill active to include any '
-        + 'emails through filters. Click <strong>Reset</strong> for '
-        + 'sensible defaults, or <strong>All</strong> to include '
-        + 'everything.';
-    } else {
-      // All four facets active but intersection is empty \u2014 show the actual
-      // active-pill values so the user can see what combo produced zero
-      // (e.g. "SPM + Captain + Ladies + Saturday" means no SPM Ladies
-      // Saturday division exists in this session \u2014 usually a real "0", not
-      // a bug).
-      const opNames = [...(_ehqFilters.operator || [])].map(id => {
-        const o = (operators || []).find(x => String(x.id) === String(id));
-        return o ? o.name : id;
-      });
-      const summary = []
-        .concat(opNames.length ? ['Operator: ' + opNames.join(', ')] : [])
-        .concat(_ehqFilters.role.size  ? ['Role: '   + [..._ehqFilters.role  ].join(', ')] : [])
-        .concat(_ehqFilters.format.size? ['Format: ' + [..._ehqFilters.format].join(', ')] : [])
-        .concat(_ehqFilters.night.size ? ['Night: '  + [..._ehqFilters.night ].join(', ')] : [])
-        .join(' &middot; ');
-      msg += ' Active filter combination: ' + summary
-        + '. No division in this session has all four. '
-        + (_ehqHideCra ? '(Hide CRA is on; uncheck it if you expected CRA divisions.)' : '');
-    }
+  if (!visible.length) {
+    let msg = 'No divisions in this session.';
+    if (_ehqHideCra) msg += ' (Hide CRA is on. Uncheck if you expected CRA divisions.)';
     out.innerHTML = '<p class="hint" style="padding:16px">' + msg + '</p>';
     _updateEhqCount();
     return;
   }
 
   let html = '';
-  for (const d of filtered) {
+  for (const d of visible) {
     const teamCount = (d.teams || []).length;
     const meta = [d.format, d.night_of_play, teamCount + ' team' + (teamCount === 1 ? '' : 's')]
-      .filter(Boolean).join(' \u00b7 ');
-    // v1.6: division title is "<divNum> \u2014 <name>" so the operator can scan
-    // the card list by number. (Legacy GAS Captains.html showed "<name>"
-    // alone; v1.6 prefixes the number per user request.)
+      .filter(Boolean).join(' · ');
     const divNumLabel = (d.division_number != null && String(d.division_number) !== '')
-      ? String(d.division_number) + ' \u2014 '
+      ? String(d.division_number) + ' — '
       : '';
     const divState = _ehqDivCheckState(d);
     html += '<div class="ehq-div-card" data-div-id="' + d.id + '">'
@@ -3619,7 +4044,7 @@ function renderEmailHQ() {
       +     (divState === 'checked' ? ' checked' : '') + (divState === 'none' ? ' data-empty="1"' : '') + '>'
       +   '<div class="ehq-div-title">' + esc(divNumLabel + (d.name || '')) + '</div>'
       +   '<div class="ehq-div-meta">' + esc(meta) + '</div>'
-      +   '<div class="ehq-div-chev">\u25B6</div>'
+      +   '<div class="ehq-div-chev">▶</div>'
       + '</div>'
       + '<div class="ehq-div-body">' + _ehqRenderTeams(d) + '</div>'
       + '</div>';
@@ -3627,7 +4052,7 @@ function renderEmailHQ() {
   out.innerHTML = html;
 
   // Set indeterminate state on division-level checkboxes after DOM exists.
-  for (const d of filtered) {
+  for (const d of visible) {
     const cb = out.querySelector('.ehq-div-cb[data-div-id="' + d.id + '"]');
     if (!cb) continue;
     cb.indeterminate = _ehqDivCheckState(d) === 'partial';
@@ -3635,26 +4060,42 @@ function renderEmailHQ() {
   _ehqPaintAllTeamParents(out);
 
   // Delegated click handler for checkboxes + expand toggles.
-  // v1.6: cells use the UNION model — cell-click toggles _ehqSel directly.
-  // No "materialize Mode 1" step; final emails = filter-matched ∪ _ehqSel.
   if (!out.dataset.wired) {
     out.addEventListener('click', (ev) => {
-      // Division-level checkbox → toggles every emailable role cell in
-      // the division. CHECK adds all cells to _ehqSel regardless of role
-      // filter (the user explicitly asked for them). UNCHECK removes all
-      // cells from _ehqSel; if filters would still match them, the count
-      // doesn't drop to zero — the user can shrink filters to fully drop.
+      // Division-level checkbox — v1.8: toggles manual check / uncheck
+      // for the division. Three-state cycle:
+      //   currently checked (via filter or manual)   → uncheck (manual uncheck)
+      //   currently unchecked                         → check  (manual check)
+      // The handler clears the OTHER manual set so the two never coexist
+      // for the same division.
       const divCb = ev.target.closest('.ehq-div-cb');
       if (divCb) {
         const divId = parseInt(divCb.dataset.divId, 10);
         const d = _emailData.find(x => x.id === divId);
         if (!d) { ev.stopPropagation(); return; }
-        const target = divCb.checked;
-        for (const t of (d.teams || [])) {
-          for (const m of (t.memberships || [])) {
-            if (!m.player || !m.player.email) continue;
-            const key = _ehqCellKey(divId, t.id, m.role);
-            if (target) _ehqSel.add(key); else _ehqSel.delete(key);
+        const wasChecked = _ehqDivIsChecked(d);
+        if (wasChecked) {
+          // Become unchecked.
+          _ehqManualCheck.delete(divId);
+          if (_ehqDivAutoChecked(d)) {
+            _ehqManualUncheck.add(divId);   // override auto
+          } else {
+            _ehqManualUncheck.delete(divId);  // already unchecked naturally
+          }
+          // Also clear any cherry-picked cells in this division (the user
+          // wanted the whole division unselected — including cherry-picks).
+          for (const t of (d.teams || [])) {
+            for (const m of (t.memberships || [])) {
+              _ehqSel.delete(_ehqCellKey(divId, t.id, m.role));
+            }
+          }
+        } else {
+          // Become checked.
+          _ehqManualUncheck.delete(divId);
+          if (!_ehqDivAutoChecked(d)) {
+            _ehqManualCheck.add(divId);     // override auto
+          } else {
+            _ehqManualCheck.delete(divId);   // already checked naturally
           }
         }
         ev.stopPropagation();
@@ -3663,7 +4104,9 @@ function renderEmailHQ() {
         return;
       }
 
-      // Team-row master checkbox → cascade to all of that team's role cells
+      // Team-row master checkbox — toggles every emailable role cell on
+      // the team in _ehqSel (cherry-pick path). Bypasses the role filter
+      // (the user explicitly named the team).
       const teamCb = ev.target.closest('.ehq-team-cb');
       if (teamCb) {
         const divId  = parseInt(teamCb.dataset.divId, 10);
@@ -3682,7 +4125,7 @@ function renderEmailHQ() {
         return;
       }
 
-      // Per-role checkbox (Captain / Co-Captain / Players cell)
+      // Per-role checkbox — toggles a single cell in _ehqSel.
       const roleCb = ev.target.closest('.ehq-role-cb');
       if (roleCb) {
         const divId  = parseInt(roleCb.dataset.divId, 10);
@@ -3716,27 +4159,27 @@ function renderEmailHQ() {
 }
 
 /* ═══════ Cell-key helpers and checkbox state derivation ═══════
- * v1.6 UNION model:
- *   A cell is "selected" iff EITHER
- *     (a) the cell's division passes the operator/format/night filters
- *         AND the cell's role passes the role filter, OR
- *     (b) the cell key is present in _ehqSel (paste / cherry-pick).
- *   No "Mode 1" / "cherry-pick" distinction — both contribute together.
- *   Empty filter facet → no cells satisfy (a); only paste/click adds via (b).
+ * v1.8 model:
+ *   A cell is "selected" iff the cell has an email AND its division is
+ *   not Hide-CRA-hidden AND
+ *     EITHER (a) the cell's division is checked (auto OR manual) and
+ *                the cell's role is in the lit Role pills,
+ *     OR     (b) the cell key is in _ehqSel (cherry-pick / paste).
  */
 function _ehqCellKey(divId, teamId, role) { return divId + '_' + teamId + '_' + role; }
 
-/* True if the (divId, teamId, role) cell is currently considered selected
- * for both visual checkbox state and email collection. Single source of
- * truth for the union model. Cells with no email are never selected. */
 function _ehqCellSelected(d, teamId, role, hasEmail) {
   if (!hasEmail) return false;
-  if (_ehqDivIsHiddenCRA(d)) return false;     // Hide-CRA hard-excludes
+  if (_ehqDivIsHiddenCRA(d)) return false;
   if (_ehqSel.has(_ehqCellKey(d.id, teamId, role))) return true;
-  return _ehqDivPassesFilters(d) && _ehqRolePassesFilter(role);
+  return _ehqDivIsChecked(d) && _ehqRolePassesFilter(role);
 }
 
-// 'checked' | 'partial' | 'unchecked' | 'none' — for a division as a whole
+// 'checked' | 'partial' | 'unchecked' | 'none' — for a division.
+// 'checked' = every emailable cell that would be selected by THIS division
+// being checked under current filters is actually selected. Counting all
+// emailable cells, not just role-passing ones, gives a more intuitive
+// indeterminate state when the role filter excludes some cells.
 function _ehqDivCheckState(d) {
   let total = 0, selected = 0;
   for (const t of (d.teams || [])) {
@@ -3753,7 +4196,6 @@ function _ehqDivCheckState(d) {
   return 'partial';
 }
 
-// 'checked' | 'partial' | 'unchecked' | 'none' (no emailable members) — for a team
 function _ehqTeamCheckState(d, team) {
   let total = 0, selected = 0;
   for (const m of (team.memberships || [])) {
@@ -3768,23 +4210,30 @@ function _ehqTeamCheckState(d, team) {
   return 'partial';
 }
 
-// Boolean — for a single per-role cell
 function _ehqRoleCellChecked(d, teamId, role) {
   return _ehqCellSelected(d, teamId, role, true);
 }
 
 // Repaint every checkbox (division, team-master, per-role) against the
-// current selection state (filters ∪ _ehqSel). Called after any change
-// so the UI stays consistent without a full re-render.
+// current selection state. Called after any change so the UI stays
+// consistent without a full re-render. v1.8: for division checkboxes,
+// "checked" is _ehqDivIsChecked (not _ehqDivCheckState === 'checked'),
+// because a manually-checked division with no role-passing cells should
+// still look CHECKED to the user — they just need to add a role pill to
+// activate the cell selection.
 function _ehqPaintAllTeamParents(root) {
   if (!_emailData) return;
   root = root || document.getElementById('emailHqOutput');
   for (const d of _emailData) {
     const divCb = root.querySelector('.ehq-div-cb[data-div-id="' + d.id + '"]');
     if (divCb) {
-      const s = _ehqDivCheckState(d);
-      divCb.checked = (s === 'checked');
-      divCb.indeterminate = (s === 'partial');
+      const isChecked = _ehqDivIsChecked(d);
+      const cellState = _ehqDivCheckState(d);
+      divCb.checked = isChecked;
+      // Indeterminate only when partially-selected via cells (cherry-picks
+      // narrowed by role filter, etc.). Fully-checked or fully-unchecked
+      // never shows indeterminate.
+      divCb.indeterminate = (cellState === 'partial' && isChecked);
     }
     for (const t of (d.teams || [])) {
       const tcb = root.querySelector(
@@ -3808,9 +4257,6 @@ function _ehqPaintAllTeamParents(root) {
 /* ═══════ Rendering the 4-column team table inside a division body ═══════ */
 
 function _ehqRenderTeams(div) {
-  // Numeric sort — team_number is a digit-string in slate ("1001", "999"),
-  // localeCompare orders lexically which puts "1001" before "999".
-  // (Bug fix v1.5)
   const teams = (div.teams || []).slice().sort((a, b) => {
     const an = parseInt(String(a.team_number || '').replace(/\D/g, ''), 10);
     const bn = parseInt(String(b.team_number || '').replace(/\D/g, ''), 10);
@@ -3844,15 +4290,11 @@ function _ehqRenderTeams(div) {
       +   '<span class="ehq-tn">#' + esc(t.team_number || '') + '</span>'
       +   esc(t.team_name || '')
       + '</td>'
-      // Captain
       + '<td>' + _ehqRenderRoleCell(div, t.id, 'Captain', cap) + '</td>'
-      // Co-Captain
       + '<td>' + _ehqRenderRoleCell(div, t.id, 'Co-Captain', coCap) + '</td>'
-      // Players (count column; member individual checkbox collapsed into one "Members" selection)
       + '<td>' + _ehqRenderPlayersCell(div, t.id, players) + '</td>'
       + '</tr>';
 
-    // Sub-row with the full player roster, toggled by clicking the player count
     if (players.length) {
       html +=
         '<tr class="ehq-player-detail">'
@@ -3860,7 +4302,7 @@ function _ehqRenderTeams(div) {
         + players.map(m => {
             const nm = m.player
               ? [m.player.first_name, m.player.last_name].filter(Boolean).join(' ')
-              : (m.name_raw || '\u2014');
+              : (m.name_raw || '—');
             if (m.player && m.player.email) {
               return '<span class="ehq-p-entry"><span class="ehq-p-name">' + esc(nm)
                 + ':</span><span class="ehq-p-email">' + esc(m.player.email) + '</span></span>';
@@ -3880,7 +4322,7 @@ function _ehqRenderRoleCell(div, teamId, role, m) {
   if (!m) return '<span class="ehq-none">none</span>';
   const name = m.player
     ? [m.player.first_name, m.player.last_name].filter(Boolean).join(' ')
-    : (m.name_raw || '\u2014');
+    : (m.name_raw || '—');
   const em = m.player && m.player.email ? m.player.email : '';
   const disabled = !em;
   const checked = !disabled && _ehqRoleCellChecked(div, teamId, role);
@@ -3913,9 +4355,7 @@ function _ehqRenderPlayersCell(div, teamId, players) {
 }
 
 /* ═══════ Email collection / copy ═══════
- * v1.6 UNION model: a cell contributes iff it would be checked by
- * _ehqCellSelected — that means EITHER it passes filters OR is in _ehqSel.
- * Hide-CRA hard-excludes. Whitespace-only emails are skipped. */
+ * v1.8: a cell contributes iff _ehqCellSelected returns true. */
 function _ehqCollectEmails() {
   if (!_emailData) return [];
   const emails = new Set();
@@ -3938,11 +4378,10 @@ function _updateEhqCount() {
   const n = _ehqCollectEmails().length;
   const el = document.getElementById('ehqCount');
   if (el) {
-    // v1.6: append a hint when _ehqSel is non-empty so the user knows
-    // some entries are paste/cherry-picked (additive to filters).
-    const tag = _ehqSel.size ? ' selected (filters + picks)' : ' selected';
+    const tag = (_ehqSel.size || _ehqManualCheck.size || _ehqManualUncheck.size)
+      ? ' selected (filters + picks)' : ' selected';
     el.textContent = n + ' email' + (n === 1 ? '' : 's') + tag;
-    el.classList.toggle('ehq-mode-filter', _ehqSel.size === 0);
+    el.classList.toggle('ehq-mode-filter', _ehqSel.size === 0 && _ehqManualCheck.size === 0 && _ehqManualUncheck.size === 0);
   }
   const btn = document.getElementById('ehqCopyBtn');
   if (btn) btn.disabled = n === 0;
@@ -3964,26 +4403,19 @@ async function ehqCopyEmails() {
 }
 
 /* ═══════ Paste team numbers → bulk-select matching teams ═══════
- * Parses any whitespace/comma/newline-delimited list, normalizes each
- * token via stripTeamNum (matches the team_number form stored in slate),
- * scans _emailData for matches, and toggles every emailable role cell
- * on each matched team as if the team master checkbox had been clicked.
- * Unmatched tokens are reported in the feedback banner.
- * ═══════════════════════════════════════════════════════════════════ */
+ * Tokenizes the paste, matches each team_number against _emailData, and
+ * adds every emailable cell of each matched team to _ehqSel. Bypasses
+ * the role filter (the user explicitly named the team). */
 function ehqSelectByPaste() {
   const box = document.getElementById('ehqPasteBox');
   const raw = (box.value || '').trim();
   const fb = document.getElementById('ehqPasteFeedback');
-  if (!_emailData) { fb.textContent = 'Email HQ data hasn\u2019t loaded yet.'; fb.className = 'ehq-paste-feedback warn'; return; }
+  if (!_emailData) { fb.textContent = 'Email HQ data hasn’t loaded yet.'; fb.className = 'ehq-paste-feedback warn'; return; }
   if (!raw) { fb.textContent = 'Paste team numbers first.'; fb.className = 'ehq-paste-feedback warn'; return; }
 
-  // Tokenize on any non-digit, then normalize via stripTeamNum.
   const tokens = raw.split(/[^\d]+/).map(t => stripTeamNum(t)).filter(Boolean);
   if (!tokens.length) { fb.textContent = 'No team numbers found in the paste.'; fb.className = 'ehq-paste-feedback warn'; return; }
 
-  // Build a fast lookup: stripped team_number → { divId, team } across all divisions.
-  // Team numbers are globally unique within a session (division prefix is embedded
-  // in the number), so one bucket is enough.
   const teamByNum = new Map();
   for (const d of _emailData) {
     for (const t of (d.teams || [])) {
@@ -3995,11 +4427,6 @@ function ehqSelectByPaste() {
   const requested = new Set(tokens);
   let matched = 0, unmatched = 0;
   const missingTokens = [];
-  // v1.6: Paste is ADDITIVE to filters — every emailable role on a matched
-  // team gets added to _ehqSel regardless of the Role filter (the user
-  // explicitly named these teams, so we honor that). The active Role pill
-  // still narrows the filter-side of the union; the paste-side bypasses.
-  // Per user request: "team paste numbers should be additive to the filters."
   for (const tn of requested) {
     const hit = teamByNum.get(tn);
     if (!hit) { unmatched++; missingTokens.push(tn); continue; }
@@ -4010,14 +4437,14 @@ function ehqSelectByPaste() {
     }
   }
 
-  renderEmailHQ();   // full re-render so division-card checkmarks paint correctly
+  renderEmailHQ();
 
   const parts = [];
   parts.push('Selected ' + matched + ' team' + (matched === 1 ? '' : 's') + '.');
   if (unmatched) {
     parts.push(unmatched + ' team# not found: '
       + (missingTokens.slice(0, 8).join(', '))
-      + (missingTokens.length > 8 ? ', \u2026 +' + (missingTokens.length - 8) + ' more' : ''));
+      + (missingTokens.length > 8 ? ', … +' + (missingTokens.length - 8) + ' more' : ''));
   }
   fb.textContent = parts.join(' ');
   fb.className = 'ehq-paste-feedback ' + (unmatched ? 'warn' : 'ok');
@@ -4031,37 +4458,31 @@ function ehqClearPaste() {
   fb.className = 'ehq-paste-feedback';
 }
 
-/* All / None / Reset — match Apps/SpmAdmin/Captains.html legacy semantics.
+/* All / None / Reset — v1.8 semantics.
  *
- *   All   → activate every pill in every facet, clear _ehqSel.
- *           Result: every emailable cell included.
- *   None  → deactivate every pill, clear _ehqSel, clear paste box.
- *           Result: 0 cells (empty facet = zero results).
+ *   All   → activate every pill in every facet, clear manual sets and
+ *            cherry-picks. Result: every division auto-checked, every
+ *            role selected, every email included.
+ *   None  → deactivate every pill, clear manual sets, clear cherry-picks,
+ *            clear paste box. Result: 0 cells (Role facet empty).
  *   Reset → SPM operator + Captains role + every format + every night,
- *           clear _ehqSel, clear paste box. The "useful default" state.
- *
- * After mutating filter state these all call renderEmailHQ(), which
- * triggers a full re-render — division-card checkmarks and the email
- * count repaint from the new state. (Fixes the v1.5 bug where All/None/
- * Reset didn't visibly update count or division checkmarks.)
+ *            clear manual sets, cherry-picks, paste box. The "useful
+ *            default" state. Mirrors legacy GAS Captains.html resetFilters().
  */
 function ehqSelectAll() {
-  // Activate every existing pill in every facet
   document.querySelectorAll('.ehq-toolbar-card .ehq-btn[data-facet]').forEach(btn => {
     btn.classList.add('active');
     const facet = btn.dataset.facet;
     const val = btn.dataset.role || btn.dataset.value;
     if (val) _ehqFilters[facet].add(val);
   });
-  // Clear cherry-pick set so "All" really means "everything via filters"
+  _ehqManualCheck.clear();
+  _ehqManualUncheck.clear();
   _ehqSel.clear();
   renderEmailHQ();
 }
 
 function ehqSelectNone() {
-  // Deactivate every pill, clear every facet, clear per-cell selections,
-  // clear the paste box. With every facet empty, ZERO emails are selected
-  // (legacy semantic: empty facet = no matches via filters).
   document.querySelectorAll('.ehq-toolbar-card .ehq-btn[data-facet]').forEach(btn => {
     btn.classList.remove('active');
   });
@@ -4069,9 +4490,9 @@ function ehqSelectNone() {
   _ehqFilters.role.clear();
   _ehqFilters.format.clear();
   _ehqFilters.night.clear();
+  _ehqManualCheck.clear();
+  _ehqManualUncheck.clear();
   _ehqSel.clear();
-  // Per-user request (v1.6): None should also clear the paste textarea
-  // (previously only Reset did). "None" = full wipe.
   const box = document.getElementById('ehqPasteBox');
   if (box) box.value = '';
   const fb = document.getElementById('ehqPasteFeedback');
@@ -4079,25 +4500,18 @@ function ehqSelectNone() {
   renderEmailHQ();
 }
 
-/* Internal: set the filter pills to the Reset defaults — SPM operator,
- * Captains role, every format, every night. Does NOT call renderEmailHQ
- * itself; the caller is expected to. Also clears _ehqSel (defaults are
- * a fresh start, not additive to whatever was previously cherry-picked).
- *
- * Mirrors Apps/SpmAdmin/Captains.html resetFilters(). */
 function _ehqApplyResetDefaults() {
-  // Wipe filter sets first
   _ehqFilters.operator.clear();
   _ehqFilters.role.clear();
   _ehqFilters.format.clear();
   _ehqFilters.night.clear();
+  _ehqManualCheck.clear();
+  _ehqManualUncheck.clear();
   _ehqSel.clear();
-  // Visually deactivate everything so we can re-activate just the defaults
   document.querySelectorAll('.ehq-toolbar-card .ehq-btn[data-facet]').forEach(btn => {
     btn.classList.remove('active');
   });
 
-  // Operator: SPM only. Look up the SPM pill by its data-value (operator id).
   const spmOp = (operators || []).find(o => o.short_code === 'SPM');
   if (spmOp) {
     _ehqFilters.operator.add(String(spmOp.id));
@@ -4106,19 +4520,16 @@ function _ehqApplyResetDefaults() {
     if (spmBtn) spmBtn.classList.add('active');
   }
 
-  // Role: Captain only
   _ehqFilters.role.add('Captain');
   const capBtn = document.querySelector(
     '.ehq-toolbar-card .ehq-btn[data-facet="role"][data-role="Captain"]');
   if (capBtn) capBtn.classList.add('active');
 
-  // Format: every existing format pill
   document.querySelectorAll('.ehq-toolbar-card .ehq-btn[data-facet="format"]').forEach(btn => {
     const v = btn.dataset.value;
     if (v) { _ehqFilters.format.add(v); btn.classList.add('active'); }
   });
 
-  // Night: every existing night pill
   document.querySelectorAll('.ehq-toolbar-card .ehq-btn[data-facet="night"]').forEach(btn => {
     const v = btn.dataset.value;
     if (v) { _ehqFilters.night.add(v); btn.classList.add('active'); }
@@ -4127,7 +4538,6 @@ function _ehqApplyResetDefaults() {
 
 function ehqReset() {
   _ehqApplyResetDefaults();
-  // Clear the paste box too (Reset = full wipe to defaults)
   const box = document.getElementById('ehqPasteBox');
   if (box) box.value = '';
   const fb = document.getElementById('ehqPasteFeedback');
@@ -4135,9 +4545,6 @@ function ehqReset() {
   renderEmailHQ();
 }
 
-/* Hide-CRA checkbox handler — persists choice to localStorage so it
- * survives reload, then re-renders. CRA divisions are excluded from
- * BOTH rendering AND email collection while this is checked. (v1.6) */
 function ehqOnHideCraToggle() {
   const cb = document.getElementById('ehqHideCra');
   _ehqHideCra = !!(cb && cb.checked);
