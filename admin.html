@@ -1053,7 +1053,14 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <button class="ehq-btn" onclick="ehqSelectAll()">All</button>
           <button class="ehq-btn" onclick="ehqSelectNone()">None</button>
           <button class="ehq-btn" onclick="ehqReset()">Reset</button>
-          <button class="ehq-btn ehq-primary" id="ehqCopyBtn" onclick="ehqCopyEmails()">Copy Emails</button>
+          <!-- v2.3: wrapper that holds either a single "Copy Emails" button
+               (when the recipient count fits in one bucket of EHQ_GROUP_SIZE)
+               or N chunked "Copy 1-450", "Copy 451-900" buttons. Rebuilt by
+               _updateEhqCount(). inline-flex+wrap so multiple chunk buttons
+               flow naturally inside the action row on narrow screens. -->
+          <span id="ehqCopyBtnArea" style="display:inline-flex;gap:6px;flex-wrap:wrap;align-items:center">
+            <button class="ehq-btn ehq-primary" id="ehqCopyBtn" onclick="ehqCopyEmails()">Copy Emails</button>
+          </span>
           <span class="ehq-feedback" id="ehqCopyFeedback"></span>
           <span class="ehq-count" id="ehqCount">0 emails selected</span>
         </div>
@@ -1091,7 +1098,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '2.2';
+const APP_VERSION = '2.3';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -4420,7 +4427,13 @@ function _ehqRenderPlayersCell(div, teamId, players) {
 }
 
 /* ═══════ Email collection / copy ═══════
- * v1.8: a cell contributes iff _ehqCellSelected returns true. */
+ * v1.8: a cell contributes iff _ehqCellSelected returns true.
+ * v2.3: lists over EHQ_GROUP_SIZE recipients are split into chunked
+ *       "Copy 1-450", "Copy 451-900" buttons so admins can paste into
+ *       email clients that cap recipients per send. Matches the legacy
+ *       GAS Captains.html behavior (GROUP_SIZE = 450 there too). */
+const EHQ_GROUP_SIZE = 450;
+
 function _ehqCollectEmails() {
   if (!_emailData) return [];
   const emails = new Set();
@@ -4448,8 +4461,26 @@ function _updateEhqCount() {
     el.textContent = n + ' email' + (n === 1 ? '' : 's') + tag;
     el.classList.toggle('ehq-mode-filter', _ehqSel.size === 0 && _ehqManualCheck.size === 0 && _ehqManualUncheck.size === 0);
   }
-  const btn = document.getElementById('ehqCopyBtn');
-  if (btn) btn.disabled = n === 0;
+  // v2.3: rebuild the copy button(s). 0 -> disabled single; <=GROUP_SIZE ->
+  // single live button; >GROUP_SIZE -> one button per chunk.
+  const btnArea = document.getElementById('ehqCopyBtnArea');
+  if (!btnArea) return;
+  if (n === 0) {
+    btnArea.innerHTML = '<button class="ehq-btn ehq-primary" id="ehqCopyBtn" onclick="ehqCopyEmails()" disabled>Copy Emails</button>';
+  } else if (n <= EHQ_GROUP_SIZE) {
+    btnArea.innerHTML = '<button class="ehq-btn ehq-primary" id="ehqCopyBtn" onclick="ehqCopyEmails()">Copy Emails</button>';
+  } else {
+    const numGroups = Math.ceil(n / EHQ_GROUP_SIZE);
+    let html = '';
+    for (let g = 0; g < numGroups; g++) {
+      const start = g * EHQ_GROUP_SIZE + 1;
+      const end = Math.min((g + 1) * EHQ_GROUP_SIZE, n);
+      html += '<button class="ehq-btn ehq-primary" onclick="ehqCopyEmailGroup(' + g + ')">'
+            + 'Copy ' + start + '–' + end
+            + '</button>';
+    }
+    btnArea.innerHTML = html;
+  }
 }
 
 async function ehqCopyEmails() {
@@ -4460,6 +4491,26 @@ async function ehqCopyEmails() {
     await navigator.clipboard.writeText(text);
     const fb = document.getElementById('ehqCopyFeedback');
     fb.textContent = 'Copied ' + emails.length + ' email' + (emails.length === 1 ? '' : 's') + '!';
+    fb.classList.add('shown');
+    setTimeout(() => fb.classList.remove('shown'), 2000);
+  } catch (e) {
+    alert('Copy failed: ' + e.message + '\n\nEmails:\n' + text);
+  }
+}
+
+// v2.3: copy a single chunk of EHQ_GROUP_SIZE emails. groupIndex is 0-based.
+async function ehqCopyEmailGroup(groupIndex) {
+  const all = _ehqCollectEmails();
+  const startIdx = groupIndex * EHQ_GROUP_SIZE;
+  const endIdx = Math.min(startIdx + EHQ_GROUP_SIZE, all.length);
+  const slice = all.slice(startIdx, endIdx);
+  if (!slice.length) return;
+  const text = slice.join(', ');
+  try {
+    await navigator.clipboard.writeText(text);
+    const fb = document.getElementById('ehqCopyFeedback');
+    fb.textContent = 'Copied ' + (startIdx + 1) + '–' + endIdx
+                   + ' (' + slice.length + ' email' + (slice.length === 1 ? '' : 's') + ')!';
     fb.classList.add('shown');
     setTimeout(() => fb.classList.remove('shown'), 2000);
   } catch (e) {
