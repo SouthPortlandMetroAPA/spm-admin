@@ -1085,7 +1085,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '1.9';
+const APP_VERSION = '2.0';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -3120,6 +3120,13 @@ window.commitTeamData = async function(headers, rows) {
 
   // Phase C: load CURRENT team_memberships for every team in the paste so
   //          we can resolve captain names against EACH TEAM''S OWN ROSTER.
+  //
+  // v2.0 fix: filter to role=eq.Member. The roster used for name→APA#
+  // resolution must come from the AUTHORITATIVE Team Screen imports, NOT
+  // from prior (potentially wrong) Captain/Co-Captain rows. Including
+  // existing Captain rows here let the prior wrong-by-name resolution
+  // dominate the index via first-write-wins (lower-id row wins), so the
+  // same wrong member_number kept getting re-elected on every paste.
   const targetTeamIds = _slateTargetTeamIds(teamWork, teamIdByKey);
   const rosterByTeamId = new Map();
   if (targetTeamIds.length) {
@@ -3128,7 +3135,8 @@ window.commitTeamData = async function(headers, rows) {
       const got = await sb('GET',
         'team_memberships?select=team_id,role,member_number,name_raw,'
         + 'player:players(first_name,last_name)'
-        + '&team_id=in.(' + chunk.join(',') + ')');
+        + '&team_id=in.(' + chunk.join(',') + ')'
+        + '&role=eq.Member');                       // ← v2.0: Team Screen only
       for (const m of (got || [])) {
         if (!rosterByTeamId.has(m.team_id)) rosterByTeamId.set(m.team_id, []);
         rosterByTeamId.get(m.team_id).push(m);
