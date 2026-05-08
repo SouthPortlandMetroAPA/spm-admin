@@ -1091,7 +1091,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '2.1';
+const APP_VERSION = '2.2';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -4015,7 +4015,16 @@ function _ehqDivAutoChecked(d) {
   }
   if (!_ehqWildcardOrMatch('operator', String(d.operator_id))) return false;
   if (!_ehqWildcardOrMatch('format',   (d.format || '').trim())) return false;
-  if (!_ehqWildcardOrMatch('night',    (d.night_of_play || '').trim())) return false;
+  // v2.2: NIGHT-ONLY data-side wildcard. Some imports leave night_of_play
+  // NULL (e.g. divisions 080/081/090/091 — Southern/Southwest 8/9 Ball).
+  // Treating NULL as "matches no night" silently hid them from every
+  // Night-filter combination — the admin had no way to ever email those
+  // captains via filters. Now: if the division has no night assigned,
+  // treat the night facet as wildcard for THAT division. Operator and
+  // Format remain strict — those NULLs are real data gaps the admin
+  // should fix on the Divisions tab, not silently mask. */
+  const nightVal = (d.night_of_play || '').trim();
+  if (nightVal !== '' && !_ehqWildcardOrMatch('night', nightVal)) return false;
   return true;
 }
 
