@@ -1061,10 +1061,16 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
              whose operator short_code is 'CRA' are hidden from rendering AND
              excluded from the email collection. Useful for SPM-only mass-mails
              without having to fiddle with the operator pills. -->
-        <div class="ehq-action-row" style="border-top:none;padding-top:6px;margin-top:0">
+        <div class="ehq-action-row" style="border-top:none;padding-top:6px;margin-top:0;gap:18px;flex-wrap:wrap">
           <label style="display:inline-flex;align-items:center;gap:8px;font-size:0.78rem;color:var(--muted);font-weight:600;cursor:pointer">
             <input type="checkbox" id="ehqHideCra" onchange="ehqOnHideCraToggle()" style="width:16px;height:16px;cursor:pointer">
             Hide CRA divisions
+          </label>
+          <!-- v2.1: empty divisions clutter the list. Default-on so the
+               admin only sees divisions that actually have teams. -->
+          <label style="display:inline-flex;align-items:center;gap:8px;font-size:0.78rem;color:var(--muted);font-weight:600;cursor:pointer">
+            <input type="checkbox" id="ehqHideEmpty" onchange="ehqOnHideEmptyToggle()" style="width:16px;height:16px;cursor:pointer">
+            Hide divisions with 0 teams
           </label>
         </div>
       </div>
@@ -1085,7 +1091,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '2.0';
+const APP_VERSION = '2.1';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -3868,6 +3874,17 @@ let _ehqPastedTeamIds = new Set();
 // Hide-CRA toggle, persisted in localStorage so it survives reload.
 const EHQ_HIDE_CRA_LS = 'ehq.hideCra.v1';
 let _ehqHideCra = (() => { try { return localStorage.getItem(EHQ_HIDE_CRA_LS) === '1'; } catch (e) { return false; } })();
+// v2.1: hide divisions with zero teams. Default ON (first-time visitors
+// see a clean list); user can opt-in to showing empty divisions if they
+// want to spot data-import gaps.
+const EHQ_HIDE_EMPTY_LS = 'ehq.hideEmpty.v1';
+let _ehqHideEmpty = (() => {
+  try {
+    const v = localStorage.getItem(EHQ_HIDE_EMPTY_LS);
+    if (v === '0') return false;   // explicitly opted out
+    return true;                   // null / unset / '1' → on
+  } catch (e) { return true; }
+})();
 
 async function loadEmailHQ() {
   const out = document.getElementById('emailHqOutput');
@@ -3890,6 +3907,8 @@ async function loadEmailHQ() {
   });
   const _hideCb = document.getElementById('ehqHideCra');
   if (_hideCb) _hideCb.checked = _ehqHideCra;
+  const _hideEmptyCb = document.getElementById('ehqHideEmpty');
+  if (_hideEmptyCb) _hideEmptyCb.checked = _ehqHideEmpty;
   out.innerHTML = '<p class="hint" style="padding:16px">Loading…</p>';
 
   try {
@@ -4033,14 +4052,24 @@ function renderEmailHQ() {
   const out = document.getElementById('emailHqOutput');
   if (!_emailData) { out.innerHTML = ''; return; }
 
-  // v1.8: render ALL divisions (subject only to Hide-CRA). Filter pills
-  // change which ones are auto-checked, not which are visible. The user
-  // can manually check/uncheck any visible division.
-  const visible = _emailData.filter(d => !_ehqDivIsHiddenCRA(d));
+  // v1.8: render ALL divisions (subject to Hide-CRA + v2.1 Hide-Empty).
+  // Filter pills change which ones are auto-checked, not which are
+  // visible. The user can manually check/uncheck any visible division.
+  const visible = _emailData.filter(d => {
+    if (_ehqDivIsHiddenCRA(d)) return false;
+    // v2.1: hide divisions with no teams. "0 teams" = empty teams[] array
+    // OR teams that all have zero memberships (truly empty roster). The
+    // length check covers both common shapes (the join either returns
+    // [] or [{...empty...}]).
+    if (_ehqHideEmpty && (!d.teams || d.teams.length === 0)) return false;
+    return true;
+  });
 
   if (!visible.length) {
     let msg = 'No divisions in this session.';
-    if (_ehqHideCra) msg += ' (Hide CRA is on. Uncheck if you expected CRA divisions.)';
+    if (_ehqHideCra)   msg += ' (Hide CRA is on.';
+    if (_ehqHideEmpty) msg += (_ehqHideCra ? ' Hide-Empty is on too.' : ' (Hide-Empty is on.');
+    if (_ehqHideCra || _ehqHideEmpty) msg += ' Uncheck if you expected hidden rows.)';
     out.innerHTML = '<p class="hint" style="padding:16px">' + msg + '</p>';
     _updateEhqCount();
     return;
@@ -4595,6 +4624,16 @@ function ehqOnHideCraToggle() {
   const cb = document.getElementById('ehqHideCra');
   _ehqHideCra = !!(cb && cb.checked);
   try { localStorage.setItem(EHQ_HIDE_CRA_LS, _ehqHideCra ? '1' : '0'); } catch (e) { /* private mode */ }
+  renderEmailHQ();
+}
+
+/* v2.1: persist hide-empty toggle. Default-on means we always write the
+ * explicit '0' to localStorage when unchecked so the next visit doesn't
+ * fall back to the default-true path. */
+function ehqOnHideEmptyToggle() {
+  const cb = document.getElementById('ehqHideEmpty');
+  _ehqHideEmpty = !!(cb && cb.checked);
+  try { localStorage.setItem(EHQ_HIDE_EMPTY_LS, _ehqHideEmpty ? '1' : '0'); } catch (e) {}
   renderEmailHQ();
 }
 
