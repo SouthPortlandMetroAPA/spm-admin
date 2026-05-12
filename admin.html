@@ -117,6 +117,16 @@ html,body {
   border: 1.5px solid rgba(255,255,255,0.5);
   color: #fff;
 }
+  .header-link {
+    position: absolute; top: 12px; right: 88px;
+    color: #fff; text-decoration: none;
+    background: rgba(255,255,255,0.15);
+    border: 1.5px solid rgba(255,255,255,0.45);
+    padding: 4px 12px; border-radius: 999px;
+    font-size: 0.78rem; font-weight: 700;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .header-link:hover { background: rgba(255,255,255,0.28); border-color: rgba(255,255,255,0.7); }
 .session-pill {
   position: absolute; top: 10px; left: 12px;
   display: inline-flex;
@@ -793,7 +803,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 <div class="page">
 
   <div class="header">
-    <div class="admin-badge">ADMIN</div>
+    <a class="header-link" href="./" title="Open the public site">View site &rarr;</a><div class="admin-badge">ADMIN</div>
     <div class="session-pill" id="sessionPillWrap">
       <span class="session-pill-label">SESSION</span>
       <select class="session-pill-select" id="sessionPillSelect" onchange="setCurrentSessionFromHeader(this.value)"></select>
