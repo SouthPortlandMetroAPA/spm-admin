@@ -796,6 +796,61 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 }
 .drop-zone > * { pointer-events: none; }
 .drop-zone input[type="file"] { pointer-events: auto; }
+
+/* ──────── SP Reports tab ─────────────────────────────────────────────── */
+.upload-zone-slate {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 4px; padding: 28px 18px;
+  border: 2px dashed #e5e7eb; border-radius: 12px;
+  background: #fafbfc; cursor: pointer; text-align: center;
+  transition: border-color 120ms, background-color 120ms;
+}
+.upload-zone-slate:hover, .upload-zone-slate.dragover {
+  border-color: var(--spm-accent); background: #eff6ff;
+}
+.upload-zone-slate.loaded {
+  border-style: solid; border-color: #16a34a; background: #f0fdf4;
+}
+.uz-title-slate { font-weight: 800; font-size: 1.02rem; }
+.uz-sub-slate { color: var(--muted); font-size: 0.88rem; }
+
+.seg-btn-slate {
+  padding: 7px 14px; border: 1px solid #d1d5db; background: #fff;
+  font: inherit; font-weight: 700; font-size: 0.9rem;
+  color: #374151; cursor: pointer;
+}
+.seg-btn-slate:first-child { border-radius: 8px 0 0 8px; }
+.seg-btn-slate:last-child  { border-radius: 0 8px 8px 0; }
+.seg-btn-slate + .seg-btn-slate { border-left: 0; }
+.seg-btn-slate.active { background: var(--spm-accent); color: #fff; border-color: var(--spm-accent); }
+
+.modal-backdrop {
+  position: fixed; inset: 0; background: rgba(15,23,42,0.55);
+  display: none; align-items: center; justify-content: center;
+  z-index: 9000; padding: 20px;
+}
+.modal-backdrop.shown { display: flex; }
+.modal-card {
+  background: #fff; border-radius: 14px;
+  padding: 22px; max-width: 460px; width: 100%;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+}
+
+.sp-report-row {
+  display: grid; grid-template-columns: auto 1fr auto; gap: 10px;
+  padding: 10px 12px; border: 1px solid #e5e7eb; border-radius: 8px;
+  align-items: center; margin-bottom: 6px; background: #fff;
+}
+.sp-report-tag {
+  display: inline-block; padding: 2px 8px; border-radius: 10px;
+  font-size: 0.74rem; font-weight: 800; letter-spacing: 0.4px;
+}
+.sp-report-tag.ll      { background: #dbeafe; color: #1e3a8a; }
+.sp-report-tag.bd      { background: #e0e7ff; color: #3730a3; }
+.sp-report-tag.s8      { background: #fef3c7; color: #92400e; }
+.sp-report-tag.s9      { background: #ede9fe; color: #5b21b6; }
+.sp-report-meta { font-size: 0.85rem; color: var(--muted); }
+.sp-report-meta strong { color: #111827; }
 </style>
 </head>
 <body>
@@ -839,6 +894,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="uploads">Uploads</button>
       <button class="tab" data-tab="divisions">Divisions</button>
       <button class="tab active" data-tab="emailhq">Email HQ</button>
+      <button class="tab" data-tab="spreports">SP Reports</button>
     </div>
 
     <div id="globalStatus" class="status-line"></div>
@@ -1095,9 +1151,93 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <div id="emailHqOutput"><p class="hint" style="padding:16px">Loading&hellip;</p></div>
     </div>
 
+    <!-- ════════════════ SP Reports tab ════════════════ -->
+    <div id="tab-spreports" class="tab-panel">
+
+      <!-- Upload card -->
+      <div class="card" style="margin-bottom:14px;">
+        <h2 style="margin:0 0 6px;">Upload SP report</h2>
+        <p class="hint" style="margin:0 0 12px;">
+          Drop the All-League / By-Division / 8-Ball Skunk PDF. Type is auto-detected.
+          Reports are tagged to <strong id="spCurSessionLabel">the current session</strong>.
+        </p>
+        <label class="upload-zone-slate" id="spDropZone">
+          <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.55; margin-bottom:6px;">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+          <div class="uz-title-slate">Drop PDF here</div>
+          <div class="uz-sub-slate">or tap to choose. One or more files OK — each is auto-detected.</div>
+          <input type="file" accept="application/pdf" multiple id="spDropInput" style="display:none;">
+        </label>
+        <div id="spDropStatus" class="status-line"></div>
+      </div>
+
+      <!-- Operator filter -->
+      <div class="card" style="margin-bottom:14px;">
+        <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+          <div style="font-weight:700;">Show divisions for:</div>
+          <div class="seg" id="spOperatorSeg" style="display:inline-flex; gap:0;">
+            <button type="button" class="seg-btn-slate active" data-op="SPM">SPM</button>
+            <button type="button" class="seg-btn-slate" data-op="CRA">CRA</button>
+            <button type="button" class="seg-btn-slate" data-op="ALL">Both</button>
+          </div>
+          <div style="flex:1;"></div>
+          <button type="button" class="btn btn-outline" onclick="spLoadAll()">Refresh</button>
+        </div>
+      </div>
+
+      <!-- Loaded reports -->
+      <div class="card" style="margin-bottom:14px;">
+        <h2 style="margin:0 0 6px;">Reports loaded this session</h2>
+        <div id="spReportsList"><p class="hint">No reports loaded yet.</p></div>
+      </div>
+
+      <!-- Future: reconciliation + by-person + week-events views -->
+      <div class="card">
+        <h2 style="margin:0 0 6px;">Reconciliation &amp; views</h2>
+        <p class="hint" style="margin:0;">
+          v2.4 ships the upload pipeline + session-scoped storage. Reconciliation,
+          by-person-by-team, and the events-by-week timeline land in v2.5
+          (algorithm uses the <code>is_cumulative</code> flag on each upload to
+          diff successive weeklies or take deltas at face value, plus direct
+          per-event ingest for skunk PDFs).
+        </p>
+      </div>
+    </div>
+    <!-- ════════════════ /SP Reports ════════════════ -->
+
   </div>
 
   <div class="footer" id="appFooter">Slate v0.1 · Phase 1 · Supabase-backed</div>
+</div>
+
+<!-- SP upload metadata modal — appears AFTER a successful auto-detect -->
+<div id="spUploadModal" class="modal-backdrop" style="display:none;">
+  <div class="modal-card">
+    <h2 style="margin:0 0 6px;">Confirm upload details</h2>
+    <p class="hint" id="spUploadDetected" style="margin:0 0 12px;">&nbsp;</p>
+
+    <label for="spWeekInput" style="font-size:0.82rem; font-weight:700; color:#6b7280;">Week #</label>
+    <input type="number" id="spWeekInput" min="1" max="20" inputmode="numeric"
+           placeholder="(blank = end-of-session / unknown)"
+           style="width:100%; padding:8px 10px; border:1px solid #e5e7eb; border-radius:8px; font-size:0.95rem; margin-bottom:10px;">
+
+    <label style="display:flex; align-items:center; gap:8px; margin-bottom:10px; font-size:0.92rem; cursor:pointer;">
+      <input type="checkbox" id="spIsCumulative" checked>
+      <span>Cumulative report (totals through end of week N). Uncheck for "this week only" delta.</span>
+    </label>
+
+    <label for="spNotesInput" style="font-size:0.82rem; font-weight:700; color:#6b7280;">Notes (optional)</label>
+    <textarea id="spNotesInput" placeholder="(optional)"
+              style="width:100%; padding:8px 10px; border:1px solid #e5e7eb; border-radius:8px; font-size:0.95rem; min-height:50px; margin-bottom:12px;"></textarea>
+
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <button type="button" class="btn btn-primary" id="spUploadConfirmBtn">Save</button>
+      <button type="button" class="btn btn-outline"  id="spUploadCancelBtn">Cancel</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -1108,7 +1248,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '2.3';
+const APP_VERSION = '2.4';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -2640,7 +2780,8 @@ const TAB_LABEL = {
   sessions:  'Sessions',
   uploads:   'Uploads',
   divisions: 'Divisions',
-  emailhq:   'Email HQ'
+  emailhq:   'Email HQ',
+  spreports: 'SP Reports'
 };
 
 function switchTab(name) {
@@ -2651,6 +2792,7 @@ function switchTab(name) {
   if (name === 'emailhq') loadEmailHQ();
   if (name === 'divisions') renderDivisionsTab();
   if (name === 'uploads') loadReportStatus();
+  if (name === 'spreports') spOnEnterTab();
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -4715,6 +4857,433 @@ function copyEmail(em, btn) {
   });
 }
 window.copyEmail = copyEmail;
+
+/* ════════════════════════════════════════════════════════════════════════
+   SP Reports tab — ingest + storage (v2.4)
+   ──────────────────────────────────────────────────────────────────────
+   Ingests three APA PDF report kinds:
+     - 'll'      All-League Award Summary
+     - 'bd'      Award Summary By Division
+     - '8skunk'  8-Ball Skunk Report (per-event log)
+   Auto-detects from PDF title text (per MEMORY rule). Each upload is
+   tagged with session_id, operator_id (defaults to the current operator
+   filter selection), week_no (asked at upload time), and is_cumulative.
+   Parsers ported from Apps/SPReconciler/site/index.html v0.7 — the
+   standalone app will be retired in a later phase once this is proven.
+   ════════════════════════════════════════════════════════════════════════ */
+const SP_OPERATOR_SHORTS = { SPM: 1, CRA: 2 };
+let _spOperatorFilter = 'SPM';   // 'SPM' | 'CRA' | 'ALL'
+let _spReports = [];             // slate.sp_reports for current session
+let _spParsedPending = null;     // parsed payload waiting for the confirm modal
+
+/* ─── PDF.js lazy loader ─────────────────────────────────────────────*/
+let _pdfjsSlate = null;
+async function spLoadPdfjs() {
+  if (_pdfjsSlate) return _pdfjsSlate;
+  _pdfjsSlate = await import('https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.min.mjs');
+  _pdfjsSlate.GlobalWorkerOptions.workerSrc =
+    'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.worker.min.mjs';
+  return _pdfjsSlate;
+}
+async function spPdfPageLines(file) {
+  const pdfjs = await spLoadPdfjs();
+  const buf = await file.arrayBuffer();
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(buf) }).promise;
+  const pages = [];
+  for (let p = 1; p <= doc.numPages; p++) {
+    const page = await doc.getPage(p);
+    const tc = await page.getTextContent();
+    const lines = new Map();
+    for (const it of tc.items) {
+      const y = Math.round(it.transform[5] * 10) / 10;
+      const x = it.transform[4];
+      if (!lines.has(y)) lines.set(y, []);
+      lines.get(y).push({ x, str: it.str });
+    }
+    const sorted = [...lines.entries()]
+      .sort((a, b) => b[0] - a[0])
+      .map(([_, items]) => items.sort((a, b) => a.x - b.x).map(i => i.str).join(' ').replace(/\s+/g, ' ').trim())
+      .filter(line => line.length > 0);
+    pages.push(sorted);
+  }
+  return pages;
+}
+
+/* ─── Auto-detect report kind from PDF content ──────────────────────*/
+function spDetectKind(pages) {
+  const lines = pages.flat();
+  for (const ln of lines.slice(0, 20)) {
+    if (/8-Ball.*Skunk.*Report/i.test(ln)) return '8skunk';
+    if (/9-Ball.*Skunk.*Report/i.test(ln)) return '9skunk';
+    if (/End Of Session Award Summary By Division/i.test(ln)) return 'bd';
+  }
+  for (const ln of lines.slice(0, 20)) {
+    if (/End Of Session Award Summary/i.test(ln)) return 'll';
+  }
+  for (const ln of lines) {
+    if (/^\d{1,3}\s*-\s*\S/.test(ln) && !/^\d{5}\b/.test(ln)) return 'bd';
+  }
+  return 'unknown';
+}
+
+/* ─── Parsers (ported from SPReconciler v0.7) ────────────────────────*/
+const SP_INT_ROW_RE = /^\d+(?:\s+\d+){5}$/;
+function spFindIntsAfter(lines, i) {
+  for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
+    const ln = lines[j];
+    if (!ln) continue;
+    if (SP_INT_ROW_RE.test(ln)) {
+      return { ints: ln.trim().split(/\s+/).map(s => parseInt(s, 10)), at: j };
+    }
+    if (/^\d{5}\b/.test(ln)) return null;
+    if (/^\d{1,3}\s*-\s*\S/.test(ln)) return null;
+  }
+  return null;
+}
+function spExtractMeta(lines) {
+  let session_label = null, printed_at = null;
+  for (const ln of lines) {
+    if (!session_label) {
+      const m = ln.match(/^(Summer|Spring|Fall|Winter)\s+\d{4}$/i);
+      if (m) session_label = ln;
+    }
+    if (!printed_at) {
+      const m = ln.match(/Printed\s+(\d+\/\d+\/\d+)\s*\/\s*(\d+:\d+:\d+\s*[AP]M)/i);
+      if (m) printed_at = m[1] + ' ' + m[2];
+    }
+    if (session_label && printed_at) break;
+  }
+  return { session_label, printed_at };
+}
+function spParseAllLeague(pages) {
+  const lines = pages.flat();
+  const { session_label, printed_at } = spExtractMeta(lines);
+  const rows = [];
+  for (let i = 0; i < lines.length; i++) {
+    const ln = lines[i];
+    const m = ln.match(/^(\d{5})\s+(.+?)\s*$/);
+    if (!m) continue;
+    const found = spFindIntsAfter(lines, i);
+    if (!found) continue;
+    const [rackless, eight_ob, eight_br, nine_os, nine_br, skunk] = found.ints;
+    rows.push({
+      member_number: m[1],
+      member_name: m[2].trim(),
+      rackless, eight_ob, eight_br, nine_os, nine_br, skunk,
+      grand_slam: 0
+    });
+    i = found.at;
+  }
+  const byMem = new Map();
+  for (const r of rows) if (!byMem.has(r.member_number)) byMem.set(r.member_number, r);
+  return { session_label, printed_at, rows: [...byMem.values()] };
+}
+function spParseByDivision(pages) {
+  const lines = pages.flat();
+  const { session_label, printed_at } = spExtractMeta(lines);
+  const rows = [];
+  let cur_div_num = null, cur_div_name = null;
+  for (let i = 0; i < lines.length; i++) {
+    const ln = lines[i];
+    const dh = ln.match(/^(\d{1,3})\s*-\s*(.+?)\s*$/);
+    if (dh && !/^\d{5}\b/.test(ln)) {
+      cur_div_num = dh[1].padStart(3, '0');
+      cur_div_name = dh[2].trim();
+      continue;
+    }
+    if (!cur_div_num) continue;
+    const m = ln.match(/^(\d{5})\s+(.+?)\s+(\d{5})\s*$/);
+    if (!m) continue;
+    const found = spFindIntsAfter(lines, i);
+    if (!found) continue;
+    const [rackless, eight_ob, eight_br, nine_os, nine_br, skunk] = found.ints;
+    rows.push({
+      division_number: cur_div_num,
+      division_name: cur_div_name,
+      team_number: m[3],
+      member_number: m[1],
+      member_name: m[2].trim(),
+      rackless, eight_ob, eight_br, nine_os, nine_br, skunk
+    });
+    i = found.at;
+  }
+  return { session_label, printed_at, rows };
+}
+const SP_SKUNK_TEAM_RE = /^(.+?)\s+On Team\s+(\d{5})\s+-\s+(.+)$/i;
+function spParseSkunks(pages, ballType) {
+  const lines = pages.flat();
+  let session_label = null, curNight = null;
+  const events = [];
+  for (const ln of lines.slice(0, 20)) {
+    const m = ln.match(/Play Dates From\s+(\d+\/\d+\/\d{4})\s+To\s+(\d+\/\d+\/\d{4})/i);
+    if (m) { session_label = m[1] + ' – ' + m[2]; break; }
+  }
+  for (let i = 0; i < lines.length; i++) {
+    const ln = lines[i];
+    const nm = ln.match(/^Night of Play:\s+(\d+\/\d+\/\d{4})/i);
+    if (nm) { curNight = nm[1]; continue; }
+    if (!/^\d{5}$/.test(ln)) continue;
+    const next = lines[i + 1];
+    if (!next) continue;
+    const tm = next.match(SP_SKUNK_TEAM_RE);
+    if (!tm) continue;
+    // Normalize curNight (MM/DD/YYYY → YYYY-MM-DD) for date column.
+    let eventISO = null;
+    if (curNight) {
+      const parts = curNight.split('/');
+      if (parts.length === 3) {
+        eventISO = parts[2] + '-' + parts[0].padStart(2, '0') + '-' + parts[1].padStart(2, '0');
+      }
+    }
+    events.push({
+      member_number: ln,
+      member_name: tm[1].trim(),
+      team_number: tm[2],
+      team_name: tm[3].trim(),
+      event_date: eventISO,
+      ball_type: ballType
+    });
+    i++;
+  }
+  return { session_label, events };
+}
+
+/* ─── Drop zone wiring ──────────────────────────────────────────────*/
+function spWireDropZone() {
+  const zone = document.getElementById('spDropZone');
+  if (!zone || zone.dataset.wired) return;
+  zone.dataset.wired = '1';
+  const input = document.getElementById('spDropInput');
+  zone.addEventListener('click', () => input.click());
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+  zone.addEventListener('drop', async e => {
+    e.preventDefault();
+    zone.classList.remove('dragover');
+    if (e.dataTransfer.files.length) {
+      for (const f of e.dataTransfer.files) await spHandleFile(f);
+    }
+  });
+  input.addEventListener('change', async e => {
+    for (const f of e.target.files) await spHandleFile(f);
+    e.target.value = '';
+  });
+}
+
+async function spHandleFile(file) {
+  if (!file || file.type !== 'application/pdf') {
+    setStatus('spDropStatus', 'Only PDF files are accepted', 'err'); return;
+  }
+  if (!currentSession || !currentSession.id) {
+    setStatus('spDropStatus', 'Pick a current session first (Sessions tab)', 'err'); return;
+  }
+  if (!SB_KEY) {
+    setStatus('spDropStatus', 'Service-role key required (?key= URL param)', 'err'); return;
+  }
+  setStatus('spDropStatus', 'Parsing ' + file.name + '…', '');
+  try {
+    const pages = await spPdfPageLines(file);
+    const kind = spDetectKind(pages);
+    if (kind === 'unknown') throw new Error('Could not identify report type from PDF title text');
+    if (kind === '9skunk') throw new Error('9-Ball Skunk Report ingest not implemented yet');
+
+    let parsed, payloadCount;
+    if (kind === 'll') {
+      parsed = spParseAllLeague(pages); payloadCount = parsed.rows.length;
+    } else if (kind === 'bd') {
+      parsed = spParseByDivision(pages); payloadCount = parsed.rows.length;
+    } else {
+      parsed = spParseSkunks(pages, '8'); payloadCount = parsed.events.length;
+    }
+    if (!payloadCount) throw new Error('Identified as ' + spKindLabel(kind) + ' but no data extracted');
+
+    // Stash parsed payload; open the modal so the user enters week_no + is_cumulative.
+    _spParsedPending = { kind, parsed, filename: file.name, payloadCount };
+    spOpenUploadModal();
+  } catch (e) {
+    setStatus('spDropStatus', 'Parse failed: ' + e.message, 'err');
+  }
+}
+
+function spKindLabel(k) {
+  return ({ ll: 'All-League', bd: 'By-Division', '8skunk': '8-Ball Skunks', '9skunk': '9-Ball Skunks' })[k] || k;
+}
+
+function spOpenUploadModal() {
+  const p = _spParsedPending;
+  if (!p) return;
+  document.getElementById('spUploadDetected').innerHTML =
+    'Detected <strong>' + esc(spKindLabel(p.kind)) + '</strong> &middot; '
+    + esc(p.payloadCount) + ' rows &middot; '
+    + esc(p.parsed.session_label || 'no session label') + ' &middot; '
+    + esc(p.filename);
+  // Skunk reports are per-event, not cumulative — disable the checkbox.
+  const cumCb = document.getElementById('spIsCumulative');
+  if (p.kind === '8skunk' || p.kind === '9skunk') {
+    cumCb.checked = false; cumCb.disabled = true;
+  } else {
+    cumCb.checked = true; cumCb.disabled = false;
+  }
+  document.getElementById('spWeekInput').value = '';
+  document.getElementById('spNotesInput').value = '';
+  document.getElementById('spUploadModal').classList.add('shown');
+}
+
+function spCloseUploadModal() {
+  document.getElementById('spUploadModal').classList.remove('shown');
+  _spParsedPending = null;
+}
+
+async function spConfirmUpload() {
+  const p = _spParsedPending;
+  if (!p) return;
+  const weekRaw = document.getElementById('spWeekInput').value;
+  const weekNo = weekRaw ? parseInt(weekRaw, 10) : null;
+  const isCum  = document.getElementById('spIsCumulative').checked;
+  const notes  = (document.getElementById('spNotesInput').value || '').trim() || null;
+  const opId   = _spOperatorFilter !== 'ALL' ? SP_OPERATOR_SHORTS[_spOperatorFilter] : null;
+  try {
+    // 1. Insert sp_reports header.
+    const headerRow = {
+      session_id: currentSession.id,
+      operator_id: opId,
+      report_kind: p.kind,
+      week_no: weekNo,
+      is_cumulative: isCum,
+      source_filename: p.filename,
+      source_printed_at: p.parsed.printed_at || null,
+      session_label_raw: p.parsed.session_label || null,
+      notes
+    };
+    const created = await sb('POST', 'sp_reports', headerRow);
+    const reportId = created && created[0] && created[0].id;
+    if (!reportId) throw new Error('Header insert returned no id');
+    // 2. Bulk insert children based on kind.
+    if (p.kind === 'll') {
+      const rows = p.parsed.rows.map(r => ({ ...r, report_id: reportId }));
+      if (rows.length) await sb('POST', 'sp_all_league_rows', rows);
+    } else if (p.kind === 'bd') {
+      const rows = p.parsed.rows.map(r => ({ ...r, report_id: reportId }));
+      if (rows.length) await sb('POST', 'sp_by_division_rows', rows);
+    } else if (p.kind === '8skunk') {
+      const rows = p.parsed.events.map(e => ({
+        report_id: reportId,
+        ball_type: '8',
+        event_date: e.event_date,
+        member_number: e.member_number,
+        member_name: e.member_name,
+        team_number: e.team_number,
+        team_name: e.team_name
+      })).filter(r => !!r.event_date);  // require a date for storage
+      if (rows.length) await sb('POST', 'sp_skunk_events', rows);
+      // Also write into sp_events directly — skunks are per-event ingest, no diff needed.
+      const events = p.parsed.events.filter(e => !!e.event_date).map(e => ({
+        session_id: currentSession.id,
+        week_no: weekNo,    // null if not entered; can be derived later
+        event_date: e.event_date,
+        member_number: e.member_number,
+        team_number: e.team_number,
+        division_number: null,
+        sp_type: 'eight_skunk',
+        source_report_id: reportId,
+        is_inferred: false
+      }));
+      if (events.length) await sb('POST', 'sp_events', events);
+    }
+    spCloseUploadModal();
+    setStatus('spDropStatus', 'Saved: ' + spKindLabel(p.kind) + ' (' + p.payloadCount + ' rows)', 'ok');
+    await spLoadAll();
+  } catch (e) {
+    setStatus('spDropStatus', 'Save failed: ' + e.message, 'err');
+  }
+}
+
+async function spLoadAll() {
+  if (!currentSession || !currentSession.id) {
+    document.getElementById('spReportsList').innerHTML =
+      '<p class="hint">Pick a current session first.</p>';
+    return;
+  }
+  try {
+    _spReports = await sb('GET',
+      'sp_reports?session_id=eq.' + currentSession.id
+      + '&select=*&order=uploaded_at.desc');
+  } catch (e) {
+    _spReports = [];
+  }
+  spRenderReports();
+}
+
+function spRenderReports() {
+  const root = document.getElementById('spReportsList');
+  if (!root) return;
+  let list = _spReports || [];
+  if (_spOperatorFilter !== 'ALL') {
+    const opId = SP_OPERATOR_SHORTS[_spOperatorFilter];
+    list = list.filter(r => r.operator_id == null || r.operator_id === opId);
+  }
+  if (list.length === 0) {
+    root.innerHTML = '<p class="hint">No SP reports loaded for this session' + (_spOperatorFilter !== 'ALL' ? ' under ' + _spOperatorFilter : '') + '.</p>';
+    return;
+  }
+  root.innerHTML = list.map(r => {
+    const tagCls = ({ ll: 'll', bd: 'bd', '8skunk': 's8', '9skunk': 's9' })[r.report_kind] || '';
+    const weekTxt = r.week_no != null ? 'Week ' + r.week_no : 'End-of-session / unknown';
+    const cumTxt = r.is_cumulative ? 'cumulative' : 'delta';
+    return '<div class="sp-report-row">'
+      + '<span class="sp-report-tag ' + tagCls + '">' + esc(spKindLabel(r.report_kind)) + '</span>'
+      + '<div>'
+      +   '<div><strong>' + esc(weekTxt) + '</strong> · ' + esc(cumTxt) + ' · ' + esc(r.source_filename || '(no filename)') + '</div>'
+      +   '<div class="sp-report-meta">'
+      +     'Uploaded ' + esc(new Date(r.uploaded_at).toLocaleString())
+      +     (r.session_label_raw ? ' · session label: ' + esc(r.session_label_raw) : '')
+      +     (r.notes ? ' · ' + esc(r.notes) : '')
+      +   '</div>'
+      + '</div>'
+      + '<button class="btn btn-danger" onclick="spDeleteReport(' + r.id + ')">Delete</button>'
+      + '</div>';
+  }).join('');
+}
+
+async function spDeleteReport(id) {
+  if (!confirm('Delete this report and all its rows?')) return;
+  try {
+    await sb('DELETE', 'sp_reports?id=eq.' + id);
+    _spReports = _spReports.filter(r => r.id !== id);
+    spRenderReports();
+    setStatus('spDropStatus', 'Deleted', 'ok');
+  } catch (e) {
+    setStatus('spDropStatus', 'Delete failed: ' + e.message, 'err');
+  }
+}
+
+function spSetOperator(op) {
+  _spOperatorFilter = op;
+  document.querySelectorAll('#spOperatorSeg .seg-btn-slate').forEach(b =>
+    b.classList.toggle('active', b.dataset.op === op));
+  spRenderReports();
+}
+
+function spOnEnterTab() {
+  spWireDropZone();
+  // Wire static event handlers once per page load.
+  if (!document.getElementById('spOperatorSeg').dataset.wired) {
+    document.getElementById('spOperatorSeg').dataset.wired = '1';
+    document.querySelectorAll('#spOperatorSeg .seg-btn-slate').forEach(b =>
+      b.addEventListener('click', () => spSetOperator(b.dataset.op)));
+    document.getElementById('spUploadConfirmBtn').addEventListener('click', spConfirmUpload);
+    document.getElementById('spUploadCancelBtn').addEventListener('click', spCloseUploadModal);
+    document.getElementById('spUploadModal').addEventListener('click', ev => {
+      if (ev.target.id === 'spUploadModal') spCloseUploadModal();
+    });
+  }
+  const lbl = document.getElementById('spCurSessionLabel');
+  if (lbl) lbl.textContent = currentSession
+    ? (currentSession.name || (currentSession.season + ' ' + currentSession.year))
+    : 'the current session';
+  spLoadAll();
+}
+window.spDeleteReport = spDeleteReport;
 </script>
 </body>
 </html>
