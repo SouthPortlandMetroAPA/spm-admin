@@ -1248,7 +1248,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '2.4';
+const APP_VERSION = '2.5';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -5080,10 +5080,15 @@ async function spHandleFile(file) {
   if (!SB_KEY) {
     setStatus('spDropStatus', 'Service-role key required (?key= URL param)', 'err'); return;
   }
-  setStatus('spDropStatus', 'Parsing ' + file.name + '…', '');
+  setStatus('spDropStatus', 'Loading PDF engine…', '');
+  console.log('[SP] handle file:', file.name, file.size, 'bytes');
   try {
+    setStatus('spDropStatus', 'Parsing ' + file.name + '… (this can take a few seconds for large skunk PDFs)', '');
+    const t0 = performance.now();
     const pages = await spPdfPageLines(file);
+    console.log('[SP] pages:', pages.length, 'in', Math.round(performance.now() - t0), 'ms');
     const kind = spDetectKind(pages);
+    console.log('[SP] detected kind:', kind);
     if (kind === 'unknown') throw new Error('Could not identify report type from PDF title text');
     if (kind === '9skunk') throw new Error('9-Ball Skunk Report ingest not implemented yet');
 
@@ -5095,12 +5100,14 @@ async function spHandleFile(file) {
     } else {
       parsed = spParseSkunks(pages, '8'); payloadCount = parsed.events.length;
     }
+    console.log('[SP] parsed', kind, '— rows/events:', payloadCount);
     if (!payloadCount) throw new Error('Identified as ' + spKindLabel(kind) + ' but no data extracted');
 
-    // Stash parsed payload; open the modal so the user enters week_no + is_cumulative.
+    setStatus('spDropStatus', 'Detected ' + spKindLabel(kind) + ' (' + payloadCount + ' rows). Confirm details to save…', 'ok');
     _spParsedPending = { kind, parsed, filename: file.name, payloadCount };
     spOpenUploadModal();
   } catch (e) {
+    console.error('[SP] parse failed:', e);
     setStatus('spDropStatus', 'Parse failed: ' + e.message, 'err');
   }
 }
@@ -5134,6 +5141,19 @@ function spCloseUploadModal() {
   _spParsedPending = null;
 }
 
+/* Insert in chunks so PostgREST doesn't choke / timeout on a big body.
+   2700-event skunk reports would 502 in one shot; 400 rows/req is comfortable. */
+async function spInsertChunks(path, rows, chunkSize, label) {
+  let done = 0;
+  while (done < rows.length) {
+    const slice = rows.slice(done, done + chunkSize);
+    await sb('POST', path, slice);
+    done += slice.length;
+    setStatus('spDropStatus', 'Saving ' + label + '… ' + done + '/' + rows.length, '');
+    console.log('[SP] inserted', done, '/', rows.length, 'into', path);
+  }
+}
+
 async function spConfirmUpload() {
   const p = _spParsedPending;
   if (!p) return;
@@ -5142,8 +5162,11 @@ async function spConfirmUpload() {
   const isCum  = document.getElementById('spIsCumulative').checked;
   const notes  = (document.getElementById('spNotesInput').value || '').trim() || null;
   const opId   = _spOperatorFilter !== 'ALL' ? SP_OPERATOR_SHORTS[_spOperatorFilter] : null;
+  const btn = document.getElementById('spUploadConfirmBtn');
+  if (btn) btn.disabled = true;
+  setStatus('spDropStatus', 'Saving header row…', '');
+  console.log('[SP] confirm upload start', { kind: p.kind, rows: p.payloadCount });
   try {
-    // 1. Insert sp_reports header.
     const headerRow = {
       session_id: currentSession.id,
       operator_id: opId,
@@ -5158,15 +5181,20 @@ async function spConfirmUpload() {
     const created = await sb('POST', 'sp_reports', headerRow);
     const reportId = created && created[0] && created[0].id;
     if (!reportId) throw new Error('Header insert returned no id');
-    // 2. Bulk insert children based on kind.
+    console.log('[SP] header inserted, id=', reportId);
+
+    // Close the modal NOW so the user can see chunked progress in the drop-status area.
+    spCloseUploadModal();
+
+    const CHUNK = 400;
     if (p.kind === 'll') {
       const rows = p.parsed.rows.map(r => ({ ...r, report_id: reportId }));
-      if (rows.length) await sb('POST', 'sp_all_league_rows', rows);
+      await spInsertChunks('sp_all_league_rows', rows, CHUNK, 'all-league rows');
     } else if (p.kind === 'bd') {
       const rows = p.parsed.rows.map(r => ({ ...r, report_id: reportId }));
-      if (rows.length) await sb('POST', 'sp_by_division_rows', rows);
+      await spInsertChunks('sp_by_division_rows', rows, CHUNK, 'by-division rows');
     } else if (p.kind === '8skunk') {
-      const rows = p.parsed.events.map(e => ({
+      const skunkRows = p.parsed.events.map(e => ({
         report_id: reportId,
         ball_type: '8',
         event_date: e.event_date,
@@ -5174,12 +5202,11 @@ async function spConfirmUpload() {
         member_name: e.member_name,
         team_number: e.team_number,
         team_name: e.team_name
-      })).filter(r => !!r.event_date);  // require a date for storage
-      if (rows.length) await sb('POST', 'sp_skunk_events', rows);
-      // Also write into sp_events directly — skunks are per-event ingest, no diff needed.
+      })).filter(r => !!r.event_date);
+      await spInsertChunks('sp_skunk_events', skunkRows, CHUNK, '8-skunk events');
       const events = p.parsed.events.filter(e => !!e.event_date).map(e => ({
         session_id: currentSession.id,
-        week_no: weekNo,    // null if not entered; can be derived later
+        week_no: weekNo,
         event_date: e.event_date,
         member_number: e.member_number,
         team_number: e.team_number,
@@ -5188,13 +5215,15 @@ async function spConfirmUpload() {
         source_report_id: reportId,
         is_inferred: false
       }));
-      if (events.length) await sb('POST', 'sp_events', events);
+      await spInsertChunks('sp_events', events, CHUNK, 'normalized events');
     }
-    spCloseUploadModal();
     setStatus('spDropStatus', 'Saved: ' + spKindLabel(p.kind) + ' (' + p.payloadCount + ' rows)', 'ok');
     await spLoadAll();
   } catch (e) {
+    console.error('[SP] save failed:', e);
     setStatus('spDropStatus', 'Save failed: ' + e.message, 'err');
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }
 
