@@ -846,6 +846,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
   font-size: 0.74rem; font-weight: 800; letter-spacing: 0.4px;
 }
 .sp-report-tag.ll      { background: #dbeafe; color: #1e3a8a; }
+.sp-report-tag.wll     { background: #dcfce7; color: #14532d; }
 .sp-report-tag.bd      { background: #e0e7ff; color: #3730a3; }
 .sp-report-tag.s8      { background: #fef3c7; color: #92400e; }
 .sp-report-tag.s9      { background: #ede9fe; color: #5b21b6; }
@@ -1248,7 +1249,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '2.5';
+const APP_VERSION = '2.6';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -4909,7 +4910,14 @@ async function spPdfPageLines(file) {
   return pages;
 }
 
-/* ─── Auto-detect report kind from PDF content ──────────────────────*/
+/* ─── Auto-detect report kind from PDF content ──────────────────────
+   Kinds recognized (2026-05-16):
+     'll'     = End Of Session Award Summary (cumulative, all-league)
+     'bd'     = End Of Session Award Summary By Division (cumulative)
+     'wll'    = Award Summary By Date Range (weekly all-league, delta)
+     '8skunk' = 8-Ball Skunk Report (per-event, no APA patch)
+     '9skunk' = (stub for future)
+*/
 function spDetectKind(pages) {
   const lines = pages.flat();
   for (const ln of lines.slice(0, 20)) {
@@ -4918,12 +4926,40 @@ function spDetectKind(pages) {
     if (/End Of Session Award Summary By Division/i.test(ln)) return 'bd';
   }
   for (const ln of lines.slice(0, 20)) {
+    if (/Award Summary By Date Range/i.test(ln)) return 'wll';
     if (/End Of Session Award Summary/i.test(ln)) return 'll';
   }
   for (const ln of lines) {
     if (/^\d{1,3}\s*-\s*\S/.test(ln) && !/^\d{5}\b/.test(ln)) return 'bd';
   }
   return 'unknown';
+}
+
+/* Extract "From M/D/YYYY To M/D/YYYY" from a weekly report's header. */
+function spExtractDateRange(pages) {
+  const lines = pages.flat();
+  for (const ln of lines.slice(0, 20)) {
+    const m = ln.match(/From\s+(\d+\/\d+\/\d{4})\s+To\s+(\d+\/\d+\/\d{4})/i);
+    if (m) {
+      const toISO = s => {
+        const [mo, da, yr] = s.split('/');
+        return yr + '-' + mo.padStart(2,'0') + '-' + da.padStart(2,'0');
+      };
+      return { from: toISO(m[1]), to: toISO(m[2]), raw: m[1] + ' – ' + m[2] };
+    }
+  }
+  return null;
+}
+
+/* Derive week_no from a weekly report's date range vs the current session's
+   start_date. Returns null if either is missing. APA weeks are 1-indexed
+   starting from the session start (week 1 = day 0..6, week 2 = day 7..13, etc.). */
+function spDeriveWeekNo(fromISO) {
+  if (!fromISO || !currentSession || !currentSession.start_date) return null;
+  const ms = new Date(fromISO + 'T00:00:00').getTime()
+           - new Date(currentSession.start_date + 'T00:00:00').getTime();
+  const days = Math.floor(ms / 86400000);
+  return Math.max(1, Math.floor(days / 7) + 1);
 }
 
 /* ─── Parsers (ported from SPReconciler v0.7) ────────────────────────*/
@@ -5093,8 +5129,19 @@ async function spHandleFile(file) {
     if (kind === '9skunk') throw new Error('9-Ball Skunk Report ingest not implemented yet');
 
     let parsed, payloadCount;
-    if (kind === 'll') {
-      parsed = spParseAllLeague(pages); payloadCount = parsed.rows.length;
+    if (kind === 'll' || kind === 'wll') {
+      parsed = spParseAllLeague(pages);
+      payloadCount = parsed.rows.length;
+      // Capture the date range for weekly reports so we can auto-derive week_no.
+      if (kind === 'wll') {
+        const range = spExtractDateRange(pages);
+        if (range) {
+          parsed.date_from = range.from;
+          parsed.date_to   = range.to;
+          parsed.session_label = parsed.session_label || range.raw;
+          parsed.derived_week_no = spDeriveWeekNo(range.from);
+        }
+      }
     } else if (kind === 'bd') {
       parsed = spParseByDivision(pages); payloadCount = parsed.rows.length;
     } else {
@@ -5113,7 +5160,13 @@ async function spHandleFile(file) {
 }
 
 function spKindLabel(k) {
-  return ({ ll: 'All-League', bd: 'By-Division', '8skunk': '8-Ball Skunks', '9skunk': '9-Ball Skunks' })[k] || k;
+  return ({
+    ll:       'All-League (end-of-session)',
+    wll:      'All-League (weekly date-range)',
+    bd:       'By-Division',
+    '8skunk': '8-Ball Skunks',
+    '9skunk': '9-Ball Skunks'
+  })[k] || k;
 }
 
 function spOpenUploadModal() {
@@ -5124,14 +5177,22 @@ function spOpenUploadModal() {
     + esc(p.payloadCount) + ' rows &middot; '
     + esc(p.parsed.session_label || 'no session label') + ' &middot; '
     + esc(p.filename);
-  // Skunk reports are per-event, not cumulative — disable the checkbox.
-  const cumCb = document.getElementById('spIsCumulative');
+  const cumCb  = document.getElementById('spIsCumulative');
+  const weekIn = document.getElementById('spWeekInput');
+  // Defaults depend on report kind.
   if (p.kind === '8skunk' || p.kind === '9skunk') {
+    // Per-event reports — never cumulative; week comes from event dates.
     cumCb.checked = false; cumCb.disabled = true;
+    weekIn.value = '';
+  } else if (p.kind === 'wll') {
+    // Weekly date-range report — delta, week auto-derived.
+    cumCb.checked = false; cumCb.disabled = true;
+    weekIn.value = (p.parsed.derived_week_no != null) ? p.parsed.derived_week_no : '';
   } else {
+    // 'll' or 'bd' — assume cumulative end-of-session by default.
     cumCb.checked = true; cumCb.disabled = false;
+    weekIn.value = '';
   }
-  document.getElementById('spWeekInput').value = '';
   document.getElementById('spNotesInput').value = '';
   document.getElementById('spUploadModal').classList.add('shown');
 }
@@ -5187,9 +5248,40 @@ async function spConfirmUpload() {
     spCloseUploadModal();
 
     const CHUNK = 400;
-    if (p.kind === 'll') {
+    if (p.kind === 'll' || p.kind === 'wll') {
       const rows = p.parsed.rows.map(r => ({ ...r, report_id: reportId }));
       await spInsertChunks('sp_all_league_rows', rows, CHUNK, 'all-league rows');
+      // For WEEKLY all-league: each (member, sp_type) count IS a confirmed
+      // week-N event. Generate sp_events directly (no diff needed — the
+      // report is already a delta). is_cumulative=false on the report;
+      // is_inferred=false on each event.
+      if (p.kind === 'wll' && weekNo) {
+        const SP_FIELDS = ['rackless','eight_ob','eight_br','nine_os','nine_br','skunk','grand_slam'];
+        const SP_FIELD_TO_TYPE = {
+          rackless:'rackless', eight_ob:'eight_ob', eight_br:'eight_br',
+          nine_os:'nine_os', nine_br:'nine_br', skunk:'nine_skunk', grand_slam:'grand_slam'
+        };
+        const events = [];
+        for (const r of p.parsed.rows) {
+          for (const f of SP_FIELDS) {
+            const n = r[f] || 0;
+            for (let i = 0; i < n; i++) {
+              events.push({
+                session_id: currentSession.id,
+                week_no: weekNo,
+                event_date: p.parsed.date_from || null,
+                member_number: r.member_number,
+                team_number: null,        // weekly LL has no team attribution
+                division_number: null,
+                sp_type: SP_FIELD_TO_TYPE[f],
+                source_report_id: reportId,
+                is_inferred: false
+              });
+            }
+          }
+        }
+        if (events.length) await spInsertChunks('sp_events', events, CHUNK, 'weekly events');
+      }
     } else if (p.kind === 'bd') {
       const rows = p.parsed.rows.map(r => ({ ...r, report_id: reportId }));
       await spInsertChunks('sp_by_division_rows', rows, CHUNK, 'by-division rows');
@@ -5256,7 +5348,7 @@ function spRenderReports() {
     return;
   }
   root.innerHTML = list.map(r => {
-    const tagCls = ({ ll: 'll', bd: 'bd', '8skunk': 's8', '9skunk': 's9' })[r.report_kind] || '';
+    const tagCls = ({ ll: 'll', wll: 'wll', bd: 'bd', '8skunk': 's8', '9skunk': 's9' })[r.report_kind] || '';
     const weekTxt = r.week_no != null ? 'Week ' + r.week_no : 'End-of-session / unknown';
     const cumTxt = r.is_cumulative ? 'cumulative' : 'delta';
     return '<div class="sp-report-row">'
