@@ -1305,6 +1305,14 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           </div>
         </div>
         <p class="hint" id="spPatchesSummary" style="margin:0 0 10px;">No patches computed yet.</p>
+        <div style="display:flex; align-items:center; gap:10px; margin:0 0 10px; flex-wrap:wrap;">
+          <span style="font-weight:700; font-size:0.85rem; color:#6b7280;">Show:</span>
+          <div class="seg" id="spPatchFilterSeg" style="display:inline-flex; gap:0;">
+            <button type="button" class="seg-btn-slate active" data-pf="unmailed">To mail</button>
+            <button type="button" class="seg-btn-slate" data-pf="mailed">Mailed</button>
+            <button type="button" class="seg-btn-slate" data-pf="all">All</button>
+          </div>
+        </div>
         <div id="spPatchesBlocker" class="status-line"></div>
         <div id="spPatchesList"></div>
       </div>
@@ -1326,7 +1334,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.4';
+const APP_VERSION = '3.5';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -5443,18 +5451,25 @@ async function spSaveLabels(labels, filename) {
       'Pick an operator (SPM or CRA) in the filter before dropping a Labels PDF.', 'err');
     return;
   }
-  const opShort = _spOperatorFilter;
-  const opId    = SP_OPERATOR_SHORTS[opShort];
+  if (!currentSession || !currentSession.id) {
+    setStatus('spDropStatus', 'Pick a current session first — labels are stored per session.', 'err');
+    return;
+  }
+  const opShort  = _spOperatorFilter;
+  const opId     = SP_OPERATOR_SHORTS[opShort];
+  const sessId   = currentSession.id;
   setStatus('spDropStatus', 'Saving ' + labels.length + ' labels for ' + opShort + '…', '');
   try {
     let prev = [];
     try {
-      prev = await sb('GET', 'sp_labels?operator_id=eq.' + opId + '&select=id');
+      prev = await sb('GET',
+        'sp_labels?operator_id=eq.' + opId + '&session_id=eq.' + sessId + '&select=id');
     } catch (e) { /* table may be empty */ }
     const previousCount = prev.length || 0;
 
     // 1) Audit row first — its PK is the FK target on sp_labels.
     const auditCreated = await sb('POST', 'sp_label_uploads', {
+      session_id: sessId,
       operator_id: opId,
       source_filename: filename,
       row_count: labels.length,
@@ -5464,9 +5479,11 @@ async function spSaveLabels(labels, filename) {
     const uploadId = auditCreated && auditCreated[0] && auditCreated[0].id;
     if (!uploadId) throw new Error('Audit row insert returned no id');
 
-    // 2) Replace label set: DELETE existing for operator, INSERT new.
-    await sb('DELETE', 'sp_labels?operator_id=eq.' + opId);
+    // 2) Replace this session's label set: DELETE existing, INSERT new.
+    await sb('DELETE',
+      'sp_labels?operator_id=eq.' + opId + '&session_id=eq.' + sessId);
     const insertRows = labels.map(l => ({
+      session_id: sessId,
       operator_id: opId,
       team_number: l.team_number,
       contact_name: l.contact_name,
@@ -5506,14 +5523,21 @@ let _spLabels = [];           // sp_labels rows (latest active for visible opera
 let _spLabelUploads = [];     // sp_label_uploads audit rows for tooltip / metadata
 
 async function spLoadLabels() {
+  // Labels are per-session — without a session there's nothing to scope to.
+  if (!currentSession || !currentSession.id) {
+    _spLabels = []; _spLabelUploads = [];
+    spRenderLabels(); spRenderExpected();
+    return;
+  }
   try {
     const opFilter = _spOperatorFilter !== 'ALL'
       ? '&operator_id=eq.' + SP_OPERATOR_SHORTS[_spOperatorFilter]
       : '';
+    const sessFilter = '&session_id=eq.' + currentSession.id;
     _spLabels = await sb('GET',
-      'sp_labels?select=*' + opFilter + '&order=team_number.asc');
+      'sp_labels?select=*' + sessFilter + opFilter + '&order=team_number.asc');
     _spLabelUploads = await sb('GET',
-      'sp_label_uploads?select=*' + opFilter + '&order=uploaded_at.desc&limit=8');
+      'sp_label_uploads?select=*' + sessFilter + opFilter + '&order=uploaded_at.desc&limit=8');
   } catch (e) {
     _spLabels = [];
     _spLabelUploads = [];
@@ -5924,6 +5948,9 @@ function spOnEnterTab() {
     document.getElementById('spUndoMailBtn').addEventListener('click', spUndoLastMailing);
     document.getElementById('spPrintSlipsBtn').addEventListener('click', spPrintSlips);
     document.getElementById('spPrintEnvBtn').addEventListener('click', spPrintEnvelopes);
+    // Patch-list view filter
+    document.querySelectorAll('#spPatchFilterSeg .seg-btn-slate').forEach(b =>
+      b.addEventListener('click', () => spSetPatchFilter(b.dataset.pf)));
     // Operator profile
     document.getElementById('opProfileSaveBtn').addEventListener('click', spSaveOpProfile);
   }
@@ -5976,10 +6003,20 @@ const SP_TYPE_TO_BD_FIELD = {
 };
 const SLAM_TYPES = ['8m','9m','g'];
 const SLAM_DEPS = { '8m': ['x','8'], '9m': ['n','9'], 'g': ['x','8','9','n'] };
-const SP_WEIGHT = { 'r':1,'8':1,'x':1,'9':1,'n':1,'k':1,'8m':2,'9m':2,'g':4 };
+// Masters remap: in a division whose name contains "Masters", an earned
+// 8/x/9/n patch is the masters variant. The APA reports never label it —
+// the code is masters purely because of the division. r, k, and the
+// slams 8m/9m/g have no masters variant.
+const MASTERS_REMAP = { '8':'m8', 'x':'mx', '9':'m9', 'n':'mn' };
+const SP_WEIGHT = {
+  'r':1,'8':1,'x':1,'9':1,'n':1,'k':1,
+  'm8':1,'mx':1,'m9':1,'mn':1,
+  '8m':2,'9m':2,'g':4
+};
 const ENVELOPE_CAPACITY = 8;
 const SP_DISPLAY = {
   'r':'R',  '8':'8',  'x':'x',  '9':'9',  'n':'n',  'k':'k',
+  'm8':'m8','mx':'mx','m9':'m9','mn':'mn',
   '8m':'8m', '9m':'9m', 'g':'g'
 };
 const SP_FULL_NAME = {
@@ -5989,6 +6026,10 @@ const SP_FULL_NAME = {
   '9':'9-Ball on the Snap',
   'n':'9-Ball Break-and-Run',
   'k':'9-Ball Skunk',
+  'm8':'8-Ball on the Break (Masters)',
+  'mx':'8-Ball Break-and-Run (Masters)',
+  'm9':'9-Ball on the Snap (Masters)',
+  'mn':'9-Ball Break-and-Run (Masters)',
   '8m':'8-Ball Mini Slam',
   '9m':'9-Ball Mini Slam',
   'g':'Grand Slam'
@@ -5997,6 +6038,14 @@ const SP_FULL_NAME = {
 let _spPatches = [];            // slate.sp_patches_v rows for current (session, operator)
 let _spLastBatch = null;        // most-recent sp_mail_batches row (active = is_undone=false)
 let _spDivisionMeta = new Map();// division_number -> operator_id
+let _spPatchFilter = 'unmailed';// patch-list view filter: 'unmailed' | 'mailed' | 'all'
+
+function spSetPatchFilter(pf) {
+  _spPatchFilter = pf;
+  document.querySelectorAll('#spPatchFilterSeg .seg-btn-slate').forEach(b =>
+    b.classList.toggle('active', b.dataset.pf === pf));
+  spRenderPatches();
+}
 
 async function spLoadPatches() {
   if (!currentSession || !currentSession.id) {
@@ -6099,11 +6148,15 @@ async function spComputePatches() {
       const div   = r.division_number;
       const mem   = r.member_number;
       const memNm = r.member_name;
+      // Masters division → 8/x/9/n patches become m8/mx/m9/mn.
+      const isMasters = /masters/i.test(r.division_name || '');
       for (const [sp, field] of Object.entries(SP_TYPE_TO_BD_FIELD)) {
         const cnt = +r[field] || 0;
         if (cnt < 1) continue;
-        // Per-code key
-        const key = mem + '|' + div + '|' + sp;
+        // The stored patch code: masters variant in a Masters division.
+        const storedSp = (isMasters && MASTERS_REMAP[sp]) ? MASTERS_REMAP[sp] : sp;
+        // Per-code key (uses the stored — masters-aware — code)
+        const key = mem + '|' + div + '|' + storedSp;
         const prior = perCodeMap.get(key);
         if (!prior || teamN > prior.team_number) {
           perCodeMap.set(key, {
@@ -6113,13 +6166,14 @@ async function spComputePatches() {
             member_name:     memNm,
             division_number: div,
             team_number:     teamN,
-            sp_type:         sp,
+            sp_type:         storedSp,
             is_slam:         false,
             weight:          1,
             source_report_id: bdReport.id
           });
         }
-        // Slam accumulation — only x/8/9/n matter
+        // Slam accumulation — keyed on the RAW code (x/8/9/n). A slam is
+        // 8m/9m/g regardless of whether its constituents were masters.
         if (sp === 'x' || sp === '8' || sp === '9' || sp === 'n') {
           if (!memberAggByDiv.has(mem)) memberAggByDiv.set(mem, { name: memNm, sp: {} });
           memberAggByDiv.get(mem).sp[sp] = (memberAggByDiv.get(mem).sp[sp] || 0) + cnt;
@@ -6244,6 +6298,13 @@ function spRenderPatches() {
     return;
   }
 
+  // View filter — which patches the list shows (the mail button + summary
+  // above always reflect the real unmailed set, regardless of this).
+  const matchesFilter = p =>
+    _spPatchFilter === 'all' ? true
+    : _spPatchFilter === 'mailed' ? !!p.mailed_at
+    : !p.mailed_at;
+
   // Group by team_number, then split mailed vs unmailed within each.
   // Envelope packing: greedy fill at ENVELOPE_CAPACITY units. Slams
   // (weight 2 / 4) count more.
@@ -6257,6 +6318,8 @@ function spRenderPatches() {
   const blocks = [];
   for (const team of teams) {
     const patches = byTeam.get(team);
+    const shown = patches.filter(matchesFilter);
+    if (!shown.length) continue;                 // nothing for this team under the filter
     const um = patches.filter(p => !p.mailed_at);
     const mailed = patches.filter(p => p.mailed_at);
     const weightSum = um.reduce((s, p) => s + (p.weight || 1), 0);
@@ -6290,9 +6353,14 @@ function spRenderPatches() {
       +   '</span></div>'
       +   '<div class="muted" style="font-size:0.86rem; text-align:right;">' + addr + '</div>'
       + '</div>'
-      + '<div class="patch-tags">' + patches.map(tagHTML).join(' ') + '</div>'
+      + '<div class="patch-tags">' + shown.map(tagHTML).join(' ') + '</div>'
       + '</div>'
     );
+  }
+  if (!blocks.length) {
+    const lbl = _spPatchFilter === 'mailed' ? 'mailed' : 'to-mail';
+    root.innerHTML = '<p class="hint">No ' + lbl + ' patches.</p>';
+    return;
   }
   root.innerHTML = blocks.join('');
 }
