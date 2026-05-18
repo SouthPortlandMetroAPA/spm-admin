@@ -1237,6 +1237,12 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             <button type="button" class="btn btn-primary" id="spMailPatchesBtn" disabled>
               Mail Patches
             </button>
+            <button type="button" class="btn btn-outline" id="spPrintSlipsBtn" disabled>
+              Print Slips
+            </button>
+            <button type="button" class="btn btn-outline" id="spPrintEnvBtn" disabled>
+              Print Envelopes
+            </button>
             <button type="button" class="btn btn-outline" id="spUndoMailBtn" disabled>
               Undo Last Mailing
             </button>
@@ -1312,7 +1318,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '2.9';
+const APP_VERSION = '3.0';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -5726,6 +5732,8 @@ function spOnEnterTab() {
     document.getElementById('spComputePatchesBtn').addEventListener('click', spComputePatches);
     document.getElementById('spMailPatchesBtn').addEventListener('click', spMailPatches);
     document.getElementById('spUndoMailBtn').addEventListener('click', spUndoLastMailing);
+    document.getElementById('spPrintSlipsBtn').addEventListener('click', spPrintSlips);
+    document.getElementById('spPrintEnvBtn').addEventListener('click', spPrintEnvelopes);
   }
   const lbl = document.getElementById('spCurSessionLabel');
   if (lbl) lbl.textContent = currentSession
@@ -6217,6 +6225,254 @@ async function spUndoLastMailing() {
 window.spComputePatches = spComputePatches;
 window.spMailPatches    = spMailPatches;
 window.spUndoLastMailing = spUndoLastMailing;
+
+/* ════════════════════════════════════════════════════════════════════
+   PRINT PACK — slips + envelopes (v3.0, Phase 5)
+   ────────────────────────────────────────────────────────────────────
+   Two print actions, both keyed off the most recent batch (or the
+   batch_id provided). Each generates a self-contained HTML document
+   in a popup and triggers window.print(). User can re-click either
+   button at any time to re-print.
+
+   Slips:
+     - All slips physically 1/5 of a Letter page (same dimensions for
+       regular + slam — slam slips are visually distinct via design)
+     - Imposition cut order: page p / slot s → linear index (s-1)*P+p
+       where P = total pages. After horizontal cuts, stacking position-1
+       cuts on top of position-2 etc. yields slips in envelope order.
+     - Envelope order itself: ascending team_number, and within an
+       envelope: per-code first, then slam.
+
+   Envelopes:
+     - #10 envelope: 9.5" × 4.125", one envelope per page (so the user
+       can feed an envelope-stack through the printer)
+     - Return-address upper-left (operator profile), recipient address
+       centered. Art slots show only when uploaded (operator profile
+       Phase 3); if URLs are null, we omit the image silently.
+   ════════════════════════════════════════════════════════════════════ */
+
+const SLIP_ROWS_PER_PAGE = 5;
+let _spOperatorProfile = null;  // slate.operators row for current operator
+
+async function spLoadOperatorProfile() {
+  if (_spOperatorFilter === 'ALL') { _spOperatorProfile = null; return; }
+  const opId = SP_OPERATOR_SHORTS[_spOperatorFilter];
+  try {
+    const rows = await sb('GET', 'operators?id=eq.' + opId + '&select=*&limit=1');
+    _spOperatorProfile = rows[0] || null;
+  } catch (e) { _spOperatorProfile = null; }
+}
+
+/* Returns the patches to print for a given batch. If batch_id is
+   null, returns the most-recent active batch's patches. */
+async function spPatchesForBatch(batchId) {
+  if (!batchId) return [];
+  return await sb('GET',
+    'sp_patches_v?batch_id=eq.' + batchId
+    + '&select=*&order=team_number.asc,is_slam.asc,sp_type.asc');
+}
+
+/* Build the envelope ordering for a batch. Returns an array of
+   { team_number, contact_name, address_line1, ..., patches: [...] }
+   in the order envelopes should be addressed and slips stacked. */
+function spBatchEnvelopes(patches) {
+  const byTeam = new Map();
+  for (const p of patches) {
+    if (!byTeam.has(p.team_number)) byTeam.set(p.team_number, []);
+    byTeam.get(p.team_number).push(p);
+  }
+  const teams = [...byTeam.keys()].sort();  // ascending team_number
+  const envelopes = [];
+  for (const t of teams) {
+    const list = byTeam.get(t);
+    list.sort((a, b) => {
+      if (a.is_slam !== b.is_slam) return a.is_slam ? 1 : -1;
+      return a.sp_type.localeCompare(b.sp_type);
+    });
+    const sample = list[0];
+    // Envelope packing — split per-team list into envelopes of <= 8 weight
+    let acc = [];
+    let accWeight = 0;
+    const slipsPerEnv = [];
+    for (const p of list) {
+      if (accWeight + p.weight > ENVELOPE_CAPACITY && acc.length) {
+        slipsPerEnv.push(acc);
+        acc = []; accWeight = 0;
+      }
+      acc.push(p); accWeight += p.weight;
+    }
+    if (acc.length) slipsPerEnv.push(acc);
+    for (const env of slipsPerEnv) {
+      envelopes.push({
+        team_number: t,
+        contact_name: sample.contact_name,
+        address_line1: sample.address_line1,
+        address_line2: sample.address_line2,
+        city: sample.city, state: sample.state, zip: sample.zip,
+        patches: env
+      });
+    }
+  }
+  return envelopes;
+}
+
+/* Print Slips — opens a new window with imposition-laid-out slips. */
+async function spPrintSlips() {
+  if (!_spLastBatch) return;
+  await spLoadOperatorProfile();
+  const patches = await spPatchesForBatch(_spLastBatch.id);
+  if (!patches.length) {
+    setStatus('spPatchesBlocker', 'No patches in last batch.', 'err');
+    return;
+  }
+  const envs = spBatchEnvelopes(patches);
+  // Flatten patches in envelope order — that's the linear slip stack
+  // we want to end up with after cutting.
+  const slipsInOrder = envs.flatMap(e => e.patches);
+  const N = slipsInOrder.length;
+  const P = Math.ceil(N / SLIP_ROWS_PER_PAGE);
+  // Imposition: pages[p][s] = slipsInOrder[(s-1)*P + p].
+  const pages = [];
+  for (let p = 0; p < P; p++) {
+    const slots = [];
+    for (let s = 0; s < SLIP_ROWS_PER_PAGE; s++) {
+      const idx = s * P + p;
+      slots.push(idx < N ? slipsInOrder[idx] : null);
+    }
+    pages.push(slots);
+  }
+  const op = _spOperatorProfile || {};
+  const html = spBuildSlipsHTML(pages, op);
+  spOpenPrintWindow(html, 'Print slips — batch ' + _spLastBatch.id.slice(0, 8));
+}
+
+function spBuildSlipsHTML(pages, op) {
+  const slipHtml = slip => {
+    if (!slip) return '<div class="slip slip-empty"></div>';
+    const slamClass = slip.is_slam ? ' slip-slam' : '';
+    const slamName = SP_FULL_NAME[slip.sp_type] || slip.sp_type;
+    return '<div class="slip' + slamClass + '">'
+      + '<div class="slip-banner">' + (slip.is_slam ? '★ ' : '')
+      +   esc(slamName) + (slip.is_slam ? ' ★' : '') + '</div>'
+      + '<div class="slip-name">' + esc(slip.member_name) + '</div>'
+      + '<div class="slip-meta">Member ' + esc(slip.member_number)
+      +   (slip.division_number ? ' · Division ' + esc(slip.division_number) : '')
+      +   ' · Team ' + esc(slip.team_number) + '</div>'
+      + '<div class="slip-org">' + esc(op.name || 'APA') + '</div>'
+      + '</div>';
+  };
+  return [
+    '<!doctype html><html><head><meta charset="utf-8"><title>Slips</title>',
+    '<style>',
+    '@page { size: letter; margin: 0; }',
+    'body { margin: 0; font-family: Georgia, "Times New Roman", serif; color: #1a1a1a; }',
+    '.page { width: 8.5in; height: 11in; padding: 0; display: flex; flex-direction: column; page-break-after: always; }',
+    '.page:last-child { page-break-after: auto; }',
+    '.slip { flex: 1 0 0; box-sizing: border-box; padding: 0.32in 0.5in;',
+    '        border-bottom: 1px dashed #888; display: flex; flex-direction: column;',
+    '        justify-content: center; align-items: center; text-align: center; }',
+    '.slip:last-child { border-bottom: 0; }',
+    '.slip-empty { background: #fff; }',
+    '.slip-banner { font-size: 12pt; font-weight: 700; letter-spacing: 0.06em;',
+    '               text-transform: uppercase; color: #374151; margin-bottom: 6pt; }',
+    '.slip-name { font-size: 22pt; font-weight: 800; letter-spacing: 0.02em; margin: 2pt 0; }',
+    '.slip-meta { font-size: 10pt; color: #4b5563; margin: 4pt 0; font-family: ui-monospace,Menlo,monospace; }',
+    '.slip-org { font-size: 9pt; color: #6b7280; margin-top: 6pt; font-style: italic; }',
+    '.slip-slam { background: linear-gradient(180deg, #fff 0%, #fef9c3 100%); border: 1px solid #f59e0b; }',
+    '.slip-slam .slip-banner { color: #92400e; font-size: 14pt; }',
+    '.slip-slam .slip-name { color: #78350f; }',
+    '@media screen { body { background: #f3f3f3; padding: 16px; }',
+    '  .page { background: #fff; margin: 0 auto 16px; box-shadow: 0 4px 14px rgba(0,0,0,0.18); } }',
+    '</style></head><body>',
+    pages.map(page =>
+      '<div class="page">' + page.map(slipHtml).join('') + '</div>'
+    ).join(''),
+    '<script>window.onload = () => setTimeout(() => window.print(), 250);<\/script>',
+    '</body></html>'
+  ].join('\n');
+}
+
+async function spPrintEnvelopes() {
+  if (!_spLastBatch) return;
+  await spLoadOperatorProfile();
+  const patches = await spPatchesForBatch(_spLastBatch.id);
+  if (!patches.length) return;
+  const envs = spBatchEnvelopes(patches);
+  const op = _spOperatorProfile || {};
+  const html = spBuildEnvelopesHTML(envs, op);
+  spOpenPrintWindow(html, 'Print envelopes — batch ' + _spLastBatch.id.slice(0, 8));
+}
+
+function spBuildEnvelopesHTML(envs, op) {
+  const ret = op.return_name || op.name
+    ? esc(op.return_name || op.name || '') + '<br>'
+      + (op.return_address1 ? esc(op.return_address1) + '<br>' : '')
+      + (op.return_address2 ? esc(op.return_address2) + '<br>' : '')
+      + (op.return_city ? esc(op.return_city) + ', ' + esc(op.return_state || '') + ' ' + esc(op.return_zip || '') : '')
+    : '<span style="color:#888;">[Set return address in operator profile]</span>';
+  const envHtml = e =>
+    '<div class="env">'
+    + '<div class="return">' + ret + '</div>'
+    + '<div class="recipient">'
+    +   '<div>' + esc(e.contact_name) + '</div>'
+    +   '<div>' + esc(e.address_line1) + '</div>'
+    +   (e.address_line2 ? '<div>' + esc(e.address_line2) + '</div>' : '')
+    +   '<div>' + esc(e.city) + ', ' + esc(e.state) + ' ' + esc(e.zip) + '</div>'
+    + '</div>'
+    + '<div class="meta">Team ' + esc(e.team_number) + ' · ' + e.patches.length + ' patch' + (e.patches.length===1?'':'es') + '</div>'
+    + '</div>';
+  return [
+    '<!doctype html><html><head><meta charset="utf-8"><title>Envelopes</title>',
+    '<style>',
+    '@page { size: 9.5in 4.125in; margin: 0; }',
+    'body { margin: 0; font-family: Georgia, "Times New Roman", serif; color: #1a1a1a; }',
+    '.env { width: 9.5in; height: 4.125in; box-sizing: border-box;',
+    '       padding: 0.4in 0.5in; position: relative; page-break-after: always; }',
+    '.env:last-child { page-break-after: auto; }',
+    '.return { position: absolute; top: 0.3in; left: 0.4in; font-size: 11pt; line-height: 1.25; max-width: 3.5in; }',
+    '.recipient { position: absolute; top: 1.5in; left: 3.4in; font-size: 13pt; line-height: 1.35; font-weight: 600; max-width: 5.2in; }',
+    '.meta { position: absolute; bottom: 0.2in; right: 0.4in; font-size: 8pt; color: #9ca3af; font-family: ui-monospace,Menlo,monospace; }',
+    '@media screen { body { background: #f3f3f3; padding: 16px; }',
+    '  .env { background: #fff; margin: 0 auto 16px; box-shadow: 0 4px 14px rgba(0,0,0,0.18); } }',
+    '</style></head><body>',
+    envs.map(envHtml).join(''),
+    '<script>window.onload = () => setTimeout(() => window.print(), 250);<\/script>',
+    '</body></html>'
+  ].join('\n');
+}
+
+function spOpenPrintWindow(html, title) {
+  const w = window.open('', '_blank', 'width=900,height=900');
+  if (!w) {
+    setStatus('spPatchesBlocker', 'Popup blocked. Allow popups for this site, then click Print again.', 'err');
+    return;
+  }
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+  w.document.title = title;
+}
+
+/* Enable Print buttons whenever there's a recent batch (active OR
+   not — re-print stays available until a new mailing is created). */
+function spRefreshPrintButtonsState() {
+  const slips = document.getElementById('spPrintSlipsBtn');
+  const env   = document.getElementById('spPrintEnvBtn');
+  const enable = !!(_spLastBatch && _spLastBatch.patch_count > 0);
+  if (slips) slips.disabled = !enable;
+  if (env)   env.disabled   = !enable;
+}
+
+/* Hook into the existing render so the print buttons toggle alongside
+   the mail/undo state. Wrap spRenderPatches once. */
+const _spRenderPatches_orig = spRenderPatches;
+spRenderPatches = function() {
+  _spRenderPatches_orig();
+  spRefreshPrintButtonsState();
+};
+
+window.spPrintSlips     = spPrintSlips;
+window.spPrintEnvelopes = spPrintEnvelopes;
 </script>
 </body>
 </html>
