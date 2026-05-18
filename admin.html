@@ -852,6 +852,27 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 .sp-report-tag.s9      { background: #ede9fe; color: #5b21b6; }
 .sp-report-meta { font-size: 0.85rem; color: var(--muted); }
 .sp-report-meta strong { color: #111827; }
+
+/* Patches list — envelope-grouped */
+.muted { color: var(--muted); }
+.patch-envelope {
+  padding: 10px 12px; border: 1px solid #e5e7eb; border-radius: 10px;
+  margin-bottom: 10px; background: #fff;
+}
+.patch-env-head {
+  display: grid; grid-template-columns: 1fr auto; gap: 14px;
+  align-items: start; padding-bottom: 8px; margin-bottom: 8px;
+  border-bottom: 1px solid #f3f4f6;
+}
+.patch-env-head strong { color: #111827; }
+.patch-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.sp-patch-tag {
+  display: inline-block; padding: 4px 9px; border-radius: 999px;
+  font-size: 0.82rem; line-height: 1.3;
+  border: 1px solid;
+}
+.sp-tag-reg  { background: #f3f4f6; color: #1f2937; border-color: #e5e7eb; }
+.sp-tag-slam { background: #fef9c3; color: #713f12; border-color: #fde68a; font-weight: 700; }
 </style>
 </head>
 <body>
@@ -1205,16 +1226,25 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         <div id="spReportsList"><p class="hint">No reports loaded yet.</p></div>
       </div>
 
-      <!-- Future: reconciliation + by-person + week-events views -->
-      <div class="card">
-        <h2 style="margin:0 0 6px;">Reconciliation &amp; views</h2>
-        <p class="hint" style="margin:0;">
-          v2.4 ships the upload pipeline + session-scoped storage. Reconciliation,
-          by-person-by-team, and the events-by-week timeline land in v2.5
-          (algorithm uses the <code>is_cumulative</code> flag on each upload to
-          diff successive weeklies or take deltas at face value, plus direct
-          per-event ingest for skunk PDFs).
-        </p>
+      <!-- Patches — computation, envelope-grouped list, mail batch, undo -->
+      <div class="card" style="margin-bottom:14px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
+          <h2 style="margin:0;">Patches</h2>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button type="button" class="btn btn-outline" id="spComputePatchesBtn">
+              Compute from latest By-Division
+            </button>
+            <button type="button" class="btn btn-primary" id="spMailPatchesBtn" disabled>
+              Mail Patches
+            </button>
+            <button type="button" class="btn btn-outline" id="spUndoMailBtn" disabled>
+              Undo Last Mailing
+            </button>
+          </div>
+        </div>
+        <p class="hint" id="spPatchesSummary" style="margin:0 0 10px;">No patches computed yet.</p>
+        <div id="spPatchesBlocker" class="status-line"></div>
+        <div id="spPatchesList"></div>
       </div>
     </div>
     <!-- ════════════════ /SP Reports ════════════════ -->
@@ -1282,7 +1312,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '2.8';
+const APP_VERSION = '2.9';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -5671,6 +5701,7 @@ function spSetOperator(op) {
     b.classList.toggle('active', b.dataset.op === op));
   spRenderReports();
   spLoadLabels();
+  spLoadPatches();
 }
 
 function spOnEnterTab() {
@@ -5691,6 +5722,10 @@ function spOnEnterTab() {
     document.getElementById('spLabelsModal').addEventListener('click', ev => {
       if (ev.target.id === 'spLabelsModal') spCloseLabelsModal();
     });
+    // Patches buttons
+    document.getElementById('spComputePatchesBtn').addEventListener('click', spComputePatches);
+    document.getElementById('spMailPatchesBtn').addEventListener('click', spMailPatches);
+    document.getElementById('spUndoMailBtn').addEventListener('click', spUndoLastMailing);
   }
   const lbl = document.getElementById('spCurSessionLabel');
   if (lbl) lbl.textContent = currentSession
@@ -5698,8 +5733,490 @@ function spOnEnterTab() {
     : 'the current session';
   spLoadAll();
   spLoadLabels();
+  spLoadPatches();
 }
 window.spDeleteReport = spDeleteReport;
+
+/* ════════════════════════════════════════════════════════════════════
+   PATCHES — compute, render, mail, undo (v2.9, Phase 4)
+   ────────────────────────────────────────────────────────────────────
+   Patch identity (per chat design 2026-05-17):
+     - Per-code (R/8/x/9/n/k): (session × operator × member × division × sp_type)
+       Routing team_number = team from the latest BD row matching that
+       (member, division). One-patch-per-division rule: count value
+       doesn't matter, only presence (>= 1).
+     - Slam (8m/9m/g):       (session × operator × member × sp_type)
+       Computed when constituent SPs all earned in the SAME operator's
+       divisions within this session:
+         8m: x>=1 AND 8>=1
+         9m: n>=1 AND 9>=1
+         g : x>=1 AND 8>=1 AND 9>=1 AND n>=1
+       Routing = team_number of the most-recent un-mailed constituent.
+       Tiebreaker = highest team_number (per user rule).
+
+   Weight:
+     R/8/x/9/n/k = 1, 8m/9m = 2, g = 4.
+     Envelope capacity = 8 weight units.
+
+   Patches sit in slate.sp_patches with mailed_at + batch_id NULL until
+   "Mail Patches" stamps a batch. "Undo Last Mailing" clears the most
+   recent batch's mailed_at+batch_id and marks the sp_mail_batches row
+   is_undone=true.
+
+   Validation gate: every team_number that has patches MUST have a
+   matching slate.sp_labels row for the same operator, else the Mail
+   button stays disabled and the blocker tells you which teams need
+   addresses.
+   ════════════════════════════════════════════════════════════════════ */
+
+const SP_TYPE_TO_BD_FIELD = {
+  'r': 'rackless',  '8': 'eight_ob', 'x': 'eight_br',
+  '9': 'nine_os',   'n': 'nine_br',  'k': 'skunk'
+};
+const SLAM_TYPES = ['8m','9m','g'];
+const SLAM_DEPS = { '8m': ['x','8'], '9m': ['n','9'], 'g': ['x','8','9','n'] };
+const SP_WEIGHT = { 'r':1,'8':1,'x':1,'9':1,'n':1,'k':1,'8m':2,'9m':2,'g':4 };
+const ENVELOPE_CAPACITY = 8;
+const SP_DISPLAY = {
+  'r':'R',  '8':'8',  'x':'x',  '9':'9',  'n':'n',  'k':'k',
+  '8m':'8m', '9m':'9m', 'g':'g'
+};
+const SP_FULL_NAME = {
+  'r':'8-Ball Rackless',
+  '8':'8-Ball on the Break',
+  'x':'8-Ball Break-and-Run',
+  '9':'9-Ball on the Snap',
+  'n':'9-Ball Break-and-Run',
+  'k':'9-Ball Skunk',
+  '8m':'8-Ball Mini Slam',
+  '9m':'9-Ball Mini Slam',
+  'g':'Grand Slam'
+};
+
+let _spPatches = [];            // slate.sp_patches_v rows for current (session, operator)
+let _spLastBatch = null;        // most-recent sp_mail_batches row (active = is_undone=false)
+let _spDivisionMeta = new Map();// division_number -> operator_id
+
+async function spLoadPatches() {
+  if (!currentSession || !currentSession.id) {
+    document.getElementById('spPatchesList').innerHTML =
+      '<p class="hint">Pick a current session first.</p>';
+    spRenderPatchesSummary([], null);
+    return;
+  }
+  const opId = _spOperatorFilter !== 'ALL' ? SP_OPERATOR_SHORTS[_spOperatorFilter] : null;
+  const opFilter = opId != null ? '&operator_id=eq.' + opId : '';
+  try {
+    _spPatches = await sb('GET',
+      'sp_patches_v?session_id=eq.' + currentSession.id + opFilter
+      + '&select=*&order=team_number.asc,is_slam.asc,sp_type.asc');
+  } catch (e) {
+    console.warn('[patches] load failed', e);
+    _spPatches = [];
+  }
+  // Find latest active batch (for "Undo Last Mailing").
+  if (opId != null) {
+    try {
+      const batches = await sb('GET',
+        'sp_mail_batches?operator_id=eq.' + opId
+        + '&session_id=eq.' + currentSession.id
+        + '&is_undone=eq.false&select=*&order=created_at.desc&limit=1');
+      _spLastBatch = batches && batches[0] || null;
+    } catch (e) {
+      _spLastBatch = null;
+    }
+  } else {
+    _spLastBatch = null;
+  }
+  spRenderPatches();
+}
+
+async function spLoadDivisionMeta() {
+  try {
+    const rows = await sb('GET', 'division_meta?select=division_number,operator_id');
+    _spDivisionMeta = new Map(rows.map(r => [r.division_number, r.operator_id]));
+  } catch (e) {
+    console.warn('[patches] division_meta load failed', e);
+    _spDivisionMeta = new Map();
+  }
+}
+
+/* ─── Compute patches from latest BD report ────────────────────────
+   Reads sp_by_division_rows for the most recent 'bd' upload (per
+   operator). Builds the canonical patch set and UPSERTs into
+   sp_patches. Existing rows are left untouched (preserves mailed_at).
+*/
+async function spComputePatches() {
+  if (!currentSession || !currentSession.id) {
+    setStatus('spPatchesBlocker', 'Pick a current session first.', 'err');
+    return;
+  }
+  if (_spOperatorFilter === 'ALL') {
+    setStatus('spPatchesBlocker',
+      'Pick an operator (SPM or CRA) before computing patches.', 'err');
+    return;
+  }
+  const opShort = _spOperatorFilter;
+  const opId    = SP_OPERATOR_SHORTS[opShort];
+  const btn = document.getElementById('spComputePatchesBtn');
+  if (btn) btn.disabled = true;
+  setStatus('spPatchesBlocker', 'Computing patches…', '');
+  try {
+    await spLoadDivisionMeta();
+    // Latest BD report for this session (operator-agnostic — BD report
+    // is the combined SPM+CRA file; we filter by division→operator).
+    const bdReports = await sb('GET',
+      'sp_reports?session_id=eq.' + currentSession.id
+      + '&report_kind=eq.bd'
+      + '&select=*&order=uploaded_at.desc&limit=1');
+    if (!bdReports.length) {
+      throw new Error('No By-Division report uploaded for this session. Drop one first.');
+    }
+    const bdReport = bdReports[0];
+    const rows = await sb('GET',
+      'sp_by_division_rows?report_id=eq.' + bdReport.id + '&select=*');
+    console.log('[patches] BD report', bdReport.id, 'has', rows.length, 'rows');
+
+    // Filter rows to operator-tagged divisions for this operator.
+    // Rows whose division_number isn't in division_meta or is tagged to
+    // another operator are dropped.
+    const opRows = rows.filter(r => _spDivisionMeta.get(r.division_number) === opId);
+    console.log('[patches] rows after operator filter:', opRows.length);
+
+    // Per-code patches: collapse rows by (member, division, sp_type)
+    // — sum counts across teams within the division, take the team#
+    // from the row with the highest team_number (matches our slam rule
+    // for "completing constituent" + same answer for per-code: most
+    // recent / highest team#). User confirmed per-division collapse +
+    // current-captain routing.
+    const perCodeMap = new Map();   // key: member|div|sp_type → { member, division, team, member_name }
+    const memberAggByDiv = new Map(); // for slam: member -> Map(sp_type, totalCount)
+    const memberTeamByCode = new Map(); // member -> Map(sp_type, [team#s with that SP])
+
+    for (const r of opRows) {
+      const teamN = r.team_number;
+      const div   = r.division_number;
+      const mem   = r.member_number;
+      const memNm = r.member_name;
+      for (const [sp, field] of Object.entries(SP_TYPE_TO_BD_FIELD)) {
+        const cnt = +r[field] || 0;
+        if (cnt < 1) continue;
+        // Per-code key
+        const key = mem + '|' + div + '|' + sp;
+        const prior = perCodeMap.get(key);
+        if (!prior || teamN > prior.team_number) {
+          perCodeMap.set(key, {
+            session_id:      currentSession.id,
+            operator_id:     opId,
+            member_number:   mem,
+            member_name:     memNm,
+            division_number: div,
+            team_number:     teamN,
+            sp_type:         sp,
+            is_slam:         false,
+            weight:          1,
+            source_report_id: bdReport.id
+          });
+        }
+        // Slam accumulation — only x/8/9/n matter
+        if (sp === 'x' || sp === '8' || sp === '9' || sp === 'n') {
+          if (!memberAggByDiv.has(mem)) memberAggByDiv.set(mem, { name: memNm, sp: {} });
+          memberAggByDiv.get(mem).sp[sp] = (memberAggByDiv.get(mem).sp[sp] || 0) + cnt;
+          if (!memberTeamByCode.has(mem)) memberTeamByCode.set(mem, {});
+          if (!memberTeamByCode.get(mem)[sp]) memberTeamByCode.get(mem)[sp] = [];
+          memberTeamByCode.get(mem)[sp].push(teamN);
+        }
+      }
+    }
+
+    // Slam patches
+    const slamMap = new Map(); // key: member|sp_type → row
+    for (const [mem, agg] of memberAggByDiv.entries()) {
+      const sps = agg.sp;
+      const has = c => (sps[c] || 0) >= 1;
+      const candidates = [];
+      if (has('x') && has('8')) candidates.push('8m');
+      if (has('n') && has('9')) candidates.push('9m');
+      if (has('x') && has('8') && has('9') && has('n')) candidates.push('g');
+      if (!candidates.length) continue;
+      const teamsByCode = memberTeamByCode.get(mem) || {};
+      for (const slamType of candidates) {
+        const deps = SLAM_DEPS[slamType];
+        // Routing tiebreaker: highest team# across all constituent SPs
+        let bestTeam = null;
+        for (const c of deps) {
+          for (const t of (teamsByCode[c] || [])) {
+            if (bestTeam === null || t > bestTeam) bestTeam = t;
+          }
+        }
+        if (!bestTeam) continue;
+        slamMap.set(mem + '|' + slamType, {
+          session_id:      currentSession.id,
+          operator_id:     opId,
+          member_number:   mem,
+          member_name:     agg.name,
+          division_number: null,
+          team_number:     bestTeam,
+          sp_type:         slamType,
+          is_slam:         true,
+          weight:          SP_WEIGHT[slamType],
+          source_report_id: bdReport.id
+        });
+      }
+    }
+
+    const allCandidates = [...perCodeMap.values(), ...slamMap.values()];
+    console.log('[patches] candidates:', allCandidates.length,
+                '(' + perCodeMap.size + ' per-code, ' + slamMap.size + ' slam)');
+
+    // Fetch existing patches for this (session, operator) — skip
+    // inserts where the identity already exists (preserves mailed_at).
+    const existing = await sb('GET',
+      'sp_patches?session_id=eq.' + currentSession.id
+      + '&operator_id=eq.' + opId
+      + '&select=member_number,division_number,sp_type,is_slam');
+    const existingSet = new Set(existing.map(e =>
+      e.member_number + '|' + (e.division_number || 'null') + '|' + e.sp_type));
+    const toInsert = allCandidates.filter(c =>
+      !existingSet.has(c.member_number + '|' + (c.division_number || 'null') + '|' + c.sp_type));
+
+    if (toInsert.length) {
+      await spInsertChunks('sp_patches', toInsert, 400, 'patches');
+    }
+
+    setStatus('spPatchesBlocker',
+      'Computed ' + allCandidates.length + ' patch identities ('
+      + toInsert.length + ' new, ' + (allCandidates.length - toInsert.length)
+      + ' already tracked).', 'ok');
+    await spLoadPatches();
+  } catch (e) {
+    console.error('[patches] compute failed:', e);
+    setStatus('spPatchesBlocker', 'Compute failed: ' + e.message, 'err');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+/* ─── Render — group by team/envelope, show counts + mail state ─── */
+function spRenderPatches() {
+  const root = document.getElementById('spPatchesList');
+  if (!root) return;
+  const list = _spPatches || [];
+  const unmailed = list.filter(p => !p.mailed_at);
+
+  spRenderPatchesSummary(list, _spLastBatch);
+
+  // Validation: every team_number in unmailed must have non-null
+  // contact_name (from sp_patches_v JOIN to sp_labels).
+  const missingByTeam = new Map();
+  for (const p of unmailed) {
+    if (!p.contact_name) {
+      if (!missingByTeam.has(p.team_number)) missingByTeam.set(p.team_number, 0);
+      missingByTeam.set(p.team_number, missingByTeam.get(p.team_number) + 1);
+    }
+  }
+  const mailBtn = document.getElementById('spMailPatchesBtn');
+  const undoBtn = document.getElementById('spUndoMailBtn');
+  if (unmailed.length === 0) {
+    mailBtn.disabled = true;
+    setStatus('spPatchesBlocker',
+      list.length ? 'All ' + list.length + ' computed patches have been mailed.' : '',
+      list.length ? 'ok' : '');
+  } else if (missingByTeam.size > 0) {
+    mailBtn.disabled = true;
+    setStatus('spPatchesBlocker',
+      'Cannot mail — ' + missingByTeam.size + ' team(s) have no mailing label: '
+      + [...missingByTeam.keys()].slice(0, 8).join(', ')
+      + (missingByTeam.size > 8 ? ' …' : '')
+      + '. Upload an updated Labels PDF first.',
+      'err');
+  } else {
+    mailBtn.disabled = false;
+    setStatus('spPatchesBlocker',
+      unmailed.length + ' patches ready to mail across '
+      + new Set(unmailed.map(p => p.team_number)).size + ' team(s).', 'ok');
+  }
+  undoBtn.disabled = !_spLastBatch;
+
+  if (list.length === 0) {
+    root.innerHTML = '<p class="hint">Click "Compute from latest By-Division" to derive the patch list.</p>';
+    return;
+  }
+
+  // Group by team_number, then split mailed vs unmailed within each.
+  // Envelope packing: greedy fill at ENVELOPE_CAPACITY units. Slams
+  // (weight 2 / 4) count more.
+  const byTeam = new Map();
+  for (const p of list) {
+    if (!byTeam.has(p.team_number)) byTeam.set(p.team_number, []);
+    byTeam.get(p.team_number).push(p);
+  }
+  // Stable display order: team_number ascending.
+  const teams = [...byTeam.keys()].sort();
+  const blocks = [];
+  for (const team of teams) {
+    const patches = byTeam.get(team);
+    const um = patches.filter(p => !p.mailed_at);
+    const mailed = patches.filter(p => p.mailed_at);
+    const weightSum = um.reduce((s, p) => s + (p.weight || 1), 0);
+    const envCount = Math.max(1, Math.ceil(weightSum / ENVELOPE_CAPACITY));
+    const sample = patches[0];
+    const addr = sample.contact_name
+      ? esc(sample.contact_name) + '<br>' + esc(sample.address_line1)
+        + (sample.address_line2 ? '<br>' + esc(sample.address_line2) : '')
+        + '<br>' + esc(sample.city) + ', ' + esc(sample.state) + ' ' + esc(sample.zip)
+      : '<span style="color:#b91c1c; font-weight:600;">(no mailing label uploaded for this team)</span>';
+    const tagHTML = p => {
+      const isNew = !p.mailed_at;
+      const cls = p.is_slam ? 'sp-tag-slam' : 'sp-tag-reg';
+      const status = isNew
+        ? '<span style="color:#0a7d29; font-weight:700;">●</span>'
+        : '<span style="color:#9ca3af;" title="Mailed ' + esc(new Date(p.mailed_at).toLocaleString()) + '">✓</span>';
+      return '<span class="sp-patch-tag ' + cls + '">' + status + ' '
+        + esc(SP_DISPLAY[p.sp_type]) + ' &middot; '
+        + esc(p.member_name) + ' (' + esc(p.member_number) + ')'
+        + (p.division_number ? ' &middot; ' + esc(p.division_number) : ' &middot; <em>session</em>')
+        + '</span>';
+    };
+    blocks.push(
+      '<div class="patch-envelope">'
+      + '<div class="patch-env-head">'
+      +   '<div><strong>Team ' + esc(team) + '</strong> &middot; '
+      +     um.length + ' unmailed'
+      +     (mailed.length ? ' &middot; <span class="muted">' + mailed.length + ' mailed</span>' : '')
+      +     ' &middot; <span class="muted">weight ' + weightSum + '/' + ENVELOPE_CAPACITY
+      +     ' &middot; ' + envCount + ' envelope' + (envCount === 1 ? '' : 's')
+      +   '</span></div>'
+      +   '<div class="muted" style="font-size:0.86rem; text-align:right;">' + addr + '</div>'
+      + '</div>'
+      + '<div class="patch-tags">' + patches.map(tagHTML).join(' ') + '</div>'
+      + '</div>'
+    );
+  }
+  root.innerHTML = blocks.join('');
+}
+
+function spRenderPatchesSummary(list, lastBatch) {
+  const root = document.getElementById('spPatchesSummary');
+  if (!root) return;
+  if (!list || !list.length) {
+    root.innerHTML = 'No patches computed yet for this session.';
+    return;
+  }
+  const um = list.filter(p => !p.mailed_at);
+  const m  = list.filter(p =>  p.mailed_at);
+  const teams = new Set(um.map(p => p.team_number));
+  const weight = um.reduce((s, p) => s + (p.weight || 1), 0);
+  const envCount = um.length
+    ? [...teams].reduce((s, t) => {
+        const tw = um.filter(p => p.team_number === t).reduce((x, p) => x + p.weight, 0);
+        return s + Math.max(1, Math.ceil(tw / ENVELOPE_CAPACITY));
+      }, 0)
+    : 0;
+  let html = '<strong>' + um.length + '</strong> patches to mail'
+    + ' across <strong>' + teams.size + '</strong> team(s)'
+    + ', <strong>' + envCount + '</strong> envelope(s)'
+    + ' &middot; <span class="muted">' + m.length + ' already mailed</span>';
+  if (lastBatch) {
+    html += '<br><span class="muted" style="font-size:0.85rem;">Last mailing: '
+      + esc(new Date(lastBatch.created_at).toLocaleString())
+      + ' (' + lastBatch.patch_count + ' patches / ' + lastBatch.envelope_count + ' envelopes) — Undo available</span>';
+  }
+  root.innerHTML = html;
+}
+
+/* ─── Mail Patches — atomic batch stamp ────────────────────────────
+   Generates a batch_id client-side, inserts the sp_mail_batches row
+   first, then PATCHes every unmailed sp_patches row for this
+   (session, operator) with mailed_at=now() + batch_id in chunked
+   updates.
+
+   Print Slips / Print Envelopes UI lands in Phase 5; this phase just
+   manages state.
+*/
+async function spMailPatches() {
+  if (!currentSession || _spOperatorFilter === 'ALL') return;
+  const opId = SP_OPERATOR_SHORTS[_spOperatorFilter];
+  const unmailed = (_spPatches || []).filter(p => !p.mailed_at);
+  if (!unmailed.length) return;
+
+  const btn = document.getElementById('spMailPatchesBtn');
+  if (btn) btn.disabled = true;
+  setStatus('spPatchesBlocker', 'Stamping batch…', '');
+  try {
+    const batchId = crypto.randomUUID();
+    const teams = new Set(unmailed.map(p => p.team_number));
+    let envCount = 0;
+    for (const t of teams) {
+      const tw = unmailed.filter(p => p.team_number === t).reduce((s, p) => s + p.weight, 0);
+      envCount += Math.max(1, Math.ceil(tw / ENVELOPE_CAPACITY));
+    }
+    // 1) Audit row.
+    await sb('POST', 'sp_mail_batches', {
+      id: batchId,
+      operator_id: opId,
+      session_id: currentSession.id,
+      patch_count: unmailed.length,
+      envelope_count: envCount,
+      created_by_device: getDeviceId()
+    });
+    // 2) Stamp the patches. PostgREST update by primary key list.
+    const ids = unmailed.map(p => p.id);
+    const stampedAt = new Date().toISOString();
+    const CHUNK = 200;
+    let done = 0;
+    while (done < ids.length) {
+      const slice = ids.slice(done, done + CHUNK);
+      const idFilter = 'id=in.(' + slice.join(',') + ')';
+      await sb('PATCH', 'sp_patches?' + idFilter, {
+        mailed_at: stampedAt,
+        batch_id: batchId
+      });
+      done += slice.length;
+      setStatus('spPatchesBlocker', 'Stamping… ' + done + '/' + ids.length, '');
+    }
+    setStatus('spPatchesBlocker',
+      'Mailed batch of ' + unmailed.length + ' patches (' + envCount + ' envelopes). Print Slips / Print Envelopes coming in Phase 5.',
+      'ok');
+    await spLoadPatches();
+  } catch (e) {
+    console.error('[patches] mail failed:', e);
+    setStatus('spPatchesBlocker', 'Mail failed: ' + e.message, 'err');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function spUndoLastMailing() {
+  if (!_spLastBatch) return;
+  if (!confirm('Undo last mailing of ' + _spLastBatch.patch_count + ' patches?\n\nAll patches in that batch will go back to unmailed.')) return;
+  const btn = document.getElementById('spUndoMailBtn');
+  if (btn) btn.disabled = true;
+  setStatus('spPatchesBlocker', 'Undoing batch…', '');
+  try {
+    // Clear mailed_at + batch_id on all patches in this batch.
+    await sb('PATCH', 'sp_patches?batch_id=eq.' + _spLastBatch.id, {
+      mailed_at: null,
+      batch_id: null
+    });
+    // Mark batch as undone.
+    await sb('PATCH', 'sp_mail_batches?id=eq.' + _spLastBatch.id, {
+      is_undone: true,
+      undone_at: new Date().toISOString()
+    });
+    setStatus('spPatchesBlocker', 'Undone. ' + _spLastBatch.patch_count + ' patches are back in the queue.', 'ok');
+    await spLoadPatches();
+  } catch (e) {
+    console.error('[patches] undo failed:', e);
+    setStatus('spPatchesBlocker', 'Undo failed: ' + e.message, 'err');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+window.spComputePatches = spComputePatches;
+window.spMailPatches    = spMailPatches;
+window.spUndoLastMailing = spUndoLastMailing;
 </script>
 </body>
 </html>
