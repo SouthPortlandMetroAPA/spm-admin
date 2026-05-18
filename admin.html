@@ -1346,7 +1346,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.1';
+const APP_VERSION = '3.2';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -5424,6 +5424,9 @@ function spRenderLabels() {
   }
   root.innerHTML = blocks.join('');
 }
+
+/* ─── Drop zone wiring ──────────────────────────────────────────────*/
+function spWireDropZone() {
   const zone = document.getElementById('spDropZone');
   if (!zone || zone.dataset.wired) return;
   zone.dataset.wired = '1';
