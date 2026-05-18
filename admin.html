@@ -1214,6 +1214,16 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         <div id="spDropStatus" class="status-line"></div>
       </div>
 
+      <!-- Expected reports — status checklist for the patch workflow -->
+      <div class="card" style="margin-bottom:14px;">
+        <h2 style="margin:0 0 6px;">Expected reports</h2>
+        <p class="hint" style="margin:0 0 10px;">
+          The reports the patch workflow needs each cycle. Drop them in the zone above &mdash;
+          each is auto-detected and auto-saved, no confirmation step.
+        </p>
+        <div id="spExpectedPanel"><p class="hint">Pick a current session to see status.</p></div>
+      </div>
+
       <!-- Operator filter -->
       <div class="card" style="margin-bottom:14px;">
         <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -1306,55 +1316,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
   <div class="footer" id="appFooter">Slate v0.1 · Phase 1 · Supabase-backed</div>
 </div>
 
-<!-- SP upload metadata modal — appears AFTER a successful auto-detect -->
-<div id="spUploadModal" class="modal-backdrop" style="display:none;">
-  <div class="modal-card">
-    <h2 style="margin:0 0 6px;">Confirm upload details</h2>
-    <p class="hint" id="spUploadDetected" style="margin:0 0 12px;">&nbsp;</p>
-
-    <label for="spWeekInput" style="font-size:0.82rem; font-weight:700; color:#6b7280;">Week #</label>
-    <input type="number" id="spWeekInput" min="1" max="20" inputmode="numeric"
-           placeholder="(blank = end-of-session / unknown)"
-           style="width:100%; padding:8px 10px; border:1px solid #e5e7eb; border-radius:8px; font-size:0.95rem; margin-bottom:10px;">
-
-    <label style="display:flex; align-items:center; gap:8px; margin-bottom:10px; font-size:0.92rem; cursor:pointer;">
-      <input type="checkbox" id="spIsCumulative" checked>
-      <span>Cumulative report (totals through end of week N). Uncheck for "this week only" delta.</span>
-    </label>
-
-    <label for="spNotesInput" style="font-size:0.82rem; font-weight:700; color:#6b7280;">Notes (optional)</label>
-    <textarea id="spNotesInput" placeholder="(optional)"
-              style="width:100%; padding:8px 10px; border:1px solid #e5e7eb; border-radius:8px; font-size:0.95rem; min-height:50px; margin-bottom:12px;"></textarea>
-
-    <div style="display:flex; gap:8px; flex-wrap:wrap;">
-      <button type="button" class="btn btn-primary" id="spUploadConfirmBtn">Save</button>
-      <button type="button" class="btn btn-outline"  id="spUploadCancelBtn">Cancel</button>
-    </div>
-  </div>
-</div>
-
-<!-- Labels confirmation modal — appears AFTER a labels.pdf is auto-detected -->
-<div id="spLabelsModal" class="modal-backdrop" style="display:none;">
-  <div class="modal-card">
-    <h2 style="margin:0 0 6px;">Replace mailing labels</h2>
-    <p class="hint" id="spLabelsDetected" style="margin:0 0 12px;">&nbsp;</p>
-
-    <div id="spLabelsPreview"
-         style="max-height:240px; overflow:auto; border:1px solid #e5e7eb; border-radius:8px;
-                padding:8px 10px; font-size:0.84rem; margin-bottom:12px; background:#fafafa;">
-    </div>
-
-    <p class="hint" style="margin:0 0 12px;">
-      This replaces every label currently stored for the selected operator.
-      The previous set is not kept &mdash; upload again to refresh.
-    </p>
-
-    <div style="display:flex; gap:8px; flex-wrap:wrap;">
-      <button type="button" class="btn btn-primary" id="spLabelsConfirmBtn">Replace labels</button>
-      <button type="button" class="btn btn-outline"  id="spLabelsCancelBtn">Cancel</button>
-    </div>
-  </div>
-</div>
+<!-- SP report uploads auto-save on detect (v3.4) — no confirmation modal. -->
 
 <script>
 /* ══════════════════════════════════════════════════════════════════════
@@ -1364,7 +1326,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.3';
+const APP_VERSION = '3.4';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -5152,7 +5114,6 @@ window.copyEmail = copyEmail;
 const SP_OPERATOR_SHORTS = { SPM: 1, CRA: 2 };
 let _spOperatorFilter = 'SPM';   // 'SPM' | 'CRA' | 'ALL'
 let _spReports = [];             // slate.sp_reports for current session
-let _spParsedPending = null;     // parsed payload waiting for the confirm modal
 
 /* ─── PDF.js lazy loader ─────────────────────────────────────────────*/
 let _pdfjsSlate = null;
@@ -5207,19 +5168,20 @@ function spDetectKind(pages) {
     if (/Award Summary By Date Range/i.test(ln)) return 'wll';
     if (/End Of Session Award Summary/i.test(ln)) return 'll';
   }
-  // Labels PDF has no title — detect by the recurring "<team#>\n<name>\n<addr>\n<city,ST zip>"
-  // structure. Need at least 3 confirmed team-label blocks to be confident.
+  // Labels PDF has no title. pdf.js Y-buckets its 3-column grid, so each
+  // team-number row reads as 1-3 five-digit numbers ("00301 00302 00303").
+  // Confirm with a city/ST/zip line a few rows below. Need 3+ to be sure.
   let labelMarkers = 0;
-  for (let i = 0; i < Math.min(lines.length, 80); i++) {
-    if (!/^\d{5}$/.test(lines[i])) continue;
-    const csz = lines[i + 3];
-    if (csz && /^.+,\s*[A-Z]{2}\s+\d{5}/.test(csz)) labelMarkers++;
+  for (let i = 0; i < Math.min(lines.length, 160); i++) {
+    if (!/^\d{5}(?:\s+\d{5})*$/.test(lines[i])) continue;
+    for (let k = i + 2; k <= i + 5 && k < lines.length; k++) {
+      if (/,\s*[A-Z]{2}\s+\d{5}\b/.test(lines[k])) { labelMarkers++; break; }
+    }
     if (labelMarkers >= 3) return 'labels';
   }
-  // Fallback: BD-style "<div_num> - <div_name>" header somewhere
-  for (const ln of lines) {
-    if (/^\d{1,3}\s*-\s*\S/.test(ln) && !/^\d{5}\b/.test(ln)) return 'bd';
-  }
+  // No title, no labels grid — not a report Slate ingests. Returning
+  // 'unknown' (rather than guessing 'bd') keeps non-SP PDFs — e.g. a
+  // World Qualifier team list — from being misfiled.
   return 'unknown';
 }
 
@@ -5388,111 +5350,114 @@ function spParseSkunks(pages, ballType) {
   return { session_label, events };
 }
 
-/* ─── Mailing labels parser ──────────────────────────────────────────
-   APA's "Labels" report PDF has NO title text. Each team renders as:
-     <team_number>                  (line 1: exactly 5 digits, alone)
-     <captain_name>                 (line 2)
-     <address line 1[ + line 2]>    (line 3 — single visual line)
-     <city, ST zip[ -zip4]>         (line 4)
-   The page also includes a 3-column grid rendering of the same data
-   below the vertical list. Those grid-rows merge multiple team#s into a
-   single bucketed line (e.g. "01001 01002 01003") and won't match the
-   strict /^\d{5}$/ test — so they're naturally skipped. Dedup by
-   team_number to be safe.
-*/
-function spParseLabels(pages) {
-  const lines = pages.flat();
+/* ─── Mailing labels parser (3-column grid, X-aware) ─────────────────
+   APA's Labels PDF is a 3-column grid with NO title text. pdf.js
+   Y-buckets each grid row, so the line-view holds all 3 columns at once
+   ("00301 00302 00303") and can't be split back into columns. This
+   re-reads the PDF keeping every text item's X coordinate, groups items
+   into rows by Y, finds team-number rows, and slices each row's items
+   into columns by X-midpoint boundaries. Each column cell reads
+   team# / name / addr1 [/ addr2] / city,ST zip. Dedups by team#. */
+async function spPdfLabelGrid(file) {
+  const pdfjs = await spLoadPdfjs();
+  const buf = await file.arrayBuffer();
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(buf) }).promise;
+  const CSZ_RE     = /^(.+?),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)\s*$/;
+  const TEAMROW_RE = /^\d{5}(?:\s+\d{5})*$/;
   const labels = [];
   const seen = new Set();
-  for (let i = 0; i < lines.length; i++) {
-    const ln = lines[i];
-    if (!/^\d{5}$/.test(ln)) continue;
-    const team_number = ln;
-    if (seen.has(team_number)) continue;
-    if (i + 3 >= lines.length) continue;
-    const contact_name = (lines[i + 1] || '').trim();
-    let address_raw    = (lines[i + 2] || '').trim();
-    const csz_line     = (lines[i + 3] || '').trim();
-    const csz = csz_line.match(/^(.+?),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)\s*$/);
-    if (!csz) continue;
-    if (!contact_name || /^\d{5}$/.test(contact_name)) continue;
-    // Defensive: strip APA's "Enter Address Line" placeholder if it
-    // ever sneaks back in (operator confirmed this is now clean
-    // upstream, but cheap to handle).
-    address_raw = address_raw.replace(/\s*Enter Address Line\s*$/i, '').trim();
-    seen.add(team_number);
-    labels.push({
-      team_number,
-      contact_name,
-      address_line1: address_raw,
-      address_line2: null,
-      city:  csz[1].trim(),
-      state: csz[2],
-      zip:   csz[3]
-    });
-    i += 3;
+  for (let p = 1; p <= doc.numPages; p++) {
+    const page = await doc.getPage(p);
+    const tc = await page.getTextContent();
+    const rowMap = new Map();
+    for (const it of tc.items) {
+      const s = (it.str || '').replace(/\s+/g, ' ').trim();
+      if (!s) continue;
+      const y = Math.round(it.transform[5] * 10) / 10;
+      if (!rowMap.has(y)) rowMap.set(y, []);
+      rowMap.get(y).push({ x: it.transform[4], str: s });
+    }
+    const rows = [...rowMap.entries()]
+      .sort((a, b) => b[0] - a[0])
+      .map(([y, items]) => ({ y, items: items.sort((a, b) => a.x - b.x) }));
+    const rowText = r => r.items.map(i => i.str).join(' ').replace(/\s+/g, ' ').trim();
+    for (let r = 0; r < rows.length; r++) {
+      if (!TEAMROW_RE.test(rowText(rows[r]))) continue;
+      const anchors = rows[r].items
+        .filter(i => /^\d{5}$/.test(i.str))
+        .map(i => ({ x: i.x, team: i.str }));
+      if (!anchors.length) continue;
+      // band = the rows below this team-number row up to the next one
+      let end = r + 1;
+      while (end < rows.length && !TEAMROW_RE.test(rowText(rows[end]))) end++;
+      const band = rows.slice(r + 1, end);
+      // column boundaries — midpoints between team-number anchors
+      const bounds = anchors.map((a, c) => ({
+        lo: c === 0 ? -Infinity : (anchors[c - 1].x + a.x) / 2,
+        hi: c === anchors.length - 1 ? Infinity : (a.x + anchors[c + 1].x) / 2
+      }));
+      for (let c = 0; c < anchors.length; c++) {
+        const team = anchors[c].team;
+        if (seen.has(team)) continue;
+        const cell = [];
+        for (const br of band) {
+          const inCol = br.items.filter(i => i.x >= bounds[c].lo && i.x < bounds[c].hi);
+          if (inCol.length) cell.push(inCol.map(i => i.str).join(' ').replace(/\s+/g, ' ').trim());
+        }
+        if (cell.length < 2) continue;            // need at least name + csz
+        let cszIdx = -1;
+        for (let k = cell.length - 1; k >= 1; k--) {
+          if (CSZ_RE.test(cell[k])) { cszIdx = k; break; }
+        }
+        if (cszIdx < 1) continue;
+        const name = cell[0];
+        if (!name || /^\d{5}$/.test(name)) continue;
+        const csz  = cell[cszIdx].match(CSZ_RE);
+        const addr = cell.slice(1, cszIdx)
+          .map(s => s.replace(/\s*Enter Address Line\s*$/i, '').trim())
+          .filter(Boolean);
+        seen.add(team);
+        labels.push({
+          team_number:   team,
+          contact_name:  name,
+          address_line1: addr[0] || '',
+          address_line2: addr[1] || null,
+          city:  csz[1].trim(),
+          state: csz[2],
+          zip:   csz[3]
+        });
+      }
+    }
   }
   return labels;
 }
 
-/* ─── Labels modal — open / confirm / cancel ────────────────────────*/
-let _spLabelsPending = null;  // { labels, filename, operatorShort, operatorId }
-
-function spOpenLabelsModal(labels, filename) {
+/* ─── Labels auto-save ───────────────────────────────────────────────
+   Drops straight to the DB — no confirmation modal. Replaces the
+   selected operator's entire label set in one transaction (audit row →
+   delete old → insert new). Requires a specific operator (SPM or CRA);
+   "Both" can't disambiguate which operator the labels belong to. */
+async function spSaveLabels(labels, filename) {
   if (_spOperatorFilter === 'ALL') {
     setStatus('spDropStatus',
-      'Pick an operator (SPM or CRA) before uploading labels.', 'err');
+      'Pick an operator (SPM or CRA) in the filter before dropping a Labels PDF.', 'err');
     return;
   }
   const opShort = _spOperatorFilter;
   const opId    = SP_OPERATOR_SHORTS[opShort];
-  _spLabelsPending = { labels, filename, operatorShort: opShort, operatorId: opId };
-
-  document.getElementById('spLabelsDetected').innerHTML =
-    'Detected <strong>' + esc(labels.length) + ' mailing labels</strong> in <strong>'
-    + esc(filename) + '</strong>. These will replace the current '
-    + esc(opShort) + ' label set.';
-
-  const preview = labels.slice(0, 30).map(l =>
-    '<div style="padding:4px 0; border-bottom:1px solid #f0f0f0;">'
-    + '<strong>' + esc(l.team_number) + '</strong> &middot; '
-    + esc(l.contact_name) + ' &middot; '
-    + esc(l.address_line1) + ', ' + esc(l.city) + ', ' + esc(l.state) + ' ' + esc(l.zip)
-    + '</div>'
-  ).join('');
-  const moreNote = labels.length > 30
-    ? '<div class="hint" style="margin-top:6px;">… and ' + (labels.length - 30) + ' more</div>'
-    : '';
-  document.getElementById('spLabelsPreview').innerHTML = preview + moreNote;
-
-  document.getElementById('spLabelsModal').classList.add('shown');
-}
-
-function spCloseLabelsModal() {
-  document.getElementById('spLabelsModal').classList.remove('shown');
-  _spLabelsPending = null;
-}
-
-async function spConfirmLabelsUpload() {
-  const p = _spLabelsPending;
-  if (!p) return;
-  const btn = document.getElementById('spLabelsConfirmBtn');
-  if (btn) btn.disabled = true;
-  setStatus('spDropStatus', 'Replacing labels…', '');
+  setStatus('spDropStatus', 'Saving ' + labels.length + ' labels for ' + opShort + '…', '');
   try {
-    // Count previous rows for the audit log.
     let prev = [];
     try {
-      prev = await sb('GET',
-        'sp_labels?operator_id=eq.' + p.operatorId + '&select=id');
+      prev = await sb('GET', 'sp_labels?operator_id=eq.' + opId + '&select=id');
     } catch (e) { /* table may be empty */ }
     const previousCount = prev.length || 0;
 
-    // 1) Audit row first — has its own PK so the FK on sp_labels resolves.
+    // 1) Audit row first — its PK is the FK target on sp_labels.
     const auditCreated = await sb('POST', 'sp_label_uploads', {
-      operator_id: p.operatorId,
-      source_filename: p.filename,
-      row_count: p.labels.length,
+      operator_id: opId,
+      source_filename: filename,
+      row_count: labels.length,
       previous_row_count: previousCount,
       uploaded_by_device: getDeviceId()
     });
@@ -5500,9 +5465,9 @@ async function spConfirmLabelsUpload() {
     if (!uploadId) throw new Error('Audit row insert returned no id');
 
     // 2) Replace label set: DELETE existing for operator, INSERT new.
-    await sb('DELETE', 'sp_labels?operator_id=eq.' + p.operatorId);
-    const insertRows = p.labels.map(l => ({
-      operator_id: p.operatorId,
+    await sb('DELETE', 'sp_labels?operator_id=eq.' + opId);
+    const insertRows = labels.map(l => ({
+      operator_id: opId,
       team_number: l.team_number,
       contact_name: l.contact_name,
       address_line1: l.address_line1,
@@ -5517,15 +5482,12 @@ async function spConfirmLabelsUpload() {
     }
 
     setStatus('spDropStatus',
-      'Saved ' + p.labels.length + ' labels for ' + p.operatorShort
-      + ' (previous: ' + previousCount + ')', 'ok');
-    spCloseLabelsModal();
+      'Saved ' + labels.length + ' labels for ' + opShort
+      + (previousCount ? ' (replaced ' + previousCount + ')' : ''), 'ok');
     await spLoadLabels();
   } catch (e) {
     console.error('[SP] labels save failed:', e);
     setStatus('spDropStatus', 'Save failed: ' + e.message, 'err');
-  } finally {
-    if (btn) btn.disabled = false;
   }
 }
 
@@ -5557,6 +5519,7 @@ async function spLoadLabels() {
     _spLabelUploads = [];
   }
   spRenderLabels();
+  spRenderExpected();
 }
 
 function spRenderLabels() {
@@ -5605,6 +5568,64 @@ function spRenderLabels() {
   root.innerHTML = blocks.join('');
 }
 
+/* ─── Expected reports status panel ─────────────────────────────────
+   The patch workflow needs three reports per cycle: By-Division,
+   8-Ball Skunk, and Mailing Labels. This panel shows a traffic-light
+   freshness dot per report (green <48h, yellow 2-7d, red older / never)
+   mirroring the Uploads tab's report-status card. Reads the already-
+   loaded _spReports (sp_reports rows) and _spLabelUploads. */
+function spRenderExpected() {
+  const root = document.getElementById('spExpectedPanel');
+  if (!root) return;
+  if (!currentSession || !currentSession.id) {
+    root.innerHTML = '<p class="hint">Pick a current session to see status.</p>';
+    return;
+  }
+  const now = Date.now();
+  const H48 = 48 * 3600 * 1000;
+  const D7  = 7  * 24 * 3600 * 1000;
+  const reports = _spReports || [];
+  const latestOf = k => reports
+    .filter(r => r.report_kind === k)
+    .sort((a, b) => new Date(b.uploaded_at) - new Date(a.uploaded_at))[0] || null;
+  const bd = latestOf('bd');
+  const sk = latestOf('8skunk');
+  const lblUp = (_spLabelUploads || [])[0] || null;   // already operator-filtered, desc
+
+  const rowFor = (name, desc, uploadedAt, extra) => {
+    let color = 'red', age = 'not uploaded yet';
+    if (uploadedAt) {
+      const ms = now - new Date(uploadedAt).getTime();
+      color = ms < H48 ? 'green' : (ms < D7 ? 'yellow' : 'red');
+      age = _fmtRelativeAge(ms);
+    }
+    return '<div class="report-row ' + color + '">'
+      + '<div class="dot"></div>'
+      + '<div class="report-main">'
+      +   '<div class="report-key">' + esc(name) + '</div>'
+      +   '<div class="report-path">' + esc(desc) + '</div>'
+      +   (extra ? '<div class="report-summary">' + esc(extra) + '</div>' : '')
+      + '</div>'
+      + '<div class="report-age">' + esc(age) + '</div>'
+      + '</div>';
+  };
+  const opLabel = _spOperatorFilter === 'ALL' ? 'selected operator' : _spOperatorFilter;
+  root.innerHTML =
+    rowFor('By-Division',
+           'End Of Session Award Summary By Division — the patch source',
+           bd && bd.uploaded_at,
+           bd && bd.source_filename ? bd.source_filename : '')
+    + rowFor('8-Ball Skunk',
+           '8-Ball Skunk Report — data completeness (no patch)',
+           sk && sk.uploaded_at,
+           sk && sk.source_filename ? sk.source_filename : '')
+    + rowFor('Mailing Labels',
+           'Captain addresses for ' + opLabel,
+           lblUp && lblUp.uploaded_at,
+           lblUp ? (lblUp.row_count + ' labels'
+             + (lblUp.source_filename ? ' · ' + lblUp.source_filename : '')) : '');
+}
+
 /* ─── Drop zone wiring ──────────────────────────────────────────────*/
 function spWireDropZone() {
   const zone = document.getElementById('spDropZone');
@@ -5649,15 +5670,15 @@ async function spHandleFile(file) {
     if (kind === 'unknown') throw new Error('Could not identify report type from PDF title text');
     if (kind === '9skunk') throw new Error('9-Ball Skunk Report ingest not implemented yet');
 
-    // Labels PDFs take a dedicated path — no week/cumulative metadata,
-    // no sp_reports row, just a replace-set into sp_labels.
+    // Labels PDFs take a dedicated path — no sp_reports row, just a
+    // replace-set into sp_labels. Auto-saved (v3.4: no confirm modal).
+    // spPdfLabelGrid re-reads the file with X coords (the line-view
+    // can't split the 3-column grid).
     if (kind === 'labels') {
-      const labels = spParseLabels(pages);
+      const labels = await spPdfLabelGrid(file);
       console.log('[SP] parsed labels —', labels.length, 'teams');
       if (!labels.length) throw new Error('Identified as Mailing Labels but no team rows extracted');
-      setStatus('spDropStatus',
-        'Detected ' + labels.length + ' mailing labels. Confirm to replace…', 'ok');
-      spOpenLabelsModal(labels, file.name);
+      await spSaveLabels(labels, file.name);
       return;
     }
 
@@ -5683,9 +5704,8 @@ async function spHandleFile(file) {
     console.log('[SP] parsed', kind, '— rows/events:', payloadCount);
     if (!payloadCount) throw new Error('Identified as ' + spKindLabel(kind) + ' but no data extracted');
 
-    setStatus('spDropStatus', 'Detected ' + spKindLabel(kind) + ' (' + payloadCount + ' rows). Confirm details to save…', 'ok');
-    _spParsedPending = { kind, parsed, filename: file.name, payloadCount };
-    spOpenUploadModal();
+    // Auto-save — no confirmation modal (v3.4).
+    await spSaveReport(kind, parsed, file.name);
   } catch (e) {
     console.error('[SP] parse failed:', e);
     setStatus('spDropStatus', 'Parse failed: ' + e.message, 'err');
@@ -5703,39 +5723,6 @@ function spKindLabel(k) {
   })[k] || k;
 }
 
-function spOpenUploadModal() {
-  const p = _spParsedPending;
-  if (!p) return;
-  document.getElementById('spUploadDetected').innerHTML =
-    'Detected <strong>' + esc(spKindLabel(p.kind)) + '</strong> &middot; '
-    + esc(p.payloadCount) + ' rows &middot; '
-    + esc(p.parsed.session_label || 'no session label') + ' &middot; '
-    + esc(p.filename);
-  const cumCb  = document.getElementById('spIsCumulative');
-  const weekIn = document.getElementById('spWeekInput');
-  // Defaults depend on report kind.
-  if (p.kind === '8skunk' || p.kind === '9skunk') {
-    // Per-event reports — never cumulative; week comes from event dates.
-    cumCb.checked = false; cumCb.disabled = true;
-    weekIn.value = '';
-  } else if (p.kind === 'wll') {
-    // Weekly date-range report — delta, week auto-derived.
-    cumCb.checked = false; cumCb.disabled = true;
-    weekIn.value = (p.parsed.derived_week_no != null) ? p.parsed.derived_week_no : '';
-  } else {
-    // 'll' or 'bd' — assume cumulative end-of-session by default.
-    cumCb.checked = true; cumCb.disabled = false;
-    weekIn.value = '';
-  }
-  document.getElementById('spNotesInput').value = '';
-  document.getElementById('spUploadModal').classList.add('shown');
-}
-
-function spCloseUploadModal() {
-  document.getElementById('spUploadModal').classList.remove('shown');
-  _spParsedPending = null;
-}
-
 /* Insert in chunks so PostgREST doesn't choke / timeout on a big body.
    2700-event skunk reports would 502 in one shot; 400 rows/req is comfortable. */
 async function spInsertChunks(path, rows, chunkSize, label) {
@@ -5749,61 +5736,61 @@ async function spInsertChunks(path, rows, chunkSize, label) {
   }
 }
 
-async function spConfirmUpload() {
-  const p = _spParsedPending;
-  if (!p) return;
-  const weekRaw = document.getElementById('spWeekInput').value;
-  const weekNo = weekRaw ? parseInt(weekRaw, 10) : null;
-  const isCum  = document.getElementById('spIsCumulative').checked;
-  const notes  = (document.getElementById('spNotesInput').value || '').trim() || null;
+/* ─── SP report auto-save ────────────────────────────────────────────
+   Saves a parsed report straight to the DB — no confirmation modal
+   (v3.4). Metadata that the old modal collected is now derived:
+     - is_cumulative: true for 'll'/'bd' (end-of-session totals),
+       false for 'wll' (weekly delta) and '8skunk' (per-event).
+     - week_no: null for 'll'/'bd' (end-of-session view), the
+       date-range-derived week for 'wll', null for '8skunk' (events
+       carry their own dates).
+     - notes: dropped — no longer collected. */
+async function spSaveReport(kind, parsed, filename) {
+  const isCum  = (kind === 'll' || kind === 'bd');
+  const weekNo = (kind === 'wll' && parsed.derived_week_no != null)
+    ? parsed.derived_week_no : null;
   const opId   = _spOperatorFilter !== 'ALL' ? SP_OPERATOR_SHORTS[_spOperatorFilter] : null;
-  const btn = document.getElementById('spUploadConfirmBtn');
-  if (btn) btn.disabled = true;
-  setStatus('spDropStatus', 'Saving header row…', '');
-  console.log('[SP] confirm upload start', { kind: p.kind, rows: p.payloadCount });
+  setStatus('spDropStatus', 'Saving ' + spKindLabel(kind) + '…', '');
+  console.log('[SP] auto-save start', { kind, isCum, weekNo });
   try {
     const headerRow = {
       session_id: currentSession.id,
       operator_id: opId,
-      report_kind: p.kind,
+      report_kind: kind,
       week_no: weekNo,
       is_cumulative: isCum,
-      source_filename: p.filename,
-      source_printed_at: p.parsed.printed_at || null,
-      session_label_raw: p.parsed.session_label || null,
-      notes
+      source_filename: filename,
+      source_printed_at: parsed.printed_at || null,
+      session_label_raw: parsed.session_label || null,
+      notes: null
     };
     const created = await sb('POST', 'sp_reports', headerRow);
     const reportId = created && created[0] && created[0].id;
     if (!reportId) throw new Error('Header insert returned no id');
     console.log('[SP] header inserted, id=', reportId);
 
-    // Close the modal NOW so the user can see chunked progress in the drop-status area.
-    spCloseUploadModal();
-
     const CHUNK = 400;
-    if (p.kind === 'll' || p.kind === 'wll') {
-      const rows = p.parsed.rows.map(r => ({ ...r, report_id: reportId }));
+    if (kind === 'll' || kind === 'wll') {
+      const rows = parsed.rows.map(r => ({ ...r, report_id: reportId }));
       await spInsertChunks('sp_all_league_rows', rows, CHUNK, 'all-league rows');
       // For WEEKLY all-league: each (member, sp_type) count IS a confirmed
       // week-N event. Generate sp_events directly (no diff needed — the
-      // report is already a delta). is_cumulative=false on the report;
-      // is_inferred=false on each event.
-      if (p.kind === 'wll' && weekNo) {
+      // report is already a delta).
+      if (kind === 'wll' && weekNo) {
         const SP_FIELDS = ['rackless','eight_ob','eight_br','nine_os','nine_br','skunk','grand_slam'];
         const SP_FIELD_TO_TYPE = {
           rackless:'rackless', eight_ob:'eight_ob', eight_br:'eight_br',
           nine_os:'nine_os', nine_br:'nine_br', skunk:'nine_skunk', grand_slam:'grand_slam'
         };
         const events = [];
-        for (const r of p.parsed.rows) {
+        for (const r of parsed.rows) {
           for (const f of SP_FIELDS) {
             const n = r[f] || 0;
             for (let i = 0; i < n; i++) {
               events.push({
                 session_id: currentSession.id,
                 week_no: weekNo,
-                event_date: p.parsed.date_from || null,
+                event_date: parsed.date_from || null,
                 member_number: r.member_number,
                 team_number: null,        // weekly LL has no team attribution
                 division_number: null,
@@ -5816,11 +5803,11 @@ async function spConfirmUpload() {
         }
         if (events.length) await spInsertChunks('sp_events', events, CHUNK, 'weekly events');
       }
-    } else if (p.kind === 'bd') {
-      const rows = p.parsed.rows.map(r => ({ ...r, report_id: reportId }));
+    } else if (kind === 'bd') {
+      const rows = parsed.rows.map(r => ({ ...r, report_id: reportId }));
       await spInsertChunks('sp_by_division_rows', rows, CHUNK, 'by-division rows');
-    } else if (p.kind === '8skunk') {
-      const skunkRows = p.parsed.events.map(e => ({
+    } else if (kind === '8skunk') {
+      const skunkRows = parsed.events.map(e => ({
         report_id: reportId,
         ball_type: '8',
         event_date: e.event_date,
@@ -5830,9 +5817,9 @@ async function spConfirmUpload() {
         team_name: e.team_name
       })).filter(r => !!r.event_date);
       await spInsertChunks('sp_skunk_events', skunkRows, CHUNK, '8-skunk events');
-      const events = p.parsed.events.filter(e => !!e.event_date).map(e => ({
+      const events = parsed.events.filter(e => !!e.event_date).map(e => ({
         session_id: currentSession.id,
-        week_no: weekNo,
+        week_no: null,
         event_date: e.event_date,
         member_number: e.member_number,
         team_number: e.team_number,
@@ -5843,13 +5830,13 @@ async function spConfirmUpload() {
       }));
       await spInsertChunks('sp_events', events, CHUNK, 'normalized events');
     }
-    setStatus('spDropStatus', 'Saved: ' + spKindLabel(p.kind) + ' (' + p.payloadCount + ' rows)', 'ok');
+    const payloadCount = parsed.rows ? parsed.rows.length
+                       : (parsed.events ? parsed.events.length : 0);
+    setStatus('spDropStatus', 'Saved: ' + spKindLabel(kind) + ' (' + payloadCount + ' rows)', 'ok');
     await spLoadAll();
   } catch (e) {
     console.error('[SP] save failed:', e);
     setStatus('spDropStatus', 'Save failed: ' + e.message, 'err');
-  } finally {
-    if (btn) btn.disabled = false;
   }
 }
 
@@ -5867,6 +5854,7 @@ async function spLoadAll() {
     _spReports = [];
   }
   spRenderReports();
+  spRenderExpected();
 }
 
 function spRenderReports() {
@@ -5929,17 +5917,7 @@ function spOnEnterTab() {
     document.getElementById('spOperatorSeg').dataset.wired = '1';
     document.querySelectorAll('#spOperatorSeg .seg-btn-slate').forEach(b =>
       b.addEventListener('click', () => spSetOperator(b.dataset.op)));
-    document.getElementById('spUploadConfirmBtn').addEventListener('click', spConfirmUpload);
-    document.getElementById('spUploadCancelBtn').addEventListener('click', spCloseUploadModal);
-    document.getElementById('spUploadModal').addEventListener('click', ev => {
-      if (ev.target.id === 'spUploadModal') spCloseUploadModal();
-    });
-    // Labels modal
-    document.getElementById('spLabelsConfirmBtn').addEventListener('click', spConfirmLabelsUpload);
-    document.getElementById('spLabelsCancelBtn').addEventListener('click', spCloseLabelsModal);
-    document.getElementById('spLabelsModal').addEventListener('click', ev => {
-      if (ev.target.id === 'spLabelsModal') spCloseLabelsModal();
-    });
+    // SP report + labels uploads auto-save on detect — no modal wiring (v3.4).
     // Patches buttons
     document.getElementById('spComputePatchesBtn').addEventListener('click', spComputePatches);
     document.getElementById('spMailPatchesBtn').addEventListener('click', spMailPatches);
