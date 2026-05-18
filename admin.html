@@ -1226,6 +1226,34 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         <div id="spReportsList"><p class="hint">No reports loaded yet.</p></div>
       </div>
 
+      <!-- Operator profile (return address used on printed envelopes) -->
+      <div class="card" style="margin-bottom:14px;">
+        <h2 style="margin:0 0 6px;">Operator profile</h2>
+        <p class="hint" style="margin:0 0 10px;">
+          Return address printed in the upper-left of every envelope for the selected operator.
+          Stored on <code>slate.operators</code>.
+        </p>
+        <div id="spOpProfileForm" style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; max-width:560px;">
+          <label style="grid-column:1/-1; font-size:0.82rem; font-weight:700; color:#6b7280;">Return name</label>
+          <input type="text" id="opReturnName" placeholder="(e.g. South Portland Metro APA)" style="grid-column:1/-1; padding:8px 10px; border:1px solid #e5e7eb; border-radius:8px;">
+          <label style="grid-column:1/-1; font-size:0.82rem; font-weight:700; color:#6b7280;">Address line 1</label>
+          <input type="text" id="opReturnAddr1" style="grid-column:1/-1; padding:8px 10px; border:1px solid #e5e7eb; border-radius:8px;">
+          <label style="grid-column:1/-1; font-size:0.82rem; font-weight:700; color:#6b7280;">Address line 2 (optional)</label>
+          <input type="text" id="opReturnAddr2" style="grid-column:1/-1; padding:8px 10px; border:1px solid #e5e7eb; border-radius:8px;">
+          <label style="font-size:0.82rem; font-weight:700; color:#6b7280;">City</label>
+          <label style="font-size:0.82rem; font-weight:700; color:#6b7280;">State / ZIP</label>
+          <input type="text" id="opReturnCity" style="padding:8px 10px; border:1px solid #e5e7eb; border-radius:8px;">
+          <div style="display:grid; grid-template-columns:60px 1fr; gap:8px;">
+            <input type="text" id="opReturnState" placeholder="OR" maxlength="2" style="padding:8px 10px; border:1px solid #e5e7eb; border-radius:8px; text-transform:uppercase;">
+            <input type="text" id="opReturnZip" placeholder="97123" style="padding:8px 10px; border:1px solid #e5e7eb; border-radius:8px;">
+          </div>
+        </div>
+        <div style="margin-top:10px; display:flex; gap:8px; align-items:center;">
+          <button type="button" class="btn btn-primary" id="opProfileSaveBtn">Save</button>
+          <div id="opProfileStatus" class="status-line" style="flex:1;"></div>
+        </div>
+      </div>
+
       <!-- Patches — computation, envelope-grouped list, mail batch, undo -->
       <div class="card" style="margin-bottom:14px;">
         <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
@@ -1318,7 +1346,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.0';
+const APP_VERSION = '3.1';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -5708,6 +5736,7 @@ function spSetOperator(op) {
   spRenderReports();
   spLoadLabels();
   spLoadPatches();
+  spLoadOpProfileForm();
 }
 
 function spOnEnterTab() {
@@ -5734,6 +5763,8 @@ function spOnEnterTab() {
     document.getElementById('spUndoMailBtn').addEventListener('click', spUndoLastMailing);
     document.getElementById('spPrintSlipsBtn').addEventListener('click', spPrintSlips);
     document.getElementById('spPrintEnvBtn').addEventListener('click', spPrintEnvelopes);
+    // Operator profile
+    document.getElementById('opProfileSaveBtn').addEventListener('click', spSaveOpProfile);
   }
   const lbl = document.getElementById('spCurSessionLabel');
   if (lbl) lbl.textContent = currentSession
@@ -5742,6 +5773,7 @@ function spOnEnterTab() {
   spLoadAll();
   spLoadLabels();
   spLoadPatches();
+  spLoadOpProfileForm();
 }
 window.spDeleteReport = spDeleteReport;
 
@@ -6473,6 +6505,55 @@ spRenderPatches = function() {
 
 window.spPrintSlips     = spPrintSlips;
 window.spPrintEnvelopes = spPrintEnvelopes;
+
+/* ════════════════════════════════════════════════════════════════════
+   OPERATOR PROFILE — minimal Phase 3 (return address only)
+   ────────────────────────────────────────────────────────────────────
+   Loads the selected operator's row from slate.operators and lets the
+   admin edit the return-address columns. Save → PATCH. Art slot UI
+   lands in a follow-up.
+   ════════════════════════════════════════════════════════════════════ */
+async function spLoadOpProfileForm() {
+  await spLoadOperatorProfile();
+  const op = _spOperatorProfile || {};
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v == null ? '' : v; };
+  set('opReturnName',  op.return_name  || op.name || '');
+  set('opReturnAddr1', op.return_address1);
+  set('opReturnAddr2', op.return_address2);
+  set('opReturnCity',  op.return_city);
+  set('opReturnState', op.return_state);
+  set('opReturnZip',   op.return_zip);
+}
+
+async function spSaveOpProfile() {
+  if (_spOperatorFilter === 'ALL') {
+    setStatus('opProfileStatus', 'Pick an operator (SPM or CRA) first.', 'err'); return;
+  }
+  const opId = SP_OPERATOR_SHORTS[_spOperatorFilter];
+  const val = id => { const el = document.getElementById(id); return el ? el.value.trim() || null : null; };
+  const body = {
+    return_name:     val('opReturnName'),
+    return_address1: val('opReturnAddr1'),
+    return_address2: val('opReturnAddr2'),
+    return_city:     val('opReturnCity'),
+    return_state:    val('opReturnState') ? val('opReturnState').toUpperCase() : null,
+    return_zip:      val('opReturnZip')
+  };
+  const btn = document.getElementById('opProfileSaveBtn');
+  if (btn) btn.disabled = true;
+  setStatus('opProfileStatus', 'Saving…', '');
+  try {
+    await sb('PATCH', 'operators?id=eq.' + opId, body);
+    _spOperatorProfile = null; // force re-fetch next print
+    setStatus('opProfileStatus', 'Saved.', 'ok');
+  } catch (e) {
+    setStatus('opProfileStatus', 'Save failed: ' + e.message, 'err');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+window.spSaveOpProfile = spSaveOpProfile;
 </script>
 </body>
 </html>
