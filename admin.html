@@ -1334,7 +1334,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.9';
+const APP_VERSION = '3.10';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -6095,10 +6095,16 @@ async function spLoadPatches() {
   // Find latest active batch (for "Undo Last Mailing").
   if (opId != null) {
     try {
+      // Exclude the legacy backfill batch — it's "mailed before Slate",
+      // not something you'd print slips/envelopes for or undo. Print
+      // Slips / Print Envelopes / Undo all key off _spLastBatch, so it
+      // must be the most recent REAL Mail Patches run.
       const batches = await sb('GET',
         'sp_mail_batches?operator_id=eq.' + opId
         + '&session_id=eq.' + currentSession.id
-        + '&is_undone=eq.false&select=*&order=created_at.desc&limit=1');
+        + '&is_undone=eq.false'
+        + '&created_by_device=neq.legacy-backfill-spring'
+        + '&select=*&order=created_at.desc&limit=1');
       _spLastBatch = batches && batches[0] || null;
     } catch (e) {
       _spLastBatch = null;
@@ -6622,24 +6628,26 @@ async function spPrintSlips() {
     setStatus('spPatchesBlocker', 'No patches in last batch.', 'err');
     return;
   }
-  const envs = spBatchEnvelopes(patches);
-  // ONE SLIP PER PLAYER (SP Admin's model) — not one per SP. Within each
-  // envelope, group the patches by member; that player's slip lists all
-  // of their special performances. Envelope order is preserved so the
-  // cut-stack still maps to envelopes top-down.
+  // ONE SLIP PER PLAYER (SP Admin's model) — not one per SP, and not one
+  // per envelope. Group the whole batch by (team, member): a player's
+  // slip lists every SP they earned on that team, independent of how the
+  // team's patches split into physical envelopes by weight. Ordered by
+  // team then member so the cut-stack maps top-down to envelopes.
+  const byTeam = new Map();
+  for (const p of patches) {
+    if (!byTeam.has(p.team_number)) byTeam.set(p.team_number, new Map());
+    const mm = byTeam.get(p.team_number);
+    if (!mm.has(p.member_number)) mm.set(p.member_number, []);
+    mm.get(p.member_number).push(p);
+  }
   const slipsInOrder = [];
-  for (const e of envs) {
-    const byMember = new Map();
-    for (const p of e.patches) {
-      if (!byMember.has(p.member_number)) byMember.set(p.member_number, []);
-      byMember.get(p.member_number).push(p);
-    }
-    for (const [mem, ps] of byMember) {
+  for (const team of [...byTeam.keys()].sort()) {
+    for (const [mem, ps] of byTeam.get(team)) {
       slipsInOrder.push({
         member_number: mem,
         member_name:   ps[0].member_name,
-        team_number:   ps[0].team_number,
-        sps:           ps        // all this player's patches in this envelope
+        team_number:   team,
+        sps:           ps        // all this player's patches on this team
       });
     }
   }
