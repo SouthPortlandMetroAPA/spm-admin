@@ -1334,7 +1334,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.11';
+const APP_VERSION = '3.12';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -6698,11 +6698,20 @@ async function spPrintSlips() {
     pages.push(slots);
   }
   const op = _spOperatorProfile || {};
-  const html = spBuildSlipsHTML(pages, op);
+  // Cover-page summary — count of each SP type going out in this mailing.
+  const tally = {};
+  for (const p of patches) tally[p.sp_type] = (tally[p.sp_type] || 0) + 1;
+  const summary = {
+    tally:         tally,
+    totalPatches:  patches.length,
+    slipCount:     N,
+    envelopeCount: spBatchEnvelopes(patches).length
+  };
+  const html = spBuildSlipsHTML(pages, op, summary);
   spOpenPrintWindow(html, 'Print slips — batch ' + _spLastBatch.id.slice(0, 8));
 }
 
-function spBuildSlipsHTML(pages, op) {
+function spBuildSlipsHTML(pages, op, summary) {
   const slipHtml = slip => {
     if (!slip) return '<div class="slip slip-empty"></div>';
     const hasSlam = slip.sps.some(p => p.is_slam);
@@ -6722,6 +6731,30 @@ function spBuildSlipsHTML(pages, op) {
       + '<div class="slip-org">' + esc(op.name || 'APA') + '</div>'
       + '</div>';
   };
+  // Cover page — count of each SP type in this mailing, fixed order.
+  const COVER_ORDER = ['r','8','x','9','n','k','m8','mx','m9','mn','8m','9m','g'];
+  const tally = (summary && summary.tally) || {};
+  const sm = summary || { totalPatches: 0, slipCount: 0, envelopeCount: 0 };
+  const coverRows = COVER_ORDER
+    .filter(t => (tally[t] || 0) > 0)
+    .map(t => '<tr><td>' + esc(SP_FULL_NAME[t] || t) + '</td>'
+      + '<td class="num">' + tally[t] + '</td></tr>')
+    .join('');
+  const coverPage =
+    '<div class="page cover">'
+    + '<div class="cover-title">Special Performance Patch Mailing</div>'
+    + '<div class="cover-sub">' + esc(op.name || 'APA') + ' &middot; '
+    +   esc(new Date().toLocaleDateString()) + '</div>'
+    + '<table class="cover-table">'
+    +   '<thead><tr><th>Patch</th><th class="num">Count</th></tr></thead>'
+    +   '<tbody>' + coverRows + '</tbody>'
+    +   '<tfoot><tr><td>Total patches</td><td class="num">' + sm.totalPatches + '</td></tr></tfoot>'
+    + '</table>'
+    + '<div class="cover-foot">'
+    +   sm.slipCount + ' slip' + (sm.slipCount === 1 ? '' : 's')
+    +   ' &middot; ' + sm.envelopeCount + ' envelope' + (sm.envelopeCount === 1 ? '' : 's')
+    + '</div>'
+    + '</div>';
   return [
     '<!doctype html><html><head><meta charset="utf-8"><title>Slips</title>',
     '<style>',
@@ -6730,9 +6763,8 @@ function spBuildSlipsHTML(pages, op) {
     '.page { width: 8.5in; height: 11in; padding: 0; display: flex; flex-direction: column; page-break-after: always; }',
     '.page:last-child { page-break-after: auto; }',
     '.slip { flex: 1 0 0; box-sizing: border-box; padding: 0.22in 0.5in;',
-    '        border-bottom: 1px dashed #888; display: flex; flex-direction: column;',
+    '        display: flex; flex-direction: column;',
     '        justify-content: center; align-items: center; text-align: center; overflow: hidden; }',
-    '.slip:last-child { border-bottom: 0; }',
     '.slip-empty { background: #fff; }',
     '.slip-name { font-size: 20pt; font-weight: 800; letter-spacing: 0.02em; margin: 0 0 3pt; }',
     '.slip-sps { margin: 1pt 0 3pt; }',
@@ -6742,9 +6774,19 @@ function spBuildSlipsHTML(pages, op) {
     '.slip-org { font-size: 9pt; color: #6b7280; margin-top: 4pt; font-style: italic; }',
     '.slip-slam { background: linear-gradient(180deg, #fff 0%, #fef9c3 100%); border: 1px solid #f59e0b; }',
     '.slip-slam .slip-name { color: #78350f; }',
+    '.cover { justify-content: flex-start; align-items: center; padding: 1in 0.9in; }',
+    '.cover-title { font-size: 26pt; font-weight: 800; text-align: center; }',
+    '.cover-sub { font-size: 12pt; color: #6b7280; font-style: italic; margin: 5pt 0 30pt; }',
+    '.cover-table { border-collapse: collapse; font-size: 13pt; min-width: 4.6in; }',
+    '.cover-table th, .cover-table td { padding: 6pt 16pt; border-bottom: 1px solid #e5e7eb; }',
+    '.cover-table th { font-size: 9.5pt; text-transform: uppercase; letter-spacing: 0.05em; color: #6b7280; text-align: left; }',
+    '.cover-table .num { text-align: right; font-family: ui-monospace,Menlo,monospace; }',
+    '.cover-table tfoot td { font-weight: 800; font-size: 14pt; border-top: 2px solid #1a1a1a; border-bottom: 0; }',
+    '.cover-foot { margin-top: 24pt; font-size: 12pt; color: #4b5563; }',
     '@media screen { body { background: #f3f3f3; padding: 16px; }',
     '  .page { background: #fff; margin: 0 auto 16px; box-shadow: 0 4px 14px rgba(0,0,0,0.18); } }',
     '</style></head><body>',
+    coverPage,
     pages.map(page =>
       '<div class="page">' + page.map(slipHtml).join('') + '</div>'
     ).join(''),
