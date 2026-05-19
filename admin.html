@@ -1368,7 +1368,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.21';
+const APP_VERSION = '3.22';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -5994,6 +5994,7 @@ function spRenderOptouts() {
 async function spToggleOptoutType(memberNumber, code) {
   const o = _spOptouts.find(x => x.member_number === memberNumber);
   if (!o) return;
+  const wasOptedOut = (o.opted_out_types || []).indexOf(code) >= 0;
   const types = new Set(o.opted_out_types || []);
   if (types.has(code)) types.delete(code); else types.add(code);
   const newTypes = OPTOUT_CODES.filter(c => types.has(c));   // preserve canonical order
@@ -6003,12 +6004,49 @@ async function spToggleOptoutType(memberNumber, code) {
   try {
     await sb('PATCH', 'patch_optouts?member_number=eq.' + encodeURIComponent(memberNumber),
       { opted_out_types: newTypes });
+    /* If the chip just turned ON, drop that member's matching unmailed
+       patches so the To-mail count reflects the new opt-out. Mailed
+       patches stay. Turning a chip OFF doesn't recreate the patch — the
+       user can re-run Compute to bring it back. */
+    if (!wasOptedOut && types.has(code)) {
+      const removed = await spDeleteOptoutPatches(memberNumber, [code]);
+      if (removed) await spLoadPatches();
+      setStatus('spOptoutStatus',
+        removed
+          ? ('Removed ' + removed + ' unmailed ' + esc(code) + ' patch for ' + memberNumber + '.')
+          : ('Saved &mdash; no existing patches to remove for ' + esc(code) + '.'),
+        'ok');
+    }
   } catch (e) {
     setStatus('spOptoutStatus', 'Save failed: ' + e.message, 'err');
     await spLoadOptouts();
   }
 }
 window.spToggleOptoutType = spToggleOptoutType;
+
+/* Delete this player's UNMAILED patches that match the given codes, scoped
+   to the current (session, operator). Already-mailed patches are never
+   touched. Returns the number of rows deleted (PostgREST returns them
+   when Prefer: return=representation is set). */
+async function spDeleteOptoutPatches(memberNumber, codes) {
+  if (!currentSession || !currentSession.id) return 0;
+  if (!codes || !codes.length) return 0;
+  const opId = SP_OPERATOR_SHORTS[_spOperatorFilter];
+  if (opId == null) return 0;
+  try {
+    const res = await sb('DELETE',
+      'sp_patches?member_number=eq.' + encodeURIComponent(memberNumber)
+      + '&sp_type=in.(' + codes.map(c => encodeURIComponent(c)).join(',') + ')'
+      + '&mailed_at=is.null'
+      + '&session_id=eq.' + currentSession.id
+      + '&operator_id=eq.' + opId,
+      null, { 'Prefer': 'return=representation' });
+    return (res || []).length;
+  } catch (e) {
+    console.warn('[optout] delete failed', memberNumber, codes, e);
+    return 0;
+  }
+}
 
 async function spSaveOptouts() {
   const box = document.getElementById('spOptoutBox');
@@ -6040,11 +6078,24 @@ async function spSaveOptouts() {
       nums.map(n => ({ member_number: n })),
       { 'Prefer': 'resolution=merge-duplicates' });
     box.value = '';
+    await spLoadOptouts();
+    /* Apply the opt-outs to the To-mail queue immediately: drop any
+       unmailed patches matching the new entries' opted_out_types so the
+       count reflects reality. Already-mailed patches stay. */
+    let removed = 0;
+    for (const n of nums) {
+      const row = _spOptouts.find(o => o.member_number === n);
+      if (row && row.opted_out_types && row.opted_out_types.length) {
+        removed += await spDeleteOptoutPatches(n, row.opted_out_types);
+      }
+    }
+    if (removed) await spLoadPatches();
     setStatus('spOptoutStatus',
       'Added ' + nums.length + ' opt-out' + (nums.length === 1 ? '' : 's')
+      + (removed ? ' · removed ' + removed + ' unmailed patch'
+                 + (removed === 1 ? '' : 'es') : '')
       + (invalid.length ? ' · ' + invalid.length + ' invalid (skipped)' : ''),
       invalid.length ? 'warn' : 'ok');
-    await spLoadOptouts();
   } catch (e) {
     setStatus('spOptoutStatus', 'Save failed: ' + e.message, 'err');
   }
@@ -6374,6 +6425,27 @@ async function spComputePatches() {
     } catch (e) { /* non-fatal — proceed without opt-out filter */ }
     const isOptedOut = (mem, code) =>
       optoutsByMember.has(mem) && optoutsByMember.get(mem).has(code);
+
+    /* Pre-compute cleanup — drop any UNMAILED patches that already exist
+       for an opted-out (member × sp_type). Opt-outs added after a prior
+       compute leave stale rows in sp_patches; this clears them so the
+       re-compute lands in the right state. Mailed patches are never
+       touched. */
+    let preCleaned = 0;
+    for (const [mem, codes] of optoutsByMember.entries()) {
+      if (!codes.size) continue;
+      try {
+        const res = await sb('DELETE',
+          'sp_patches?member_number=eq.' + encodeURIComponent(mem)
+          + '&sp_type=in.(' + [...codes].map(c => encodeURIComponent(c)).join(',') + ')'
+          + '&mailed_at=is.null'
+          + '&session_id=eq.' + currentSession.id
+          + '&operator_id=eq.' + opId,
+          null, { 'Prefer': 'return=representation' });
+        preCleaned += (res || []).length;
+      } catch (e) { /* per-member failure non-fatal */ }
+    }
+    if (preCleaned) console.log('[patches] pre-compute optout cleanup removed:', preCleaned);
 
     // Filter rows to operator-tagged divisions for this operator. Also
     // drop inactive teams (team-within-division > 16) — those were pulled
