@@ -1334,7 +1334,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.6';
+const APP_VERSION = '3.7';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -5534,7 +5534,7 @@ async function spLoadLabels() {
       ? '&operator_id=eq.' + SP_OPERATOR_SHORTS[_spOperatorFilter]
       : '';
     const sessFilter = '&session_id=eq.' + currentSession.id;
-    _spLabels = await sb('GET',
+    _spLabels = await sbGetAll(
       'sp_labels?select=*' + sessFilter + opFilter + '&order=team_number.asc');
     _spLabelUploads = await sb('GET',
       'sp_label_uploads?select=*' + sessFilter + opFilter + '&order=uploaded_at.desc&limit=8');
@@ -6141,8 +6141,11 @@ async function spComputePatches() {
       throw new Error('No By-Division report uploaded for this session. Drop one first.');
     }
     const bdReport = bdReports[0];
-    const rows = await sb('GET',
-      'sp_by_division_rows?report_id=eq.' + bdReport.id + '&select=*');
+    // Paged — a By-Division report holds ~2300 member×division rows,
+    // well past the 1000-row single-response cap. An unpaged read would
+    // compute patches from under half the report.
+    const rows = await sbGetAll(
+      'sp_by_division_rows?report_id=eq.' + bdReport.id + '&select=*&order=id.asc');
     console.log('[patches] BD report', bdReport.id, 'has', rows.length, 'rows');
 
     // Filter rows to operator-tagged divisions for this operator.
