@@ -1282,6 +1282,23 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         </div>
       </div>
 
+      <!-- Patch opt-outs — members who don't want patches mailed -->
+      <div class="card" style="margin-bottom:14px;">
+        <h2 style="margin:0 0 6px;">Patch opt-outs</h2>
+        <p class="hint" style="margin:0 0 10px;">
+          Member numbers (5- or 8-digit, one per line) of players who&rsquo;ve asked not
+          to receive patches. Compute skips them going forward; already-mailed patches
+          stay untouched. Persists across sessions.
+        </p>
+        <textarea id="spOptoutBox" class="ehq-paste-box" style="min-height:64px;"
+          placeholder="e.g.&#10;24779&#10;97223806"></textarea>
+        <div style="display:flex; gap:8px; align-items:center; margin-top:8px;">
+          <button type="button" class="btn btn-primary" onclick="spSaveOptouts()">Add to list</button>
+          <span class="status-line" id="spOptoutStatus" style="flex:1;"></span>
+        </div>
+        <div id="spOptoutList" style="margin-top:10px;"><p class="hint" style="margin:0;">No opt-outs.</p></div>
+      </div>
+
       <!-- Patches — computation, envelope-grouped list, mail batch, undo -->
       <div class="card" style="margin-bottom:14px;">
         <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
@@ -1296,8 +1313,11 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             <button type="button" class="btn btn-outline" id="spPrintSlipsBtn" disabled>
               Print Slips
             </button>
-            <button type="button" class="btn btn-outline" id="spPrintEnvBtn" disabled>
-              Print Envelopes
+            <button type="button" class="btn btn-outline" id="spPrintEnvBtn1" disabled>
+              Print Envelopes (1st half)
+            </button>
+            <button type="button" class="btn btn-outline" id="spPrintEnvBtn2" disabled>
+              Print Envelopes (2nd half)
             </button>
             <button type="button" class="btn btn-outline" id="spUndoMailBtn" disabled>
               Undo Last Mailing
@@ -1334,7 +1354,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.17';
+const APP_VERSION = '3.18';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -5874,7 +5894,118 @@ async function spLoadAll() {
   }
   spRenderReports();
   spRenderExpected();
+  spLoadOptouts();
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   PATCH OPT-OUTS — players who don't want patches mailed
+   ────────────────────────────────────────────────────────────────────
+   slate.patch_optouts is a flat list of 5-digit member numbers; the
+   compute step filters them out so no new patch rows are created for
+   anyone in this list. Existing already-mailed patches stay untouched.
+   ════════════════════════════════════════════════════════════════════ */
+let _spOptouts = [];
+
+async function spLoadOptouts() {
+  try {
+    const rows = await sb('GET',
+      'patch_optouts?select=member_number,note,created_at&order=member_number');
+    _spOptouts = rows || [];
+  } catch (e) {
+    _spOptouts = [];
+  }
+  /* Resolve First "Nickname" Last for each row. */
+  const nums = [...new Set(_spOptouts.map(o => o.member_number))];
+  if (nums.length) {
+    try {
+      const players = await sb('POST', 'rpc/players_by_short', { p_nums: nums });
+      const byShort = {};
+      for (const p of (players || [])) {
+        const f  = (p.first_name || '').trim();
+        const l  = (p.last_name  || '').trim();
+        const nk = (p.nickname   || '').trim();
+        byShort[p.short_number] = (nk ? f + ' "' + nk + '" ' + l : f + ' ' + l)
+          .replace(/\s+/g, ' ').trim();
+      }
+      _spOptouts.forEach(o => { o._name = byShort[o.member_number] || ''; });
+    } catch (e) { /* name resolve failed — fall back to numbers only */ }
+  }
+  spRenderOptouts();
+}
+
+function spRenderOptouts() {
+  const el = document.getElementById('spOptoutList');
+  if (!el) return;
+  if (!_spOptouts.length) {
+    el.innerHTML = '<p class="hint" style="margin:0;">No opt-outs.</p>';
+    return;
+  }
+  el.innerHTML =
+    '<div style="font-size:0.82rem; font-weight:700; color:#6b7280; margin-bottom:6px;">'
+    +   _spOptouts.length + ' opt-out' + (_spOptouts.length === 1 ? '' : 's')
+    + '</div>'
+    + _spOptouts.map(o =>
+        '<div style="display:flex; gap:10px; align-items:center; padding:5px 0; border-bottom:1px solid #f1f1f1;">'
+        + '<span style="font-family:ui-monospace,Menlo,monospace; font-weight:700; min-width:60px;">'
+        +   esc(o.member_number) + '</span>'
+        + '<span style="flex:1; font-size:0.9rem;">' + esc(o._name || '—') + '</span>'
+        + '<button class="btn btn-outline" style="padding:2px 10px; font-size:0.78rem;"'
+        +   ' onclick="spRemoveOptout(\'' + esc(o.member_number) + '\')">Remove</button>'
+        + '</div>'
+      ).join('');
+}
+
+async function spSaveOptouts() {
+  const box = document.getElementById('spOptoutBox');
+  const raw = (box.value || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  if (!raw.length) {
+    setStatus('spOptoutStatus', 'Paste at least one number.', 'err');
+    return;
+  }
+  /* Normalize to 5-digit: 5-digit → as-is, 8-digit → last 5, anything else
+     → invalid (collected for the status message). */
+  const valid = new Set();
+  const invalid = [];
+  for (const line of raw) {
+    const digits = line.replace(/\D+/g, '');
+    if (digits.length === 5)      valid.add(digits);
+    else if (digits.length === 8) valid.add(digits.slice(-5));
+    else                          invalid.push(line);
+  }
+  const nums = [...valid];
+  if (!nums.length) {
+    setStatus('spOptoutStatus', 'No valid 5- or 8-digit numbers found.', 'err');
+    return;
+  }
+  setStatus('spOptoutStatus', 'Saving…', '');
+  try {
+    /* Upsert. Prefer: resolution=merge-duplicates is the POSTGREST idiom
+       for "insert and skip on PK conflict". */
+    await sb('POST', 'patch_optouts',
+      nums.map(n => ({ member_number: n })),
+      { 'Prefer': 'resolution=merge-duplicates' });
+    box.value = '';
+    setStatus('spOptoutStatus',
+      'Added ' + nums.length + ' opt-out' + (nums.length === 1 ? '' : 's')
+      + (invalid.length ? ' · ' + invalid.length + ' invalid (skipped)' : ''),
+      invalid.length ? 'warn' : 'ok');
+    await spLoadOptouts();
+  } catch (e) {
+    setStatus('spOptoutStatus', 'Save failed: ' + e.message, 'err');
+  }
+}
+
+async function spRemoveOptout(memberNumber) {
+  try {
+    await sb('DELETE', 'patch_optouts?member_number=eq.' + encodeURIComponent(memberNumber));
+    setStatus('spOptoutStatus', 'Removed ' + memberNumber + '.', 'ok');
+    await spLoadOptouts();
+  } catch (e) {
+    setStatus('spOptoutStatus', 'Remove failed: ' + e.message, 'err');
+  }
+}
+window.spSaveOptouts  = spSaveOptouts;
+window.spRemoveOptout = spRemoveOptout;
 
 function spRenderReports() {
   const root = document.getElementById('spReportsList');
@@ -5942,7 +6073,8 @@ function spOnEnterTab() {
     document.getElementById('spMailPatchesBtn').addEventListener('click', spMailPatches);
     document.getElementById('spUndoMailBtn').addEventListener('click', spUndoLastMailing);
     document.getElementById('spPrintSlipsBtn').addEventListener('click', spPrintSlips);
-    document.getElementById('spPrintEnvBtn').addEventListener('click', spPrintEnvelopes);
+    document.getElementById('spPrintEnvBtn1').addEventListener('click', () => spPrintEnvelopes(1));
+    document.getElementById('spPrintEnvBtn2').addEventListener('click', () => spPrintEnvelopes(2));
     // Patch-list view filter
     document.querySelectorAll('#spPatchFilterSeg .seg-btn-slate').forEach(b =>
       b.addEventListener('click', () => spSetPatchFilter(b.dataset.pf)));
@@ -6172,13 +6304,25 @@ async function spComputePatches() {
       'sp_by_division_rows?report_id=eq.' + bdReport.id + '&select=*&order=id.asc');
     console.log('[patches] BD report', bdReport.id, 'has', rows.length, 'rows');
 
+    // Pull the opt-out list fresh (in case it was edited since page load)
+    // — these member numbers are skipped entirely so no new patch rows are
+    // created for them. Already-mailed patches stay untouched.
+    let optoutSet = new Set();
+    try {
+      const optouts = await sb('GET', 'patch_optouts?select=member_number');
+      optoutSet = new Set((optouts || []).map(o => o.member_number));
+    } catch (e) { /* non-fatal — proceed without opt-out filter */ }
+
     // Filter rows to operator-tagged divisions for this operator. Also
     // drop inactive teams (team-within-division > 16) — those were pulled
     // mid-session; their patches are ignored (no captain/label to mail).
+    // And drop any opted-out members.
     const opRows = rows.filter(r =>
       _spDivisionMeta.get(r.division_number) === opId
-      && !spIsInactiveTeam(r.team_number));
-    console.log('[patches] rows after operator filter:', opRows.length);
+      && !spIsInactiveTeam(r.team_number)
+      && !optoutSet.has(r.member_number));
+    console.log('[patches] rows after operator + opt-out filter:', opRows.length,
+                '(skipped opt-outs:', optoutSet.size, ')');
 
     // Per-code patches: collapse rows by (member, division, sp_type)
     // — sum counts across teams within the division, take the team#
@@ -6855,15 +6999,32 @@ function spBuildSlipsHTML(pages, op, summary) {
   ].join('\n');
 }
 
-async function spPrintEnvelopes() {
+async function spPrintEnvelopes(half) {
   if (!_spLastBatch) return;
   await spLoadOperatorProfile();
   const patches = await spPatchesForBatch(_spLastBatch.id);
   if (!patches.length) return;
   const envs = spBatchEnvelopes(patches);
+  if (!envs.length) return;
+  /* Two buttons feed the same function with half=1 / half=2 so a mailing
+     run can be split across two printers. Envelopes are ordered by
+     captain (alphabetical) — half 1 is the first chunk, half 2 the
+     remainder. Calling with no `half` prints the whole batch. */
+  let subset = envs, suffix = '';
+  if (half === 1 || half === 2) {
+    const mid = Math.ceil(envs.length / 2);
+    if (half === 1) {
+      subset = envs.slice(0, mid);
+      suffix = ' — 1/2 (1–' + mid + ' of ' + envs.length + ')';
+    } else {
+      subset = envs.slice(mid);
+      suffix = ' — 2/2 (' + (mid + 1) + '–' + envs.length + ' of ' + envs.length + ')';
+    }
+    if (!subset.length) return;
+  }
   const op = _spOperatorProfile || {};
-  const html = spBuildEnvelopesHTML(envs, op);
-  spOpenPrintWindow(html, 'Print envelopes — batch ' + _spLastBatch.id.slice(0, 8));
+  const html = spBuildEnvelopesHTML(subset, op);
+  spOpenPrintWindow(html, 'Print envelopes — batch ' + _spLastBatch.id.slice(0, 8) + suffix);
 }
 
 /* Envelope graphics — copied verbatim from the legacy SP Admin
@@ -6935,10 +7096,12 @@ function spOpenPrintWindow(html, title) {
    not — re-print stays available until a new mailing is created). */
 function spRefreshPrintButtonsState() {
   const slips = document.getElementById('spPrintSlipsBtn');
-  const env   = document.getElementById('spPrintEnvBtn');
+  const env1  = document.getElementById('spPrintEnvBtn1');
+  const env2  = document.getElementById('spPrintEnvBtn2');
   const enable = !!(_spLastBatch && _spLastBatch.patch_count > 0);
   if (slips) slips.disabled = !enable;
-  if (env)   env.disabled   = !enable;
+  if (env1)  env1.disabled  = !enable;
+  if (env2)  env2.disabled  = !enable;
 }
 
 /* Hook into the existing render so the print buttons toggle alongside
