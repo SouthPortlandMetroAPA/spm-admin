@@ -1334,7 +1334,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.8';
+const APP_VERSION = '3.9';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -6623,9 +6623,26 @@ async function spPrintSlips() {
     return;
   }
   const envs = spBatchEnvelopes(patches);
-  // Flatten patches in envelope order — that's the linear slip stack
-  // we want to end up with after cutting.
-  const slipsInOrder = envs.flatMap(e => e.patches);
+  // ONE SLIP PER PLAYER (SP Admin's model) — not one per SP. Within each
+  // envelope, group the patches by member; that player's slip lists all
+  // of their special performances. Envelope order is preserved so the
+  // cut-stack still maps to envelopes top-down.
+  const slipsInOrder = [];
+  for (const e of envs) {
+    const byMember = new Map();
+    for (const p of e.patches) {
+      if (!byMember.has(p.member_number)) byMember.set(p.member_number, []);
+      byMember.get(p.member_number).push(p);
+    }
+    for (const [mem, ps] of byMember) {
+      slipsInOrder.push({
+        member_number: mem,
+        member_name:   ps[0].member_name,
+        team_number:   ps[0].team_number,
+        sps:           ps        // all this player's patches in this envelope
+      });
+    }
+  }
   const N = slipsInOrder.length;
   const P = Math.ceil(N / SLIP_ROWS_PER_PAGE);
   // Imposition: pages[p][s] = slipsInOrder[(s-1)*P + p].
@@ -6646,15 +6663,20 @@ async function spPrintSlips() {
 function spBuildSlipsHTML(pages, op) {
   const slipHtml = slip => {
     if (!slip) return '<div class="slip slip-empty"></div>';
-    const slamClass = slip.is_slam ? ' slip-slam' : '';
-    const slamName = SP_FULL_NAME[slip.sp_type] || slip.sp_type;
-    return '<div class="slip' + slamClass + '">'
-      + '<div class="slip-banner">' + (slip.is_slam ? '★ ' : '')
-      +   esc(slamName) + (slip.is_slam ? ' ★' : '') + '</div>'
+    const hasSlam = slip.sps.some(p => p.is_slam);
+    // List every SP on the one player slip; slams marked + styled.
+    const spList = slip.sps.map(p => {
+      const nm = SP_FULL_NAME[p.sp_type] || p.sp_type;
+      return '<div class="slip-sp' + (p.is_slam ? ' slip-sp-slam' : '') + '">'
+        + (p.is_slam ? '★ ' : '') + esc(nm) + '</div>';
+    }).join('');
+    const n = slip.sps.length;
+    return '<div class="slip' + (hasSlam ? ' slip-slam' : '') + '">'
       + '<div class="slip-name">' + esc(slip.member_name) + '</div>'
+      + '<div class="slip-sps">' + spList + '</div>'
       + '<div class="slip-meta">Member ' + esc(slip.member_number)
-      +   (slip.division_number ? ' · Division ' + esc(slip.division_number) : '')
-      +   ' · Team ' + esc(slip.team_number) + '</div>'
+      +   ' · Team ' + esc(slip.team_number)
+      +   ' · ' + n + ' patch' + (n === 1 ? '' : 'es') + '</div>'
       + '<div class="slip-org">' + esc(op.name || 'APA') + '</div>'
       + '</div>';
   };
@@ -6665,18 +6687,18 @@ function spBuildSlipsHTML(pages, op) {
     'body { margin: 0; font-family: Georgia, "Times New Roman", serif; color: #1a1a1a; }',
     '.page { width: 8.5in; height: 11in; padding: 0; display: flex; flex-direction: column; page-break-after: always; }',
     '.page:last-child { page-break-after: auto; }',
-    '.slip { flex: 1 0 0; box-sizing: border-box; padding: 0.32in 0.5in;',
+    '.slip { flex: 1 0 0; box-sizing: border-box; padding: 0.22in 0.5in;',
     '        border-bottom: 1px dashed #888; display: flex; flex-direction: column;',
-    '        justify-content: center; align-items: center; text-align: center; }',
+    '        justify-content: center; align-items: center; text-align: center; overflow: hidden; }',
     '.slip:last-child { border-bottom: 0; }',
     '.slip-empty { background: #fff; }',
-    '.slip-banner { font-size: 12pt; font-weight: 700; letter-spacing: 0.06em;',
-    '               text-transform: uppercase; color: #374151; margin-bottom: 6pt; }',
-    '.slip-name { font-size: 22pt; font-weight: 800; letter-spacing: 0.02em; margin: 2pt 0; }',
-    '.slip-meta { font-size: 10pt; color: #4b5563; margin: 4pt 0; font-family: ui-monospace,Menlo,monospace; }',
-    '.slip-org { font-size: 9pt; color: #6b7280; margin-top: 6pt; font-style: italic; }',
+    '.slip-name { font-size: 20pt; font-weight: 800; letter-spacing: 0.02em; margin: 0 0 3pt; }',
+    '.slip-sps { margin: 1pt 0 3pt; }',
+    '.slip-sp { font-size: 10.5pt; font-weight: 700; color: #374151; line-height: 1.35; }',
+    '.slip-sp-slam { color: #92400e; font-size: 12pt; }',
+    '.slip-meta { font-size: 9pt; color: #4b5563; margin: 2pt 0 0; font-family: ui-monospace,Menlo,monospace; }',
+    '.slip-org { font-size: 9pt; color: #6b7280; margin-top: 4pt; font-style: italic; }',
     '.slip-slam { background: linear-gradient(180deg, #fff 0%, #fef9c3 100%); border: 1px solid #f59e0b; }',
-    '.slip-slam .slip-banner { color: #92400e; font-size: 14pt; }',
     '.slip-slam .slip-name { color: #78350f; }',
     '@media screen { body { background: #f3f3f3; padding: 16px; }',
     '  .page { background: #fff; margin: 0 auto 16px; box-shadow: 0 4px 14px rgba(0,0,0,0.18); } }',
