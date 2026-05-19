@@ -824,6 +824,18 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 .seg-btn-slate + .seg-btn-slate { border-left: 0; }
 .seg-btn-slate.active { background: var(--spm-accent); color: #fff; border-color: var(--spm-accent); }
 
+/* Opt-out per-SP chips. Each chip is one SP code; click toggles it in
+   slate.patch_optouts.opted_out_types. Filled gold = opted out. */
+.optout-chip {
+  display: inline-block; padding: 2px 7px; font-size: 0.72rem;
+  font-family: ui-monospace, Menlo, monospace; font-weight: 700;
+  border-radius: 4px; cursor: pointer; user-select: none;
+  border: 1px solid #b4923c; background: #b4923c; color: #fff;
+  transition: background .12s ease, color .12s ease;
+}
+.optout-chip.off { background: #fff; color: #7a5d12; }
+.optout-chip:hover { filter: brightness(0.95); }
+
 .modal-backdrop {
   position: fixed; inset: 0; background: rgba(15,23,42,0.55);
   display: none; align-items: center; justify-content: center;
@@ -1287,8 +1299,10 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         <h2 style="margin:0 0 6px;">Patch opt-outs</h2>
         <p class="hint" style="margin:0 0 10px;">
           Member numbers (5- or 8-digit, one per line) of players who&rsquo;ve asked not
-          to receive patches. Compute skips them going forward; already-mailed patches
-          stay untouched. Persists across sessions.
+          to receive patches. Each entry defaults to <strong>all 13 patch types</strong>
+          opted out &mdash; click any code chip below to keep that one patch coming.
+          Compute skips highlighted codes going forward; already-mailed patches stay
+          untouched. Persists across sessions.
         </p>
         <textarea id="spOptoutBox" class="ehq-paste-box" style="min-height:64px;"
           placeholder="e.g.&#10;24779&#10;97223806"></textarea>
@@ -1354,7 +1368,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.20';
+const APP_VERSION = '3.21';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -5909,7 +5923,7 @@ let _spOptouts = [];
 async function spLoadOptouts() {
   try {
     const rows = await sb('GET',
-      'patch_optouts?select=member_number,note,created_at&order=member_number');
+      'patch_optouts?select=member_number,note,opted_out_types,created_at&order=member_number');
     _spOptouts = rows || [];
   } catch (e) {
     _spOptouts = [];
@@ -5933,6 +5947,10 @@ async function spLoadOptouts() {
   spRenderOptouts();
 }
 
+/* The 13 SP codes a player can opt out of. Order matches the slip's cover
+   page so the chips read as a quick legend. */
+const OPTOUT_CODES = ['r','8','x','9','n','k','m8','mx','m9','mn','8m','9m','g'];
+
 function spRenderOptouts() {
   const el = document.getElementById('spOptoutList');
   if (!el) return;
@@ -5941,19 +5959,56 @@ function spRenderOptouts() {
     return;
   }
   el.innerHTML =
-    '<div style="font-size:0.82rem; font-weight:700; color:#6b7280; margin-bottom:6px;">'
+    '<div style="font-size:0.82rem; font-weight:700; color:#6b7280; margin: 0 0 6px;">'
     +   _spOptouts.length + ' opt-out' + (_spOptouts.length === 1 ? '' : 's')
+    +   ' &middot; click a code to toggle that patch'
     + '</div>'
-    + _spOptouts.map(o =>
-        '<div style="display:flex; gap:10px; align-items:center; padding:5px 0; border-bottom:1px solid #f1f1f1;">'
-        + '<span style="font-family:ui-monospace,Menlo,monospace; font-weight:700; min-width:60px;">'
-        +   esc(o.member_number) + '</span>'
-        + '<span style="flex:1; font-size:0.9rem;">' + esc(o._name || '—') + '</span>'
-        + '<button class="btn btn-outline" style="padding:2px 10px; font-size:0.78rem;"'
-        +   ' onclick="spRemoveOptout(\'' + esc(o.member_number) + '\')">Remove</button>'
-        + '</div>'
-      ).join('');
+    + _spOptouts.map(o => {
+        const types = new Set(o.opted_out_types || []);
+        const chips = OPTOUT_CODES.map(code =>
+          '<span class="optout-chip' + (types.has(code) ? '' : ' off') + '"'
+          + ' title="' + esc(SP_FULL_NAME[code] || code) + '"'
+          + ' onclick="spToggleOptoutType(\'' + esc(o.member_number) + '\',\'' + esc(code) + '\')">'
+          + esc(code)
+          + '</span>'
+        ).join('');
+        const offCount = OPTOUT_CODES.length - types.size;
+        const summary = offCount === 0
+          ? 'all patches opted out'
+          : (offCount === OPTOUT_CODES.length ? 'no patches opted out (row has no effect)'
+                                              : (types.size + ' of ' + OPTOUT_CODES.length + ' opted out'));
+        return '<div style="padding:8px 0; border-bottom:1px solid #f1f1f1;">'
+          + '<div style="display:flex; gap:10px; align-items:center;">'
+          +   '<span style="font-family:ui-monospace,Menlo,monospace; font-weight:700; min-width:60px;">'
+          +     esc(o.member_number) + '</span>'
+          +   '<span style="flex:1; font-size:0.9rem;">' + esc(o._name || '—') + '</span>'
+          +   '<button class="btn btn-outline" style="padding:2px 10px; font-size:0.78rem;"'
+          +     ' onclick="spRemoveOptout(\'' + esc(o.member_number) + '\')">Remove</button>'
+          + '</div>'
+          + '<div style="display:flex; flex-wrap:wrap; gap:4px; margin-top:6px;">' + chips + '</div>'
+          + '<div style="font-size:0.72rem; color:#6b7280; margin-top:4px;">' + esc(summary) + '</div>'
+          + '</div>';
+      }).join('');
 }
+
+async function spToggleOptoutType(memberNumber, code) {
+  const o = _spOptouts.find(x => x.member_number === memberNumber);
+  if (!o) return;
+  const types = new Set(o.opted_out_types || []);
+  if (types.has(code)) types.delete(code); else types.add(code);
+  const newTypes = OPTOUT_CODES.filter(c => types.has(c));   // preserve canonical order
+  /* Optimistic local update so the chip flips instantly. */
+  o.opted_out_types = newTypes;
+  spRenderOptouts();
+  try {
+    await sb('PATCH', 'patch_optouts?member_number=eq.' + encodeURIComponent(memberNumber),
+      { opted_out_types: newTypes });
+  } catch (e) {
+    setStatus('spOptoutStatus', 'Save failed: ' + e.message, 'err');
+    await spLoadOptouts();
+  }
+}
+window.spToggleOptoutType = spToggleOptoutType;
 
 async function spSaveOptouts() {
   const box = document.getElementById('spOptoutBox');
@@ -6304,25 +6359,32 @@ async function spComputePatches() {
       'sp_by_division_rows?report_id=eq.' + bdReport.id + '&select=*&order=id.asc');
     console.log('[patches] BD report', bdReport.id, 'has', rows.length, 'rows');
 
-    // Pull the opt-out list fresh (in case it was edited since page load)
-    // — these member numbers are skipped entirely so no new patch rows are
-    // created for them. Already-mailed patches stay untouched.
-    let optoutSet = new Set();
+    // Pull the opt-out list fresh (in case it was edited since page load).
+    // Each opt-out lists which SP codes the member is opted out of; the
+    // loops below check `optoutsByMember[mem]` per code, so an opt-out
+    // for just one code (e.g. only Rackless) leaves the rest to compute
+    // normally. Already-mailed patches stay untouched.
+    let optoutsByMember = new Map();   // member_number → Set<sp_code>
     try {
-      const optouts = await sb('GET', 'patch_optouts?select=member_number');
-      optoutSet = new Set((optouts || []).map(o => o.member_number));
+      const optouts = await sb('GET',
+        'patch_optouts?select=member_number,opted_out_types');
+      for (const o of (optouts || [])) {
+        optoutsByMember.set(o.member_number, new Set(o.opted_out_types || []));
+      }
     } catch (e) { /* non-fatal — proceed without opt-out filter */ }
+    const isOptedOut = (mem, code) =>
+      optoutsByMember.has(mem) && optoutsByMember.get(mem).has(code);
 
     // Filter rows to operator-tagged divisions for this operator. Also
     // drop inactive teams (team-within-division > 16) — those were pulled
     // mid-session; their patches are ignored (no captain/label to mail).
-    // And drop any opted-out members.
+    // (The per-code opt-out filter is applied inside the loops below
+    // since one player can opt out of only some of their patches.)
     const opRows = rows.filter(r =>
       _spDivisionMeta.get(r.division_number) === opId
-      && !spIsInactiveTeam(r.team_number)
-      && !optoutSet.has(r.member_number));
-    console.log('[patches] rows after operator + opt-out filter:', opRows.length,
-                '(skipped opt-outs:', optoutSet.size, ')');
+      && !spIsInactiveTeam(r.team_number));
+    console.log('[patches] rows after operator filter:', opRows.length,
+                '(opt-out members:', optoutsByMember.size, ')');
 
     // Per-code patches: collapse rows by (member, division, sp_type)
     // — sum counts across teams within the division, take the team#
@@ -6346,6 +6408,8 @@ async function spComputePatches() {
         if (cnt < 1) continue;
         // The stored patch code: masters variant in a Masters division.
         const storedSp = (isMasters && MASTERS_REMAP[sp]) ? MASTERS_REMAP[sp] : sp;
+        // Per-code opt-out — this player has asked to skip this patch type.
+        if (isOptedOut(mem, storedSp)) continue;
         // Per-code key (uses the stored — masters-aware — code)
         const key = mem + '|' + div + '|' + storedSp;
         const prior = perCodeMap.get(key);
@@ -6387,6 +6451,8 @@ async function spComputePatches() {
       if (!candidates.length) continue;
       const teamsByCode = memberTeamByCode.get(mem) || {};
       for (const slamType of candidates) {
+        // Per-code opt-out — the player has asked to skip this slam.
+        if (isOptedOut(mem, slamType)) continue;
         const deps = SLAM_DEPS[slamType];
         // Routing tiebreaker: highest team# across all constituent SPs
         let bestTeam = null;
@@ -6990,9 +7056,11 @@ function spBuildSlipsHTML(pages, op, summary) {
     '        width: 0.62in; background: #c9a84c; }',
     '.slip-rule span { font-size: 6.5pt; }',
     '.slip-for { font-size: 9pt; font-style: italic; color: #4a3f1c; line-height: 1.4; }',
-    '.slip-ach { font-style: normal; font-weight: 700; color: #2a2208; }',
+    '.slip-ach { display: inline-block; white-space: nowrap;',
+    '        font-style: normal; font-weight: 700; color: #2a2208; }',
     '.slip-ach-slam { color: #8a5a00; }',
-    '.slip-ach-sep { font-style: normal; color: #c9a84c; margin: 0 4pt; }',
+    '.slip-ach-sep { display: inline-block; font-style: normal;',
+    '        color: #c9a84c; margin: 0 4pt; }',
     '.slip-meta { font-size: 7.5pt; color: #8a7a55; margin-top: 3.5pt;',
     '        font-family: ui-monospace,Menlo,monospace; }',
     '.slip-issuer { flex: 0 0 1.5in; text-align: center; }',
