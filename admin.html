@@ -1334,7 +1334,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.14';
+const APP_VERSION = '3.15';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -6798,9 +6798,10 @@ function spBuildSlipsHTML(pages, op, summary) {
     '       -webkit-print-color-adjust: exact; print-color-adjust: exact; }',
     '.page { width: 8.5in; height: 11in; padding: 0; display: flex; flex-direction: column; page-break-after: always; }',
     '.page:last-child { page-break-after: auto; }',
-    '.slip { flex: 1 0 0; box-sizing: border-box; padding: 0.1in 0.18in; display: flex; overflow: hidden; }',
+    '.slip { flex: 1 0 0; box-sizing: border-box; padding: 0.1in 0;',
+    '        display: flex; justify-content: center; overflow: hidden; }',
     '.slip-empty { background: #fff; }',
-    '.slip-frame { flex: 1; position: relative; box-sizing: border-box;',
+    '.slip-frame { flex: 0 0 7.5in; position: relative; box-sizing: border-box;',
     '        display: flex; align-items: center; padding: 0 0.32in;',
     '        border: 2pt solid #b4923c;',
     '        background: linear-gradient(165deg, #fffdf6 0%, #fbf3dc 100%); }',
@@ -6839,8 +6840,7 @@ function spBuildSlipsHTML(pages, op, summary) {
     '.slip-issuer { flex: 0 0 1.5in; text-align: center; }',
     '.slip-issuer-name { font-size: 12.5pt; font-style: italic; color: #3a2f12; line-height: 1.1; }',
     '.slip-issuer-rule { border-top: 0.75pt solid #6b5a2a; margin: 2.5pt 0; }',
-    '.slip-issuer-cap { font-size: 6.5pt; letter-spacing: 0.14em;',
-    '        text-transform: uppercase; color: #8a7a45; }',
+    '.slip-issuer-cap { font-size: 7.5pt; font-style: italic; color: #8a7a45; }',
     '.cover { justify-content: flex-start; align-items: center; padding: 1in 0.9in; }',
     '.cover-title { font-size: 26pt; font-weight: 800; text-align: center; }',
     '.cover-sub { font-size: 12pt; color: #6b7280; font-style: italic; margin: 5pt 0 30pt; }',
