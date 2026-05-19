@@ -1334,7 +1334,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.7';
+const APP_VERSION = '3.8';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -6035,6 +6035,16 @@ const SP_FULL_NAME = {
   'g':'Grand Slam'
 };
 
+/* Inactive team — pulled mid-session and renumbered with a team-within-
+   division number > 16 (APA convention). Active teams are 01-16. A 5-digit
+   team number is <3-digit division><2-digit team>, so the last two digits
+   are the team-within-division. Patches on inactive teams are ignored
+   entirely — the team is gone, there's no captain/label to mail to. */
+function spIsInactiveTeam(team) {
+  const within = parseInt(String(team || '').slice(-2), 10);
+  return Number.isFinite(within) && within > 16;
+}
+
 let _spPatches = [];            // slate.sp_patches_v rows for current (session, operator)
 let _spLastBatch = null;        // most-recent sp_mail_batches row (active = is_undone=false)
 let _spDivisionMeta = new Map();// division_number -> operator_id
@@ -6148,10 +6158,12 @@ async function spComputePatches() {
       'sp_by_division_rows?report_id=eq.' + bdReport.id + '&select=*&order=id.asc');
     console.log('[patches] BD report', bdReport.id, 'has', rows.length, 'rows');
 
-    // Filter rows to operator-tagged divisions for this operator.
-    // Rows whose division_number isn't in division_meta or is tagged to
-    // another operator are dropped.
-    const opRows = rows.filter(r => _spDivisionMeta.get(r.division_number) === opId);
+    // Filter rows to operator-tagged divisions for this operator. Also
+    // drop inactive teams (team-within-division > 16) — those were pulled
+    // mid-session; their patches are ignored (no captain/label to mail).
+    const opRows = rows.filter(r =>
+      _spDivisionMeta.get(r.division_number) === opId
+      && !spIsInactiveTeam(r.team_number));
     console.log('[patches] rows after operator filter:', opRows.length);
 
     // Per-code patches: collapse rows by (member, division, sp_type)
