@@ -1368,7 +1368,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.22';
+const APP_VERSION = '3.23';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -7225,10 +7225,15 @@ function spBuildEnvelopesHTML(envs, op) {
     '       padding: 0.4in 0.5in; position: relative; page-break-after: always; }',
     '.env:last-child { page-break-after: auto; }',
     '.return { position: absolute; top: 0.3in; left: 0.4in; font-size: 11pt; line-height: 1.25; max-width: 3.5in; }',
-    '.recipient { position: absolute; top: 1.5in; left: 3.4in; font-size: 13pt; line-height: 1.35; font-weight: 600; max-width: 5.2in; }',
+    '.recipient { position: absolute; top: 1.5in; left: 3.4in; font-size: 13pt; line-height: 1.35;',
+    '             font-weight: 600; max-width: 5.2in;',
+    '             /* Opaque label-sticker so the recipient stays readable',
+    '                even when the patches logo or cat sits behind it. */',
+    '             background: #fff; padding: 0.1in 0.16in; border-radius: 2pt;',
+    '             box-shadow: 0 1px 3px rgba(0,0,0,0.08); }',
     '.meta { position: absolute; bottom: 0.2in; right: 0.4in; font-size: 8pt; color: #9ca3af; font-family: ui-monospace,Menlo,monospace; }',
-    '.env-logo { position: absolute; right: 0.3in; top: 50%; transform: translateY(-50%);',
-    '            max-height: 3.2in; max-width: 4in; opacity: 0.85; }',
+    '.env-logo { position: absolute; right: 0.35in; bottom: 0.35in;',
+    '            max-height: 1.7in; max-width: 2.3in; opacity: 0.75; }',
     '.env-cat { position: absolute; left: 0.3in; bottom: 0.3in;',
     '           max-height: 2in; max-width: 2.2in; opacity: 0.75; }',
     '@media screen { body { background: #f3f3f3; padding: 16px; }',
