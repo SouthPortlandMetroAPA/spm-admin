@@ -1334,7 +1334,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.5';
+const APP_VERSION = '3.6';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -6047,6 +6047,24 @@ function spSetPatchFilter(pf) {
   spRenderPatches();
 }
 
+/* Paginated GET — PostgREST caps a single response at 1000 rows. A
+   Spring session can hold 1000+ patches (the legacy backfill alone is
+   ~1130), so any patches query must page through with limit/offset.
+   The path must already carry an &order= for stable paging. */
+async function sbGetAll(path) {
+  const PAGE = 1000;
+  let all = [], offset = 0;
+  for (;;) {
+    const sep = path.includes('?') ? '&' : '?';
+    const page = await sb('GET', path + sep + 'limit=' + PAGE + '&offset=' + offset);
+    if (!page || !page.length) break;
+    all = all.concat(page);
+    if (page.length < PAGE) break;
+    offset += PAGE;
+  }
+  return all;
+}
+
 async function spLoadPatches() {
   if (!currentSession || !currentSession.id) {
     document.getElementById('spPatchesList').innerHTML =
@@ -6057,7 +6075,7 @@ async function spLoadPatches() {
   const opId = _spOperatorFilter !== 'ALL' ? SP_OPERATOR_SHORTS[_spOperatorFilter] : null;
   const opFilter = opId != null ? '&operator_id=eq.' + opId : '';
   try {
-    _spPatches = await sb('GET',
+    _spPatches = await sbGetAll(
       'sp_patches_v?session_id=eq.' + currentSession.id + opFilter
       + '&select=*&order=team_number.asc,is_slam.asc,sp_type.asc');
   } catch (e) {
@@ -6226,10 +6244,13 @@ async function spComputePatches() {
 
     // Fetch existing patches for this (session, operator) — skip
     // inserts where the identity already exists (preserves mailed_at).
-    const existing = await sb('GET',
+    // Paged: the legacy backfill alone is ~1130 rows, past the 1000-row
+    // single-response cap — an unpaged read would miss the tail and the
+    // insert would collide on sp_patches_non_slam_uq.
+    const existing = await sbGetAll(
       'sp_patches?session_id=eq.' + currentSession.id
       + '&operator_id=eq.' + opId
-      + '&select=member_number,division_number,sp_type,is_slam');
+      + '&select=member_number,division_number,sp_type,is_slam&order=id.asc');
     const existingSet = new Set(existing.map(e =>
       e.member_number + '|' + (e.division_number || 'null') + '|' + e.sp_type));
     const toInsert = allCandidates.filter(c =>
@@ -6528,7 +6549,7 @@ async function spLoadOperatorProfile() {
    null, returns the most-recent active batch's patches. */
 async function spPatchesForBatch(batchId) {
   if (!batchId) return [];
-  return await sb('GET',
+  return await sbGetAll(
     'sp_patches_v?batch_id=eq.' + batchId
     + '&select=*&order=team_number.asc,is_slam.asc,sp_type.asc');
 }
