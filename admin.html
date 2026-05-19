@@ -1354,7 +1354,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.18';
+const APP_VERSION = '3.19';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -6799,20 +6799,21 @@ async function spPrintSlips() {
     setStatus('spPatchesBlocker', 'No patches in last batch.', 'err');
     return;
   }
-  // Resolve First "Nickname" Last for the slip name. sp_patches stores
-  // only a denormalized name; the split lives in slate.players (keyed by
-  // the 8-digit APA number — last 5 digits = the patch member number).
+  // Resolve First / "Nickname" / Last for the slip name. The slip prints
+  // these on three separate lines for consistency, so we keep the parts
+  // separate here rather than pre-joining. sp_patches stores only the
+  // denormalized name; the split lives in slate.players (keyed by the
+  // 8-digit APA number — last 5 digits = the patch member number).
   const memberNums = [...new Set(patches.map(p => p.member_number))];
-  const nameByMember = {};
+  const playerByMember = {};   // short_number → { first, nick, last }
   try {
     const players = await sb('POST', 'rpc/players_by_short', { p_nums: memberNums });
     for (const pl of (players || [])) {
-      const f  = (pl.first_name || '').trim();
-      const l  = (pl.last_name  || '').trim();
-      const nk = (pl.nickname   || '').trim();
-      const full = (nk ? f + ' "' + nk + '" ' + l : f + ' ' + l)
-        .replace(/\s+/g, ' ').trim();
-      if (full) nameByMember[pl.short_number] = full;
+      playerByMember[pl.short_number] = {
+        first: (pl.first_name || '').trim(),
+        nick:  (pl.nickname   || '').trim(),
+        last:  (pl.last_name  || '').trim()
+      };
     }
   } catch (e) { console.warn('[slips] player-name lookup failed', e); }
 
@@ -6833,9 +6834,15 @@ async function spPrintSlips() {
   const slipsInOrder = [];
   for (const k of [...byContact.keys()].sort()) {
     for (const [mem, ps] of byContact.get(k)) {
+      const p = playerByMember[mem];
       slipsInOrder.push({
         member_number: mem,
-        member_name:   nameByMember[mem] || ps[0].member_name,
+        member_first:  p ? p.first : '',
+        member_nick:   p ? p.nick  : '',
+        member_last:   p ? p.last  : '',
+        /* Fallback for members not found in slate.players — keep the
+           report's denormalized name so the slip still gets printed. */
+        member_name:   p ? '' : (ps[0].member_name || ''),
         team_number:   ps[0].team_number,
         sps:           ps        // all this player's patches to this captain
       });
@@ -6890,7 +6897,15 @@ function spBuildSlipsHTML(pages, op, summary) {
       +   '<div class="slip-body">'
       +     '<div class="slip-head">&#10022; Special Performance &#10022;</div>'
       +     '<div class="slip-pre">this certifies that</div>'
-      +     '<div class="slip-name">' + esc(slip.member_name) + '</div>'
+      +     '<div class="slip-name">'
+      +       (slip.member_name
+              ? '<div class="slip-name-full">' + esc(slip.member_name) + '</div>'
+              : (
+                  (slip.member_first ? '<div class="slip-name-first">' + esc(slip.member_first) + '</div>' : '')
+                + (slip.member_nick  ? '<div class="slip-name-nick">&ldquo;' + esc(slip.member_nick)  + '&rdquo;</div>' : '')
+                + (slip.member_last  ? '<div class="slip-name-last">'  + esc(slip.member_last)  + '</div>' : '')
+                ))
+      +     '</div>'
       +     '<div class="slip-rule"><span>&#10022;</span></div>'
       +     '<div class="slip-for">is recognized for ' + ach + '</div>'
       +     '<div class="slip-meta">Member ' + esc(slip.member_number)
@@ -6939,7 +6954,7 @@ function spBuildSlipsHTML(pages, op, summary) {
     '.slip { flex: 1 0 0; box-sizing: border-box; padding: 0.1in 0;',
     '        display: flex; justify-content: center; overflow: hidden; }',
     '.slip-empty { background: #fff; }',
-    '.slip-frame { flex: 0 0 7.5in; position: relative; box-sizing: border-box;',
+    '.slip-frame { flex: 0 0 7in; position: relative; box-sizing: border-box;',
     '        display: flex; align-items: center; padding: 0 0.32in;',
     '        border: 2pt solid #b4923c;',
     '        background: linear-gradient(165deg, #fffdf6 0%, #fbf3dc 100%); }',
@@ -6962,8 +6977,13 @@ function spBuildSlipsHTML(pages, op, summary) {
     '.slip-head { font-size: 8pt; font-weight: 700; letter-spacing: 0.2em;',
     '        text-transform: uppercase; color: #9a7b1e; }',
     '.slip-pre { font-size: 7.5pt; font-style: italic; color: #7c6f4e; margin-top: 3pt; }',
-    '.slip-name { font-size: 19pt; font-weight: 700; color: #2a2208;',
-    '        letter-spacing: 0.01em; line-height: 1.05; margin: 1.5pt 0 0; }',
+    '.slip-name { margin: 2pt 0 0; }',
+    '.slip-name-first, .slip-name-last { font-size: 15pt; font-weight: 700;',
+    '        color: #2a2208; letter-spacing: 0.01em; line-height: 1.05; }',
+    '.slip-name-nick { font-size: 11pt; font-style: italic; color: #5a4818;',
+    '        line-height: 1.2; margin: 1pt 0; }',
+    '.slip-name-full { font-size: 15pt; font-weight: 700; color: #2a2208;',
+    '        letter-spacing: 0.01em; line-height: 1.1; }',
     '.slip-rule { display: flex; align-items: center; justify-content: center;',
     '        gap: 6pt; margin: 3.5pt 0; color: #c9a84c; }',
     ".slip-rule::before, .slip-rule::after { content: ''; height: 0.75pt;",
