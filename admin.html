@@ -1334,7 +1334,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.10';
+const APP_VERSION = '3.11';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -6045,6 +6045,19 @@ function spIsInactiveTeam(team) {
   return Number.isFinite(within) && within > 16;
 }
 
+/* Envelope/grouping key — one envelope per CAPTAIN (mailing contact),
+   not per team. A captain who runs several teams gets a single envelope
+   holding all their players' patches. Keyed on contact name + the full
+   address, so two DIFFERENT captains who happen to share a mailing
+   address stay separate (per the operator's rule). A patch with no
+   label can't be grouped — it falls in its own per-team bucket. */
+function spContactKey(p) {
+  if (!p || !p.contact_name) return 'noLabel:' + (p ? p.team_number : '');
+  return 'c:' + [p.contact_name, p.address_line1, p.address_line2,
+                 p.city, p.state, p.zip]
+    .map(x => (x || '').trim().toLowerCase()).join('|');
+}
+
 let _spPatches = [];            // slate.sp_patches_v rows for current (session, operator)
 let _spLastBatch = null;        // most-recent sp_mail_batches row (active = is_undone=false)
 let _spDivisionMeta = new Map();// division_number -> operator_id
@@ -6330,8 +6343,8 @@ function spRenderPatches() {
   } else {
     mailBtn.disabled = false;
     setStatus('spPatchesBlocker',
-      unmailed.length + ' patches ready to mail across '
-      + new Set(unmailed.map(p => p.team_number)).size + ' team(s).', 'ok');
+      unmailed.length + ' patches ready to mail to '
+      + new Set(unmailed.map(spContactKey)).size + ' captain(s).', 'ok');
   }
   undoBtn.disabled = !_spLastBatch;
 
@@ -6347,31 +6360,35 @@ function spRenderPatches() {
     : _spPatchFilter === 'mailed' ? !!p.mailed_at
     : !p.mailed_at;
 
-  // Group by team_number, then split mailed vs unmailed within each.
-  // Envelope packing: greedy fill at ENVELOPE_CAPACITY units. Slams
-  // (weight 2 / 4) count more.
-  const byTeam = new Map();
+  // Group by mailing contact (captain) — one block per envelope target,
+  // matching how envelopes are built. A captain who runs several teams
+  // is a single block. Unlabeled patches fall in their own per-team
+  // block. Envelope count = ceil(unmailed weight / capacity).
+  const byContact = new Map();
   for (const p of list) {
-    if (!byTeam.has(p.team_number)) byTeam.set(p.team_number, []);
-    byTeam.get(p.team_number).push(p);
+    const k = spContactKey(p);
+    if (!byContact.has(k)) byContact.set(k, []);
+    byContact.get(k).push(p);
   }
-  // Stable display order: team_number ascending.
-  const teams = [...byTeam.keys()].sort();
   const blocks = [];
-  for (const team of teams) {
-    const patches = byTeam.get(team);
+  for (const k of [...byContact.keys()].sort()) {
+    const patches = byContact.get(k);
     const shown = patches.filter(matchesFilter);
-    if (!shown.length) continue;                 // nothing for this team under the filter
+    if (!shown.length) continue;                 // nothing here under the filter
     const um = patches.filter(p => !p.mailed_at);
     const mailed = patches.filter(p => p.mailed_at);
     const weightSum = um.reduce((s, p) => s + (p.weight || 1), 0);
     const envCount = Math.max(1, Math.ceil(weightSum / ENVELOPE_CAPACITY));
     const sample = patches[0];
+    const teams = [...new Set(patches.map(p => p.team_number))].sort();
+    const head = sample.contact_name
+      ? '<strong>' + esc(sample.contact_name) + '</strong>'
+      : '<strong style="color:#b91c1c;">Team ' + esc(sample.team_number) + ' — no mailing label</strong>';
     const addr = sample.contact_name
-      ? esc(sample.contact_name) + '<br>' + esc(sample.address_line1)
+      ? esc(sample.address_line1)
         + (sample.address_line2 ? '<br>' + esc(sample.address_line2) : '')
         + '<br>' + esc(sample.city) + ', ' + esc(sample.state) + ' ' + esc(sample.zip)
-      : '<span style="color:#b91c1c; font-weight:600;">(no mailing label uploaded for this team)</span>';
+      : '<span style="color:#b91c1c; font-weight:600;">(upload an updated Labels PDF)</span>';
     const tagHTML = p => {
       const isNew = !p.mailed_at;
       const cls = p.is_slam ? 'sp-tag-slam' : 'sp-tag-reg';
@@ -6387,11 +6404,11 @@ function spRenderPatches() {
     blocks.push(
       '<div class="patch-envelope">'
       + '<div class="patch-env-head">'
-      +   '<div><strong>Team ' + esc(team) + '</strong> &middot; '
+      +   '<div>' + head + ' &middot; '
       +     um.length + ' unmailed'
       +     (mailed.length ? ' &middot; <span class="muted">' + mailed.length + ' mailed</span>' : '')
-      +     ' &middot; <span class="muted">weight ' + weightSum + '/' + ENVELOPE_CAPACITY
-      +     ' &middot; ' + envCount + ' envelope' + (envCount === 1 ? '' : 's')
+      +     ' &middot; <span class="muted">' + envCount + ' envelope' + (envCount === 1 ? '' : 's')
+      +     ' &middot; team' + (teams.length === 1 ? '' : 's') + ' ' + esc(teams.join(', '))
       +   '</span></div>'
       +   '<div class="muted" style="font-size:0.86rem; text-align:right;">' + addr + '</div>'
       + '</div>'
@@ -6416,16 +6433,19 @@ function spRenderPatchesSummary(list, lastBatch) {
   }
   const um = list.filter(p => !p.mailed_at);
   const m  = list.filter(p =>  p.mailed_at);
-  const teams = new Set(um.map(p => p.team_number));
-  const weight = um.reduce((s, p) => s + (p.weight || 1), 0);
-  const envCount = um.length
-    ? [...teams].reduce((s, t) => {
-        const tw = um.filter(p => p.team_number === t).reduce((x, p) => x + p.weight, 0);
-        return s + Math.max(1, Math.ceil(tw / ENVELOPE_CAPACITY));
-      }, 0)
-    : 0;
+  // Group unmailed by captain — envelopes are per-captain, weight-split
+  // at ENVELOPE_CAPACITY.
+  const weightByContact = new Map();
+  for (const p of um) {
+    const k = spContactKey(p);
+    weightByContact.set(k, (weightByContact.get(k) || 0) + (p.weight || 1));
+  }
+  let envCount = 0;
+  for (const w of weightByContact.values()) {
+    envCount += Math.max(1, Math.ceil(w / ENVELOPE_CAPACITY));
+  }
   let html = '<strong>' + um.length + '</strong> patches to mail'
-    + ' across <strong>' + teams.size + '</strong> team(s)'
+    + ' to <strong>' + weightByContact.size + '</strong> captain(s)'
     + ', <strong>' + envCount + '</strong> envelope(s)'
     + ' &middot; <span class="muted">' + m.length + ' already mailed</span>';
   if (lastBatch) {
@@ -6456,11 +6476,16 @@ async function spMailPatches() {
   setStatus('spPatchesBlocker', 'Stamping batch…', '');
   try {
     const batchId = crypto.randomUUID();
-    const teams = new Set(unmailed.map(p => p.team_number));
+    // Envelope count — per captain (mailing contact), weight-split at
+    // ENVELOPE_CAPACITY. Matches spBatchEnvelopes' grouping.
+    const weightByContact = new Map();
+    for (const p of unmailed) {
+      const k = spContactKey(p);
+      weightByContact.set(k, (weightByContact.get(k) || 0) + (p.weight || 1));
+    }
     let envCount = 0;
-    for (const t of teams) {
-      const tw = unmailed.filter(p => p.team_number === t).reduce((s, p) => s + p.weight, 0);
-      envCount += Math.max(1, Math.ceil(tw / ENVELOPE_CAPACITY));
+    for (const w of weightByContact.values()) {
+      envCount += Math.max(1, Math.ceil(w / ENVELOPE_CAPACITY));
     }
     // 1) Audit row.
     await sb('POST', 'sp_mail_batches', {
@@ -6575,44 +6600,51 @@ async function spPatchesForBatch(batchId) {
     + '&select=*&order=team_number.asc,is_slam.asc,sp_type.asc');
 }
 
-/* Build the envelope ordering for a batch. Returns an array of
-   { team_number, contact_name, address_line1, ..., patches: [...] }
-   in the order envelopes should be addressed and slips stacked. */
+/* Build the envelope ordering for a batch. One envelope per CAPTAIN
+   (mailing contact) — every team that captain runs is combined, so a
+   captain with 4 teams gets 1 envelope instead of 4. A captain whose
+   weighted patch total exceeds ENVELOPE_CAPACITY overflows into extra
+   envelopes. Returns an array of
+   { contact_name, address_line1, ..., teams: [...], patches: [...] }
+   ordered by contact, ready to address and stack slips against. */
 function spBatchEnvelopes(patches) {
-  const byTeam = new Map();
+  const byContact = new Map();
   for (const p of patches) {
-    if (!byTeam.has(p.team_number)) byTeam.set(p.team_number, []);
-    byTeam.get(p.team_number).push(p);
+    const k = spContactKey(p);
+    if (!byContact.has(k)) byContact.set(k, []);
+    byContact.get(k).push(p);
   }
-  const teams = [...byTeam.keys()].sort();  // ascending team_number
   const envelopes = [];
-  for (const t of teams) {
-    const list = byTeam.get(t);
+  for (const k of [...byContact.keys()].sort()) {
+    const list = byContact.get(k);
     list.sort((a, b) => {
+      if (a.team_number !== b.team_number) return a.team_number < b.team_number ? -1 : 1;
       if (a.is_slam !== b.is_slam) return a.is_slam ? 1 : -1;
       return a.sp_type.localeCompare(b.sp_type);
     });
     const sample = list[0];
-    // Envelope packing — split per-team list into envelopes of <= 8 weight
+    const teams = [...new Set(list.map(p => p.team_number))].sort();
+    // Envelope packing — split the captain's patches into envelopes of
+    // <= ENVELOPE_CAPACITY weighted units.
     let acc = [];
     let accWeight = 0;
-    const slipsPerEnv = [];
+    const chunks = [];
     for (const p of list) {
       if (accWeight + p.weight > ENVELOPE_CAPACITY && acc.length) {
-        slipsPerEnv.push(acc);
+        chunks.push(acc);
         acc = []; accWeight = 0;
       }
       acc.push(p); accWeight += p.weight;
     }
-    if (acc.length) slipsPerEnv.push(acc);
-    for (const env of slipsPerEnv) {
+    if (acc.length) chunks.push(acc);
+    for (const chunk of chunks) {
       envelopes.push({
-        team_number: t,
         contact_name: sample.contact_name,
         address_line1: sample.address_line1,
         address_line2: sample.address_line2,
         city: sample.city, state: sample.state, zip: sample.zip,
-        patches: env
+        teams: teams,
+        patches: chunk
       });
     }
   }
@@ -6628,26 +6660,28 @@ async function spPrintSlips() {
     setStatus('spPatchesBlocker', 'No patches in last batch.', 'err');
     return;
   }
-  // ONE SLIP PER PLAYER (SP Admin's model) — not one per SP, and not one
-  // per envelope. Group the whole batch by (team, member): a player's
-  // slip lists every SP they earned on that team, independent of how the
-  // team's patches split into physical envelopes by weight. Ordered by
-  // team then member so the cut-stack maps top-down to envelopes.
-  const byTeam = new Map();
+  // ONE SLIP PER PLAYER PER CAPTAIN (SP Admin's model). Group the batch
+  // by (mailing contact, member): a player's slip lists every SP routed
+  // to that captain. A player whose patches all go to one captain gets
+  // one slip; if their patches route to two captains they get a slip in
+  // each. Ordered by contact then member so the cut-stack maps top-down
+  // to the captain envelopes.
+  const byContact = new Map();
   for (const p of patches) {
-    if (!byTeam.has(p.team_number)) byTeam.set(p.team_number, new Map());
-    const mm = byTeam.get(p.team_number);
+    const k = spContactKey(p);
+    if (!byContact.has(k)) byContact.set(k, new Map());
+    const mm = byContact.get(k);
     if (!mm.has(p.member_number)) mm.set(p.member_number, []);
     mm.get(p.member_number).push(p);
   }
   const slipsInOrder = [];
-  for (const team of [...byTeam.keys()].sort()) {
-    for (const [mem, ps] of byTeam.get(team)) {
+  for (const k of [...byContact.keys()].sort()) {
+    for (const [mem, ps] of byContact.get(k)) {
       slipsInOrder.push({
         member_number: mem,
         member_name:   ps[0].member_name,
-        team_number:   team,
-        sps:           ps        // all this player's patches on this team
+        team_number:   ps[0].team_number,
+        sps:           ps        // all this player's patches to this captain
       });
     }
   }
@@ -6746,7 +6780,10 @@ function spBuildEnvelopesHTML(envs, op) {
     +   (e.address_line2 ? '<div>' + esc(e.address_line2) + '</div>' : '')
     +   '<div>' + esc(e.city) + ', ' + esc(e.state) + ' ' + esc(e.zip) + '</div>'
     + '</div>'
-    + '<div class="meta">Team ' + esc(e.team_number) + ' · ' + e.patches.length + ' patch' + (e.patches.length===1?'':'es') + '</div>'
+    + '<div class="meta">'
+    +   (e.teams.length > 1 ? 'Teams ' : 'Team ') + esc((e.teams || []).join(', '))
+    +   ' · ' + e.patches.length + ' patch' + (e.patches.length === 1 ? '' : 'es')
+    + '</div>'
     + '</div>';
   return [
     '<!doctype html><html><head><meta charset="utf-8"><title>Envelopes</title>',
