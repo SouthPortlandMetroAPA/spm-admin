@@ -1354,7 +1354,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.19';
+const APP_VERSION = '3.20';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -6949,7 +6949,7 @@ function spBuildSlipsHTML(pages, op, summary) {
     '@page { size: letter; margin: 0; }',
     'body { margin: 0; font-family: Georgia, "Times New Roman", serif; color: #1a1a1a;',
     '       -webkit-print-color-adjust: exact; print-color-adjust: exact; }',
-    '.page { width: 8.5in; height: 11in; padding: 0; display: flex; flex-direction: column; page-break-after: always; }',
+    '.page { width: 8.5in; height: 11in; padding: 0; box-sizing: border-box; display: flex; flex-direction: column; page-break-after: always; }',
     '.page:last-child { page-break-after: auto; }',
     '.slip { flex: 1 0 0; box-sizing: border-box; padding: 0.1in 0;',
     '        display: flex; justify-content: center; overflow: hidden; }',
