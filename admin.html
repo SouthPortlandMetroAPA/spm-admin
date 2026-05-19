@@ -1117,17 +1117,17 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       </div>
 
       <div class="card ehq-paste-card">
-        <h3 class="ehq-paste-title">Look Up Emails by Name</h3>
+        <h3 class="ehq-paste-title">Look Up Emails by Player Number</h3>
         <p class="hint" style="margin:4px 0 8px;font-size:0.8rem">
-          Paste a list of names, one <strong>First Last</strong> per line. Slate searches every
-          player it knows (matching first name <em>or</em> nickname + last name) and returns their
-          email addresses. A popup lists anyone not found, matched to more than one person, or
-          with no email on file.
+          Paste a list of APA player numbers, one per line. A <strong>5-digit</strong> number is
+          the league-local number (Slate prepends <strong>972</strong>); an <strong>8-digit</strong>
+          number is the full APA number, used as-is. A popup lists anything not found, with an
+          invalid number, or with no email on file.
         </p>
         <textarea id="ehqNameBox" class="ehq-paste-box"
-                  placeholder="e.g.&#10;Phillip Segura&#10;Wendy Warner&#10;Chad Clemenson"></textarea>
+                  placeholder="e.g.&#10;24779&#10;97223806&#10;22154"></textarea>
         <div class="ehq-paste-actions">
-          <button class="ehq-btn ehq-primary" onclick="ehqLookupByName()">Look Up Emails</button>
+          <button class="ehq-btn ehq-primary" onclick="ehqLookupByNumber()">Look Up Emails</button>
           <button class="ehq-btn" onclick="ehqClearNameLookup()">Clear</button>
           <span class="ehq-paste-feedback" id="ehqNameFeedback"></span>
         </div>
@@ -1334,7 +1334,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.16';
+const APP_VERSION = '3.17';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -4817,113 +4817,108 @@ function ehqSelectByPaste() {
 }
 
 /* ════════════════════════════════════════════════════════════════════
-   NAME → EMAIL LOOKUP (Email HQ)
+   PLAYER NUMBER → EMAIL LOOKUP (Email HQ)
    ────────────────────────────────────────────────────────────────────
-   Paste "First Last" names → emails. Matching runs server-side via the
-   slate.lookup_emails_by_name(text[]) RPC (slate.players is ~26k rows —
-   too big to ship to the browser). The RPC returns every player row
-   that matches each input name on "first last" OR "nickname last",
-   case-insensitive + whitespace-collapsed.
+   Paste APA player numbers → emails. Each line is digits only:
+     5-digit → league-local number; the full APA number is '972' + it
+     8-digit → already the full APA member number; used as-is
+   Matching runs server-side via the slate.lookup_emails_by_number(text[])
+   RPC (slate.players is ~26k rows — too big to ship to the browser).
 
-   Client groups by input name and classifies:
-     0 distinct member_numbers  → not found
-     1 distinct + has email     → success
-     1 distinct + blank email   → found, no email on file
-     >1 distinct member_numbers → ambiguous (more than one match)
-   Successes land in the copyable results box; the other three
-   categories are collected into one popup.
+   Client classifies each input number:
+     not 5 or 8 digits  → invalid
+     no player matched  → not found
+     matched + email    → success
+     matched, no email  → found, no email on file
+   Successes land in the copyable results box; the rest go to one popup.
    ════════════════════════════════════════════════════════════════════ */
-async function ehqLookupByName() {
+function ehqPlayerName(r) {
+  const f = (r.first_name || '').trim();
+  const l = (r.last_name || '').trim();
+  return (f + ' ' + l).replace(/\s+/g, ' ').trim() || r.member_number;
+}
+
+async function ehqLookupByNumber() {
   const box = document.getElementById('ehqNameBox');
   const fb  = document.getElementById('ehqNameFeedback');
   const resultsEl = document.getElementById('ehqNameResults');
-  const norm = s => s.toLowerCase().replace(/\s+/g, ' ').trim();
 
   const rawLines = (box.value || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
   if (!rawLines.length) {
-    fb.textContent = 'Paste some names first.';
+    fb.textContent = 'Paste some player numbers first.';
     fb.className = 'ehq-paste-feedback err';
     return;
   }
-  // Dedupe input case-insensitively, keep first-seen spelling.
-  const seen = new Map();
-  for (const n of rawLines) { const k = norm(n); if (!seen.has(k)) seen.set(k, n); }
-  const names = [...seen.values()];
+  // Reduce each line to digits; dedupe by the digit string.
+  const seen = new Map();   // digits → first-seen raw line
+  for (const line of rawLines) {
+    const digits = line.replace(/\D+/g, '');
+    if (digits && !seen.has(digits)) seen.set(digits, line);
+  }
+  const nums = [...seen.keys()];
+  if (!nums.length) {
+    fb.textContent = 'No numbers found — paste APA player numbers, one per line.';
+    fb.className = 'ehq-paste-feedback err';
+    return;
+  }
 
-  fb.textContent = 'Looking up ' + names.length + ' name' + (names.length === 1 ? '' : 's') + '…';
+  fb.textContent = 'Looking up ' + nums.length + ' number' + (nums.length === 1 ? '' : 's') + '…';
   fb.className = 'ehq-paste-feedback';
   resultsEl.innerHTML = '';
 
   try {
-    const rows = await sb('POST', 'rpc/lookup_emails_by_name', { p_names: names });
-    // Group match rows by normalized input name.
+    const rows = await sb('POST', 'rpc/lookup_emails_by_number', { p_nums: nums });
+    // One player per input number — member_number is unique.
     const byInput = new Map();
-    for (const r of (rows || [])) {
-      const k = norm(r.input_name);
-      if (!byInput.has(k)) byInput.set(k, []);
-      byInput.get(k).push(r);
-    }
+    for (const r of (rows || [])) byInput.set(String(r.input_number), r);
 
     const found = [];      // { name, email }
-    const notFound = [];   // name
+    const notFound = [];   // raw line
     const noEmail = [];    // { name, member }
-    const ambiguous = [];  // { name, candidates: [...] }
+    const invalid = [];    // raw line — not a 5- or 8-digit number
 
-    for (const name of names) {
-      const matches = byInput.get(norm(name)) || [];
-      // Collapse rows that point at the same person (a player can match
-      // on both "first last" and "nickname last" when first === nickname).
-      const byMember = new Map();
-      for (const m of matches) byMember.set(m.member_number, m);
-      const distinct = [...byMember.values()];
-
-      if (distinct.length === 0) { notFound.push(name); continue; }
-      if (distinct.length > 1)   { ambiguous.push({ name, candidates: distinct }); continue; }
-      const p = distinct[0];
-      const email = (p.email || '').trim();
-      if (!email) { noEmail.push({ name, member: p.member_number }); continue; }
+    for (const digits of nums) {
+      const raw = seen.get(digits);
+      if (digits.length !== 5 && digits.length !== 8) { invalid.push(raw); continue; }
+      const r = byInput.get(digits);
+      if (!r) { notFound.push(raw); continue; }
+      const name = ehqPlayerName(r);
+      const email = (r.email || '').trim();
+      if (!email) { noEmail.push({ name, member: r.member_number }); continue; }
       found.push({ name, email });
     }
 
     _ehqRenderNameResults(found);
 
-    const problemCount = notFound.length + ambiguous.length + noEmail.length;
-    fb.textContent = found.length + ' of ' + names.length + ' matched with an email'
+    const problemCount = notFound.length + noEmail.length + invalid.length;
+    fb.textContent = found.length + ' of ' + nums.length + ' matched with an email'
       + (problemCount ? ' · ' + problemCount + ' need attention' : '') + '.';
     fb.className = 'ehq-paste-feedback' + (problemCount ? '' : ' ok');
 
-    if (problemCount) ehqShowLookupIssues(notFound, ambiguous, noEmail);
+    if (problemCount) ehqShowLookupIssues(notFound, noEmail, invalid);
   } catch (e) {
     fb.textContent = 'Lookup failed: ' + e.message;
     fb.className = 'ehq-paste-feedback err';
   }
 }
 
-/* The single popup covering every name that didn't cleanly resolve. */
-function ehqShowLookupIssues(notFound, ambiguous, noEmail) {
+/* The single popup covering every number that didn't cleanly resolve. */
+function ehqShowLookupIssues(notFound, noEmail, invalid) {
   const parts = [];
+  if (invalid.length) {
+    parts.push('INVALID — not a 5- or 8-digit number (' + invalid.length + '):\n  '
+      + invalid.join('\n  '));
+  }
   if (notFound.length) {
     parts.push('NOT FOUND (' + notFound.length + '):\n  '
       + notFound.join('\n  '));
-  }
-  if (ambiguous.length) {
-    parts.push('MORE THAN ONE MATCH (' + ambiguous.length + '):\n'
-      + ambiguous.map(a =>
-          '  "' + a.name + '" matches ' + a.candidates.length + ' players:\n'
-          + a.candidates.map(c =>
-              '      ' + c.member_number + '  ' + c.first_name
-              + (c.nickname ? ' "' + c.nickname + '"' : '')
-              + ' ' + c.last_name
-              + (c.email && c.email.trim() ? '  <' + c.email.trim() + '>' : '  (no email)')
-            ).join('\n')
-        ).join('\n'));
   }
   if (noEmail.length) {
     parts.push('FOUND BUT NO EMAIL ON FILE (' + noEmail.length + '):\n  '
       + noEmail.map(x => x.name + '  (member ' + x.member + ')').join('\n  '));
   }
-  const total = notFound.length + ambiguous.length + noEmail.length;
-  alert('Email lookup — ' + total + ' name' + (total === 1 ? '' : 's')
+  const total = notFound.length + noEmail.length + invalid.length;
+  alert('Email lookup — ' + total + ' number' + (total === 1 ? '' : 's')
     + ' need attention:\n\n' + parts.join('\n\n'));
 }
 
@@ -6761,7 +6756,6 @@ function spBuildSlipsHTML(pages, op, summary) {
       +   '<div class="slip-issuer">'
       +     '<div class="slip-issuer-name">' + esc(op.name || 'APA') + '</div>'
       +     '<div class="slip-issuer-rule"></div>'
-      +     '<div class="slip-issuer-cap">Issuing Operator</div>'
       +   '</div>'
       + '</div>'
       + '</div>';
@@ -6839,8 +6833,7 @@ function spBuildSlipsHTML(pages, op, summary) {
     '        font-family: ui-monospace,Menlo,monospace; }',
     '.slip-issuer { flex: 0 0 1.5in; text-align: center; }',
     '.slip-issuer-name { font-size: 12.5pt; font-style: italic; color: #3a2f12; line-height: 1.1; }',
-    '.slip-issuer-rule { border-top: 0.75pt solid #6b5a2a; margin: 2.5pt 0; }',
-    '.slip-issuer-cap { font-size: 7.5pt; font-style: italic; color: #8a7a45; }',
+    '.slip-issuer-rule { border-top: 0.75pt solid #6b5a2a; margin: 2.5pt 0 0; }',
     '.cover { justify-content: flex-start; align-items: center; padding: 1in 0.9in; }',
     '.cover-title { font-size: 26pt; font-weight: 800; text-align: center; }',
     '.cover-sub { font-size: 12pt; color: #6b7280; font-style: italic; margin: 5pt 0 30pt; }',
