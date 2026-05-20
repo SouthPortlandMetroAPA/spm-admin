@@ -1387,7 +1387,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.30';
+const APP_VERSION = '3.31';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -5824,6 +5824,52 @@ function spWireDropZone() {
   });
 }
 
+/* Per-tab cache of the last data-through date the operator entered, so
+   subsequent uploads in the same drag-drop pre-fill the same date. */
+let _spLastDataThrough = null;
+
+/* v3.31 — modal asking for the report's "data through" date. Returns
+   the YYYY-MM-DD string the operator picked, or null if they cancelled.
+   Stored on sp_reports.data_through and surfaced as the "Last updated"
+   line on SharpShooters and PatchCheck. */
+function spPromptDataThrough(kind, filename, defaultDate) {
+  return new Promise(resolve => {
+    const today = new Date();
+    const todayIso = today.getFullYear() + '-'
+      + String(today.getMonth() + 1).padStart(2, '0') + '-'
+      + String(today.getDate()).padStart(2, '0');
+    const defVal = defaultDate || todayIso;
+    const bd = document.createElement('div');
+    bd.className = 'modal-backdrop shown';
+    bd.innerHTML =
+      '<div style="background:#fff;padding:22px 24px;border-radius:12px;max-width:420px;'
+      +   'box-shadow:0 12px 40px rgba(0,0,0,0.25);font-family:inherit;">'
+      + '<h3 style="margin:0 0 6px;font-size:1.05rem;">Data through what date?</h3>'
+      + '<p style="margin:0 0 14px;font-size:0.85rem;color:#6b7280;line-height:1.45;">'
+      +   esc(spKindLabel(kind)) + ' &middot; <code>' + esc(filename) + '</code><br>'
+      +   'Shows up as the &ldquo;Last updated&rdquo; line on SharpShooters and PatchCheck. '
+      +   'Pick the latest date these reports include.'
+      + '</p>'
+      + '<input type="date" id="_spDataThroughInput" value="' + esc(defVal) + '"'
+      +   ' style="width:100%;padding:9px 11px;border:1px solid #d1d5db;'
+      +   'border-radius:8px;font-size:1rem;font-family:inherit;">'
+      + '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">'
+      +   '<button class="btn btn-outline" id="_spDtCancel" type="button">Cancel</button>'
+      +   '<button class="btn btn-primary" id="_spDtOk" type="button">Save report</button>'
+      + '</div></div>';
+    document.body.appendChild(bd);
+    const input = bd.querySelector('#_spDataThroughInput');
+    const close = (val) => { document.body.removeChild(bd); resolve(val); };
+    bd.querySelector('#_spDtOk').addEventListener('click', () => close(input.value || null));
+    bd.querySelector('#_spDtCancel').addEventListener('click', () => close(null));
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter')  { e.preventDefault(); close(input.value || null); }
+      if (e.key === 'Escape') { e.preventDefault(); close(null); }
+    });
+    setTimeout(() => input.focus(), 30);
+  });
+}
+
 async function spHandleFile(file) {
   if (!file || file.type !== 'application/pdf') {
     setStatus('spDropStatus', 'Only PDF files are accepted', 'err'); return;
@@ -5880,8 +5926,19 @@ async function spHandleFile(file) {
     console.log('[SP] parsed', kind, '— rows/events:', payloadCount);
     if (!payloadCount) throw new Error('Identified as ' + spKindLabel(kind) + ' but no data extracted');
 
+    /* v3.31 — prompt for "data through" date. This is what shows up as
+       the "Last updated" line on SharpShooters and PatchCheck, so the
+       operator can stamp the report with the date their scoresheet
+       processing actually got to (not the report's print timestamp). */
+    const dataThrough = await spPromptDataThrough(kind, file.name, _spLastDataThrough);
+    if (!dataThrough) {
+      setStatus('spDropStatus', 'Cancelled — ' + file.name + ' not saved.', '');
+      return;
+    }
+    _spLastDataThrough = dataThrough;
+
     // Auto-save — no confirmation modal (v3.4).
-    await spSaveReport(kind, parsed, file.name);
+    await spSaveReport(kind, parsed, file.name, dataThrough);
   } catch (e) {
     console.error('[SP] parse failed:', e);
     setStatus('spDropStatus', 'Parse failed: ' + e.message, 'err');
@@ -5921,13 +5978,13 @@ async function spInsertChunks(path, rows, chunkSize, label) {
        date-range-derived week for 'wll', null for '8skunk' (events
        carry their own dates).
      - notes: dropped — no longer collected. */
-async function spSaveReport(kind, parsed, filename) {
+async function spSaveReport(kind, parsed, filename, dataThrough) {
   const isCum  = (kind === 'll' || kind === 'bd');
   const weekNo = (kind === 'wll' && parsed.derived_week_no != null)
     ? parsed.derived_week_no : null;
   const opId   = _spOperatorFilter !== 'ALL' ? SP_OPERATOR_SHORTS[_spOperatorFilter] : null;
   setStatus('spDropStatus', 'Saving ' + spKindLabel(kind) + '…', '');
-  console.log('[SP] auto-save start', { kind, isCum, weekNo });
+  console.log('[SP] auto-save start', { kind, isCum, weekNo, dataThrough });
   try {
     const headerRow = {
       session_id: currentSession.id,
@@ -5938,6 +5995,7 @@ async function spSaveReport(kind, parsed, filename) {
       source_filename: filename,
       source_printed_at: parsed.printed_at || null,
       session_label_raw: parsed.session_label || null,
+      data_through: dataThrough || null,
       notes: null
     };
     const created = await sb('POST', 'sp_reports', headerRow);
