@@ -1387,7 +1387,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.29';
+const APP_VERSION = '3.30';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -3584,7 +3584,53 @@ window.commitTeamData = async function(headers, rows) {
     throw new Error('Team Data write failed mid-stream — rolled back. Cause: ' + writeErr.message);
   }
 
+  // Phase F: orphan sweep — the paste is the whole truth of who's in the
+  // session, so any team in this session NOT in the paste gets dropped
+  // along with its team_memberships rows. team_memberships is deleted
+  // first so FK constraints don't fight the teams delete regardless of
+  // ON DELETE setting.
+  let orphansDeleted = 0;
+  const orphanDetail = [];
+  try {
+    const allDivIds = Object.values(divByNum).map(d => d.id);
+    if (allDivIds.length && teamWork.length) {
+      const allExistingTeams = await sb('GET',
+        'teams?division_id=in.(' + allDivIds.join(',') + ')'
+        + '&select=id,division_id,team_number,team_name');
+      const pasteKeys = new Set(teamWork.map(w => w.divId + ':' + w.tn));
+      const orphans = (allExistingTeams || []).filter(t =>
+        !pasteKeys.has(t.division_id + ':' + t.team_number));
+      if (orphans.length) {
+        const orphanIds = orphans.map(t => t.id);
+        for (let i = 0; i < orphanIds.length; i += 100) {
+          const chunk = orphanIds.slice(i, i + 100);
+          await sb('DELETE', 'team_memberships?team_id=in.(' + chunk.join(',') + ')');
+          await sb('DELETE', 'teams?id=in.(' + chunk.join(',') + ')');
+        }
+        orphansDeleted = orphans.length;
+        orphans.slice(0, 30).forEach(t =>
+          orphanDetail.push(t.team_number + (t.team_name ? ' "' + t.team_name + '"' : '')));
+        console.log('[Slate] commitTeamData removed', orphansDeleted,
+          'orphan team(s) not in the paste:',
+          orphanDetail.join(', ') + (orphans.length > 30 ? '…' : ''));
+      }
+    }
+  } catch (sweepErr) {
+    /* The captain writes already succeeded — the sweep is a cleanup pass.
+       Surface the error in the message but don't roll back valid writes. */
+    console.warn('[Slate] orphan sweep failed:', sweepErr);
+  }
+
   let msg = teamUpserts.length + ' team(s) upserted, ' + newCaptainRows.length + ' captain/co-captain membership(s) written.';
+  if (orphansDeleted) {
+    msg += ' Removed ' + orphansDeleted + ' team(s) not in this paste';
+    if (orphanDetail.length) {
+      const shown = orphanDetail.slice(0, 10).join(', ');
+      const more = orphansDeleted > 10 ? ' …+' + (orphansDeleted - 10) + ' more' : '';
+      msg += ' (' + shown + more + ')';
+    }
+    msg += '.';
+  }
   if (missingDivisions) msg += ' ⚠ ' + missingDivisions + ' team row(s) skipped (division not found in current session).';
   return msg;
 };
