@@ -1350,6 +1350,25 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         <div id="spPatchesBlocker" class="status-line"></div>
         <div id="spPatchesList"></div>
       </div>
+
+      <!-- Ad-hoc envelope printing — pull addresses from slate.players -->
+      <div class="card" style="margin-bottom:14px;">
+        <h2 style="margin:0 0 6px;">Print envelopes by player number</h2>
+        <p class="hint" style="margin:0 0 10px;">
+          Paste APA player numbers (5- or 8-digit, one per line). One envelope
+          per player, using the mailing address on file in <code>slate.players</code>.
+          Use this for one-off mailings outside the regular patch run &mdash;
+          replacements, special awards, anything ad-hoc.
+        </p>
+        <textarea id="spAdhocBox" class="ehq-paste-box" style="min-height:64px;"
+          placeholder="e.g.&#10;24779&#10;97223806"></textarea>
+        <div style="display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap;">
+          <input type="text" id="spAdhocNote" placeholder="Optional note printed on envelope (e.g. 'Replacement patch')"
+            style="flex:1; min-width:240px; padding:8px 10px; border:1px solid #e5e7eb; border-radius:8px;">
+          <button type="button" class="btn btn-primary" onclick="spAdhocEnvelopes()">Print envelopes</button>
+        </div>
+        <div class="status-line" id="spAdhocStatus" style="margin-top:6px;"></div>
+      </div>
     </div>
     <!-- ════════════════ /SP Reports ════════════════ -->
 
@@ -1368,7 +1387,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.26';
+const APP_VERSION = '3.27';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -7226,11 +7245,17 @@ function spBuildEnvelopesHTML(envs, op) {
     +   (e.address_line2 ? '<div>' + esc(e.address_line2) + '</div>' : '')
     +   '<div>' + esc(e.city) + ', ' + esc(e.state) + ' ' + esc(e.zip) + '</div>'
     + '</div>'
-    + '<div class="meta">'
-    +   (sessionLabel ? esc(sessionLabel) + ' · ' : '')
-    +   (e.teams.length > 1 ? 'Teams ' : 'Team ') + esc((e.teams || []).join(', '))
-    +   ' · ' + e.patches.length + ' patch' + (e.patches.length === 1 ? '' : 'es')
-    + '</div>'
+    /* Meta line — only emit the bits that have content. Patch-flow envs
+       carry teams + patches; ad-hoc envs may carry only a note (or
+       nothing at all). The line is suppressed entirely if empty. */
+    + (function () {
+        const bits = [];
+        if (sessionLabel)              bits.push(esc(sessionLabel));
+        if (e.note)                    bits.push(esc(e.note));
+        if (e.teams && e.teams.length) bits.push((e.teams.length > 1 ? 'Teams ' : 'Team ') + esc(e.teams.join(', ')));
+        if (e.patches && e.patches.length) bits.push(e.patches.length + ' patch' + (e.patches.length === 1 ? '' : 'es'));
+        return bits.length ? '<div class="meta">' + bits.join(' · ') + '</div>' : '';
+      })()
     + '</div>';
   return [
     '<!doctype html><html><head><meta charset="utf-8"><title>Envelopes</title>',
@@ -7304,6 +7329,118 @@ spRenderPatches = function() {
 
 window.spPrintSlips     = spPrintSlips;
 window.spPrintEnvelopes = spPrintEnvelopes;
+
+/* ════════════════════════════════════════════════════════════════════
+   AD-HOC ENVELOPE PRINTING — by player number
+   ────────────────────────────────────────────────────────────────────
+   Independent of the patch batch flow. The operator pastes APA player
+   numbers (5- or 8-digit); each one's mailing address is pulled from
+   slate.players and rendered through spBuildEnvelopesHTML. Same
+   letterhead, same right-side patches logo, same cat — just with a
+   custom note instead of teams + patch count on the meta line.
+   ════════════════════════════════════════════════════════════════════ */
+async function spAdhocEnvelopes() {
+  const box     = document.getElementById('spAdhocBox');
+  const noteEl  = document.getElementById('spAdhocNote');
+  const note    = (noteEl && noteEl.value || '').trim();
+  const raw     = (box.value || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  if (!raw.length) { setStatus('spAdhocStatus', 'Paste at least one number.', 'err'); return; }
+
+  /* Normalize: 5-digit → '972' + 5, 8-digit → as-is. Anything else
+     goes into the "invalid" bucket for the status message. */
+  const valid = new Map();      // 8-digit → first-seen raw line (for display)
+  const invalid = [];
+  for (const line of raw) {
+    const digits = line.replace(/\D+/g, '');
+    if (digits.length === 5)      { if (!valid.has('972' + digits)) valid.set('972' + digits, line); }
+    else if (digits.length === 8) { if (!valid.has(digits))         valid.set(digits, line); }
+    else                          invalid.push(line);
+  }
+  if (!valid.size) {
+    setStatus('spAdhocStatus', 'No valid 5- or 8-digit numbers found.', 'err');
+    return;
+  }
+  const memberNums = [...valid.keys()];
+  setStatus('spAdhocStatus', 'Looking up ' + memberNums.length + ' player(s)…', '');
+
+  try {
+    /* Admin runs as service_role so this filtered read works against the
+       PII-locked slate.players. Chunked at 100 in case of large pastes. */
+    const players = [];
+    for (let i = 0; i < memberNums.length; i += 100) {
+      const chunk = memberNums.slice(i, i + 100);
+      const rows = await sb('GET',
+        'players?member_number=in.(' + chunk.join(',') + ')'
+        + '&select=member_number,first_name,nickname,last_name,address1,address2,city,state,zip');
+      if (rows && rows.length) players.push(...rows);
+    }
+    const byMember = {};
+    for (const p of players) byMember[p.member_number] = p;
+
+    const envs    = [];
+    const notFound = [];
+    const noAddr   = [];
+    for (const mn of memberNums) {
+      const p = byMember[mn];
+      if (!p) { notFound.push(valid.get(mn)); continue; }
+      const f  = (p.first_name || '').trim();
+      const l  = (p.last_name  || '').trim();
+      const nk = (p.nickname   || '').trim();
+      const name = (nk ? f + ' "' + nk + '" ' + l : f + ' ' + l).replace(/\s+/g, ' ').trim()
+                || ('Member ' + mn);
+      if (!p.address1 || !p.city) { noAddr.push({ mn, name }); continue; }
+      /* Strip the dangling "97123-____" zip pattern seen in some rows. */
+      const zip = (p.zip || '').replace(/[-_\s]+$/, '');
+      envs.push({
+        contact_name:  name,
+        address_line1: p.address1,
+        address_line2: p.address2 || null,
+        city:          p.city,
+        state:         p.state || '',
+        zip:           zip,
+        teams:         [],
+        patches:       [],
+        note:          note
+      });
+    }
+
+    if (!envs.length) {
+      setStatus('spAdhocStatus', 'No printable envelopes — none of those players have an address on file.', 'err');
+      if (notFound.length || noAddr.length) {
+        alert('Nothing to print:\n\n'
+          + (notFound.length ? 'NOT FOUND:\n  ' + notFound.join('\n  ') + '\n\n' : '')
+          + (noAddr.length ? 'NO ADDRESS ON FILE:\n  ' + noAddr.map(x => x.mn + '  ' + x.name).join('\n  ') : ''));
+      }
+      return;
+    }
+
+    await spLoadOperatorProfile();
+    const op = _spOperatorProfile || {};
+    const html = spBuildEnvelopesHTML(envs, op);
+    spOpenPrintWindow(html, 'Ad-hoc envelopes (' + envs.length + ')');
+
+    /* Status summary + per-player issues popup. */
+    const issues = [];
+    if (invalid.length)  issues.push(invalid.length + ' invalid');
+    if (notFound.length) issues.push(notFound.length + ' not in players table');
+    if (noAddr.length)   issues.push(noAddr.length + ' no address on file');
+    setStatus('spAdhocStatus',
+      'Printed ' + envs.length + ' envelope' + (envs.length === 1 ? '' : 's')
+      + (issues.length ? ' · ' + issues.join(' · ') : '') + '.',
+      issues.length ? 'warn' : 'ok');
+    if (notFound.length || noAddr.length || invalid.length) {
+      const parts = [];
+      if (invalid.length)  parts.push('INVALID (not 5- or 8-digit):\n  ' + invalid.join('\n  '));
+      if (notFound.length) parts.push('NOT FOUND in slate.players:\n  ' + notFound.join('\n  '));
+      if (noAddr.length)   parts.push('NO ADDRESS ON FILE:\n  '
+        + noAddr.map(x => x.mn + '  ' + x.name).join('\n  '));
+      alert('Some inputs were skipped:\n\n' + parts.join('\n\n'));
+    }
+  } catch (e) {
+    setStatus('spAdhocStatus', 'Failed: ' + e.message, 'err');
+  }
+}
+window.spAdhocEnvelopes = spAdhocEnvelopes;
 
 /* ════════════════════════════════════════════════════════════════════
    OPERATOR PROFILE — minimal Phase 3 (return address only)
