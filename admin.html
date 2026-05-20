@@ -1387,7 +1387,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.27';
+const APP_VERSION = '3.28';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -5550,9 +5550,63 @@ async function spSaveLabels(labels, filename) {
       'Saved ' + labels.length + ' labels for ' + opShort
       + (previousCount ? ' (replaced ' + previousCount + ')' : ''), 'ok');
     await spLoadLabels();
+    /* Cross-check against the Team Screen: every active team for this
+       (session, operator) needs a mailing contact, or its players have
+       no envelope to land in. Inactive teams (team-within-division > 16)
+       are skipped — they were pulled mid-session. */
+    await spLabelsCoverageCheck(opId, sessId, opShort);
   } catch (e) {
     console.error('[SP] labels save failed:', e);
     setStatus('spDropStatus', 'Save failed: ' + e.message, 'err');
+  }
+}
+
+async function spLabelsCoverageCheck(opId, sessId, opShort) {
+  try {
+    /* 1) The active team set for (session, operator), pulled via the
+          divisions FK chain since teams.division_id is the link. */
+    const divs = await sb('GET',
+      'divisions?session_id=eq.' + sessId + '&operator_id=eq.' + opId + '&select=id');
+    if (!divs.length) return;
+    const divIds = divs.map(d => d.id).join(',');
+    const teams = await sb('GET',
+      'teams?division_id=in.(' + divIds + ')&select=team_number,team_name');
+    const active = (teams || []).filter(t => !spIsInactiveTeam(t.team_number));
+    if (!active.length) return;
+
+    /* 2) Team numbers that DID make it into the uploaded labels. Compare
+          via parseInt so a 4-digit team-screen number ("1301") matches a
+          5-digit zero-padded label ("01301") and vice versa. */
+    const haveRows = await sb('GET',
+      'sp_labels?operator_id=eq.' + opId + '&session_id=eq.' + sessId
+      + '&select=team_number');
+    const have = new Set((haveRows || []).map(r => String(parseInt(r.team_number, 10))));
+
+    const missing = active
+      .filter(t => !have.has(String(parseInt(t.team_number, 10))))
+      .sort((a, b) => parseInt(a.team_number, 10) - parseInt(b.team_number, 10));
+
+    if (!missing.length) {
+      setStatus('spDropStatus',
+        'Saved labels &mdash; all ' + active.length + ' active ' + opShort + ' teams covered.',
+        'ok');
+      return;
+    }
+    setStatus('spDropStatus',
+      'Saved labels &mdash; ' + missing.length + ' ' + opShort + ' team'
+      + (missing.length === 1 ? '' : 's') + ' missing a mailing contact (see popup).',
+      'warn');
+    const list = missing.map(t =>
+      '  ' + (t.team_number || '?').toString().padStart(5, '0')
+      + '  ' + (t.team_name || '(no team name)')).join('\n');
+    alert(missing.length + ' ' + opShort + ' team'
+      + (missing.length === 1 ? '' : 's')
+      + ' on the Team Screen have no mailing contact:\n\n'
+      + list
+      + '\n\nFix the captain in APA, regenerate the labels PDF, and re-upload.');
+  } catch (e) {
+    console.warn('[SP] labels coverage check failed:', e);
+    /* Non-fatal — the save itself succeeded. */
   }
 }
 
