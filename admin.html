@@ -1382,28 +1382,59 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         <p class="hint" style="margin-bottom:10px">
           Photos uploaded by captains via
           <a href="https://southportlandmetroapa.github.io/papertrail/" target="_blank" rel="noopener" style="color:var(--spm-accent);font-weight:700">PaperTrail</a>
-          (Masters + Doubles only — SPM operator, current session). Click any thumbnail to view full-size; Delete removes both the DB row and the R2 object.
+          (Masters + Doubles only — SPM operator, current session).
         </p>
-        <div class="row" style="margin-bottom:10px">
-          <div>
-            <label for="ssDivFilter">Division</label>
-            <select id="ssDivFilter">
-              <option value="">All</option>
-            </select>
-          </div>
-          <div>
-            <label for="ssTeamFilter">Team</label>
-            <select id="ssTeamFilter">
-              <option value="">All</option>
-            </select>
-          </div>
-          <div style="display:flex;align-items:flex-end;justify-content:flex-end">
-            <button class="btn btn-outline btn-sm" onclick="renderScoresheetsTab()">Refresh</button>
-          </div>
+
+        <!-- View toggle -->
+        <div class="seg" id="ssViewSeg" style="display:inline-flex;gap:4px;padding:3px;border-radius:10px;background:#f3f4f6;border:1px solid var(--border);margin-bottom:12px">
+          <button type="button" class="seg-btn ssview active" data-view="grid"
+            style="padding:7px 14px;border:0;background:#fff;font:inherit;font-weight:700;font-size:0.86rem;border-radius:7px;cursor:pointer;color:var(--spm-accent);box-shadow:0 1px 3px rgba(0,0,0,0.08)">Grid</button>
+          <button type="button" class="seg-btn ssview" data-view="photos"
+            style="padding:7px 14px;border:0;background:transparent;font:inherit;font-weight:700;font-size:0.86rem;border-radius:7px;cursor:pointer;color:var(--muted)">Photos</button>
         </div>
-        <div id="ssStatus" class="status-line"></div>
-        <div id="ssSummary" style="font-size:0.8rem;color:var(--muted);margin-bottom:8px"></div>
-        <div id="ssGrid"></div>
+
+        <!-- ── GRID VIEW ─────────────────────────────────────────── -->
+        <div id="ssGridView">
+          <div class="row" style="margin-bottom:10px">
+            <div>
+              <label for="ssgDivSelect">Division</label>
+              <select id="ssgDivSelect"></select>
+            </div>
+            <div style="display:flex;align-items:flex-end;justify-content:flex-end;gap:6px">
+              <span id="ssgSummary" style="font-size:0.78rem;color:var(--muted);align-self:center;margin-right:8px"></span>
+              <button class="btn btn-outline btn-sm" onclick="renderScoresheetsGridView()">Refresh</button>
+            </div>
+          </div>
+          <div id="ssgStatus" class="status-line"></div>
+          <div id="ssgGrid" style="overflow-x:auto"></div>
+        </div>
+
+        <!-- ── PHOTOS VIEW (cards) ───────────────────────────────── -->
+        <div id="ssPhotosView" style="display:none">
+          <div class="row" style="margin-bottom:10px">
+            <div>
+              <label for="ssDivFilter">Division</label>
+              <select id="ssDivFilter">
+                <option value="">All</option>
+              </select>
+            </div>
+            <div>
+              <label for="ssTeamFilter">Team</label>
+              <select id="ssTeamFilter">
+                <option value="">All</option>
+              </select>
+            </div>
+            <div style="display:flex;align-items:flex-end;justify-content:flex-end">
+              <button class="btn btn-outline btn-sm" onclick="renderScoresheetsTab()">Refresh</button>
+            </div>
+          </div>
+          <div id="ssStatus" class="status-line"></div>
+          <div id="ssSummary" style="font-size:0.8rem;color:var(--muted);margin-bottom:8px"></div>
+          <div id="ssGrid"></div>
+        </div>
+
+        <!-- Inline popover for cell click -->
+        <div id="ssCellPopover" style="display:none;position:absolute;z-index:50;background:#fff;border:1px solid var(--border-strong);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.15);padding:12px;min-width:260px;max-width:340px"></div>
       </div>
     </div>
     <!-- ════════════════ /Scoresheets ════════════════ -->
@@ -1423,7 +1454,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.32';
+const APP_VERSION = '3.33';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -2969,7 +3000,7 @@ function switchTab(name) {
   if (name === 'divisions')   renderDivisionsTab();
   if (name === 'uploads')     loadReportStatus();
   if (name === 'spreports')   spOnEnterTab();
-  if (name === 'scoresheets') renderScoresheetsTab();
+  if (name === 'scoresheets') { ssBindViewToggle(); renderScoresheetsGridView(); }
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -7861,6 +7892,392 @@ async function ssDeletePhoto(photoId, r2Path) {
   }
 }
 window.ssDeletePhoto = ssDeletePhoto;
+
+/* ══════════════════════════════════════════════════════════════════════
+   SCORESHEETS — GRID VIEW (tracker)
+   ─────────────────────────────────────────────────────────────────
+   Per-division tracker grid: teams as rows, weeks as columns. Each
+   cell shows ✓ / ⚠ / ✗ / — based on whether the required photos for
+   THAT (team, week) match exist.
+     ✓  all required sides uploaded
+     ⚠  partial (only 1 of 2 for 9-Ball Doubles; should be rare —
+        captain UI's atomic upload prevents creating this state, but
+        admin delete can produce it)
+     ✗  no photos
+     —  non-match cell (BYE / playoff / no-play / TBA opponent)
+   Click a cell → inline popover with photo(s) + delete.
+   Each week column header has a ZIP download button.
+   ══════════════════════════════════════════════════════════════════════ */
+const SSG_FORMATS = {
+  'Masters':         { sides: ['single'] },
+  '8-Ball Doubles':  { sides: ['single'] },
+  '9-Ball Doubles':  { sides: ['front', 'back'] }
+};
+let _ssgState = {
+  divisions: [],
+  divisionId: null,
+  teams: [],
+  matches: [],
+  photosByMatch: new Map(),
+  weeks: []     // sorted unique non-null week_numbers, plus any 'playoff'/'no_play' columns
+};
+
+/* View toggle wiring (Grid <-> Photos) */
+function ssBindViewToggle() {
+  document.querySelectorAll('#ssViewSeg .ssview').forEach(btn => {
+    btn.onclick = () => {
+      const v = btn.dataset.view;
+      document.querySelectorAll('#ssViewSeg .ssview').forEach(b => {
+        const active = b.dataset.view === v;
+        b.classList.toggle('active', active);
+        b.style.background = active ? '#fff' : 'transparent';
+        b.style.color      = active ? 'var(--spm-accent)' : 'var(--muted)';
+        b.style.boxShadow  = active ? '0 1px 3px rgba(0,0,0,0.08)' : 'none';
+      });
+      document.getElementById('ssGridView').style.display   = v === 'grid'   ? '' : 'none';
+      document.getElementById('ssPhotosView').style.display = v === 'photos' ? '' : 'none';
+      ssCellPopoverClose();
+      if (v === 'grid')   renderScoresheetsGridView();
+      if (v === 'photos') renderScoresheetsTab();
+    };
+  });
+}
+
+/* Main grid render — load divisions, populate dropdown, render */
+async function renderScoresheetsGridView() {
+  setStatus('ssgStatus', 'Loading…', '');
+  if (!currentSession) {
+    setStatus('ssgStatus', 'No current session.', 'err');
+    return;
+  }
+  try {
+    const divs = await sb('GET',
+      'divisions?select=id,division_number,name,format' +
+      '&session_id=eq.' + currentSession.id +
+      '&operator_id=eq.1' +
+      '&format=in.(Masters,8-Ball Doubles,9-Ball Doubles)' +
+      '&order=division_number');
+    _ssgState.divisions = divs;
+    const sel = document.getElementById('ssgDivSelect');
+    const prev = sel.value;
+    sel.innerHTML = divs.map(d =>
+      `<option value="${d.id}">${esc(d.division_number)} — ${esc(d.name)} · ${esc(d.format)}</option>`
+    ).join('');
+    if (prev && divs.find(d => String(d.id) === prev)) sel.value = prev;
+    sel.onchange = () => ssgRenderGridForDivision(parseInt(sel.value, 10));
+    if (!divs.length) {
+      setStatus('ssgStatus', 'No SPM Masters/Doubles divisions in this session.', '');
+      return;
+    }
+    clearStatus('ssgStatus');
+    ssgRenderGridForDivision(parseInt(sel.value, 10));
+  } catch (e) {
+    setStatus('ssgStatus', 'Failed: ' + e.message, 'err');
+  }
+}
+
+async function ssgRenderGridForDivision(divisionId) {
+  _ssgState.divisionId = divisionId;
+  const div = _ssgState.divisions.find(d => d.id === divisionId);
+  if (!div) return;
+  const gridEl = document.getElementById('ssgGrid');
+  gridEl.innerHTML = '<div class="status-line" style="font-size:0.84rem;color:var(--muted)">Loading division data…</div>';
+
+  try {
+    // Teams + matches + photos
+    const teams = await sb('GET',
+      'teams?select=id,team_number,team_name' +
+      '&division_id=eq.' + divisionId +
+      '&order=team_number');
+    const matches = await sb('GET',
+      'matches?select=id,week_number,match_index,scheduled_date,row_type,label,home_team_id,away_team_id,' +
+      'home_team:teams!matches_home_team_id_fkey(team_number,team_name),' +
+      'away_team:teams!matches_away_team_id_fkey(team_number,team_name)' +
+      '&division_id=eq.' + divisionId +
+      '&order=week_number.asc.nullsfirst,match_index.asc');
+    const matchIds = matches.map(m => m.id);
+    let photos = [];
+    if (matchIds.length) {
+      const r = await fetch(SB_URL + '/rest/v1/photos?select=id,match_id,side,r2_path,uploader_name,uploader_apa_number,uploaded_at,bytes' +
+        '&match_id=in.(' + matchIds.join(',') + ')',
+        { headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON, 'Accept-Profile': 'papertrail' } });
+      photos = r.ok ? await r.json() : [];
+    }
+    const photosByMatch = new Map();
+    for (const p of photos) {
+      if (!photosByMatch.has(p.match_id)) photosByMatch.set(p.match_id, []);
+      photosByMatch.get(p.match_id).push(p);
+    }
+
+    _ssgState.teams = teams;
+    _ssgState.matches = matches;
+    _ssgState.photosByMatch = photosByMatch;
+
+    // Build week-column order
+    const colMap = new Map();   // colKey → { type:'regular'|'playoff'|'no_play', label, weekNum?, date? }
+    const colKeys = [];
+    for (const m of matches) {
+      let key;
+      if (m.row_type === 'regular' || m.row_type === 'playoff') {
+        key = 'W' + m.week_number;
+        if (!colMap.has(key)) {
+          colMap.set(key, {
+            type: m.row_type, weekNum: m.week_number, date: m.scheduled_date,
+            label: m.row_type === 'playoff' ? ('W' + m.week_number + ' · Playoff') : ('W' + m.week_number)
+          });
+          colKeys.push(key);
+        }
+      } else if (m.row_type === 'no_play') {
+        key = 'NP-' + m.scheduled_date;
+        if (!colMap.has(key)) {
+          colMap.set(key, { type: 'no_play', date: m.scheduled_date, label: m.label || 'No Play' });
+          colKeys.push(key);
+        }
+      }
+    }
+    _ssgState.weeks = colKeys.map(k => ({ key: k, ...colMap.get(k) }));
+
+    ssgRenderGridDom(div);
+  } catch (e) {
+    gridEl.innerHTML = '<div class="status-line err">Failed: ' + esc(e.message) + '</div>';
+  }
+}
+
+function ssgCellState(team, col, fmt) {
+  // Find the match for this (team, col)
+  let match = null;
+  if (col.type === 'regular') {
+    match = _ssgState.matches.find(m =>
+      m.row_type === 'regular' && m.week_number === col.weekNum &&
+      (m.home_team_id === team.id || m.away_team_id === team.id));
+    if (!match) return { state: 'dash', tip: 'No match scheduled' };
+    if (!match.home_team_id || !match.away_team_id) return { state: 'dash', tip: 'BYE (opponent unfilled)', match };
+    const required = SSG_FORMATS[fmt].sides;
+    const photos = _ssgState.photosByMatch.get(match.id) || [];
+    const have = new Set(photos.map(p => p.side));
+    const haveCount = required.filter(s => have.has(s)).length;
+    if (haveCount === required.length) return { state: 'ok',  tip: 'Uploaded', match, photos };
+    if (haveCount > 0)                  return { state: 'partial', tip: haveCount + '/' + required.length + ' uploaded', match, photos };
+    return { state: 'bad', tip: 'Missing scoresheet', match, photos: [] };
+  }
+  return { state: 'dash', tip: col.label };  // playoff / no_play
+}
+
+function ssgRenderGridDom(div) {
+  const fmt = div.format;
+  const teams = _ssgState.teams;
+  const cols  = _ssgState.weeks;
+
+  // Compute % uploaded across all required regular cells for this division
+  let need = 0, have = 0;
+  for (const t of teams) for (const c of cols.filter(x => x.type === 'regular')) {
+    const s = ssgCellState(t, c, fmt);
+    if (s.state === 'ok')      { need++; have++; }
+    else if (s.state === 'bad' || s.state === 'partial') need++;
+  }
+  const pct = need === 0 ? '—' : Math.round(100 * have / need) + '%';
+  document.getElementById('ssgSummary').textContent =
+    have + ' / ' + need + ' uploaded (' + pct + ')';
+
+  // Header: blank corner + week columns (with download buttons on regular weeks)
+  let headHtml = '<tr><th style="position:sticky;left:0;background:#fff;z-index:2;text-align:left;padding:8px 10px;border-bottom:2px solid var(--border);min-width:200px">Team</th>';
+  for (const c of cols) {
+    const downloadable = c.type === 'regular';
+    const cellLabel = c.type === 'regular' ? ('W' + c.weekNum)
+                    : c.type === 'playoff' ? '★ Playoff'
+                    : '⊘ No Play';
+    const dateStr = c.date ? c.date.slice(5) : '';   // MM-DD
+    headHtml += `<th style="text-align:center;padding:6px 8px;border-bottom:2px solid var(--border);font-size:0.74rem;min-width:64px;background:#fff">
+      <div style="font-weight:800;color:var(--spm-accent)">${esc(cellLabel)}</div>
+      <div style="font-weight:500;color:var(--muted);font-size:0.68rem">${esc(dateStr)}</div>
+      ${downloadable
+        ? `<button class="btn btn-outline btn-sm" style="margin-top:4px;padding:2px 8px;font-size:0.68rem" title="Download all ${esc(cellLabel)} photos as ZIP" onclick="ssgDownloadWeek(${c.weekNum})">⤓ ZIP</button>`
+        : ''}
+    </th>`;
+  }
+  headHtml += '</tr>';
+
+  // Body rows
+  let bodyHtml = '';
+  for (const t of teams) {
+    bodyHtml += `<tr><td style="position:sticky;left:0;background:#fff;z-index:1;padding:8px 10px;border-bottom:1px solid var(--border);font-weight:700;font-size:0.84rem">
+      <span style="color:var(--spm-accent);font-weight:800">${esc(t.team_number)}</span>
+      <span style="color:var(--text);font-weight:600;margin-left:6px">${esc(t.team_name)}</span>
+    </td>`;
+    for (const c of cols) {
+      const s = ssgCellState(t, c, fmt);
+      const baseStyle = 'text-align:center;padding:8px 6px;border-bottom:1px solid var(--border);font-size:1.05rem;line-height:1;cursor:default';
+      const stateStyle = ({
+        ok:      'background:#f0fdf4;color:#16a34a;cursor:pointer',
+        bad:     'background:#fef2f2;color:#dc2626;cursor:pointer',
+        partial: 'background:#fefce8;color:#ca8a04;cursor:pointer',
+        dash:    'background:#fafafa;color:#9ca3af'
+      })[s.state];
+      const sym = ({ ok: '✓', bad: '✗', partial: '⚠', dash: '—' })[s.state];
+      const click = s.match
+        ? `onclick="ssgCellClick(event, ${s.match.id})"`
+        : '';
+      bodyHtml += `<td style="${baseStyle};${stateStyle}" title="${esc(s.tip)}" ${click}>${sym}</td>`;
+    }
+    bodyHtml += '</tr>';
+  }
+
+  document.getElementById('ssgGrid').innerHTML =
+    `<table style="border-collapse:collapse;width:max-content;min-width:100%;background:#fff">
+       <thead>${headHtml}</thead>
+       <tbody>${bodyHtml}</tbody>
+     </table>`;
+}
+
+/* ── Inline popover on cell click ─────────────────────────────────── */
+function ssgCellClick(ev, matchId) {
+  ev.stopPropagation();
+  const match = _ssgState.matches.find(m => m.id === matchId);
+  if (!match) return;
+  const photos = _ssgState.photosByMatch.get(matchId) || [];
+  const pop = document.getElementById('ssCellPopover');
+
+  const home = match.home_team ? (match.home_team.team_number + ' ' + match.home_team.team_name) : '—';
+  const away = match.away_team ? (match.away_team.team_number + ' ' + match.away_team.team_name) : '—';
+
+  let body = `<div style="font-weight:800;font-size:0.92rem">Week ${match.week_number} · ${esc(match.scheduled_date)}</div>
+    <div style="color:var(--muted);font-size:0.78rem;margin-bottom:8px">${esc(home)} <span style="color:#9ca3af">vs</span> ${esc(away)}</div>`;
+  if (photos.length === 0) {
+    body += '<div style="color:var(--muted);font-size:0.82rem;padding:8px 0">No photos uploaded yet.</div>';
+  } else {
+    body += '<div style="display:grid;gap:8px">';
+    for (const p of photos) {
+      const url = SS_R2_URL + '/' + p.r2_path;
+      const sideLabel = p.side === 'single' ? 'Scoresheet' : (p.side.charAt(0).toUpperCase() + p.side.slice(1));
+      const sizeKB = p.bytes ? Math.round(p.bytes / 1024) + ' KB' : '';
+      body += `<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden">
+        <a href="${esc(url)}" target="_blank" rel="noopener">
+          <img src="${esc(url)}" style="display:block;width:100%;max-height:160px;object-fit:cover;background:#000">
+        </a>
+        <div style="padding:6px 8px;display:flex;align-items:center;justify-content:space-between;gap:6px">
+          <div style="font-size:0.74rem">
+            <strong>${esc(sideLabel)}</strong>
+            <span style="color:var(--muted)"> · ${esc(p.uploader_name || p.uploader_apa_number || '—')}</span>
+            ${sizeKB ? `<span style="color:var(--muted)"> · ${esc(sizeKB)}</span>` : ''}
+          </div>
+          <button class="btn btn-danger btn-sm" style="padding:3px 9px;font-size:0.72rem"
+            onclick="event.stopPropagation();ssgPopoverDelete(${p.id}, '${esc(p.r2_path)}', ${matchId})">Delete</button>
+        </div>
+      </div>`;
+    }
+    body += '</div>';
+  }
+  body += '<div style="display:flex;justify-content:flex-end;margin-top:8px"><button class="btn btn-outline btn-sm" onclick="ssCellPopoverClose()" style="padding:3px 10px;font-size:0.74rem">Close</button></div>';
+  pop.innerHTML = body;
+  pop.style.display = 'block';
+
+  // Position near the cell, clamped to viewport
+  const rect = ev.target.getBoundingClientRect();
+  const popRect = pop.getBoundingClientRect();
+  let left = window.scrollX + rect.left;
+  let top  = window.scrollY + rect.bottom + 6;
+  // Right-clamp
+  if (left + popRect.width > window.scrollX + window.innerWidth - 12) {
+    left = window.scrollX + window.innerWidth - popRect.width - 12;
+  }
+  pop.style.left = left + 'px';
+  pop.style.top  = top + 'px';
+}
+function ssCellPopoverClose() {
+  document.getElementById('ssCellPopover').style.display = 'none';
+}
+document.addEventListener('click', (e) => {
+  const pop = document.getElementById('ssCellPopover');
+  if (!pop || pop.style.display === 'none') return;
+  if (pop.contains(e.target)) return;
+  if (e.target.closest && e.target.closest('td[onclick]')) return;
+  ssCellPopoverClose();
+});
+async function ssgPopoverDelete(photoId, r2Path, matchId) {
+  if (!confirm('Delete this photo? Removes the DB row and the R2 object.')) return;
+  try {
+    const r = await fetch(SB_URL + '/rest/v1/photos?id=eq.' + photoId, {
+      method: 'DELETE',
+      headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Accept-Profile': 'papertrail' }
+    });
+    if (!r.ok) throw new Error('DB delete: ' + r.status);
+    try { await fetch(SS_R2_URL + '/' + r2Path, { method: 'DELETE' }); } catch (_) {}
+    ssCellPopoverClose();
+    ssgRenderGridForDivision(_ssgState.divisionId);
+  } catch (e) {
+    alert('Delete failed: ' + e.message);
+  }
+}
+window.ssgCellClick      = ssgCellClick;
+window.ssgPopoverDelete  = ssgPopoverDelete;
+window.ssCellPopoverClose = ssCellPopoverClose;
+
+/* ── Per-week ZIP download ────────────────────────────────────────── */
+let _jszipPromise = null;
+async function ensureJSZip() {
+  if (_jszipPromise) return _jszipPromise;
+  _jszipPromise = (async () => {
+    if (window.JSZip) return window.JSZip;
+    await new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js';
+      s.onload = res; s.onerror = () => rej(new Error('JSZip CDN load failed'));
+      document.head.appendChild(s);
+    });
+    return window.JSZip;
+  })();
+  return _jszipPromise;
+}
+
+function ssgSafe(s) {
+  return String(s || '').replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'x';
+}
+
+async function ssgDownloadWeek(weekNum) {
+  const div = _ssgState.divisions.find(d => d.id === _ssgState.divisionId);
+  if (!div) return;
+  const matches = _ssgState.matches.filter(m => m.row_type === 'regular' && m.week_number === weekNum);
+  // Collect (match, photo[]) for all matches with at least one photo
+  const queued = [];
+  for (const m of matches) {
+    const photos = _ssgState.photosByMatch.get(m.id) || [];
+    for (const p of photos) queued.push({ m, p });
+  }
+  if (queued.length === 0) {
+    alert('No photos uploaded for week ' + weekNum + ' yet.');
+    return;
+  }
+
+  setStatus('ssgStatus', 'Building ZIP (' + queued.length + ' photo' + (queued.length === 1 ? '' : 's') + ')…', '');
+  try {
+    const JSZip = await ensureJSZip();
+    const zip = new JSZip();
+    let fetched = 0;
+    for (const { m, p } of queued) {
+      const home = m.home_team ? ssgSafe(m.home_team.team_number + '-' + m.home_team.team_name) : 'unfilled';
+      const away = m.away_team ? ssgSafe(m.away_team.team_number + '-' + m.away_team.team_name) : 'unfilled';
+      const side = p.side === 'single' ? 'scoresheet' : p.side;
+      const name = home + '_vs_' + away + '_' + side + '.jpg';
+      const resp = await fetch(SS_R2_URL + '/' + p.r2_path);
+      if (!resp.ok) throw new Error('Fetch ' + p.r2_path + ': ' + resp.status);
+      zip.file(name, await resp.blob());
+      fetched++;
+      setStatus('ssgStatus', 'Building ZIP… (' + fetched + '/' + queued.length + ')', '');
+    }
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const url  = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = div.division_number + '-week-' + weekNum + '.zip';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    setStatus('ssgStatus', 'Downloaded ' + queued.length + ' photo' + (queued.length === 1 ? '' : 's') + ' for week ' + weekNum + '.', 'ok');
+    setTimeout(() => clearStatus('ssgStatus'), 2200);
+  } catch (e) {
+    setStatus('ssgStatus', 'ZIP failed: ' + e.message, 'err');
+  }
+}
+window.ssgDownloadWeek = ssgDownloadWeek;
 
 </script>
 </body>
