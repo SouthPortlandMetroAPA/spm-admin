@@ -929,6 +929,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="divisions">Divisions</button>
       <button class="tab active" data-tab="emailhq">Email HQ</button>
       <button class="tab" data-tab="spreports">SP Reports</button>
+      <button class="tab" data-tab="scoresheets">Scoresheets</button>
     </div>
 
     <div id="globalStatus" class="status-line"></div>
@@ -1372,6 +1373,41 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
     </div>
     <!-- ════════════════ /SP Reports ════════════════ -->
 
+    <!-- ══════════════════════════════════════════════════════════════
+         TAB: SCORESHEETS — view + delete PaperTrail photo uploads
+         ══════════════════════════════════════════════════════════════ -->
+    <div id="tab-scoresheets" class="tab-panel">
+      <div class="card">
+        <h2>PaperTrail scoresheets</h2>
+        <p class="hint" style="margin-bottom:10px">
+          Photos uploaded by captains via
+          <a href="https://southportlandmetroapa.github.io/papertrail/" target="_blank" rel="noopener" style="color:var(--spm-accent);font-weight:700">PaperTrail</a>
+          (Masters + Doubles only — SPM operator, current session). Click any thumbnail to view full-size; Delete removes both the DB row and the R2 object.
+        </p>
+        <div class="row" style="margin-bottom:10px">
+          <div>
+            <label for="ssDivFilter">Division</label>
+            <select id="ssDivFilter">
+              <option value="">All</option>
+            </select>
+          </div>
+          <div>
+            <label for="ssTeamFilter">Team</label>
+            <select id="ssTeamFilter">
+              <option value="">All</option>
+            </select>
+          </div>
+          <div style="display:flex;align-items:flex-end;justify-content:flex-end">
+            <button class="btn btn-outline btn-sm" onclick="renderScoresheetsTab()">Refresh</button>
+          </div>
+        </div>
+        <div id="ssStatus" class="status-line"></div>
+        <div id="ssSummary" style="font-size:0.8rem;color:var(--muted);margin-bottom:8px"></div>
+        <div id="ssGrid"></div>
+      </div>
+    </div>
+    <!-- ════════════════ /Scoresheets ════════════════ -->
+
   </div>
 
   <div class="footer" id="appFooter">Slate v0.1 · Phase 1 · Supabase-backed</div>
@@ -1387,7 +1423,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.31';
+const APP_VERSION = '3.32';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -2916,11 +2952,12 @@ async function init() {
 }
 
 const TAB_LABEL = {
-  sessions:  'Sessions',
-  uploads:   'Uploads',
-  divisions: 'Divisions',
-  emailhq:   'Email HQ',
-  spreports: 'SP Reports'
+  sessions:    'Sessions',
+  uploads:     'Uploads',
+  divisions:   'Divisions',
+  emailhq:     'Email HQ',
+  spreports:   'SP Reports',
+  scoresheets: 'Scoresheets'
 };
 
 function switchTab(name) {
@@ -2928,10 +2965,11 @@ function switchTab(name) {
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + name));
   const sub = document.getElementById('appSubpage');
   if (sub) sub.textContent = TAB_LABEL[name] || '';
-  if (name === 'emailhq') loadEmailHQ();
-  if (name === 'divisions') renderDivisionsTab();
-  if (name === 'uploads') loadReportStatus();
-  if (name === 'spreports') spOnEnterTab();
+  if (name === 'emailhq')     loadEmailHQ();
+  if (name === 'divisions')   renderDivisionsTab();
+  if (name === 'uploads')     loadReportStatus();
+  if (name === 'spreports')   spOnEnterTab();
+  if (name === 'scoresheets') renderScoresheetsTab();
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -7652,6 +7690,178 @@ async function spSaveOpProfile() {
 }
 
 window.spSaveOpProfile = spSaveOpProfile;
+
+/* ══════════════════════════════════════════════════════════════════════
+   SCORESHEETS TAB — view + delete PaperTrail photo uploads
+   ──────────────────────────────────────────────────────────────────
+   Reads papertrail.photos joined with slate.matches → teams → divisions,
+   filtered to the current session × SPM × PaperTrail formats. Click any
+   thumbnail to open the R2-served image in a new tab. Delete removes
+   both the DB row (papertrail.photos) AND the R2 object (best-effort).
+   ══════════════════════════════════════════════════════════════════════ */
+const SS_R2_URL = 'https://apa-photos.spmapa.workers.dev';
+let _ssRows = null;
+
+async function renderScoresheetsTab() {
+  const grid    = document.getElementById('ssGrid');
+  const status  = document.getElementById('ssStatus');
+  const summary = document.getElementById('ssSummary');
+  grid.innerHTML    = '';
+  summary.innerHTML = '';
+  setStatus('ssStatus', 'Loading…', '');
+  if (!currentSession) {
+    setStatus('ssStatus', 'No current session.', 'err');
+    return;
+  }
+  try {
+    // Get all PaperTrail-eligible divisions for current SPM session.
+    const divs = await sb('GET',
+      'divisions?select=id,division_number,name,format' +
+      '&session_id=eq.' + currentSession.id +
+      '&operator_id=eq.1' +
+      '&format=in.(Masters,8-Ball Doubles,9-Ball Doubles)' +
+      '&order=division_number');
+    if (!divs.length) {
+      setStatus('ssStatus', 'No SPM Masters/Doubles divisions in this session.', '');
+      return;
+    }
+    const divIds = divs.map(d => d.id);
+
+    // All matches for those divisions.
+    const matches = await sb('GET',
+      'matches?select=id,division_id,week_number,scheduled_date,home_team_id,away_team_id,row_type,' +
+      'home_team:teams!matches_home_team_id_fkey(id,team_number,team_name),' +
+      'away_team:teams!matches_away_team_id_fkey(id,team_number,team_name)' +
+      '&division_id=in.(' + divIds.join(',') + ')' +
+      '&row_type=eq.regular' +
+      '&order=division_id.asc,scheduled_date.asc,week_number.asc');
+    const matchById = new Map(matches.map(m => [m.id, m]));
+
+    // All photos for those matches — go cross-schema.
+    const matchIds = matches.map(m => m.id);
+    const photos = matchIds.length
+      ? await fetch(SB_URL + '/rest/v1/photos?select=id,match_id,side,r2_path,uploader_apa_number,uploader_name,uploaded_at,bytes' +
+          '&match_id=in.(' + matchIds.join(',') + ')' +
+          '&order=uploaded_at.desc',
+          { headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON, 'Accept-Profile': 'papertrail' } })
+        .then(r => r.ok ? r.json() : [])
+      : [];
+
+    const divById = new Map(divs.map(d => [d.id, d]));
+    _ssRows = photos.map(p => {
+      const m = matchById.get(p.match_id);
+      const d = m ? divById.get(m.division_id) : null;
+      return { photo: p, match: m, division: d };
+    }).filter(r => r.match && r.division);
+
+    // Populate filters
+    const divSel = document.getElementById('ssDivFilter');
+    divSel.innerHTML = '<option value="">All</option>' +
+      divs.map(d => `<option value="${d.id}">${esc(d.division_number)} — ${esc(d.name)}</option>`).join('');
+    divSel.onchange = () => { renderScoresheetsGrid(); };
+
+    const teamSel = document.getElementById('ssTeamFilter');
+    // build set of all teams that appear in matches
+    const teamMap = new Map();
+    for (const m of matches) {
+      if (m.home_team) teamMap.set(m.home_team.id, m.home_team);
+      if (m.away_team) teamMap.set(m.away_team.id, m.away_team);
+    }
+    const teamSorted = [...teamMap.values()].sort((a,b) => a.team_number.localeCompare(b.team_number));
+    teamSel.innerHTML = '<option value="">All</option>' +
+      teamSorted.map(t => `<option value="${t.id}">${esc(t.team_number)} — ${esc(t.team_name)}</option>`).join('');
+    teamSel.onchange = () => { renderScoresheetsGrid(); };
+
+    clearStatus('ssStatus');
+    renderScoresheetsGrid();
+  } catch (e) {
+    setStatus('ssStatus', 'Failed: ' + e.message, 'err');
+  }
+}
+
+function renderScoresheetsGrid() {
+  if (!_ssRows) return;
+  const grid    = document.getElementById('ssGrid');
+  const summary = document.getElementById('ssSummary');
+  const divFilter  = document.getElementById('ssDivFilter').value;
+  const teamFilter = document.getElementById('ssTeamFilter').value;
+  const rows = _ssRows.filter(r => {
+    if (divFilter && String(r.division.id) !== divFilter) return false;
+    if (teamFilter) {
+      const tid = String(teamFilter);
+      if (String(r.match.home_team_id) !== tid && String(r.match.away_team_id) !== tid) return false;
+    }
+    return true;
+  });
+  summary.textContent = rows.length + ' photo' + (rows.length === 1 ? '' : 's') + ' shown.';
+  if (!rows.length) {
+    grid.innerHTML = '<p class="hint" style="margin-top:8px">No uploaded scoresheets match these filters yet.</p>';
+    return;
+  }
+  // Group by (division, team_id-the-uploader-is-from doesn't exist, so group by division)
+  // and render rows as cards.
+  const byDiv = new Map();
+  for (const r of rows) {
+    if (!byDiv.has(r.division.id)) byDiv.set(r.division.id, []);
+    byDiv.get(r.division.id).push(r);
+  }
+  let html = '';
+  for (const [divId, rs] of byDiv) {
+    const d = rs[0].division;
+    html += `<div style="margin-top:16px"><h3 style="font-size:0.95rem;font-weight:800;margin:0 0 8px;color:var(--spm-accent)">
+      ${esc(d.division_number)} — ${esc(d.name)} <span style="color:var(--muted);font-weight:600">· ${esc(d.format)} · ${rs.length} photo${rs.length === 1 ? '' : 's'}</span>
+    </h3>`;
+    html += '<div style="display:grid;gap:8px">';
+    for (const r of rs) {
+      const m = r.match;
+      const p = r.photo;
+      const photoUrl = SS_R2_URL + '/' + r.photo.r2_path;
+      const sideLabel = p.side === 'single' ? 'Scoresheet' : (p.side.charAt(0).toUpperCase() + p.side.slice(1));
+      const home = m.home_team ? `${m.home_team.team_number} ${m.home_team.team_name}` : '(unfilled)';
+      const away = m.away_team ? `${m.away_team.team_number} ${m.away_team.team_name}` : '(unfilled)';
+      const sizeKB = p.bytes ? Math.round(p.bytes / 1024) + ' KB' : '';
+      html += `<div style="display:flex;gap:10px;align-items:center;border:1px solid var(--border);border-radius:10px;padding:8px;background:#fff">
+        <a href="${esc(photoUrl)}" target="_blank" rel="noopener" style="flex-shrink:0">
+          <img src="${esc(photoUrl)}" style="width:64px;height:64px;object-fit:cover;border-radius:6px;background:#000" alt="">
+        </a>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:700;font-size:0.9rem">Week ${m.week_number} · ${esc(home)} <span style="color:var(--muted)">vs</span> ${esc(away)}</div>
+          <div style="font-size:0.78rem;color:var(--muted);margin-top:2px">
+            ${esc(m.scheduled_date)} · <strong>${esc(sideLabel)}</strong> · uploaded by ${esc(p.uploader_name || p.uploader_apa_number || '—')} · ${esc(new Date(p.uploaded_at).toLocaleString())} ${sizeKB ? '· ' + esc(sizeKB) : ''}
+          </div>
+        </div>
+        <div style="display:flex;gap:6px;flex-shrink:0">
+          <a class="btn btn-outline btn-sm" href="${esc(photoUrl)}" target="_blank" rel="noopener">Open</a>
+          <button class="btn btn-danger btn-sm" onclick="ssDeletePhoto(${p.id}, '${esc(p.r2_path)}')">Delete</button>
+        </div>
+      </div>`;
+    }
+    html += '</div></div>';
+  }
+  grid.innerHTML = html;
+}
+
+async function ssDeletePhoto(photoId, r2Path) {
+  if (!confirm('Delete this scoresheet photo? Removes both the DB row and the R2 object. Captain will have to re-upload.')) return;
+  setStatus('ssStatus', 'Deleting…', '');
+  try {
+    // Delete via service_role (so RLS isn't relevant), cross-schema.
+    const r = await fetch(SB_URL + '/rest/v1/photos?id=eq.' + photoId, {
+      method: 'DELETE',
+      headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Accept-Profile': 'papertrail' }
+    });
+    if (!r.ok) throw new Error('DB delete: ' + r.status);
+    // Best-effort R2 cleanup
+    try { await fetch(SS_R2_URL + '/' + r2Path, { method: 'DELETE' }); } catch (_) {}
+    setStatus('ssStatus', 'Deleted.', 'ok');
+    setTimeout(() => clearStatus('ssStatus'), 1800);
+    renderScoresheetsTab();
+  } catch (e) {
+    setStatus('ssStatus', 'Delete failed: ' + e.message, 'err');
+  }
+}
+window.ssDeletePhoto = ssDeletePhoto;
+
 </script>
 </body>
 </html>
