@@ -1454,7 +1454,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.33';
+const APP_VERSION = '3.34';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -7803,7 +7803,7 @@ async function renderScoresheetsTab() {
       teamSorted.map(t => `<option value="${t.id}">${esc(t.team_number)} — ${esc(t.team_name)}</option>`).join('');
     teamSel.onchange = () => { renderScoresheetsGrid(); };
 
-    clearStatus('ssStatus');
+    setStatus('ssStatus', '', '');
     renderScoresheetsGrid();
   } catch (e) {
     setStatus('ssStatus', 'Failed: ' + e.message, 'err');
@@ -7885,7 +7885,7 @@ async function ssDeletePhoto(photoId, r2Path) {
     // Best-effort R2 cleanup
     try { await fetch(SS_R2_URL + '/' + r2Path, { method: 'DELETE' }); } catch (_) {}
     setStatus('ssStatus', 'Deleted.', 'ok');
-    setTimeout(() => clearStatus('ssStatus'), 1800);
+    setTimeout(() => setStatus('ssStatus', '', ''), 1800);
     renderScoresheetsTab();
   } catch (e) {
     setStatus('ssStatus', 'Delete failed: ' + e.message, 'err');
@@ -7969,7 +7969,7 @@ async function renderScoresheetsGridView() {
       setStatus('ssgStatus', 'No SPM Masters/Doubles divisions in this session.', '');
       return;
     }
-    clearStatus('ssgStatus');
+    setStatus('ssgStatus', '', '');
     ssgRenderGridForDivision(parseInt(sel.value, 10));
   } catch (e) {
     setStatus('ssgStatus', 'Failed: ' + e.message, 'err');
@@ -8272,7 +8272,7 @@ async function ssgDownloadWeek(weekNum) {
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 5000);
     setStatus('ssgStatus', 'Downloaded ' + queued.length + ' photo' + (queued.length === 1 ? '' : 's') + ' for week ' + weekNum + '.', 'ok');
-    setTimeout(() => clearStatus('ssgStatus'), 2200);
+    setTimeout(() => setStatus('ssgStatus', '', ''), 2200);
   } catch (e) {
     setStatus('ssgStatus', 'ZIP failed: ' + e.message, 'err');
   }
