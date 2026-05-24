@@ -930,6 +930,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab active" data-tab="emailhq">Email HQ</button>
       <button class="tab" data-tab="spreports">SP Reports</button>
       <button class="tab" data-tab="scoresheets">Scoresheets</button>
+      <button class="tab" data-tab="playoffs">Playoffs</button>
     </div>
 
     <div id="globalStatus" class="status-line"></div>
@@ -1456,6 +1457,35 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         <div id="ssCellPopover" style="display:none;position:absolute;z-index:50;background:#fff;border:1px solid var(--border-strong);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.15);padding:12px;min-width:260px;max-width:340px"></div>
       </div>
     </div>
+
+    <!-- ══════════════════════════════════════════════════════════════
+         TAB: PLAYOFFS — "show your work" breakdown of advancement math
+         ══════════════════════════════════════════════════════════════ -->
+    <div id="tab-playoffs" class="tab-panel">
+      <div class="card">
+        <h2>Tri-Annual advancement math</h2>
+        <p class="hint" style="margin-bottom:10px">
+          Per-division breakdown of teams advancing to Tri-Annuals for
+          the selected session. Counts come from <code>slate.teams</code>
+          (the actual roster), not <code>slate.divisions.num_teams</code>
+          (which includes the TBA placeholder). 8-Ball Open and 9-Ball
+          Open only — Doubles, Ladies, and Masters have their own
+          separate playoffs.
+        </p>
+        <div class="row" style="margin-bottom:10px">
+          <div>
+            <label for="poSessionSelect">Session</label>
+            <select id="poSessionSelect"></select>
+          </div>
+          <div style="display:flex;align-items:flex-end;justify-content:flex-end">
+            <button class="btn btn-outline btn-sm" onclick="renderPlayoffsTab()">Refresh</button>
+          </div>
+        </div>
+        <div id="poStatus" class="status-line"></div>
+        <div id="poTables"></div>
+      </div>
+    </div>
+    <!-- ════════════════ /Playoffs ════════════════ -->
     <!-- ════════════════ /Scoresheets ════════════════ -->
 
   </div>
@@ -1473,7 +1503,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.36';
+const APP_VERSION = '3.37';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -3007,7 +3037,8 @@ const TAB_LABEL = {
   divisions:   'Divisions',
   emailhq:     'Email HQ',
   spreports:   'SP Reports',
-  scoresheets: 'Scoresheets'
+  scoresheets: 'Scoresheets',
+  playoffs:    'Playoffs'
 };
 
 function switchTab(name) {
@@ -3020,6 +3051,7 @@ function switchTab(name) {
   if (name === 'uploads')     loadReportStatus();
   if (name === 'spreports')   spOnEnterTab();
   if (name === 'scoresheets') { ssBindViewToggle(); renderScoresheetsGridView(); }
+  if (name === 'playoffs')    renderPlayoffsTab();
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -8425,6 +8457,149 @@ async function ssgDownloadWeek(weekNum) {
   }
 }
 window.ssgDownloadWeek = ssgDownloadWeek;
+
+/* ══════════════════════════════════════════════════════════════════════
+   PLAYOFFS TAB — "show your work" advancement breakdown
+   ──────────────────────────────────────────────────────────────────
+   Two side-by-side tables (8-Ball Open / 9-Ball Open), one row per
+   division with: division #, name, # of teams (from slate.teams, NOT
+   slate.divisions.num_teams), the matched rule's qualify + playoffs,
+   and the per-division total. Footer row sums each column.
+
+   Uses slate.triannual_lookup RPC for the rule lookup. Default session
+   is the current one; admin can switch via the dropdown to inspect any
+   session's math (great for sanity-checking a re-imported roster).
+   ══════════════════════════════════════════════════════════════════════ */
+let _poSessions = null;
+
+async function renderPlayoffsTab() {
+  setStatus('poStatus', 'Loading…', '');
+  try {
+    // Sessions dropdown (once)
+    if (!_poSessions) {
+      _poSessions = await sb('GET', 'sessions?select=id,name,is_current&order=start_date.desc.nullslast');
+    }
+    const sel = document.getElementById('poSessionSelect');
+    if (!sel.options.length) {
+      sel.innerHTML = _poSessions.map(s =>
+        `<option value="${s.id}"${s.is_current ? ' selected' : ''}>${esc(s.name)}${s.is_current ? ' (current)' : ''}</option>`
+      ).join('');
+      sel.onchange = renderPlayoffsTab;
+    }
+    const sessionId = parseInt(sel.value, 10) ||
+      (currentSession && currentSession.id) ||
+      (_poSessions[0] && _poSessions[0].id);
+    if (!sessionId) {
+      setStatus('poStatus', 'No session selected.', 'err');
+      return;
+    }
+
+    // Open divisions for this session (SPM only)
+    const divs = await sb('GET',
+      'divisions?select=id,division_number,name,format' +
+      '&session_id=eq.' + sessionId +
+      '&operator_id=eq.1' +
+      '&format=in.(8-Ball Open,9-Ball Open)' +
+      '&order=division_number');
+
+    if (!divs.length) {
+      document.getElementById('poTables').innerHTML =
+        '<p class="hint">No 8-Ball Open or 9-Ball Open divisions in this session.</p>';
+      setStatus('poStatus', '', '');
+      return;
+    }
+
+    // Actual roster counts from slate.teams
+    const divIds = divs.map(d => d.id);
+    const teamRows = await sb('GET',
+      'teams?select=division_id&division_id=in.(' + divIds.join(',') + ')');
+    const teamsByDiv = new Map();
+    for (const t of teamRows) {
+      teamsByDiv.set(t.division_id, (teamsByDiv.get(t.division_id) || 0) + 1);
+    }
+
+    // Look up advancement rules for the unique team counts that appear
+    const uniqueCounts = [...new Set(divs.map(d => teamsByDiv.get(d.id) || 0))].filter(n => n > 0);
+    const ruleByCount = new Map();   // count → { rule_min_size, qualify, playoffs, total }
+    for (const n of uniqueCounts) {
+      const r = await fetch(SB_URL + '/rest/v1/rpc/triannual_lookup', {
+        method: 'POST',
+        headers: { ...HEADERS_READ, 'Content-Type': 'application/json', 'Content-Profile': 'slate', Prefer: 'return=representation' },
+        body: JSON.stringify({ p_num_teams: n })
+      }).then(r => r.ok ? r.json() : []);
+      if (r[0]) ruleByCount.set(n, r[0]);
+    }
+
+    const eight = divs.filter(d => d.format === '8-Ball Open');
+    const nine  = divs.filter(d => d.format === '9-Ball Open');
+
+    document.getElementById('poTables').innerHTML =
+      poBuildTable('8-Ball Open', eight, teamsByDiv, ruleByCount) +
+      poBuildTable('9-Ball Open', nine,  teamsByDiv, ruleByCount);
+    setStatus('poStatus', '', '');
+  } catch (e) {
+    setStatus('poStatus', 'Failed: ' + e.message, 'err');
+  }
+}
+
+function poBuildTable(title, divs, teamsByDiv, ruleByCount) {
+  let totalTeams = 0, totalQualify = 0, totalPlayoffs = 0, totalAdvance = 0;
+  let rowsHtml = '';
+  for (const d of divs) {
+    const n   = teamsByDiv.get(d.id) || 0;
+    const r   = n > 0 ? ruleByCount.get(n) : null;
+    const q   = r ? r.qualify  : 0;
+    const p   = r ? r.playoffs : 0;
+    const tot = q + p;
+    totalTeams    += n;
+    totalQualify  += q;
+    totalPlayoffs += p;
+    totalAdvance  += tot;
+
+    const ruleLabel = r ? (r.rule_min_size + '-team rule') : (n === 0 ? '— no roster —' : 'no rule');
+    const warn = n === 0
+      ? ' style="color:var(--muted);font-style:italic"'
+      : (!r ? ' style="color:var(--danger)"' : '');
+
+    rowsHtml += `<tr${warn}>
+      <td style="font-weight:700;color:var(--spm-accent)">${esc(d.division_number)}</td>
+      <td>${esc(d.name)}</td>
+      <td style="text-align:center;font-weight:700">${n || '—'}</td>
+      <td style="text-align:center;font-size:0.78rem;color:var(--muted)">${esc(ruleLabel)}</td>
+      <td style="text-align:center">${q || (r ? 0 : '—')}</td>
+      <td style="text-align:center">${p || (r ? 0 : '—')}</td>
+      <td style="text-align:center;font-weight:800;color:var(--spm-accent)">${tot || (r ? 0 : '—')}</td>
+    </tr>`;
+  }
+  return `<div style="margin-top:14px">
+    <h3 style="font-size:0.95rem;font-weight:800;color:var(--spm-accent);margin:0 0 8px">${esc(title)}</h3>
+    <table style="width:100%;border-collapse:collapse;font-size:0.86rem;background:#fff">
+      <thead>
+        <tr style="background:#f9fafb">
+          <th style="text-align:left;padding:8px;border-bottom:2px solid var(--border);width:70px">Div #</th>
+          <th style="text-align:left;padding:8px;border-bottom:2px solid var(--border)">Name</th>
+          <th style="text-align:center;padding:8px;border-bottom:2px solid var(--border);width:64px">Teams</th>
+          <th style="text-align:center;padding:8px;border-bottom:2px solid var(--border);width:100px">Rule</th>
+          <th style="text-align:center;padding:8px;border-bottom:2px solid var(--border);width:64px">Qualify</th>
+          <th style="text-align:center;padding:8px;border-bottom:2px solid var(--border);width:64px">Playoff</th>
+          <th style="text-align:center;padding:8px;border-bottom:2px solid var(--border);width:64px">Total</th>
+        </tr>
+      </thead>
+      <tbody>${rowsHtml}</tbody>
+      <tfoot>
+        <tr style="background:#eff6ff;font-weight:800">
+          <td colspan="2" style="padding:10px 8px;border-top:2px solid var(--border-strong);text-align:right">TOTAL</td>
+          <td style="text-align:center;padding:10px 8px;border-top:2px solid var(--border-strong)">${totalTeams}</td>
+          <td style="border-top:2px solid var(--border-strong)"></td>
+          <td style="text-align:center;padding:10px 8px;border-top:2px solid var(--border-strong)">${totalQualify}</td>
+          <td style="text-align:center;padding:10px 8px;border-top:2px solid var(--border-strong)">${totalPlayoffs}</td>
+          <td style="text-align:center;padding:10px 8px;border-top:2px solid var(--border-strong);color:var(--spm-accent);font-size:1.05rem">${totalAdvance}</td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>`;
+}
+window.renderPlayoffsTab = renderPlayoffsTab;
 
 </script>
 </body>
