@@ -1454,7 +1454,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.34';
+const APP_VERSION = '3.35';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -7998,16 +7998,26 @@ async function ssgRenderGridForDivision(divisionId) {
     const matchIds = matches.map(m => m.id);
     let photos = [];
     if (matchIds.length) {
-      const r = await fetch(SB_URL + '/rest/v1/photos?select=id,match_id,side,r2_path,uploader_name,uploader_apa_number,uploaded_at,bytes' +
+      // Per-team photos: each (match, team, side) is its own row.
+      const r = await fetch(SB_URL + '/rest/v1/photos?select=id,match_id,team_id,side,r2_path,uploader_name,uploader_apa_number,uploaded_at,bytes' +
         '&match_id=in.(' + matchIds.join(',') + ')',
         { headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON, 'Accept-Profile': 'papertrail' } });
       photos = r.ok ? await r.json() : [];
     }
+    // Index by (match_id, team_id) so each cell can ask "did THIS team upload?"
+    const photosByMatchTeam = new Map();  // key = matchId + ':' + teamId
+    for (const p of photos) {
+      const k = p.match_id + ':' + p.team_id;
+      if (!photosByMatchTeam.has(k)) photosByMatchTeam.set(k, []);
+      photosByMatchTeam.get(k).push(p);
+    }
+    // Keep the by-match map too for the popover and the Photos view.
     const photosByMatch = new Map();
     for (const p of photos) {
       if (!photosByMatch.has(p.match_id)) photosByMatch.set(p.match_id, []);
       photosByMatch.get(p.match_id).push(p);
     }
+    _ssgState.photosByMatchTeam = photosByMatchTeam;
 
     _ssgState.teams = teams;
     _ssgState.matches = matches;
@@ -8044,7 +8054,8 @@ async function ssgRenderGridForDivision(divisionId) {
 }
 
 function ssgCellState(team, col, fmt) {
-  // Find the match for this (team, col)
+  // Find the match for this (team, col). Cell is now scoped to a SINGLE
+  // team — only THIS team's uploaded photos count for the ✓.
   let match = null;
   if (col.type === 'regular') {
     match = _ssgState.matches.find(m =>
@@ -8053,12 +8064,12 @@ function ssgCellState(team, col, fmt) {
     if (!match) return { state: 'dash', tip: 'No match scheduled' };
     if (!match.home_team_id || !match.away_team_id) return { state: 'dash', tip: 'BYE (opponent unfilled)', match };
     const required = SSG_FORMATS[fmt].sides;
-    const photos = _ssgState.photosByMatch.get(match.id) || [];
+    const photos = _ssgState.photosByMatchTeam.get(match.id + ':' + team.id) || [];
     const have = new Set(photos.map(p => p.side));
     const haveCount = required.filter(s => have.has(s)).length;
-    if (haveCount === required.length) return { state: 'ok',  tip: 'Uploaded', match, photos };
-    if (haveCount > 0)                  return { state: 'partial', tip: haveCount + '/' + required.length + ' uploaded', match, photos };
-    return { state: 'bad', tip: 'Missing scoresheet', match, photos: [] };
+    if (haveCount === required.length) return { state: 'ok',  tip: 'Uploaded', match, photos, team };
+    if (haveCount > 0)                  return { state: 'partial', tip: haveCount + '/' + required.length + ' uploaded', match, photos, team };
+    return { state: 'bad', tip: 'Missing scoresheet (this team)', match, photos: [], team };
   }
   return { state: 'dash', tip: col.label };  // playoff / no_play
 }
@@ -8115,7 +8126,7 @@ function ssgRenderGridDom(div) {
       })[s.state];
       const sym = ({ ok: '✓', bad: '✗', partial: '⚠', dash: '—' })[s.state];
       const click = s.match
-        ? `onclick="ssgCellClick(event, ${s.match.id})"`
+        ? `onclick="ssgCellClick(event, ${s.match.id}, ${t.id})"`
         : '';
       bodyHtml += `<td style="${baseStyle};${stateStyle}" title="${esc(s.tip)}" ${click}>${sym}</td>`;
     }
@@ -8130,20 +8141,26 @@ function ssgRenderGridDom(div) {
 }
 
 /* ── Inline popover on cell click ─────────────────────────────────── */
-function ssgCellClick(ev, matchId) {
+function ssgCellClick(ev, matchId, teamId) {
   ev.stopPropagation();
   const match = _ssgState.matches.find(m => m.id === matchId);
   if (!match) return;
-  const photos = _ssgState.photosByMatch.get(matchId) || [];
+  const team = _ssgState.teams.find(t => t.id === teamId);
+  // Per-team scoping: popover shows only this team's photos. To see the
+  // opponent's, click the opponent's cell in the same column.
+  const photos = _ssgState.photosByMatchTeam.get(matchId + ':' + teamId) || [];
   const pop = document.getElementById('ssCellPopover');
 
   const home = match.home_team ? (match.home_team.team_number + ' ' + match.home_team.team_name) : '—';
   const away = match.away_team ? (match.away_team.team_number + ' ' + match.away_team.team_name) : '—';
+  const teamLabel = team ? (team.team_number + ' ' + team.team_name) : '—';
+  const role = match.home_team_id === teamId ? 'HOME' : (match.away_team_id === teamId ? 'AWAY' : '');
 
   let body = `<div style="font-weight:800;font-size:0.92rem">Week ${match.week_number} · ${esc(match.scheduled_date)}</div>
-    <div style="color:var(--muted);font-size:0.78rem;margin-bottom:8px">${esc(home)} <span style="color:#9ca3af">vs</span> ${esc(away)}</div>`;
+    <div style="color:var(--muted);font-size:0.78rem;margin-bottom:6px">${esc(home)} <span style="color:#9ca3af">vs</span> ${esc(away)}</div>
+    <div style="font-size:0.78rem;color:var(--spm-accent);font-weight:700;margin-bottom:8px">${esc(role)} &middot; ${esc(teamLabel)}</div>`;
   if (photos.length === 0) {
-    body += '<div style="color:var(--muted);font-size:0.82rem;padding:8px 0">No photos uploaded yet.</div>';
+    body += '<div style="color:var(--muted);font-size:0.82rem;padding:8px 0">This team hasn\'t uploaded yet.</div>';
   } else {
     body += '<div style="display:grid;gap:8px">';
     for (const p of photos) {
@@ -8161,7 +8178,7 @@ function ssgCellClick(ev, matchId) {
             ${sizeKB ? `<span style="color:var(--muted)"> · ${esc(sizeKB)}</span>` : ''}
           </div>
           <button class="btn btn-danger btn-sm" style="padding:3px 9px;font-size:0.72rem"
-            onclick="event.stopPropagation();ssgPopoverDelete(${p.id}, '${esc(p.r2_path)}', ${matchId})">Delete</button>
+            onclick="event.stopPropagation();ssgPopoverDelete(${p.id}, '${esc(p.r2_path)}', ${matchId}, ${teamId})">Delete</button>
         </div>
       </div>`;
     }
@@ -8193,7 +8210,7 @@ document.addEventListener('click', (e) => {
   if (e.target.closest && e.target.closest('td[onclick]')) return;
   ssCellPopoverClose();
 });
-async function ssgPopoverDelete(photoId, r2Path, matchId) {
+async function ssgPopoverDelete(photoId, r2Path, matchId, teamId) {
   if (!confirm('Delete this photo? Removes the DB row and the R2 object.')) return;
   try {
     const r = await fetch(SB_URL + '/rest/v1/photos?id=eq.' + photoId, {
@@ -8237,11 +8254,16 @@ async function ssgDownloadWeek(weekNum) {
   const div = _ssgState.divisions.find(d => d.id === _ssgState.divisionId);
   if (!div) return;
   const matches = _ssgState.matches.filter(m => m.row_type === 'regular' && m.week_number === weekNum);
-  // Collect (match, photo[]) for all matches with at least one photo
+  // Per-team: include both teams' uploads for each match. Filenames
+  // carry the uploading team's number so admin can tell home vs away
+  // submissions apart.
+  const teamById = new Map(_ssgState.teams.map(t => [t.id, t]));
   const queued = [];
   for (const m of matches) {
-    const photos = _ssgState.photosByMatch.get(m.id) || [];
-    for (const p of photos) queued.push({ m, p });
+    for (const t of _ssgState.teams) {
+      const photos = _ssgState.photosByMatchTeam.get(m.id + ':' + t.id) || [];
+      for (const p of photos) queued.push({ m, p, team: t });
+    }
   }
   if (queued.length === 0) {
     alert('No photos uploaded for week ' + weekNum + ' yet.');
@@ -8253,11 +8275,13 @@ async function ssgDownloadWeek(weekNum) {
     const JSZip = await ensureJSZip();
     const zip = new JSZip();
     let fetched = 0;
-    for (const { m, p } of queued) {
+    for (const { m, p, team } of queued) {
       const home = m.home_team ? ssgSafe(m.home_team.team_number + '-' + m.home_team.team_name) : 'unfilled';
       const away = m.away_team ? ssgSafe(m.away_team.team_number + '-' + m.away_team.team_name) : 'unfilled';
       const side = p.side === 'single' ? 'scoresheet' : p.side;
-      const name = home + '_vs_' + away + '_' + side + '.jpg';
+      const uploader = ssgSafe(team.team_number);
+      // Filename: <home>_vs_<away>__by-<uploader>_<side>.jpg
+      const name = home + '_vs_' + away + '__by-' + uploader + '_' + side + '.jpg';
       const resp = await fetch(SS_R2_URL + '/' + p.r2_path);
       if (!resp.ok) throw new Error('Fetch ' + p.r2_path + ': ' + resp.status);
       zip.file(name, await resp.blob());
