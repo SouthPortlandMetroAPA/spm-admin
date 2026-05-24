@@ -1466,13 +1466,17 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         <h2>Tri-Annual advancement math</h2>
         <p class="hint" style="margin-bottom:10px">
           Per-division breakdown of teams advancing to Tri-Annuals for
-          the selected session. Counts come from <code>slate.teams</code>
-          (the actual roster), not <code>slate.divisions.num_teams</code>
-          (which includes the TBA placeholder). 8-Ball Open and 9-Ball
-          Open only — Doubles, Ladies, and Masters have their own
-          separate playoffs.
+          the selected session and operator. Counts come from
+          <code>slate.teams</code> (the actual roster), not
+          <code>slate.divisions.num_teams</code> (which includes the TBA
+          placeholder). 8-Ball Open and 9-Ball Open only — Doubles,
+          Ladies, and Masters have their own separate playoffs.
         </p>
         <div class="row" style="margin-bottom:10px">
+          <div>
+            <label for="poOperatorSelect">Operator</label>
+            <select id="poOperatorSelect"></select>
+          </div>
           <div>
             <label for="poSessionSelect">Session</label>
             <select id="poSessionSelect"></select>
@@ -1503,7 +1507,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.37';
+const APP_VERSION = '3.38';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -8471,10 +8475,24 @@ window.ssgDownloadWeek = ssgDownloadWeek;
    session's math (great for sanity-checking a re-imported roster).
    ══════════════════════════════════════════════════════════════════════ */
 let _poSessions = null;
+let _poOperators = null;
 
 async function renderPlayoffsTab() {
   setStatus('poStatus', 'Loading…', '');
   try {
+    // Operators dropdown (once)
+    if (!_poOperators) {
+      _poOperators = await sb('GET', 'operators?select=id,name,short_code&order=id');
+    }
+    const opSel = document.getElementById('poOperatorSelect');
+    if (!opSel.options.length) {
+      opSel.innerHTML = _poOperators.map(o =>
+        `<option value="${o.id}"${o.id === 1 ? ' selected' : ''}>${esc(o.short_code || o.name)} — ${esc(o.name)}</option>`
+      ).join('');
+      opSel.onchange = renderPlayoffsTab;
+    }
+    const operatorId = parseInt(opSel.value, 10) || 1;
+
     // Sessions dropdown (once)
     if (!_poSessions) {
       _poSessions = await sb('GET', 'sessions?select=id,name,is_current&order=start_date.desc.nullslast');
@@ -8494,17 +8512,18 @@ async function renderPlayoffsTab() {
       return;
     }
 
-    // Open divisions for this session (SPM only)
+    // Open divisions for this session + operator
     const divs = await sb('GET',
       'divisions?select=id,division_number,name,format' +
       '&session_id=eq.' + sessionId +
-      '&operator_id=eq.1' +
+      '&operator_id=eq.' + operatorId +
       '&format=in.(8-Ball Open,9-Ball Open)' +
       '&order=division_number');
 
     if (!divs.length) {
+      const opName = (_poOperators.find(o => o.id === operatorId) || {}).short_code || 'this operator';
       document.getElementById('poTables').innerHTML =
-        '<p class="hint">No 8-Ball Open or 9-Ball Open divisions in this session.</p>';
+        '<p class="hint">No 8-Ball Open or 9-Ball Open divisions for ' + esc(opName) + ' in this session.</p>';
       setStatus('poStatus', '', '');
       return;
     }
