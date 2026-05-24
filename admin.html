@@ -1405,6 +1405,25 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
               <button class="btn btn-outline btn-sm" onclick="renderScoresheetsGridView()">Refresh</button>
             </div>
           </div>
+
+          <!-- Download form: division (above) + week + ZIP button ──── -->
+          <div class="card" style="background:#f9fafb;border:1px solid var(--border);padding:12px 14px;margin-bottom:12px;border-radius:10px">
+            <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px">
+              <div style="flex:0 0 auto">
+                <label style="font-size:0.72rem;font-weight:800;color:var(--spm-accent);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;display:block">Download</label>
+                <div style="font-size:0.82rem;color:var(--muted);font-weight:600">All scoresheet photos for the selected division, packaged as a ZIP file.</div>
+              </div>
+              <div style="flex:1 1 160px;min-width:140px">
+                <label for="ssgWeekSelect" style="font-size:0.72rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;display:block">Week</label>
+                <select id="ssgWeekSelect" style="width:100%"></select>
+              </div>
+              <div style="flex:0 0 auto;display:flex;align-items:flex-end;gap:6px">
+                <button class="btn btn-primary" id="ssgDownloadBtn" onclick="ssgDownloadFromPicker()" style="white-space:nowrap">⤓ Download ZIP</button>
+              </div>
+            </div>
+            <div id="ssgDownloadInfo" style="font-size:0.78rem;color:var(--muted);margin-top:8px"></div>
+          </div>
+
           <div id="ssgStatus" class="status-line"></div>
           <div id="ssgGrid" style="overflow-x:auto"></div>
         </div>
@@ -1454,7 +1473,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.35';
+const APP_VERSION = '3.36';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -8047,6 +8066,25 @@ async function ssgRenderGridForDivision(divisionId) {
     }
     _ssgState.weeks = colKeys.map(k => ({ key: k, ...colMap.get(k) }));
 
+    // Populate the download form's week dropdown (regular weeks only,
+    // plus an "All weeks" option). Also refresh the info line so admin
+    // sees photo count at a glance.
+    const wkSel = document.getElementById('ssgWeekSelect');
+    if (wkSel) {
+      const regularWeeks = _ssgState.weeks.filter(c => c.type === 'regular');
+      const prevVal = wkSel.value;
+      wkSel.innerHTML =
+        '<option value="all">All weeks (whole division)</option>' +
+        regularWeeks.map(c => {
+          const dateStr = c.date ? ' · ' + c.date : '';
+          return `<option value="${c.weekNum}">Week ${c.weekNum}${dateStr}</option>`;
+        }).join('');
+      // Try to preserve previous selection if it still exists
+      if (prevVal && [...wkSel.options].find(o => o.value === prevVal)) wkSel.value = prevVal;
+      wkSel.onchange = ssgUpdateDownloadInfo;
+    }
+    ssgUpdateDownloadInfo();
+
     ssgRenderGridDom(div);
   } catch (e) {
     gridEl.innerHTML = '<div class="status-line err">Failed: ' + esc(e.message) + '</div>';
@@ -8249,6 +8287,91 @@ async function ensureJSZip() {
 function ssgSafe(s) {
   return String(s || '').replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'x';
 }
+
+/* Count uploaded photos for a given selection (week number or 'all'). */
+function ssgPhotoCountFor(weekSel) {
+  if (!_ssgState.matches.length) return 0;
+  const matches = weekSel === 'all'
+    ? _ssgState.matches.filter(m => m.row_type === 'regular')
+    : _ssgState.matches.filter(m => m.row_type === 'regular' && m.week_number === parseInt(weekSel, 10));
+  let n = 0;
+  for (const m of matches) {
+    for (const t of _ssgState.teams) {
+      n += (_ssgState.photosByMatchTeam.get(m.id + ':' + t.id) || []).length;
+    }
+  }
+  return n;
+}
+
+function ssgUpdateDownloadInfo() {
+  const info = document.getElementById('ssgDownloadInfo');
+  const sel  = document.getElementById('ssgWeekSelect');
+  if (!info || !sel) return;
+  const val = sel.value;
+  const div = _ssgState.divisions.find(d => d.id === _ssgState.divisionId);
+  if (!div) { info.textContent = ''; return; }
+  const n = ssgPhotoCountFor(val);
+  const wkLabel = val === 'all' ? 'all weeks' : 'week ' + val;
+  info.textContent = `${esc(div.division_number)} — ${esc(div.name)} · ${wkLabel}: ${n} photo${n === 1 ? '' : 's'} available`;
+}
+
+/* Download from the explicit Division + Week picker form. Defaults
+ * to the currently selected division and the picked week (or 'all'). */
+async function ssgDownloadFromPicker() {
+  const sel = document.getElementById('ssgWeekSelect');
+  if (!sel) return;
+  const val = sel.value;
+  if (val === 'all') await ssgDownloadAllWeeks();
+  else                await ssgDownloadWeek(parseInt(val, 10));
+}
+window.ssgDownloadFromPicker = ssgDownloadFromPicker;
+
+async function ssgDownloadAllWeeks() {
+  const div = _ssgState.divisions.find(d => d.id === _ssgState.divisionId);
+  if (!div) return;
+  const allMatches = _ssgState.matches.filter(m => m.row_type === 'regular');
+  const queued = [];
+  for (const m of allMatches) {
+    for (const t of _ssgState.teams) {
+      const photos = _ssgState.photosByMatchTeam.get(m.id + ':' + t.id) || [];
+      for (const p of photos) queued.push({ m, p, team: t });
+    }
+  }
+  if (!queued.length) { alert('No scoresheets uploaded yet for this division.'); return; }
+
+  setStatus('ssgStatus', 'Building ZIP (' + queued.length + ' photos)…', '');
+  try {
+    const JSZip = await ensureJSZip();
+    const zip = new JSZip();
+    let fetched = 0;
+    for (const { m, p, team } of queued) {
+      const home = m.home_team ? ssgSafe(m.home_team.team_number + '-' + m.home_team.team_name) : 'unfilled';
+      const away = m.away_team ? ssgSafe(m.away_team.team_number + '-' + m.away_team.team_name) : 'unfilled';
+      const side = p.side === 'single' ? 'scoresheet' : p.side;
+      const uploader = ssgSafe(team.team_number);
+      // Folder per week so admin can navigate by week inside the ZIP.
+      const weekFolder = 'week-' + String(m.week_number).padStart(2, '0');
+      const name = weekFolder + '/' + home + '_vs_' + away + '__by-' + uploader + '_' + side + '.jpg';
+      const resp = await fetch(SS_R2_URL + '/' + p.r2_path);
+      if (!resp.ok) throw new Error('Fetch ' + p.r2_path + ': ' + resp.status);
+      zip.file(name, await resp.blob());
+      fetched++;
+      setStatus('ssgStatus', 'Building ZIP… (' + fetched + '/' + queued.length + ')', '');
+    }
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const url  = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = div.division_number + '-all-weeks.zip';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    setStatus('ssgStatus', 'Downloaded ' + queued.length + ' photos across all weeks.', 'ok');
+    setTimeout(() => setStatus('ssgStatus', '', ''), 2200);
+  } catch (e) {
+    setStatus('ssgStatus', 'ZIP failed: ' + e.message, 'err');
+  }
+}
+window.ssgDownloadAllWeeks = ssgDownloadAllWeeks;
 
 async function ssgDownloadWeek(weekNum) {
   const div = _ssgState.divisions.find(d => d.id === _ssgState.divisionId);
