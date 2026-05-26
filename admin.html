@@ -1495,6 +1495,14 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
                background:linear-gradient(90deg,#fef3c7,#fde68a); border:1.5px solid #d97706;
                border-radius:8px; color:#78350f; font-weight:700;"></div>
 
+          <!-- Section 0: ineligible players (I marker on their roster row) -->
+          <div id="cpIneligibleSection" style="margin-bottom:18px;">
+            <h3 style="margin:0 0 8px; font-size:1rem">Ineligible players
+              <span class="hint" style="font-weight:400">(marked with "I" on the roster &mdash; not eligible to play)</span>
+            </h3>
+            <div id="cpIneligible"></div>
+          </div>
+
           <!-- Section 1: conflict table (players on >1 team) -->
           <div id="cpConflictsSection" style="margin-bottom:18px;">
             <h3 style="margin:0 0 8px; font-size:1rem">Players on multiple teams</h3>
@@ -1581,7 +1589,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.42';
+const APP_VERSION = '3.43';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -9169,7 +9177,12 @@ function cpRenderResults() {
   const totalPlayers = teams.reduce((n, t) => n + t.players.length, 0);
   const conflicts = [...playerToTeams.entries()].filter(([_, ts]) => ts.size > 1);
   const uniqueApaNumbers = new Set();
-  for (const t of teams) for (const p of t.players) uniqueApaNumbers.add(p.apa_number);
+  for (const t of teams) for (const p of t.players) uniqueApaNumbers.add(p.apa_full || cpToFullApa(p.apa_number));
+  // Ineligible players (I marker)
+  const ineligibles = [];
+  for (const t of teams) for (const p of t.players) {
+    if (p.ineligible) ineligibles.push({ team: t, player: p });
+  }
   const sum = document.getElementById('cpSummary');
   sum.innerHTML = [
     `<span class="chip">📄 ${esc(sourceName)}</span>`,
@@ -9177,8 +9190,31 @@ function cpRenderResults() {
     `<span class="chip">${totalPlayers} player rows</span>`,
     `<span class="chip">${uniqueApaNumbers.size} unique APA#s</span>`,
     `<span class="chip" style="background:${conflicts.length ? '#fef2f2' : '#d1fae5'};color:${conflicts.length ? '#dc2626' : '#16a34a'};border-color:${conflicts.length ? '#fecaca' : '#86efac'}">${conflicts.length} conflict${conflicts.length === 1 ? '' : 's'}</span>`,
+    `<span class="chip" style="background:${ineligibles.length ? '#fef3c7' : '#d1fae5'};color:${ineligibles.length ? '#92400e' : '#16a34a'};border-color:${ineligibles.length ? '#fde68a' : '#86efac'}">${ineligibles.length} ineligible</span>`,
     `<span class="chip" style="background:#eff6ff;color:var(--spm-accent)">${clusters.length} cluster${clusters.length === 1 ? '' : 's'}</span>`
   ].join('');
+
+  // Ineligible players section — players whose row had an "I" marker.
+  // APA conventions: ineligible players cannot play in the event; rostering
+  // them is a violation. Surfacing prominently so admin can intercept.
+  const ineligDiv = document.getElementById('cpIneligible');
+  if (!ineligibles.length) {
+    ineligDiv.innerHTML = '<p class="hint" style="font-style:italic">No ineligible players on this roster. ✓</p>';
+  } else {
+    ineligibles.sort((a, b) => a.player.name.localeCompare(b.player.name));
+    let html = '<div style="overflow-x:auto;border:1px solid #fde68a;border-radius:8px"><table class="table" style="margin:0;font-size:0.86rem;background:#fffbeb"><thead><tr>'
+             + '<th>Player</th><th>APA #</th><th>Team</th><th>Skill</th></tr></thead><tbody>';
+    for (const { team, player } of ineligibles) {
+      html += `<tr>
+        <td><strong>${esc(player.name)}</strong></td>
+        <td style="font-family:ui-monospace,monospace">${esc(player.apa_full || cpToFullApa(player.apa_number))}</td>
+        <td><span style="white-space:nowrap">${esc(team.team_number)} ${esc(team.team_name)}</span></td>
+        <td style="text-align:center">${esc(player.skill)}</td>
+      </tr>`;
+    }
+    html += '</tbody></table></div>';
+    ineligDiv.innerHTML = html;
+  }
 
   // Irwin banner (or any hardcoded host rule)
   const banner = document.getElementById('cpIrwinBanner');
