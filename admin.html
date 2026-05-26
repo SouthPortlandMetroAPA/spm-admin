@@ -1589,7 +1589,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.44';
+const APP_VERSION = '3.45';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -8016,9 +8016,13 @@ async function ssDeletePhoto(photoId, r2Path) {
   setStatus('ssStatus', 'Deleting…', '');
   try {
     // Delete via service_role (so RLS isn't relevant), cross-schema.
+    // PostgREST routes writes (incl. DELETE) by Content-Profile, NOT
+    // Accept-Profile — Accept-Profile governs GETs only. Sending only
+    // Accept-Profile here makes PostgREST fall back to the default
+    // exposed schema and return 404 (no `photos` table there).
     const r = await fetch(SB_URL + '/rest/v1/photos?id=eq.' + photoId, {
       method: 'DELETE',
-      headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Accept-Profile': 'papertrail' }
+      headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Accept-Profile': 'papertrail', 'Content-Profile': 'papertrail' }
     });
     if (!r.ok) throw new Error('DB delete: ' + r.status);
     // Best-effort R2 cleanup
@@ -8406,9 +8410,12 @@ document.addEventListener('click', (e) => {
 async function ssgPopoverDelete(photoId, r2Path, matchId, teamId) {
   if (!confirm('Delete this photo? Removes the DB row and the R2 object.')) return;
   try {
+    // PostgREST routes writes (incl. DELETE) by Content-Profile, NOT
+    // Accept-Profile — without Content-Profile the DELETE hits the
+    // default exposed schema and 404s. (Slate 3.45 fix.)
     const r = await fetch(SB_URL + '/rest/v1/photos?id=eq.' + photoId, {
       method: 'DELETE',
-      headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Accept-Profile': 'papertrail' }
+      headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Accept-Profile': 'papertrail', 'Content-Profile': 'papertrail' }
     });
     if (!r.ok) throw new Error('DB delete: ' + r.status);
     try { await fetch(SS_R2_URL + '/' + r2Path, { method: 'DELETE' }); } catch (_) {}
