@@ -1512,13 +1512,13 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <!-- Section 3: all APA numbers for Email HQ -->
           <div id="cpApaNumbersSection" style="margin-bottom:6px;">
             <h3 style="margin:0 0 8px; font-size:1rem">All APA numbers
-              <span class="hint" style="font-weight:400">(paste into Email HQ)</span>
+              <span class="hint" style="font-weight:400">(8-digit, paste into Email HQ &rarr; Look Up Emails by Player Number)</span>
             </h3>
             <div style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">
               <button class="btn btn-primary btn-sm" id="cpCopyApasBtn">📋 Copy all</button>
               <select id="cpApaFormat" class="select-sm">
+                <option value="newline" selected>One per line (Email HQ format)</option>
                 <option value="comma">Comma-separated (12345,67890,…)</option>
-                <option value="newline">One per line</option>
                 <option value="space">Space-separated</option>
               </select>
               <span id="cpApaCount" class="hint"></span>
@@ -1581,7 +1581,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.41';
+const APP_VERSION = '3.42';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -8871,6 +8871,21 @@ const CP_HOST_RULES = [
   { matchName: 'Irwin, Craig', requiredHost: 'Wichita' }
 ];
 
+/* Normalize an APA number to the 8-digit full form Email HQ expects.
+   Roster PDFs print the 5-digit league-local form; Email HQ's Look-Up-
+   By-Player-Number expects either 5 or 8 (prepends 972 internally to a
+   5-digit). We normalize to 8 so:
+     • Conflict dedup works even if a roster mixes 5-digit + 8-digit
+       forms for the same player.
+     • Pasted output is universally usable (works in EHQ, in SQL, etc.).
+   The 972 prefix is APA's SPM operator prefix per project convention. */
+function cpToFullApa(num) {
+  const s = String(num || '').trim();
+  if (/^\d{8}$/.test(s)) return s;
+  if (/^\d{5}$/.test(s)) return '972' + s;
+  return s; // unrecognized format — return as-is so caller can flag
+}
+
 let _cpLastParse = null; // { teams: [{number, name, city, players}], allPlayers: [], ... }
 
 function cpInit() {
@@ -9059,18 +9074,23 @@ async function cpParseRosterPdf(file) {
             ineligible = parts[0].str === 'I';
             parts = parts.slice(1);
           }
-          // Look for: 1-digit skill (1-9), 5-digit apa#, then name
+          // Look for: 1-digit skill (1-9), 5-digit OR 8-digit APA#, then name.
+          // 5-digit is the league-local form rosters typically print; 8-digit
+          // is the full APA number. Both get normalized to apa_full (8-digit)
+          // for dedup + Email HQ output.
           if (parts.length < 3) continue;
           const skillStr = parts[0].str;
           const apaStr = parts[1].str;
           if (!/^[1-9]$/.test(skillStr)) continue;
-          if (!/^\d{5}$/.test(apaStr)) continue;
-          if (seenApa.has(apaStr)) continue;
-          seenApa.add(apaStr);
+          if (!/^\d{5}$|^\d{8}$/.test(apaStr)) continue;
+          const apaFull = cpToFullApa(apaStr);
+          if (seenApa.has(apaFull)) continue;
+          seenApa.add(apaFull);
           const name = parts.slice(2).map(p => p.str).join(' ').replace(/\s+/g, ' ').trim();
           players.push({
             skill: parseInt(skillStr, 10),
-            apa_number: apaStr,
+            apa_number: apaStr,     // as-printed on the roster (5- or 8-digit)
+            apa_full: apaFull,      // canonical 8-digit (Email HQ-ready)
             name,
             ineligible
           });
@@ -9093,15 +9113,16 @@ async function cpParseRosterPdf(file) {
 
 /* ── Union-find grouping (ported from Apps/TeamGrouper) ──────────── */
 function cpComputeClusters(teams) {
-  // apa# → Set<team_number>
+  // apa_full (8-digit) → Set<team_number>. Keying by the canonical form
+  // so "22100" on one team and "97222100" on another (same player) dedup.
   const playerToTeams = new Map();
-  // player names lookup keyed by apa#
   const playerNames = new Map();
   for (const t of teams) {
     for (const p of t.players) {
-      if (!playerToTeams.has(p.apa_number)) playerToTeams.set(p.apa_number, new Set());
-      playerToTeams.get(p.apa_number).add(t.team_number);
-      if (!playerNames.has(p.apa_number)) playerNames.set(p.apa_number, p.name);
+      const key = p.apa_full || cpToFullApa(p.apa_number);
+      if (!playerToTeams.has(key)) playerToTeams.set(key, new Set());
+      playerToTeams.get(key).add(t.team_number);
+      if (!playerNames.has(key)) playerNames.set(key, p.name);
     }
   }
   // Union-find
@@ -9218,7 +9239,7 @@ function cpRenderResults() {
       const teamRows = group.map(t => {
         // Players in this team that are also on another team in this cluster
         const shared = t.players.filter(p => {
-          const onTeams = playerToTeams.get(p.apa_number);
+          const onTeams = playerToTeams.get(p.apa_full || cpToFullApa(p.apa_number));
           if (!onTeams || onTeams.size < 2) return false;
           // Any other team in cluster has this player
           for (const ot of onTeams) {
@@ -9227,7 +9248,7 @@ function cpRenderResults() {
           return false;
         });
         const sharedText = shared.length
-          ? shared.map(p => `${esc(p.name)} (#${esc(p.apa_number)})`).join('; ')
+          ? shared.map(p => `${esc(p.name)} (#${esc(p.apa_full || cpToFullApa(p.apa_number))})`).join('; ')
           : '<span class="hint">—</span>';
         return `<tr><td style="font-family:ui-monospace,monospace">${esc(t.team_number)}</td><td>${esc(t.team_name)}</td><td>${sharedText}</td></tr>`;
       }).join('');
@@ -9251,13 +9272,19 @@ function cpRenderResults() {
 
 function cpRenderApaNumbers() {
   if (!_cpLastParse) return;
+  // Output the 8-digit canonical form — works directly in Email HQ's
+  // "Look Up Emails by Player Number" (which accepts 5 or 8, and prepends
+  // 972 to 5-digit). Using 8-digit avoids any prefix ambiguity for users
+  // whose rosters might come from a different operator area.
   const apaSet = new Set();
-  for (const t of _cpLastParse.teams) for (const p of t.players) apaSet.add(p.apa_number);
+  for (const t of _cpLastParse.teams) {
+    for (const p of t.players) apaSet.add(p.apa_full || cpToFullApa(p.apa_number));
+  }
   const apas = [...apaSet].sort((a, b) => a.localeCompare(b));
   const fmt = document.getElementById('cpApaFormat').value;
-  const sep = fmt === 'newline' ? '\n' : (fmt === 'space' ? ' ' : ',');
+  const sep = fmt === 'comma' ? ',' : (fmt === 'space' ? ' ' : '\n');
   document.getElementById('cpApaNumbers').value = apas.join(sep);
-  document.getElementById('cpApaCount').textContent = `${apas.length} unique APA #s`;
+  document.getElementById('cpApaCount').textContent = `${apas.length} unique APA #s (8-digit, Email HQ ready)`;
 }
 
 async function cpCopyApas() {
