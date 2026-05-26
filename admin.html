@@ -930,6 +930,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab active" data-tab="emailhq">Email HQ</button>
       <button class="tab" data-tab="spreports">SP Reports</button>
       <button class="tab" data-tab="scoresheets">Scoresheets</button>
+      <button class="tab" data-tab="commonplayers">Common Players</button>
       <button class="tab" data-tab="playoffs">Playoffs</button>
     </div>
 
@@ -1459,6 +1460,79 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
     </div>
 
     <!-- ══════════════════════════════════════════════════════════════
+         TAB: COMMON PLAYERS — find players on multiple teams within a
+         Roster & Handicap Report PDF. Produces conflict table, transitive
+         cluster groups (union-find from TeamGrouper), and a flat APA-number
+         list ready to paste into Email HQ. Hardcoded special case:
+         Irwin, Craig's team is flagged as needing to host at Wichita.
+         ══════════════════════════════════════════════════════════════ -->
+    <div id="tab-commonplayers" class="tab-panel">
+      <div class="card">
+        <h2>Common Players — Roster check</h2>
+        <p class="hint" style="margin-bottom:10px">
+          Drop an APA <strong>Roster &amp; Handicap Report</strong> PDF. Finds
+          players who appear on more than one team (a typical World-Qualifier
+          violation), groups teams transitively (if A↔B and B↔C share players,
+          A, B, C all cluster), and gives you a flat list of every APA number
+          on the roster — paste-ready for <strong>Email HQ</strong>.
+        </p>
+
+        <div id="cpDropzone" tabindex="0" role="button"
+             style="border:2px dashed var(--border-strong); border-radius:10px; padding:24px; text-align:center; cursor:pointer; transition:background 0.12s;">
+          <div style="font-size:1rem; font-weight:700; margin-bottom:4px">Drop roster PDF here</div>
+          <div class="hint" style="font-size:0.82rem">or click to choose · single PDF</div>
+          <input id="cpFileInput" type="file" accept=".pdf,application/pdf" hidden>
+        </div>
+
+        <div id="cpStatus" class="status-line" style="margin-top:10px"></div>
+
+        <div id="cpResults" style="display:none; margin-top:18px;">
+          <!-- Summary chips -->
+          <div id="cpSummary" style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px;"></div>
+
+          <!-- Irwin/Wichita banner — rendered only when Irwin, Craig is in the roster -->
+          <div id="cpIrwinBanner" style="display:none; padding:12px 16px; margin-bottom:14px;
+               background:linear-gradient(90deg,#fef3c7,#fde68a); border:1.5px solid #d97706;
+               border-radius:8px; color:#78350f; font-weight:700;"></div>
+
+          <!-- Section 1: conflict table (players on >1 team) -->
+          <div id="cpConflictsSection" style="margin-bottom:18px;">
+            <h3 style="margin:0 0 8px; font-size:1rem">Players on multiple teams</h3>
+            <div id="cpConflicts"></div>
+          </div>
+
+          <!-- Section 2: transitive cluster groups -->
+          <div id="cpClustersSection" style="margin-bottom:18px;">
+            <h3 style="margin:0 0 8px; font-size:1rem">Linked team clusters
+              <span class="hint" style="font-weight:400">(transitive — any chain of shared players)</span>
+            </h3>
+            <div id="cpClusters"></div>
+          </div>
+
+          <!-- Section 3: all APA numbers for Email HQ -->
+          <div id="cpApaNumbersSection" style="margin-bottom:6px;">
+            <h3 style="margin:0 0 8px; font-size:1rem">All APA numbers
+              <span class="hint" style="font-weight:400">(paste into Email HQ)</span>
+            </h3>
+            <div style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">
+              <button class="btn btn-primary btn-sm" id="cpCopyApasBtn">📋 Copy all</button>
+              <select id="cpApaFormat" class="select-sm">
+                <option value="comma">Comma-separated (12345,67890,…)</option>
+                <option value="newline">One per line</option>
+                <option value="space">Space-separated</option>
+              </select>
+              <span id="cpApaCount" class="hint"></span>
+            </div>
+            <textarea id="cpApaNumbers" readonly rows="6"
+                      style="width:100%; font-family:ui-monospace, SFMono-Regular, monospace;
+                             font-size:0.84rem; padding:8px 10px; border:1px solid var(--border);
+                             border-radius:6px; background:#fafafa; resize:vertical;"></textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════════
          TAB: PLAYOFFS — "show your work" breakdown of advancement math
          ══════════════════════════════════════════════════════════════ -->
     <div id="tab-playoffs" class="tab-panel">
@@ -1507,7 +1581,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.38';
+const APP_VERSION = '3.39';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -3036,13 +3110,14 @@ async function init() {
 }
 
 const TAB_LABEL = {
-  sessions:    'Sessions',
-  uploads:     'Uploads',
-  divisions:   'Divisions',
-  emailhq:     'Email HQ',
-  spreports:   'SP Reports',
-  scoresheets: 'Scoresheets',
-  playoffs:    'Playoffs'
+  sessions:      'Sessions',
+  uploads:       'Uploads',
+  divisions:     'Divisions',
+  emailhq:       'Email HQ',
+  spreports:     'SP Reports',
+  scoresheets:   'Scoresheets',
+  commonplayers: 'Common Players',
+  playoffs:      'Playoffs'
 };
 
 function switchTab(name) {
@@ -3055,6 +3130,7 @@ function switchTab(name) {
   if (name === 'uploads')     loadReportStatus();
   if (name === 'spreports')   spOnEnterTab();
   if (name === 'scoresheets') { ssBindViewToggle(); renderScoresheetsGridView(); }
+  if (name === 'commonplayers') cpInit();
   if (name === 'playoffs')    renderPlayoffsTab();
 }
 
@@ -8619,6 +8695,411 @@ function poBuildTable(title, divs, teamsByDiv, ruleByCount) {
   </div>`;
 }
 window.renderPlayoffsTab = renderPlayoffsTab;
+
+/* ════════════════════════════════════════════════════════════════════════
+   COMMON PLAYERS — Roster & Handicap Report parser + transitive grouping
+   ─────────────────────────────────────────────────────────────────
+   Drops in a PDF; parses the 3-column grid layout; finds players who
+   appear on multiple teams (typical World-Qualifier violation); groups
+   teams transitively via union-find (ported from Apps/TeamGrouper);
+   produces a flat APA-number list for Email HQ paste-in.
+
+   Hardcoded special-case: when "Irwin, Craig" is in the roster, his
+   team is flagged with a banner stating the team needs to host at
+   Wichita. Add additional rules in CP_HOST_RULES below.
+   ════════════════════════════════════════════════════════════════════════ */
+
+const CP_HOST_RULES = [
+  // { matchName: <case-insensitive substring>, requiredHost: <string> }
+  { matchName: 'Irwin, Craig', requiredHost: 'Wichita' }
+];
+
+let _cpLastParse = null; // { teams: [{number, name, city, players}], allPlayers: [], ... }
+
+function cpInit() {
+  // Idempotent — wire dropzone listeners once
+  if (cpInit._wired) return;
+  cpInit._wired = true;
+  const dz = document.getElementById('cpDropzone');
+  const fi = document.getElementById('cpFileInput');
+  dz.addEventListener('click', () => fi.click());
+  dz.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') fi.click(); });
+  dz.addEventListener('dragover',  (e) => { e.preventDefault(); dz.style.background = 'var(--accent-bg, #eff6ff)'; });
+  dz.addEventListener('dragleave', () => { dz.style.background = ''; });
+  dz.addEventListener('drop', (e) => {
+    e.preventDefault(); dz.style.background = '';
+    const f = e.dataTransfer.files[0];
+    if (f) cpHandleFile(f);
+  });
+  fi.addEventListener('change', (e) => {
+    const f = e.target.files[0];
+    if (f) cpHandleFile(f);
+    e.target.value = '';
+  });
+  document.getElementById('cpCopyApasBtn').addEventListener('click', cpCopyApas);
+  document.getElementById('cpApaFormat').addEventListener('change', cpRenderApaNumbers);
+}
+
+async function cpHandleFile(file) {
+  const status = document.getElementById('cpStatus');
+  const results = document.getElementById('cpResults');
+  status.className = 'status-line progress';
+  status.textContent = 'Parsing ' + file.name + '…';
+  results.style.display = 'none';
+  try {
+    const teams = await cpParseRosterPdf(file);
+    if (!teams.length) throw new Error('No teams parsed from PDF — is this a Roster & Handicap Report?');
+    _cpLastParse = { teams, sourceName: file.name };
+    cpRenderResults();
+    status.className = 'status-line ok';
+    const players = teams.reduce((n, t) => n + t.players.length, 0);
+    status.textContent = `✓ Parsed ${teams.length} teams, ${players} players from ${file.name}`;
+  } catch (e) {
+    status.className = 'status-line err';
+    status.textContent = 'Parse failed: ' + e.message;
+    console.error(e);
+  }
+}
+
+/* ── PDF parser — 3-column grid layout ─────────────────────────────
+   Each page has 1-3 columns of teams; each column is a vertical stack of
+   one or more team blocks. A team block looks like:
+       01201  I'm Confused                 N 0000
+       FROM : Cornelius, OR
+                  Skl  Number  Name
+       I            5    22100  Clemenson, Chad     <- "I" prefix = ineligible
+                    4    25113  Grant, Kurt
+                    ...
+   Strategy: group items into Y-rows; find anchor rows that contain
+   ≥1 team-header pattern (5-digit + alpha + optional "N 0000"); slice
+   columns by X-midpoint between anchors; within each column walk down
+   the items until the next anchor row to extract player rows. */
+async function cpParseRosterPdf(file) {
+  const pdfjs = await spLoadPdfjs();
+  const buf = await file.arrayBuffer();
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(buf) }).promise;
+  const teams = [];
+  const seenTeamNums = new Set();
+
+  for (let p = 1; p <= doc.numPages; p++) {
+    const page = await doc.getPage(p);
+    const tc = await page.getTextContent();
+    const items = tc.items
+      .filter(it => it.str && it.str.trim())
+      .map(it => ({ x: it.transform[4], y: it.transform[5], str: it.str.trim() }));
+    if (!items.length) continue;
+
+    // Bucket items by Y (rounded to integer)
+    const yMap = new Map();
+    for (const it of items) {
+      const yk = Math.round(it.y);
+      if (!yMap.has(yk)) yMap.set(yk, []);
+      yMap.get(yk).push(it);
+    }
+    const rows = [...yMap.entries()]
+      .sort((a, b) => b[0] - a[0])             // top-to-bottom
+      .map(([y, its]) => ({ y, items: its.sort((a, b) => a.x - b.x) }));
+
+    // Find anchor rows (team header lines). A team header has a 5-digit team
+    // number followed by an alpha team name. We detect anchors as rows that
+    // contain 1 or more "5-digit number immediately followed by an alpha
+    // string" patterns — those are the team-header positions.
+    const isTeamNumberOnly = s => /^\d{5}$/.test(s);
+    const headerAnchorsForRow = (row) => {
+      const anchors = [];
+      for (let i = 0; i < row.items.length; i++) {
+        const cur = row.items[i];
+        if (!isTeamNumberOnly(cur.str)) continue;
+        // Must be followed by an alpha string close in X (the team name)
+        const next = row.items[i + 1];
+        if (!next) continue;
+        const dx = next.x - cur.x;
+        if (dx < 8 || dx > 80) continue;
+        if (!/^[A-Za-z]/.test(next.str)) continue;
+        anchors.push({ x: cur.x, team: cur.str, nameStart: next.x });
+      }
+      return anchors;
+    };
+
+    // Walk rows top-to-bottom. When we hit an anchor row, find the next
+    // anchor row below it (same column count) and treat the slice as one
+    // band of team blocks. For each column in that band, parse one team
+    // block top-to-bottom.
+    let rIdx = 0;
+    while (rIdx < rows.length) {
+      const anchors = headerAnchorsForRow(rows[rIdx]);
+      if (!anchors.length) { rIdx++; continue; }
+      // Find end of band — next row that has anchors, or end of page
+      let endIdx = rIdx + 1;
+      while (endIdx < rows.length && !headerAnchorsForRow(rows[endIdx]).length) endIdx++;
+      const band = rows.slice(rIdx + 1, endIdx);
+
+      // Column boundaries by midpoint between anchor X's (last col extends to +Inf)
+      const bounds = anchors.map((a, c) => ({
+        lo: c === 0 ? -Infinity : (anchors[c - 1].x + a.x) / 2,
+        hi: c === anchors.length - 1 ? Infinity : (a.x + anchors[c + 1].x) / 2
+      }));
+
+      for (let c = 0; c < anchors.length; c++) {
+        const teamNum = anchors[c].team;
+        if (seenTeamNums.has(teamNum)) continue;
+        // Header row items in this column: just the anchor team#, name, status
+        const headerColItems = rows[rIdx].items
+          .filter(i => i.x >= bounds[c].lo && i.x < bounds[c].hi);
+        // Team name = items between team# and first "N" status (or end of column)
+        const nameItems = [];
+        let pastTeamNum = false;
+        for (const it of headerColItems) {
+          if (!pastTeamNum) { if (it.str === teamNum) pastTeamNum = true; continue; }
+          // Stop at "N <4-digit>" status indicator
+          if (/^[NI*]$/.test(it.str) && nameItems.length > 0) break;
+          nameItems.push(it.str);
+        }
+        const teamName = nameItems.join(' ').replace(/\s+/g, ' ').trim();
+
+        // Walk band rows in this column for FROM line and player rows.
+        // FROM line: city, ST. Player rows: skill, apa#, name (with optional "I" prefix).
+        let city = null;
+        const players = [];
+        const seenApa = new Set();
+        for (const br of band) {
+          const cells = br.items.filter(i => i.x >= bounds[c].lo && i.x < bounds[c].hi);
+          if (!cells.length) continue;
+          const text = cells.map(i => i.str).join(' ').replace(/\s+/g, ' ').trim();
+          // City line — APA reports always say "FROM : <city, ST>"
+          const fromM = text.match(/FROM\s*:\s*(.+)/);
+          if (fromM) { city = fromM[1].trim(); continue; }
+          // Skip column header row
+          if (/^Skl\s+Number\s+Name/i.test(text)) continue;
+          // Skip standalone status indicators ("N 0000" etc.)
+          if (/^[NIH*]\s+\d{4,}$/.test(text)) continue;
+          // Player row: optional leading "I" (ineligible), then skill, apa#, name
+          // Player rows in this format have items: [skill] [apa#] [name-parts...]
+          // Sometimes prefixed with "I" indicator (ineligible).
+          let ineligible = false;
+          let parts = [...cells];
+          if (parts[0] && /^[IN*]$/.test(parts[0].str)) {
+            ineligible = parts[0].str === 'I';
+            parts = parts.slice(1);
+          }
+          // Look for: 1-digit skill (1-9), 5-digit apa#, then name
+          if (parts.length < 3) continue;
+          const skillStr = parts[0].str;
+          const apaStr = parts[1].str;
+          if (!/^[1-9]$/.test(skillStr)) continue;
+          if (!/^\d{5}$/.test(apaStr)) continue;
+          if (seenApa.has(apaStr)) continue;
+          seenApa.add(apaStr);
+          const name = parts.slice(2).map(p => p.str).join(' ').replace(/\s+/g, ' ').trim();
+          players.push({
+            skill: parseInt(skillStr, 10),
+            apa_number: apaStr,
+            name,
+            ineligible
+          });
+        }
+        seenTeamNums.add(teamNum);
+        teams.push({
+          team_number: teamNum,
+          team_name: teamName,
+          city,
+          players
+        });
+      }
+
+      rIdx = endIdx;
+    }
+  }
+
+  return teams;
+}
+
+/* ── Union-find grouping (ported from Apps/TeamGrouper) ──────────── */
+function cpComputeClusters(teams) {
+  // apa# → Set<team_number>
+  const playerToTeams = new Map();
+  // player names lookup keyed by apa#
+  const playerNames = new Map();
+  for (const t of teams) {
+    for (const p of t.players) {
+      if (!playerToTeams.has(p.apa_number)) playerToTeams.set(p.apa_number, new Set());
+      playerToTeams.get(p.apa_number).add(t.team_number);
+      if (!playerNames.has(p.apa_number)) playerNames.set(p.apa_number, p.name);
+    }
+  }
+  // Union-find
+  const parent = new Map();
+  const find = x => {
+    if (!parent.has(x)) parent.set(x, x);
+    let r = x;
+    while (parent.get(r) !== r) r = parent.get(r);
+    let c = x;
+    while (parent.get(c) !== r) {
+      const n = parent.get(c); parent.set(c, r); c = n;
+    }
+    return r;
+  };
+  const union = (a, b) => {
+    const ra = find(a), rb = find(b);
+    if (ra !== rb) parent.set(ra, rb);
+  };
+  for (const t of teams) find(t.team_number);
+  for (const teamsSharing of playerToTeams.values()) {
+    if (teamsSharing.size < 2) continue;
+    const arr = [...teamsSharing];
+    for (let i = 1; i < arr.length; i++) union(arr[0], arr[i]);
+  }
+  // Bucket teams by root
+  const groupMap = new Map();
+  for (const t of teams) {
+    const r = find(t.team_number);
+    if (!groupMap.has(r)) groupMap.set(r, []);
+    groupMap.get(r).push(t);
+  }
+  const clusters = [...groupMap.values()]
+    .filter(g => g.length > 1)
+    .sort((a, b) => a[0].team_number.localeCompare(b[0].team_number));
+  return { clusters, playerToTeams, playerNames };
+}
+
+/* ── Render results ──────────────────────────────────────────────── */
+function cpRenderResults() {
+  const { teams, sourceName } = _cpLastParse;
+  const { clusters, playerToTeams, playerNames } = cpComputeClusters(teams);
+
+  // Summary chips
+  const totalPlayers = teams.reduce((n, t) => n + t.players.length, 0);
+  const conflicts = [...playerToTeams.entries()].filter(([_, ts]) => ts.size > 1);
+  const uniqueApaNumbers = new Set();
+  for (const t of teams) for (const p of t.players) uniqueApaNumbers.add(p.apa_number);
+  const sum = document.getElementById('cpSummary');
+  sum.innerHTML = [
+    `<span class="chip">📄 ${esc(sourceName)}</span>`,
+    `<span class="chip">${teams.length} teams</span>`,
+    `<span class="chip">${totalPlayers} player rows</span>`,
+    `<span class="chip">${uniqueApaNumbers.size} unique APA#s</span>`,
+    `<span class="chip" style="background:${conflicts.length ? '#fef2f2' : '#d1fae5'};color:${conflicts.length ? '#dc2626' : '#16a34a'};border-color:${conflicts.length ? '#fecaca' : '#86efac'}">${conflicts.length} conflict${conflicts.length === 1 ? '' : 's'}</span>`,
+    `<span class="chip" style="background:#eff6ff;color:var(--spm-accent)">${clusters.length} cluster${clusters.length === 1 ? '' : 's'}</span>`
+  ].join('');
+
+  // Irwin banner (or any hardcoded host rule)
+  const banner = document.getElementById('cpIrwinBanner');
+  const hostMessages = [];
+  for (const rule of CP_HOST_RULES) {
+    for (const t of teams) {
+      const hit = t.players.find(p => p.name.toLowerCase().includes(rule.matchName.toLowerCase()));
+      if (hit) {
+        hostMessages.push(`⚠️ <strong>${esc(hit.name)}</strong> is on team <strong>${esc(t.team_number)} ${esc(t.team_name)}</strong> — this team needs to host at <strong>${esc(rule.requiredHost)}</strong>.`);
+      }
+    }
+  }
+  if (hostMessages.length) {
+    banner.style.display = 'block';
+    banner.innerHTML = hostMessages.join('<br>');
+  } else {
+    banner.style.display = 'none';
+  }
+
+  // Conflict table
+  const conflictsDiv = document.getElementById('cpConflicts');
+  if (!conflicts.length) {
+    conflictsDiv.innerHTML = '<p class="hint" style="font-style:italic">No players appear on more than one team. ✓</p>';
+  } else {
+    // Sort by player name
+    conflicts.sort((a, b) => (playerNames.get(a[0]) || '').localeCompare(playerNames.get(b[0]) || ''));
+    let html = '<div style="overflow-x:auto;border:1px solid var(--border);border-radius:8px"><table class="table" style="margin:0;font-size:0.86rem"><thead><tr>'
+             + '<th>Player</th><th>APA #</th><th>Teams (count)</th></tr></thead><tbody>';
+    for (const [apa, teamSet] of conflicts) {
+      const teamNumbers = [...teamSet].sort();
+      const teamLabels = teamNumbers.map(tn => {
+        const team = teams.find(x => x.team_number === tn);
+        return team ? `<span style="white-space:nowrap">${esc(tn)} ${esc(team.team_name)}</span>` : esc(tn);
+      });
+      html += `<tr>
+        <td>${esc(playerNames.get(apa) || '(unknown)')}</td>
+        <td style="font-family:ui-monospace,monospace">${esc(apa)}</td>
+        <td>${teamLabels.join(' &nbsp;·&nbsp; ')} <span class="hint">(${teamSet.size})</span></td>
+      </tr>`;
+    }
+    html += '</tbody></table></div>';
+    conflictsDiv.innerHTML = html;
+  }
+
+  // Cluster groups
+  const clustersDiv = document.getElementById('cpClusters');
+  if (!clusters.length) {
+    clustersDiv.innerHTML = '<p class="hint" style="font-style:italic">No linked teams. Every team is independent. ✓</p>';
+  } else {
+    const letters = (i) => {
+      let n = i + 1, s = '';
+      while (n > 0) { n--; s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26); }
+      return s;
+    };
+    let html = '';
+    clusters.forEach((group, idx) => {
+      const label = letters(idx);
+      const teamRows = group.map(t => {
+        // Players in this team that are also on another team in this cluster
+        const shared = t.players.filter(p => {
+          const onTeams = playerToTeams.get(p.apa_number);
+          if (!onTeams || onTeams.size < 2) return false;
+          // Any other team in cluster has this player
+          for (const ot of onTeams) {
+            if (ot !== t.team_number && group.some(g => g.team_number === ot)) return true;
+          }
+          return false;
+        });
+        const sharedText = shared.length
+          ? shared.map(p => `${esc(p.name)} (#${esc(p.apa_number)})`).join('; ')
+          : '<span class="hint">—</span>';
+        return `<tr><td style="font-family:ui-monospace,monospace">${esc(t.team_number)}</td><td>${esc(t.team_name)}</td><td>${sharedText}</td></tr>`;
+      }).join('');
+      html += `<div style="margin-bottom:10px;border:1px solid var(--border);border-radius:8px;overflow:hidden">
+        <div style="padding:6px 12px;background:var(--accent-bg,#eff6ff);font-weight:700;font-size:0.88rem;color:var(--spm-accent)">
+          Cluster ${label} · ${group.length} teams
+        </div>
+        <table class="table" style="margin:0;font-size:0.84rem">
+          <thead><tr><th style="width:80px">Team #</th><th>Team Name</th><th>Shared Players</th></tr></thead>
+          <tbody>${teamRows}</tbody>
+        </table>
+      </div>`;
+    });
+    clustersDiv.innerHTML = html;
+  }
+
+  // APA numbers panel
+  document.getElementById('cpResults').style.display = 'block';
+  cpRenderApaNumbers();
+}
+
+function cpRenderApaNumbers() {
+  if (!_cpLastParse) return;
+  const apaSet = new Set();
+  for (const t of _cpLastParse.teams) for (const p of t.players) apaSet.add(p.apa_number);
+  const apas = [...apaSet].sort((a, b) => a.localeCompare(b));
+  const fmt = document.getElementById('cpApaFormat').value;
+  const sep = fmt === 'newline' ? '\n' : (fmt === 'space' ? ' ' : ',');
+  document.getElementById('cpApaNumbers').value = apas.join(sep);
+  document.getElementById('cpApaCount').textContent = `${apas.length} unique APA #s`;
+}
+
+async function cpCopyApas() {
+  const ta = document.getElementById('cpApaNumbers');
+  const btn = document.getElementById('cpCopyApasBtn');
+  try {
+    await navigator.clipboard.writeText(ta.value);
+    const old = btn.textContent;
+    btn.textContent = '✓ Copied';
+    btn.style.background = '#16a34a';
+    setTimeout(() => { btn.textContent = old; btn.style.background = ''; }, 1600);
+  } catch (e) {
+    ta.select();
+    btn.textContent = '⚠ Select then ⌘+C';
+  }
+}
+
+window.cpInit = cpInit;
+window.cpRenderApaNumbers = cpRenderApaNumbers;
 
 </script>
 </body>
