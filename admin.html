@@ -1581,7 +1581,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.39';
+const APP_VERSION = '3.40';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -8789,16 +8789,21 @@ async function cpParseRosterPdf(file) {
       .map(it => ({ x: it.transform[4], y: it.transform[5], str: it.str.trim() }));
     if (!items.length) continue;
 
-    // Bucket items by Y (rounded to integer)
-    const yMap = new Map();
-    for (const it of items) {
-      const yk = Math.round(it.y);
-      if (!yMap.has(yk)) yMap.set(yk, []);
-      yMap.get(yk).push(it);
+    // Cluster items into rows by Y with tolerance — pdf.js gives sub-pixel
+    // Y offsets that Math.round loses (Math.round breaks one logical line
+    // into multiple incomplete partials, dropping players from teams).
+    const Y_TOLERANCE = 3;
+    const sortedByY = items.slice().sort((a, b) => b.y - a.y);
+    const rows = [];
+    for (const it of sortedByY) {
+      const last = rows[rows.length - 1];
+      if (last && Math.abs(it.y - last.y) <= Y_TOLERANCE) {
+        last.items.push(it);
+      } else {
+        rows.push({ y: it.y, items: [it] });
+      }
     }
-    const rows = [...yMap.entries()]
-      .sort((a, b) => b[0] - a[0])             // top-to-bottom
-      .map(([y, its]) => ({ y, items: its.sort((a, b) => a.x - b.x) }));
+    for (const r of rows) r.items.sort((a, b) => a.x - b.x);
 
     // Find anchor rows (team header lines). A team header has a 5-digit team
     // number followed by an alpha team name. We detect anchors as rows that
@@ -8810,12 +8815,23 @@ async function cpParseRosterPdf(file) {
       for (let i = 0; i < row.items.length; i++) {
         const cur = row.items[i];
         if (!isTeamNumberOnly(cur.str)) continue;
-        // Must be followed by an alpha string close in X (the team name)
+        // Distinguish team header from player row: a player row has a
+        // skill (1-9) and/or an I/N status marker IMMEDIATELY before the
+        // 5-digit number; a team header is at the start of its column's
+        // content (no skill/marker before it).
+        const prev = row.items[i - 1];
+        if (prev) {
+          const dxPrev = cur.x - prev.x;
+          if (dxPrev < 60 && /^[1-9]$/.test(prev.str)) continue;
+          if (dxPrev < 60 && /^[IN*]$/.test(prev.str)) continue;
+        }
         const next = row.items[i + 1];
         if (!next) continue;
         const dx = next.x - cur.x;
         if (dx < 8 || dx > 80) continue;
         if (!/^[A-Za-z]/.test(next.str)) continue;
+        // Player surnames contain a comma ("Clemenson,"). Team names don't.
+        if (/,/.test(next.str)) continue;
         anchors.push({ x: cur.x, team: cur.str, nameStart: next.x });
       }
       return anchors;
@@ -8846,16 +8862,20 @@ async function cpParseRosterPdf(file) {
         // Header row items in this column: just the anchor team#, name, status
         const headerColItems = rows[rIdx].items
           .filter(i => i.x >= bounds[c].lo && i.x < bounds[c].hi);
-        // Team name = items between team# and first "N" status (or end of column)
+        // Team name = items between team# and first "N" status (or end of column).
+        // Then strip any trailing "N 0000" pattern that arrived as one combined
+        // item (split items don't trip the break; combined items would).
         const nameItems = [];
         let pastTeamNum = false;
         for (const it of headerColItems) {
           if (!pastTeamNum) { if (it.str === teamNum) pastTeamNum = true; continue; }
-          // Stop at "N <4-digit>" status indicator
-          if (/^[NI*]$/.test(it.str) && nameItems.length > 0) break;
+          if (/^[NIH*]$/.test(it.str) && nameItems.length > 0) break;
           nameItems.push(it.str);
         }
-        const teamName = nameItems.join(' ').replace(/\s+/g, ' ').trim();
+        const teamName = nameItems.join(' ')
+          .replace(/\s+/g, ' ')
+          .replace(/\s+[NIH*]\s+\d{4,}.*$/i, '')
+          .trim();
 
         // Walk band rows in this column for FROM line and player rows.
         // FROM line: city, ST. Player rows: skill, apa#, name (with optional "I" prefix).
