@@ -1589,7 +1589,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.45';
+const APP_VERSION = '3.46';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -8040,16 +8040,19 @@ window.ssDeletePhoto = ssDeletePhoto;
    SCORESHEETS — GRID VIEW (tracker)
    ─────────────────────────────────────────────────────────────────
    Per-division tracker grid: teams as rows, weeks as columns. Each
-   cell shows ✓ / ⚠ / ✗ / — based on whether the required photos for
-   THAT (team, week) match exist.
+   cell shows ✓ / ⚠ / R / ✗ / — based on whether the required photos for
+   THAT (team, week) match exist (with one admin annotation: R).
      ✓  all required sides uploaded
      ⚠  partial (only 1 of 2 for 9-Ball Doubles; should be rare —
         captain UI's atomic upload prevents creating this state, but
         admin delete can produce it)
-     ✗  no photos
+     R  no photos, but admin marked the match rescheduled (3.46+).
+        Photos always win — once any side uploads, the cell goes ⚠/✓.
+        Backed by slate.matches.{rescheduled, rescheduled_to}.
+     ✗  no photos and not rescheduled
      —  non-match cell (BYE / playoff / no-play / TBA opponent)
-   Click a cell → inline popover with photo(s) + delete.
-   Each week column header has a ZIP download button.
+   Click a cell → inline popover with photo(s) + delete + reschedule
+                  controls. Each week column header has a folder-save.
    ══════════════════════════════════════════════════════════════════════ */
 const SSG_FORMATS = {
   'Masters':         { sides: ['single'] },
@@ -8134,6 +8137,7 @@ async function ssgRenderGridForDivision(divisionId) {
       '&order=team_number');
     const matches = await sb('GET',
       'matches?select=id,week_number,match_index,scheduled_date,row_type,label,home_team_id,away_team_id,' +
+      'rescheduled,rescheduled_to,rescheduled_at,' +
       'home_team:teams!matches_home_team_id_fkey(team_number,team_name),' +
       'away_team:teams!matches_away_team_id_fkey(team_number,team_name)' +
       '&division_id=eq.' + divisionId +
@@ -8231,6 +8235,14 @@ function ssgCellState(team, col, fmt) {
     const haveCount = required.filter(s => have.has(s)).length;
     if (haveCount === required.length) return { state: 'ok',  tip: 'Uploaded', match, photos, team };
     if (haveCount > 0)                  return { state: 'partial', tip: haveCount + '/' + required.length + ' uploaded', match, photos, team };
+    // No photos. If admin marked the match rescheduled, show R instead of ✗.
+    // Photos always win (see ok / partial above) — R only shows on empty cells.
+    if (match.rescheduled) {
+      const tip = match.rescheduled_to
+        ? 'Rescheduled to ' + match.rescheduled_to
+        : 'Rescheduled — no date set yet';
+      return { state: 'rescheduled', tip, match, photos: [], team };
+    }
     return { state: 'bad', tip: 'Missing scoresheet (this team)', match, photos: [], team };
   }
   return { state: 'dash', tip: col.label };  // playoff / no_play
@@ -8281,12 +8293,13 @@ function ssgRenderGridDom(div) {
       const s = ssgCellState(t, c, fmt);
       const baseStyle = 'text-align:center;padding:8px 6px;border-bottom:1px solid var(--border);font-size:1.05rem;line-height:1;cursor:default';
       const stateStyle = ({
-        ok:      'background:#f0fdf4;color:#16a34a;cursor:pointer',
-        bad:     'background:#fef2f2;color:#dc2626;cursor:pointer',
-        partial: 'background:#fefce8;color:#ca8a04;cursor:pointer',
-        dash:    'background:#fafafa;color:#9ca3af'
+        ok:          'background:#f0fdf4;color:#16a34a;cursor:pointer',
+        bad:         'background:#fef2f2;color:#dc2626;cursor:pointer',
+        partial:     'background:#fefce8;color:#ca8a04;cursor:pointer',
+        rescheduled: 'background:#dbeafe;color:#2563eb;cursor:pointer;font-weight:800',
+        dash:        'background:#fafafa;color:#9ca3af'
       })[s.state];
-      const sym = ({ ok: '✓', bad: '✗', partial: '⚠', dash: '—' })[s.state];
+      const sym = ({ ok: '✓', bad: '✗', partial: '⚠', rescheduled: 'R', dash: '—' })[s.state];
       const click = s.match
         ? `onclick="ssgCellClick(event, ${s.match.id}, ${t.id})"`
         : '';
@@ -8379,6 +8392,63 @@ function ssgCellClick(ev, matchId, teamId) {
         <span id="${inputId}_status" style="font-size:0.72rem;color:var(--muted)"></span>
       </div>
     </div>`;
+  }
+
+  // Reschedule section. Three modes:
+  //   1. No photos + not rescheduled (the X case) → "Mark as rescheduled"
+  //      with date picker + "Save with date" + "No date yet" buttons.
+  //   2. Already rescheduled (R cell — implies no photos) → show current
+  //      state + "Update date" + "Clear reschedule".
+  //   3. Photos exist (ok / partial) → small banner if match was previously
+  //      rescheduled, but no controls (photos won; just an audit note).
+  const isReg = match.row_type === 'regular' && match.home_team_id && match.away_team_id;
+  if (isReg) {
+    if (match.rescheduled) {
+      // Modes 2 + 3 (already rescheduled). If no photos → state was 'rescheduled'.
+      // If photos exist → state was ok/partial; show note only.
+      if (photos.length === 0) {
+        body += `<div style="margin-top:10px;padding:10px;background:#dbeafe;border:1px solid #2563eb;border-radius:8px">
+          <div style="font-size:0.78rem;font-weight:700;color:#1e40af;margin-bottom:6px">
+            📅 Rescheduled${match.rescheduled_to ? ' to <span style="font-family:ui-monospace,monospace">' + esc(match.rescheduled_to) + '</span>' : ' — no date set yet'}
+          </div>
+          <div style="font-size:0.72rem;color:var(--muted);margin-bottom:8px">
+            Cell shows "R" instead of "✗". Once photos are uploaded the cell will go to ✓.
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <input id="ssgRsDate_${matchId}" type="date" value="${esc(match.rescheduled_to || '')}" style="font-size:0.78rem;padding:3px 6px" />
+            <button class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:0.74rem"
+              onclick="event.stopPropagation();ssgMarkRescheduled(${matchId}, document.getElementById('ssgRsDate_${matchId}').value || null)">Update date</button>
+            <button class="btn btn-danger btn-sm" style="padding:4px 12px;font-size:0.74rem"
+              onclick="event.stopPropagation();ssgClearReschedule(${matchId})">Clear reschedule</button>
+            <span id="ssgRsStatus_${matchId}" style="font-size:0.72rem;color:var(--muted)"></span>
+          </div>
+        </div>`;
+      } else {
+        body += `<div style="margin-top:8px;padding:6px 10px;background:#eff6ff;border-left:3px solid #2563eb;font-size:0.74rem;color:#1e40af">
+          📅 Match was rescheduled${match.rescheduled_to ? ' to <span style="font-family:ui-monospace,monospace">' + esc(match.rescheduled_to) + '</span>' : ' (no date set)'}.
+          <button class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:0.68rem;margin-left:6px"
+            onclick="event.stopPropagation();ssgClearReschedule(${matchId})">Clear</button>
+        </div>`;
+      }
+    } else if (photos.length === 0) {
+      // Mode 1: bad state, offer to mark rescheduled.
+      body += `<div style="margin-top:10px;padding:10px;background:#eff6ff;border:1px dashed #2563eb;border-radius:8px">
+        <div style="font-size:0.78rem;font-weight:700;color:#1e40af;margin-bottom:6px">
+          📅 Mark as rescheduled
+        </div>
+        <div style="font-size:0.72rem;color:var(--muted);margin-bottom:8px">
+          Use when the match was rescheduled and photos aren't due yet. Cell will show "R" instead of "✗".
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <input id="ssgRsDate_${matchId}" type="date" value="" style="font-size:0.78rem;padding:3px 6px" />
+          <button class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:0.74rem"
+            onclick="event.stopPropagation();ssgMarkRescheduled(${matchId}, document.getElementById('ssgRsDate_${matchId}').value || null)">Save with date</button>
+          <button class="btn btn-outline btn-sm" style="padding:4px 12px;font-size:0.74rem"
+            onclick="event.stopPropagation();ssgMarkRescheduled(${matchId}, null)">No date yet</button>
+          <span id="ssgRsStatus_${matchId}" style="font-size:0.72rem;color:var(--muted)"></span>
+        </div>
+      </div>`;
+    }
   }
 
   body += '<div style="display:flex;justify-content:flex-end;margin-top:8px"><button class="btn btn-outline btn-sm" onclick="ssCellPopoverClose()" style="padding:3px 10px;font-size:0.74rem">Close</button></div>';
@@ -8522,6 +8592,87 @@ async function ssgUploadOnBehalf(matchId, teamId, inputId, missingSidesEscaped) 
   }
 }
 window.ssgUploadOnBehalf = ssgUploadOnBehalf;
+
+/* ── Mark / clear reschedule ────────────────────────────────────────
+   Backed by slate.matches.{rescheduled, rescheduled_to, rescheduled_at}.
+   Cell-state machine (ssgCellState) renders 'R' when match.rescheduled
+   AND there are no photos. Once photos arrive the cell goes ✓/⚠ —
+   "photos win." The reschedule flag stays in the DB as an audit trail
+   (admin can still see it in the popover when the cell is ✓).
+   PostgREST writes need Content-Profile (Accept-Profile only governs
+   reads), so both headers go on every PATCH. */
+async function ssgMarkRescheduled(matchId, dateStr) {
+  const statusEl = document.getElementById('ssgRsStatus_' + matchId);
+  const setStatus = (txt, danger) => {
+    if (!statusEl) return;
+    statusEl.textContent = txt;
+    statusEl.style.color = danger ? 'var(--danger)' : 'var(--muted)';
+  };
+  setStatus('Saving…', false);
+  try {
+    const r = await fetch(SB_URL + '/rest/v1/matches?id=eq.' + matchId, {
+      method: 'PATCH',
+      headers: {
+        apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY,
+        'Accept-Profile': SB_SCHEMA, 'Content-Profile': SB_SCHEMA,
+        'Content-Type': 'application/json',
+        Prefer: 'return=minimal'
+      },
+      body: JSON.stringify({
+        rescheduled: true,
+        rescheduled_to: dateStr || null,
+        rescheduled_at: new Date().toISOString()
+      })
+    });
+    if (!r.ok) throw new Error('PATCH ' + r.status + ': ' + (await r.text()).slice(0, 160));
+    // Mutate local cache so re-render reflects the new state without refetch.
+    const m = _ssgState.matches.find(x => x.id === matchId);
+    if (m) {
+      m.rescheduled = true;
+      m.rescheduled_to = dateStr || null;
+      m.rescheduled_at = new Date().toISOString();
+    }
+    ssCellPopoverClose();
+    ssgRenderGridForDivision(_ssgState.divisionId);
+  } catch (e) {
+    setStatus('Failed: ' + e.message, true);
+  }
+}
+async function ssgClearReschedule(matchId) {
+  if (!confirm('Clear rescheduled status for this match? Cell will go back to ✗ if no photos.')) return;
+  const statusEl = document.getElementById('ssgRsStatus_' + matchId);
+  const setStatus = (txt, danger) => {
+    if (!statusEl) return;
+    statusEl.textContent = txt;
+    statusEl.style.color = danger ? 'var(--danger)' : 'var(--muted)';
+  };
+  setStatus('Clearing…', false);
+  try {
+    const r = await fetch(SB_URL + '/rest/v1/matches?id=eq.' + matchId, {
+      method: 'PATCH',
+      headers: {
+        apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY,
+        'Accept-Profile': SB_SCHEMA, 'Content-Profile': SB_SCHEMA,
+        'Content-Type': 'application/json',
+        Prefer: 'return=minimal'
+      },
+      body: JSON.stringify({
+        rescheduled: false,
+        rescheduled_to: null,
+        rescheduled_at: null
+      })
+    });
+    if (!r.ok) throw new Error('PATCH ' + r.status + ': ' + (await r.text()).slice(0, 160));
+    const m = _ssgState.matches.find(x => x.id === matchId);
+    if (m) { m.rescheduled = false; m.rescheduled_to = null; m.rescheduled_at = null; }
+    ssCellPopoverClose();
+    ssgRenderGridForDivision(_ssgState.divisionId);
+  } catch (e) {
+    setStatus('Failed: ' + e.message, true);
+  }
+}
+window.ssgMarkRescheduled = ssgMarkRescheduled;
+window.ssgClearReschedule = ssgClearReschedule;
 
 /* ── Per-week ZIP download ────────────────────────────────────────── */
 let _jszipPromise = null;
