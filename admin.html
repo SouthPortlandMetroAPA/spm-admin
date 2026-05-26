@@ -1520,7 +1520,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <!-- Section 3: all APA numbers for Email HQ -->
           <div id="cpApaNumbersSection" style="margin-bottom:6px;">
             <h3 style="margin:0 0 8px; font-size:1rem">All APA numbers
-              <span class="hint" style="font-weight:400">(8-digit, paste into Email HQ &rarr; Look Up Emails by Player Number)</span>
+              <span class="hint" style="font-weight:400">(8-digit, eligible-only; paste into Email HQ &rarr; Look Up Emails by Player Number)</span>
             </h3>
             <div style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">
               <button class="btn btn-primary btn-sm" id="cpCopyApasBtn">📋 Copy all</button>
@@ -1589,7 +1589,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.43';
+const APP_VERSION = '3.44';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -9312,15 +9312,27 @@ function cpRenderApaNumbers() {
   // "Look Up Emails by Player Number" (which accepts 5 or 8, and prepends
   // 972 to 5-digit). Using 8-digit avoids any prefix ambiguity for users
   // whose rosters might come from a different operator area.
+  //
+  // Ineligible players (I marker on the roster) are EXCLUDED — they
+  // shouldn't receive event emails because they can't play. Surface
+  // the count in the helper text so the operator knows the filter ran.
   const apaSet = new Set();
+  let ineligExcluded = 0;
   for (const t of _cpLastParse.teams) {
-    for (const p of t.players) apaSet.add(p.apa_full || cpToFullApa(p.apa_number));
+    for (const p of t.players) {
+      if (p.ineligible) { ineligExcluded++; continue; }
+      apaSet.add(p.apa_full || cpToFullApa(p.apa_number));
+    }
   }
   const apas = [...apaSet].sort((a, b) => a.localeCompare(b));
   const fmt = document.getElementById('cpApaFormat').value;
   const sep = fmt === 'comma' ? ',' : (fmt === 'space' ? ' ' : '\n');
   document.getElementById('cpApaNumbers').value = apas.join(sep);
-  document.getElementById('cpApaCount').textContent = `${apas.length} unique APA #s (8-digit, Email HQ ready)`;
+  const tail = ineligExcluded
+    ? ` · ${ineligExcluded} ineligible excluded`
+    : '';
+  document.getElementById('cpApaCount').textContent =
+    `${apas.length} unique APA #s (8-digit, Email HQ ready)${tail}`;
 }
 
 async function cpCopyApas() {
