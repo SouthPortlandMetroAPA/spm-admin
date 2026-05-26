@@ -1581,7 +1581,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.40';
+const APP_VERSION = '3.41';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -8252,7 +8252,7 @@ function ssgRenderGridDom(div) {
       <div style="font-weight:800;color:var(--spm-accent)">${esc(cellLabel)}</div>
       <div style="font-weight:500;color:var(--muted);font-size:0.68rem">${esc(dateStr)}</div>
       ${downloadable
-        ? `<button class="btn btn-outline btn-sm" style="margin-top:4px;padding:2px 8px;font-size:0.68rem" title="Download all ${esc(cellLabel)} photos as ZIP" onclick="ssgDownloadWeek(${c.weekNum})">⤓ ZIP</button>`
+        ? `<button class="btn btn-outline btn-sm" style="margin-top:4px;padding:2px 8px;font-size:0.68rem" title="Save all ${esc(cellLabel)} photos to a folder you pick (falls back to ZIP if your browser doesn't support folder save)" onclick="ssgDownloadWeek(${c.weekNum})">⤓ Save</button>`
         : ''}
     </th>`;
   }
@@ -8296,9 +8296,14 @@ function ssgCellClick(ev, matchId, teamId) {
   const match = _ssgState.matches.find(m => m.id === matchId);
   if (!match) return;
   const team = _ssgState.teams.find(t => t.id === teamId);
+  const div = _ssgState.divisions.find(d => d.id === _ssgState.divisionId);
+  const fmt = div && div.format;
+  const requiredSides = (SSG_FORMATS[fmt] && SSG_FORMATS[fmt].sides) || ['single'];
   // Per-team scoping: popover shows only this team's photos. To see the
   // opponent's, click the opponent's cell in the same column.
   const photos = _ssgState.photosByMatchTeam.get(matchId + ':' + teamId) || [];
+  const haveSides = new Set(photos.map(p => p.side));
+  const missingSides = requiredSides.filter(s => !haveSides.has(s));
   const pop = document.getElementById('ssCellPopover');
 
   const home = match.home_team ? (match.home_team.team_number + ' ' + match.home_team.team_name) : '—';
@@ -8310,7 +8315,7 @@ function ssgCellClick(ev, matchId, teamId) {
     <div style="color:var(--muted);font-size:0.78rem;margin-bottom:6px">${esc(home)} <span style="color:#9ca3af">vs</span> ${esc(away)}</div>
     <div style="font-size:0.78rem;color:var(--spm-accent);font-weight:700;margin-bottom:8px">${esc(role)} &middot; ${esc(teamLabel)}</div>`;
   if (photos.length === 0) {
-    body += '<div style="color:var(--muted);font-size:0.82rem;padding:8px 0">This team hasn\'t uploaded yet.</div>';
+    body += '<div style="color:var(--muted);font-size:0.82rem;padding:6px 0 10px">This team hasn\'t uploaded yet.</div>';
   } else {
     body += '<div style="display:grid;gap:8px">';
     for (const p of photos) {
@@ -8334,6 +8339,36 @@ function ssgCellClick(ev, matchId, teamId) {
     }
     body += '</div>';
   }
+
+  // Admin upload section — visible when this team has missing sides for the
+  // division's format. Admin can fill in on behalf of the team (e.g. captain
+  // emailed a paper scan). 9-Ball Doubles needs front + back atomically;
+  // 8-Ball Doubles & Masters need a single scoresheet.
+  if (missingSides.length) {
+    const slotsLabel = missingSides.map(s =>
+      s === 'single' ? 'Scoresheet' : (s.charAt(0).toUpperCase() + s.slice(1))
+    ).join(' + ');
+    const inputId = 'ssgUpload_' + matchId + '_' + teamId;
+    const acceptAttr = missingSides.length > 1 ? 'multiple' : '';
+    body += `<div style="margin-top:10px;padding:10px;background:var(--accent-bg,#eff6ff);border:1px dashed var(--spm-accent);border-radius:8px">
+      <div style="font-size:0.78rem;font-weight:700;color:var(--spm-accent);margin-bottom:6px">
+        📤 Upload on behalf of this team
+      </div>
+      <div style="font-size:0.72rem;color:var(--muted);margin-bottom:8px">
+        Needed: <strong>${esc(slotsLabel)}</strong>${missingSides.length > 1 ? ' (select ' + missingSides.length + ' files — front, back)' : ''}.
+        Full-resolution upload, no compression.
+      </div>
+      <input id="${inputId}" type="file" accept="image/*" ${acceptAttr} style="font-size:0.78rem;width:100%" />
+      <div style="display:flex;gap:8px;margin-top:6px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:0.74rem"
+          onclick="event.stopPropagation();ssgUploadOnBehalf(${matchId}, ${teamId}, '${inputId}', ${JSON.stringify(missingSides).replace(/"/g, '&quot;')})">
+          Upload ${missingSides.length} ${missingSides.length === 1 ? 'file' : 'files'}
+        </button>
+        <span id="${inputId}_status" style="font-size:0.72rem;color:var(--muted)"></span>
+      </div>
+    </div>`;
+  }
+
   body += '<div style="display:flex;justify-content:flex-end;margin-top:8px"><button class="btn btn-outline btn-sm" onclick="ssCellPopoverClose()" style="padding:3px 10px;font-size:0.74rem">Close</button></div>';
   pop.innerHTML = body;
   pop.style.display = 'block';
@@ -8378,6 +8413,100 @@ async function ssgPopoverDelete(photoId, r2Path, matchId, teamId) {
 window.ssgCellClick      = ssgCellClick;
 window.ssgPopoverDelete  = ssgPopoverDelete;
 window.ssCellPopoverClose = ssCellPopoverClose;
+
+/* ── Admin upload-on-behalf (red-X / partial cells) ─────────────────
+   When admin clicks a cell with missing photos, the popover shows an
+   upload form. This handler reads the chosen file(s), assigns each to
+   one of the missing sides in order (e.g. for 9-Ball Doubles: file 1 →
+   front, file 2 → back), uploads to R2 at the same path PaperTrail uses,
+   and writes the papertrail.photos row. Differs from captain uploads in
+   one important way: NO image compression. Admin uploads typically come
+   from full-resolution scans/photos already on a desktop, so we preserve
+   the original bytes. The uploader_name is set to "Admin (Slate)" so the
+   admin path is distinguishable in the log + the popover credit line. */
+async function ssgUploadOnBehalf(matchId, teamId, inputId, missingSidesEscaped) {
+  const missingSides = typeof missingSidesEscaped === 'string'
+    ? JSON.parse(missingSidesEscaped.replace(/&quot;/g, '"'))
+    : missingSidesEscaped;
+  const input  = document.getElementById(inputId);
+  const status = document.getElementById(inputId + '_status');
+  const files  = Array.from(input.files || []);
+  if (!files.length) {
+    status.textContent = 'Choose ' + missingSides.length + ' file(s) first.';
+    status.style.color = 'var(--danger)';
+    return;
+  }
+  if (files.length !== missingSides.length) {
+    status.textContent = 'Need exactly ' + missingSides.length + ' file' + (missingSides.length === 1 ? '' : 's') + ' (' + missingSides.join(' + ') + ').';
+    status.style.color = 'var(--danger)';
+    return;
+  }
+  status.textContent = 'Uploading…';
+  status.style.color = 'var(--muted)';
+  try {
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const side = missingSides[i];
+      // R2 path mirrors PaperTrail's r2PathFor — keep keys identical so
+      // the public renderer / popover URL building doesn't have to know
+      // who uploaded it.
+      const path = 'papertrail/' + currentSession.id + '/' + matchId + '/' + teamId + '/' + side + '.jpg';
+      // Upload raw bytes — no compression. Use the original Content-Type
+      // when the file is JPEG; for PNG/HEIC the worker stores as-is too,
+      // but we standardize the path suffix to .jpg for compatibility
+      // with the existing renderer (which assumes the .jpg path).
+      const r = await fetch(SS_R2_URL + '/' + path, {
+        method: 'PUT',
+        headers: { 'Content-Type': file.type || 'image/jpeg' },
+        body: file
+      });
+      if (!r.ok) throw new Error('R2 PUT ' + r.status + ': ' + (await r.text()).slice(0, 160));
+      // Best-effort dimensions for the DB row — not critical if it fails.
+      let width = null, height = null;
+      try {
+        const bitmap = await createImageBitmap(file);
+        width  = bitmap.width;
+        height = bitmap.height;
+        bitmap.close && bitmap.close();
+      } catch (_) {}
+      // UPSERT photo row (on_conflict matches PaperTrail's unique constraint).
+      const dbBody = [{
+        match_id: matchId,
+        team_id:  teamId,
+        side,
+        r2_path:  path,
+        uploader_apa_number: null,
+        uploader_name: 'Admin (Slate)',
+        bytes: file.size,
+        content_type: file.type || 'image/jpeg',
+        width, height
+      }];
+      const dbR = await fetch(SB_URL + '/rest/v1/photos?on_conflict=match_id,team_id,side', {
+        method: 'POST',
+        headers: {
+          apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY,
+          'Accept-Profile': 'papertrail', 'Content-Profile': 'papertrail',
+          'Content-Type': 'application/json',
+          Prefer: 'resolution=merge-duplicates,return=minimal'
+        },
+        body: JSON.stringify(dbBody)
+      });
+      if (!dbR.ok) throw new Error('DB upsert ' + dbR.status + ': ' + (await dbR.text()).slice(0, 160));
+      status.textContent = (i + 1) + ' / ' + files.length + ' uploaded…';
+    }
+    status.textContent = '✓ Uploaded · refreshing…';
+    status.style.color = 'var(--success, #16a34a)';
+    // Close popover and re-render so the cell flips green.
+    setTimeout(() => {
+      ssCellPopoverClose();
+      ssgRenderGridForDivision(_ssgState.divisionId);
+    }, 600);
+  } catch (e) {
+    status.textContent = 'Failed: ' + e.message;
+    status.style.color = 'var(--danger)';
+  }
+}
+window.ssgUploadOnBehalf = ssgUploadOnBehalf;
 
 /* ── Per-week ZIP download ────────────────────────────────────────── */
 let _jszipPromise = null;
@@ -8438,35 +8567,109 @@ async function ssgDownloadFromPicker() {
 }
 window.ssgDownloadFromPicker = ssgDownloadFromPicker;
 
-async function ssgDownloadAllWeeks() {
-  const div = _ssgState.divisions.find(d => d.id === _ssgState.divisionId);
-  if (!div) return;
-  const allMatches = _ssgState.matches.filter(m => m.row_type === 'regular');
+/* Build the queue of photo objects + filenames for a given week selector.
+   weekSel = 'all' or a specific week number. Pure function — no I/O.    */
+function ssgBuildPhotoQueue(weekSel) {
+  const allMatches = weekSel === 'all'
+    ? _ssgState.matches.filter(m => m.row_type === 'regular')
+    : _ssgState.matches.filter(m => m.row_type === 'regular' && m.week_number === weekSel);
   const queued = [];
   for (const m of allMatches) {
     for (const t of _ssgState.teams) {
       const photos = _ssgState.photosByMatchTeam.get(m.id + ':' + t.id) || [];
-      for (const p of photos) queued.push({ m, p, team: t });
+      for (const p of photos) {
+        const home = m.home_team ? ssgSafe(m.home_team.team_number + '-' + m.home_team.team_name) : 'unfilled';
+        const away = m.away_team ? ssgSafe(m.away_team.team_number + '-' + m.away_team.team_name) : 'unfilled';
+        const side = p.side === 'single' ? 'scoresheet' : p.side;
+        const uploader = ssgSafe(t.team_number);
+        const baseName = home + '_vs_' + away + '__by-' + uploader + '_' + side + '.jpg';
+        // When dumping all weeks, prepend the week folder; when dumping
+        // a single week, the file goes flat into the picked folder.
+        const filename = weekSel === 'all'
+          ? 'week-' + String(m.week_number).padStart(2, '0') + '/' + baseName
+          : baseName;
+        queued.push({ p, filename });
+      }
     }
   }
-  if (!queued.length) { alert('No scoresheets uploaded yet for this division.'); return; }
+  return queued;
+}
 
+/* Download via the modern File System Access API: prompts the user to
+   pick a destination folder, then writes every file directly into it
+   (or into per-week subfolders when "all weeks" is selected). No ZIP,
+   no extraction step. Falls back to ZIP for browsers without the API. */
+async function ssgDownloadToFolder(weekSel) {
+  const div = _ssgState.divisions.find(d => d.id === _ssgState.divisionId);
+  if (!div) return;
+  const queued = ssgBuildPhotoQueue(weekSel);
+  if (!queued.length) {
+    alert(weekSel === 'all'
+      ? 'No scoresheets uploaded yet for this division.'
+      : 'No photos uploaded for week ' + weekSel + ' yet.');
+    return;
+  }
+  // Fallback to ZIP if the File System Access API isn't available
+  // (Safari, Firefox, older Chrome). Same output shape as before.
+  if (!('showDirectoryPicker' in window)) {
+    return ssgDownloadAsZip(weekSel, div, queued);
+  }
+  setStatus('ssgStatus', 'Pick a folder to save into…', '');
+  let rootDir;
+  try {
+    rootDir = await window.showDirectoryPicker({ mode: 'readwrite', startIn: 'downloads' });
+  } catch (e) {
+    setStatus('ssgStatus', 'Folder pick cancelled.', '');
+    setTimeout(() => setStatus('ssgStatus', '', ''), 1500);
+    return;
+  }
+  setStatus('ssgStatus', 'Writing ' + queued.length + ' file(s)…', '');
+  try {
+    // Make a subfolder for this division so multiple downloads don't
+    // collide. Name pattern: <division>-<week or "all">.
+    const dirName = ssgSafe(div.division_number + (weekSel === 'all' ? '-all-weeks' : '-week-' + weekSel));
+    const targetDir = await rootDir.getDirectoryHandle(dirName, { create: true });
+    let done = 0;
+    const dirCache = new Map(); // path-prefix → DirectoryHandle (for week-NN/)
+    dirCache.set('', targetDir);
+    for (const { p, filename } of queued) {
+      const slash = filename.lastIndexOf('/');
+      const subdirPath = slash >= 0 ? filename.slice(0, slash) : '';
+      const baseName   = slash >= 0 ? filename.slice(slash + 1) : filename;
+      let dir = dirCache.get(subdirPath);
+      if (!dir) {
+        dir = await targetDir.getDirectoryHandle(subdirPath, { create: true });
+        dirCache.set(subdirPath, dir);
+      }
+      const resp = await fetch(SS_R2_URL + '/' + p.r2_path);
+      if (!resp.ok) throw new Error('Fetch ' + p.r2_path + ': ' + resp.status);
+      const blob = await resp.blob();
+      const fh = await dir.getFileHandle(baseName, { create: true });
+      const w  = await fh.createWritable();
+      await w.write(blob);
+      await w.close();
+      done++;
+      setStatus('ssgStatus', 'Writing… (' + done + '/' + queued.length + ')', '');
+    }
+    setStatus('ssgStatus', 'Saved ' + queued.length + ' file(s) to "' + dirName + '/".', 'ok');
+    setTimeout(() => setStatus('ssgStatus', '', ''), 3000);
+  } catch (e) {
+    setStatus('ssgStatus', 'Folder write failed: ' + e.message, 'err');
+  }
+}
+
+/* ZIP fallback — only used when showDirectoryPicker isn't available.
+   Same behavior as the pre-3.41 download path. */
+async function ssgDownloadAsZip(weekSel, div, queued) {
   setStatus('ssgStatus', 'Building ZIP (' + queued.length + ' photos)…', '');
   try {
     const JSZip = await ensureJSZip();
     const zip = new JSZip();
     let fetched = 0;
-    for (const { m, p, team } of queued) {
-      const home = m.home_team ? ssgSafe(m.home_team.team_number + '-' + m.home_team.team_name) : 'unfilled';
-      const away = m.away_team ? ssgSafe(m.away_team.team_number + '-' + m.away_team.team_name) : 'unfilled';
-      const side = p.side === 'single' ? 'scoresheet' : p.side;
-      const uploader = ssgSafe(team.team_number);
-      // Folder per week so admin can navigate by week inside the ZIP.
-      const weekFolder = 'week-' + String(m.week_number).padStart(2, '0');
-      const name = weekFolder + '/' + home + '_vs_' + away + '__by-' + uploader + '_' + side + '.jpg';
+    for (const { p, filename } of queued) {
       const resp = await fetch(SS_R2_URL + '/' + p.r2_path);
       if (!resp.ok) throw new Error('Fetch ' + p.r2_path + ': ' + resp.status);
-      zip.file(name, await resp.blob());
+      zip.file(filename, await resp.blob());
       fetched++;
       setStatus('ssgStatus', 'Building ZIP… (' + fetched + '/' + queued.length + ')', '');
     }
@@ -8474,69 +8677,23 @@ async function ssgDownloadAllWeeks() {
     const url  = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = div.division_number + '-all-weeks.zip';
+    a.download = div.division_number + (weekSel === 'all' ? '-all-weeks' : '-week-' + weekSel) + '.zip';
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 5000);
-    setStatus('ssgStatus', 'Downloaded ' + queued.length + ' photos across all weeks.', 'ok');
-    setTimeout(() => setStatus('ssgStatus', '', ''), 2200);
+    setStatus('ssgStatus', 'Downloaded ' + queued.length + ' photos (browser doesn\'t support folder save — fell back to ZIP).', 'ok');
+    setTimeout(() => setStatus('ssgStatus', '', ''), 3000);
   } catch (e) {
     setStatus('ssgStatus', 'ZIP failed: ' + e.message, 'err');
   }
 }
+
+/* Public entry points — keep the old function names + behavior so the
+   onclick handlers in the HTML still work, but route through the folder
+   path. */
+async function ssgDownloadAllWeeks() { return ssgDownloadToFolder('all'); }
+async function ssgDownloadWeek(weekNum) { return ssgDownloadToFolder(weekNum); }
 window.ssgDownloadAllWeeks = ssgDownloadAllWeeks;
-
-async function ssgDownloadWeek(weekNum) {
-  const div = _ssgState.divisions.find(d => d.id === _ssgState.divisionId);
-  if (!div) return;
-  const matches = _ssgState.matches.filter(m => m.row_type === 'regular' && m.week_number === weekNum);
-  // Per-team: include both teams' uploads for each match. Filenames
-  // carry the uploading team's number so admin can tell home vs away
-  // submissions apart.
-  const teamById = new Map(_ssgState.teams.map(t => [t.id, t]));
-  const queued = [];
-  for (const m of matches) {
-    for (const t of _ssgState.teams) {
-      const photos = _ssgState.photosByMatchTeam.get(m.id + ':' + t.id) || [];
-      for (const p of photos) queued.push({ m, p, team: t });
-    }
-  }
-  if (queued.length === 0) {
-    alert('No photos uploaded for week ' + weekNum + ' yet.');
-    return;
-  }
-
-  setStatus('ssgStatus', 'Building ZIP (' + queued.length + ' photo' + (queued.length === 1 ? '' : 's') + ')…', '');
-  try {
-    const JSZip = await ensureJSZip();
-    const zip = new JSZip();
-    let fetched = 0;
-    for (const { m, p, team } of queued) {
-      const home = m.home_team ? ssgSafe(m.home_team.team_number + '-' + m.home_team.team_name) : 'unfilled';
-      const away = m.away_team ? ssgSafe(m.away_team.team_number + '-' + m.away_team.team_name) : 'unfilled';
-      const side = p.side === 'single' ? 'scoresheet' : p.side;
-      const uploader = ssgSafe(team.team_number);
-      // Filename: <home>_vs_<away>__by-<uploader>_<side>.jpg
-      const name = home + '_vs_' + away + '__by-' + uploader + '_' + side + '.jpg';
-      const resp = await fetch(SS_R2_URL + '/' + p.r2_path);
-      if (!resp.ok) throw new Error('Fetch ' + p.r2_path + ': ' + resp.status);
-      zip.file(name, await resp.blob());
-      fetched++;
-      setStatus('ssgStatus', 'Building ZIP… (' + fetched + '/' + queued.length + ')', '');
-    }
-    const blob = await zip.generateAsync({ type: 'blob' });
-    const url  = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = div.division_number + '-week-' + weekNum + '.zip';
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
-    setStatus('ssgStatus', 'Downloaded ' + queued.length + ' photo' + (queued.length === 1 ? '' : 's') + ' for week ' + weekNum + '.', 'ok');
-    setTimeout(() => setStatus('ssgStatus', '', ''), 2200);
-  } catch (e) {
-    setStatus('ssgStatus', 'ZIP failed: ' + e.message, 'err');
-  }
-}
-window.ssgDownloadWeek = ssgDownloadWeek;
+window.ssgDownloadWeek     = ssgDownloadWeek;
 
 /* ══════════════════════════════════════════════════════════════════════
    PLAYOFFS TAB — "show your work" advancement breakdown
