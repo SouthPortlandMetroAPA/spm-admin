@@ -1589,7 +1589,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.46';
+const APP_VERSION = '3.47';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -8109,13 +8109,31 @@ async function renderScoresheetsGridView() {
     sel.innerHTML = divs.map(d =>
       `<option value="${d.id}">${esc(d.division_number)} — ${esc(d.name)} · ${esc(d.format)}</option>`
     ).join('');
-    if (prev && divs.find(d => String(d.id) === prev)) sel.value = prev;
-    sel.onchange = () => ssgRenderGridForDivision(parseInt(sel.value, 10));
+    // Restore last-viewed division. Priority:
+    //   1. Whatever the select already had (intra-session re-render — e.g.
+    //      switching from Photos to Grid view).
+    //   2. localStorage memory (3.47+) — keyed per session so the choice
+    //      is sticky across page reloads but doesn't bleed into next season.
+    //   3. First option (default).
+    const lsKey = 'slate.ssg.lastDivision.' + currentSession.id;
+    let remembered = null;
+    try { remembered = localStorage.getItem(lsKey); } catch (_) {}
+    if (prev && divs.find(d => String(d.id) === prev)) {
+      sel.value = prev;
+    } else if (remembered && divs.find(d => String(d.id) === remembered)) {
+      sel.value = remembered;
+    }
+    sel.onchange = () => {
+      try { localStorage.setItem(lsKey, sel.value); } catch (_) {}
+      ssgRenderGridForDivision(parseInt(sel.value, 10));
+    };
     if (!divs.length) {
       setStatus('ssgStatus', 'No SPM Masters/Doubles divisions in this session.', '');
       return;
     }
     setStatus('ssgStatus', '', '');
+    // Persist the chosen-on-load value too, so the FIRST visit anchors the memory.
+    try { localStorage.setItem(lsKey, sel.value); } catch (_) {}
     ssgRenderGridForDivision(parseInt(sel.value, 10));
   } catch (e) {
     setStatus('ssgStatus', 'Failed: ' + e.message, 'err');
