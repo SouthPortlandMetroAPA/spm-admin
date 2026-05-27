@@ -1664,7 +1664,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.50';
+const APP_VERSION = '3.51';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -9650,34 +9650,26 @@ function cpPrintReport() {
   const clusters     = _cpLastParse._clusters;
   const hostByTeam   = _cpLastParse._hostByTeam || new Map();
   const playerToTeams= _cpLastParse._playerToTeams;
-  const letters = (i) => {
-    let n = i + 1, s = '';
-    while (n > 0) { n--; s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26); }
-    return s;
-  };
   const esc2 = (s) => String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
-  const now = new Date();
-  const stamp = now.toLocaleString(undefined, {
-    year: 'numeric', month: 'short', day: '2-digit',
-    hour: '2-digit', minute: '2-digit'
+  // Customer-facing date: "May 26, 2026 at 10:30 PM"
+  const stamp = new Date().toLocaleString('en-US', {
+    year: 'numeric', month: 'long', day: 'numeric',
+    hour: 'numeric', minute: '2-digit'
   });
 
-  // Summary numbers
-  const totalTeams   = teams.length;
-  const totalGroups  = clusters.length;
-  const hostGroups   = clusters.filter(g => g.some(t => hostByTeam.has(t.team_number))).length;
+  const totalGroups = clusters.length;
+  const hostGroups  = clusters.filter(g => g.some(t => hostByTeam.has(t.team_number))).length;
 
-  const groupsHtml = clusters.map((group, idx) => {
-    const label = letters(idx);
+  // Per-group section. NO group label (per customer-facing UX direction —
+  // each group stands on its own with a host banner if applicable). Host
+  // group gets an amber border and the host team's row is tinted yellow.
+  const groupsHtml = clusters.map(group => {
     const hostHits = group.filter(t => hostByTeam.has(t.team_number));
     const hostBanner = hostHits.length
-      ? `<div class="host-banner">🏠 <strong>This group must host at ${esc2(hostByTeam.get(hostHits[0].team_number).host)}</strong>
-           — team <strong>${esc2(hostHits[0].team_number)} ${esc2(hostHits[0].team_name)}</strong>
-           (player: ${esc2(hostByTeam.get(hostHits[0].team_number).playerName)})
-         </div>`
+      ? `<div class="host-banner"><strong>Host at ${esc2(hostByTeam.get(hostHits[0].team_number).host)}:</strong> ${esc2(hostHits[0].team_number)} &mdash; ${esc2(hostHits[0].team_name)}</div>`
       : '';
     const rows = group.map(t => {
       const shared = t.players.filter(p => {
@@ -9689,90 +9681,131 @@ function cpPrintReport() {
         return false;
       });
       const sharedText = shared.length
-        ? shared.map(p => `${esc2(p.name)} (#${esc2(p.apa_full || cpToFullApa(p.apa_number))})`).join('<br>')
-        : '<span class="muted">—</span>';
+        ? shared.map(p => `<div class="shared-player"><span class="shared-name">${esc2(p.name)}</span> <span class="shared-apa">#${esc2(p.apa_full || cpToFullApa(p.apa_number))}</span></div>`).join('')
+        : '<span class="muted">&mdash;</span>';
       const isHost = hostByTeam.has(t.team_number);
       return `<tr${isHost ? ' class="host-row"' : ''}>
-        <td class="mono">${esc2(t.team_number)}</td>
-        <td><strong>${esc2(t.team_name)}</strong>${isHost ? ` <span class="host-chip">🏠 ${esc2(hostByTeam.get(t.team_number).host)}</span>` : ''}</td>
-        <td>${sharedText}</td>
+        <td class="cell-team">
+          <span class="team-num">${esc2(t.team_number)}</span>
+          <span class="team-name">${esc2(t.team_name)}</span>
+          ${t.city ? `<span class="team-city">${esc2(t.city)}</span>` : ''}
+        </td>
+        <td class="cell-shared">${sharedText}</td>
       </tr>`;
     }).join('');
     return `<section class="group${hostHits.length ? ' is-host' : ''}">
-      <h2>Group ${label} <span class="count">· ${group.length} teams</span></h2>
       ${hostBanner}
       <table>
-        <thead><tr><th>Team #</th><th>Team</th><th>Shared players</th></tr></thead>
+        <thead><tr><th class="th-team">Team</th><th class="th-shared">Shared players</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </section>`;
   }).join('');
 
   const html = `<!doctype html><html><head><meta charset="utf-8">
-<title>Common Players — Linked Teams</title>
+<title>Linked teams &mdash; shared-roster check</title>
 <style>
-  @page { size: letter; margin: 0.6in 0.6in 0.5in; }
+  @page { size: letter; margin: 0.55in 0.55in 0.55in; }
   * { box-sizing: border-box; }
-  body { font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-    color: #111827; margin: 0; padding: 24px 32px; background: #fff; max-width: 8.4in; margin: 0 auto; }
-  header { border-bottom: 3px solid #2563eb; padding-bottom: 10px; margin-bottom: 18px; }
-  header h1 { margin: 0 0 4px; font-size: 22px; color: #1e3a8a; }
-  header .sub { color: #6b7280; font-size: 13px; }
-  .summary { display: flex; gap: 16px; flex-wrap: wrap; margin: 14px 0 20px; padding: 10px 14px;
-    background: #f9fafb; border-radius: 8px; }
-  .summary .pill { font-size: 13px; }
-  .summary strong { font-size: 18px; color: #1e3a8a; }
-  section.group { break-inside: avoid; page-break-inside: avoid; margin-bottom: 18px;
-    border: 1px solid #d1d5db; border-radius: 8px; overflow: hidden; }
-  section.group h2 { margin: 0; padding: 8px 14px; font-size: 15px;
-    background: #eff6ff; color: #1e40af; border-bottom: 1px solid #d1d5db; }
-  section.group h2 .count { font-weight: 400; color: #6b7280; font-size: 13px; }
-  section.group.is-host h2 { background: linear-gradient(90deg,#fef3c7,#fde68a); color: #78350f;
-    border-bottom: 2px solid #d97706; }
-  .host-banner { padding: 8px 14px; background: #fffbeb; color: #78350f;
-    border-bottom: 1px solid #fcd34d; font-size: 13px; }
-  table { width: 100%; border-collapse: collapse; }
-  th, td { padding: 6px 12px; border-bottom: 1px solid #e5e7eb; text-align: left;
-    font-size: 13px; vertical-align: top; }
-  thead th { background: #f9fafb; font-size: 11px; font-weight: 700; color: #6b7280;
-    text-transform: uppercase; letter-spacing: 0.04em; }
-  tr.host-row { background: #fffbeb; }
-  .host-chip { display: inline-block; padding: 1px 7px; background: #d97706; color: #fff;
-    border-radius: 4px; font-size: 10px; font-weight: 800; letter-spacing: 0.04em;
-    text-transform: uppercase; margin-left: 6px; vertical-align: middle; }
-  .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace; }
-  .muted { color: #9ca3af; }
-  footer { margin-top: 20px; padding-top: 10px; border-top: 1px solid #e5e7eb;
-    font-size: 11px; color: #9ca3af; text-align: center; }
-  @media print {
-    body { padding: 0; }
-    header { page-break-after: avoid; }
-    section.group { break-inside: avoid; }
-    .no-print { display: none; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    color: #111827; line-height: 1.5; font-size: 11pt; background: #f3f4f6;
   }
-  .toolbar { position: sticky; top: 0; background: #fff; padding: 10px 0 14px;
-    margin-bottom: 6px; display: flex; gap: 8px; justify-content: flex-end; }
-  .toolbar button { padding: 6px 14px; font-size: 13px; border: 1px solid #d1d5db;
-    background: #fff; border-radius: 6px; cursor: pointer; font: inherit; }
-  .toolbar button.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+  .page {
+    max-width: 7.5in; margin: 24px auto; padding: 28px 36px 36px;
+    background: #fff; box-shadow: 0 4px 16px rgba(0,0,0,0.06);
+  }
+  header { border-bottom: 2px solid #111827; padding-bottom: 10px; margin-bottom: 22px; }
+  header .eyebrow {
+    font-size: 9pt; text-transform: uppercase; letter-spacing: 0.12em;
+    color: #6b7280; font-weight: 600;
+  }
+  header h1 { margin: 4px 0 6px; font-size: 22pt; font-weight: 700; color: #111827; line-height: 1.15; }
+  header .sub { color: #6b7280; font-size: 10pt; }
+
+  .summary { margin: 0 0 24px; font-size: 11pt; color: #374151; }
+  .summary strong { color: #111827; }
+
+  section.group {
+    break-inside: avoid; page-break-inside: avoid;
+    margin-bottom: 24px; border: 1px solid #e5e7eb; border-radius: 6px; overflow: hidden;
+  }
+  section.group.is-host { border-color: #d97706; border-width: 2px; }
+
+  .host-banner { padding: 10px 16px; background: #fffbeb; border-bottom: 1px solid #fcd34d;
+    font-size: 11pt; color: #78350f; }
+  .host-banner strong { font-weight: 700; }
+
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  th, td { padding: 12px 18px; text-align: left; vertical-align: top; border-bottom: 1px solid #f3f4f6; }
+  thead th {
+    background: #f9fafb; font-size: 9pt; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.08em; color: #6b7280;
+    border-bottom: 1px solid #e5e7eb; padding: 8px 18px;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  tr.host-row { background: #fffbeb; }
+
+  .th-team   { width: 45%; }
+  .th-shared { width: 55%; }
+
+  .cell-team .team-num {
+    display: block; font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    font-size: 9pt; color: #6b7280; margin-bottom: 2px; letter-spacing: 0.04em;
+  }
+  .cell-team .team-name { display: block; font-weight: 700; font-size: 12pt; color: #111827; }
+  .cell-team .team-city { display: block; font-size: 9.5pt; color: #6b7280; margin-top: 2px; }
+
+  .cell-shared .shared-player { display: flex; align-items: baseline; gap: 8px; padding: 2px 0; }
+  .cell-shared .shared-name { font-weight: 500; color: #111827; }
+  .cell-shared .shared-apa {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    font-size: 9pt; color: #9ca3af; letter-spacing: 0.02em;
+  }
+  .muted { color: #9ca3af; font-style: italic; }
+
+  footer { margin-top: 32px; padding-top: 14px; border-top: 1px solid #e5e7eb;
+    font-size: 9pt; color: #9ca3af; text-align: center; }
+
+  .toolbar {
+    position: sticky; top: 0; z-index: 10; background: #f3f4f6;
+    padding: 10px 0 14px; text-align: right;
+  }
+  .toolbar button {
+    padding: 8px 16px; font-size: 11pt; border: 1px solid #d1d5db;
+    background: #fff; border-radius: 6px; cursor: pointer; font-family: inherit; margin-left: 6px;
+  }
+  .toolbar button.primary { background: #111827; color: #fff; border-color: #111827; }
+
+  @media print {
+    body { background: #fff; font-size: 10.5pt; }
+    .toolbar { display: none; }
+    .page { max-width: none; margin: 0; padding: 0; box-shadow: none; }
+    header { page-break-after: avoid; }
+    section.group { break-inside: avoid; page-break-inside: avoid; }
+  }
 </style>
 </head><body>
-  <div class="toolbar no-print">
-    <button onclick="window.close()">Close</button>
-    <button class="primary" onclick="window.print()">🖨️ Print / Save as PDF</button>
+  <div class="page">
+    <div class="toolbar">
+      <button onclick="window.close()">Close</button>
+      <button class="primary" onclick="window.print()">Save as PDF</button>
+    </div>
+    <header>
+      <div class="eyebrow">South Portland Metro APA</div>
+      <h1>Linked teams &mdash; shared-roster check</h1>
+      <div class="sub">${esc2(stamp)}</div>
+    </header>
+    <div class="summary">
+      ${totalGroups === 0
+        ? '<em>No linked teams found. Every team is independent.</em>'
+        : `Found <strong>${totalGroups}</strong> set${totalGroups === 1 ? '' : 's'} of teams sharing one or more players${hostGroups ? `, of which <strong>${hostGroups}</strong> must host at the designated venue` : ''}.`}
+    </div>
+    ${groupsHtml}
+    <footer>South Portland Metro APA &middot; spmapa.com</footer>
   </div>
-  <header>
-    <h1>Linked teams · Shared-roster check</h1>
-    <div class="sub">Generated ${esc2(stamp)} · Slate Common Players</div>
-  </header>
-  <div class="summary">
-    <span class="pill"><strong>${totalTeams}</strong> teams on roster</span>
-    <span class="pill"><strong>${totalGroups}</strong> linked-team group${totalGroups === 1 ? '' : 's'}</span>
-    ${hostGroups ? `<span class="pill" style="color:#78350f"><strong>${hostGroups}</strong> 🏠 host-required</span>` : ''}
-  </div>
-  ${groupsHtml || '<p class="muted" style="font-style:italic">No linked teams. Every team is independent.</p>'}
-  <footer>Slate · slate.spmapa</footer>
-  <script>setTimeout(() => window.print(), 350);<\/script>
+  <script>setTimeout(() => window.print(), 400);<\/script>
 </body></html>`;
 
   const win = window.open('', '_blank');
