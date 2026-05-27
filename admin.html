@@ -932,6 +932,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="scoresheets">Scoresheets</button>
       <button class="tab" data-tab="commonplayers">Common Players</button>
       <button class="tab" data-tab="reports">Reports</button>
+      <button class="tab" data-tab="redtape">RedTape</button>
       <button class="tab" data-tab="playoffs">Playoffs</button>
     </div>
 
@@ -1640,6 +1641,53 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
     </div>
 
     <!-- ══════════════════════════════════════════════════════════════
+         TAB: REDTAPE (3.55+) — admin view for the captain-facing
+         paperwork-upload app. Lives in the redtape schema; the
+         captain UI is at southportlandmetroapa.github.io/redtape/.
+         Two views: event list (default) and event detail (grid of
+         teams × items with status icons). Click any cell to view /
+         approve / delete the uploaded paperwork.
+         ══════════════════════════════════════════════════════════════ -->
+    <div id="tab-redtape" class="tab-panel">
+      <div id="rtEventsView">
+        <div class="card">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+            <h2 style="margin:0">Paperwork events</h2>
+            <span class="hint" id="rtListStatus"></span>
+            <div style="margin-left:auto" class="actions">
+              <button class="btn btn-primary btn-sm" onclick="rtOpenCreateEvent()">+ New event</button>
+            </div>
+          </div>
+          <p class="hint" style="margin-top:0">Active events that require teams to upload paperwork. The captain-facing portal is at <a href="https://southportlandmetroapa.github.io/redtape/" target="_blank" rel="noopener"><code>redtape</code></a> &mdash; captains sign in with their APA number to upload.</p>
+          <div id="rtEventsList"><p class="hint">Loading…</p></div>
+        </div>
+      </div>
+
+      <div id="rtEventDetailView" style="display:none">
+        <div class="card">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
+            <button class="btn btn-outline btn-sm" onclick="rtBackToList()">‹ All events</button>
+            <h2 id="rtEventName" style="margin:0"></h2>
+            <span class="hint" id="rtEventMeta"></span>
+            <div style="margin-left:auto" class="actions">
+              <button class="btn btn-outline btn-sm" onclick="rtOpenEditEvent()">Edit event</button>
+              <button class="btn btn-outline btn-sm" onclick="rtOpenManageTeams()">Manage teams</button>
+              <button class="btn btn-outline btn-sm" onclick="rtOpenManageItems()">Manage items</button>
+            </div>
+          </div>
+          <p class="hint" style="margin-top:0" id="rtEventDescription"></p>
+        </div>
+        <div class="card">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
+            <h2 style="margin:0;font-size:1rem">Submissions</h2>
+            <span class="hint" id="rtGridStatus"></span>
+          </div>
+          <div id="rtGrid"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════════
          TAB: PLAYOFFS — "show your work" breakdown of advancement math
          ══════════════════════════════════════════════════════════════ -->
     <div id="tab-playoffs" class="tab-panel">
@@ -1688,7 +1736,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.54';
+const APP_VERSION = '3.55';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -3245,6 +3293,7 @@ const TAB_LABEL = {
   scoresheets:   'Scoresheets',
   commonplayers: 'Common Players',
   reports:       'Reports',
+  redtape:       'RedTape',
   playoffs:      'Playoffs'
 };
 
@@ -3260,6 +3309,7 @@ function switchTab(name) {
   if (name === 'scoresheets') { ssBindViewToggle(); renderScoresheetsGridView(); }
   if (name === 'commonplayers') cpInit();
   if (name === 'reports')     rptInit();
+  if (name === 'redtape')     rtInit();
   if (name === 'playoffs')    renderPlayoffsTab();
 }
 
@@ -10138,6 +10188,520 @@ function rptCopyAllEmails(btn) {
 
 window.rptInit = rptInit;
 window.rptRun  = rptRun;
+
+/* ══════════════════════════════════════════════════════════════════════
+   REDTAPE ADMIN TAB (3.55+)
+   ──────────────────────────────────────────────────────────────────
+   Admin surface for the captain-facing RedTape paperwork-upload portal.
+   Data lives in the `redtape` schema. Talks via service-role through
+   the existing sb() helper (Accept-Profile / Content-Profile per call).
+   ══════════════════════════════════════════════════════════════════════ */
+
+const RT_R2_URL = 'https://apa-photos.spmapa.workers.dev';
+const RT_HEADERS = () => ({
+  apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY,
+  'Accept-Profile': 'redtape', 'Content-Profile': 'redtape',
+  'Content-Type': 'application/json'
+});
+
+let _rtEvents = [];
+let _rtActiveEvent = null;  // { ...event, items: [], assignments: [], uploads: [] }
+let _rtTeamsCache = null;   // all teams in current session, both operators
+
+function rtInit() {
+  rtRenderEventList();
+}
+
+async function rtFetch(method, path, body) {
+  const opts = { method, headers: RT_HEADERS() };
+  if (body != null && method !== 'GET' && method !== 'DELETE') opts.body = JSON.stringify(body);
+  const r = await fetch(SB_URL + '/rest/v1/' + path, opts);
+  if (!r.ok) throw new Error(method + ' ' + path + ': ' + r.status + ' ' + (await r.text()).slice(0, 200));
+  const ct = r.headers.get('content-type') || '';
+  if (ct.includes('json') && r.status !== 204) return r.json();
+  return null;
+}
+
+async function rtLoadAllTeams() {
+  if (_rtTeamsCache) return _rtTeamsCache;
+  // Pull all teams in the current session, both operators, for the team picker.
+  const sess = await sb('GET', 'sessions?select=id&is_current=eq.true&limit=1');
+  if (!sess.length) throw new Error('no current session');
+  const teams = await sb('GET',
+    'teams?select=id,team_number,team_name,division_id,division:divisions!teams_division_id_fkey(division_number,name,format,night_of_play,operator_id)' +
+    '&order=team_number');
+  // Filter to current session teams
+  _rtTeamsCache = teams.filter(t => t.division); // every team has a division in current session via this query
+  return _rtTeamsCache;
+}
+
+/* ── Event list ───────────────────────────────────────────────────── */
+async function rtRenderEventList() {
+  document.getElementById('rtEventsView').style.display = '';
+  document.getElementById('rtEventDetailView').style.display = 'none';
+  setStatus('rtListStatus', 'Loading…', '');
+  try {
+    _rtEvents = await rtFetch('GET', 'events?select=*&order=created_at.desc');
+    setStatus('rtListStatus', '', '');
+    const el = document.getElementById('rtEventsList');
+    if (!_rtEvents.length) {
+      el.innerHTML = '<p class="hint" style="font-style:italic">No paperwork events yet. Click <strong>+ New event</strong> to create one.</p>';
+      return;
+    }
+    el.innerHTML = '<div style="display:flex;flex-direction:column;gap:8px">'
+      + _rtEvents.map(e => {
+        const due = e.due_date ? '<span class="hint" style="margin-left:8px">Due ' + esc(e.due_date) + '</span>' : '';
+        const inactive = !e.is_active ? ' <span class="badge warn">Inactive</span>' : '';
+        return '<div onclick="rtOpenEvent(' + e.id + ')" style="cursor:pointer;padding:12px 14px;background:#fff;border:1px solid var(--border);border-radius:8px;transition:background 0.12s" onmouseover="this.style.background=\'#fafafa\'" onmouseout="this.style.background=\'#fff\'">'
+          + '<div style="display:flex;align-items:center;gap:8px">'
+          +   '<strong style="font-size:1rem">' + esc(e.name) + '</strong>' + inactive
+          +   due
+          + '</div>'
+          + (e.description ? '<div class="hint" style="margin-top:4px;font-size:0.84rem">' + esc(e.description) + '</div>' : '')
+          + '<div class="hint" style="font-size:0.78rem;margin-top:4px">slug: <code>' + esc(e.slug) + '</code> · created ' + esc(fmtDateTime(e.created_at)) + '</div>'
+        + '</div>';
+      }).join('') + '</div>';
+  } catch (e) {
+    setStatus('rtListStatus', 'Failed: ' + e.message, 'err');
+  }
+}
+
+/* ── Create event modal ─────────────────────────────────────────── */
+function rtOpenCreateEvent() {
+  const slugify = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+  const sess = currentSession ? currentSession.id : '';
+  const html = '<div class="modal-box">'
+    + '<div class="modal-title">New paperwork event</div>'
+    + '<div class="form-row"><div style="flex:1"><label>Name</label><input type="text" id="rtNewName" placeholder="e.g. Summer 2026 World Qualifier — Team Cert"></div></div>'
+    + '<div class="form-row"><div style="flex:1"><label>Description (optional)</label><textarea id="rtNewDesc" placeholder="What the paperwork is for…"></textarea></div></div>'
+    + '<div class="form-row"><div><label>Due date (optional)</label><input type="date" id="rtNewDue"></div></div>'
+    + '<div id="rtNewStatus" class="status-line" style="margin-top:10px"></div>'
+    + '<div class="modal-actions"><button class="btn btn-outline" onclick="rtCloseModal()">Cancel</button><button class="btn btn-primary" onclick="rtCreateEvent()">Create</button></div>'
+    + '</div>';
+  rtShowModal(html);
+  setTimeout(() => document.getElementById('rtNewName').focus(), 50);
+
+  async function rtCreate(){}; // dummy to keep linter quiet (function below)
+}
+
+async function rtCreateEvent() {
+  const name = document.getElementById('rtNewName').value.trim();
+  const desc = document.getElementById('rtNewDesc').value.trim();
+  const due  = document.getElementById('rtNewDue').value || null;
+  if (!name) { setStatus('rtNewStatus', 'Name is required.', 'err'); return; }
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+  if (!slug) { setStatus('rtNewStatus', 'Could not derive a slug from that name.', 'err'); return; }
+  setStatus('rtNewStatus', 'Creating…', '');
+  try {
+    const sessionId = currentSession ? currentSession.id : null;
+    const created = await rtFetch('POST', 'events?select=*', {
+      slug, name, description: desc || null, due_date: due,
+      session_id: sessionId, created_by: 'admin'
+    });
+    rtCloseModal();
+    await rtRenderEventList();
+    const id = Array.isArray(created) ? created[0].id : created.id;
+    rtOpenEvent(id);
+  } catch (e) {
+    setStatus('rtNewStatus', 'Failed: ' + e.message, 'err');
+  }
+}
+
+/* ── Event detail (grid view) ──────────────────────────────────── */
+async function rtOpenEvent(eventId) {
+  document.getElementById('rtEventsView').style.display = 'none';
+  document.getElementById('rtEventDetailView').style.display = '';
+  setStatus('rtGridStatus', 'Loading…', '');
+  document.getElementById('rtGrid').innerHTML = '<p class="hint">Loading…</p>';
+  try {
+    const [eRows, items, assignments, uploads] = await Promise.all([
+      rtFetch('GET', 'events?select=*&id=eq.' + eventId),
+      rtFetch('GET', 'items?event_id=eq.' + eventId + '&order=sort_order.asc,id.asc'),
+      rtFetch('GET', 'assignments?event_id=eq.' + eventId + '&order=team_number.asc'),
+      rtFetch('GET', 'uploads?select=*,assignment:assignments!uploads_assignment_id_fkey(event_id,team_id,team_number,team_name)&assignment.event_id=eq.' + eventId)
+    ]);
+    if (!eRows.length) throw new Error('Event not found');
+    _rtActiveEvent = { ...eRows[0], items, assignments, uploads };
+    rtRenderGrid();
+    setStatus('rtGridStatus', '', '');
+  } catch (e) {
+    setStatus('rtGridStatus', 'Failed: ' + e.message, 'err');
+    document.getElementById('rtGrid').innerHTML = '<p class="status-line err">' + esc(e.message) + '</p>';
+  }
+}
+
+function rtBackToList() {
+  _rtActiveEvent = null;
+  rtRenderEventList();
+}
+
+function rtRenderGrid() {
+  const e = _rtActiveEvent;
+  document.getElementById('rtEventName').textContent = e.name;
+  const due = e.due_date ? ' · Due ' + e.due_date : '';
+  document.getElementById('rtEventMeta').textContent =
+    e.items.length + ' item' + (e.items.length === 1 ? '' : 's') + ' · '
+    + e.assignments.length + ' team' + (e.assignments.length === 1 ? '' : 's') + due;
+  document.getElementById('rtEventDescription').textContent = e.description || '';
+
+  const gridEl = document.getElementById('rtGrid');
+  if (!e.assignments.length) {
+    gridEl.innerHTML = '<p class="hint" style="font-style:italic">No teams assigned. Click <strong>Manage teams</strong> to add them.</p>';
+    return;
+  }
+  if (!e.items.length) {
+    gridEl.innerHTML = '<p class="hint" style="font-style:italic">No paperwork items defined. Click <strong>Manage items</strong> to add them.</p>';
+    return;
+  }
+  // Build upload map for fast lookup: assignment_id+item_id → upload
+  const uploadMap = new Map();
+  for (const u of e.uploads) uploadMap.set(u.assignment_id + ':' + u.item_id, u);
+  // Status counters
+  let pending = 0, uploaded = 0, approved = 0;
+
+  let h = '<div style="overflow-x:auto;border:1px solid var(--border);border-radius:8px;background:#fff">'
+    + '<table class="table" style="margin:0;font-size:0.84rem">'
+    + '<thead><tr><th style="position:sticky;left:0;background:#fff;text-align:left;min-width:180px">Team</th>';
+  for (const it of e.items) {
+    h += '<th style="text-align:center;min-width:90px;font-weight:700">' + esc(it.title) + '</th>';
+  }
+  h += '</tr></thead><tbody>';
+
+  for (const a of e.assignments) {
+    h += '<tr><td style="position:sticky;left:0;background:#fff;font-weight:600">'
+      + '<div>' + esc(a.team_number) + ' ' + esc(a.team_name || '') + '</div>'
+      + '</td>';
+    for (const it of e.items) {
+      const u = uploadMap.get(a.id + ':' + it.id);
+      let cls, sym, color, title;
+      if (!u) {
+        cls = 'pending'; sym = '✗'; color = '#fef2f2;color:#dc2626'; title = 'Not filed';
+        pending++;
+      } else if (u.approved_at) {
+        cls = 'approved'; sym = '✓'; color = '#dcfce7;color:#16a34a'; title = 'Stamped';
+        approved++;
+      } else {
+        cls = 'uploaded'; sym = '⏳'; color = '#fef3c7;color:#92400e'; title = 'Awaiting review';
+        uploaded++;
+      }
+      h += '<td style="text-align:center;padding:8px;background:' + color + ';cursor:pointer;font-size:1.05rem;font-weight:800"'
+        + ' onclick="rtOpenCell(' + a.id + ',' + it.id + ')" title="' + esc(title) + '">' + sym + '</td>';
+    }
+    h += '</tr>';
+  }
+  h += '</tbody></table></div>';
+  h += '<div style="display:flex;gap:14px;margin-top:10px;flex-wrap:wrap;font-size:0.86rem">'
+    + '<span class="badge ok">✓ ' + approved + ' stamped</span>'
+    + '<span class="badge warn">⏳ ' + uploaded + ' awaiting review</span>'
+    + '<span class="badge" style="background:#fef2f2;color:#dc2626">✗ ' + pending + ' not filed</span>'
+    + '</div>';
+  gridEl.innerHTML = h;
+}
+
+/* ── Cell click: view / approve / delete ─────────────────────── */
+async function rtOpenCell(assignmentId, itemId) {
+  const e = _rtActiveEvent;
+  const a = e.assignments.find(x => x.id === assignmentId);
+  const it = e.items.find(x => x.id === itemId);
+  const u = e.uploads.find(x => x.assignment_id === assignmentId && x.item_id === itemId);
+  if (!a || !it) return;
+
+  let body = '<div class="modal-box" style="max-width:560px">'
+    + '<div class="modal-title">' + esc(it.title) + '</div>'
+    + '<p class="hint" style="margin-top:0">' + esc(a.team_number) + ' ' + esc(a.team_name || '') + '</p>';
+
+  if (!u) {
+    body += '<div style="padding:24px;text-align:center;background:#fef2f2;border-radius:8px;color:#dc2626;font-weight:600;margin:12px 0">Not yet filed by this team.</div>';
+    body += '<div class="modal-actions"><button class="btn" onclick="rtCloseModal()">Close</button></div>';
+  } else {
+    const url = RT_R2_URL + '/' + u.r2_path;
+    const isApproved = !!u.approved_at;
+    body += '<div style="position:relative;background:#000;border-radius:6px;overflow:hidden;margin:10px 0">'
+      + '<img src="' + esc(url) + '" style="display:block;width:100%;max-height:60vh;object-fit:contain;background:#000">'
+      + (isApproved ? '<div style="position:absolute;top:20%;right:10%;border:4px double #b91c1c;color:#b91c1c;padding:8px 16px;font-family:Georgia,serif;font-size:1.4rem;font-weight:900;letter-spacing:0.1em;transform:rotate(-12deg);background:rgba(255,253,247,0.92)">STAMPED</div>' : '')
+      + '</div>';
+    body += '<div class="hint" style="font-size:0.82rem">'
+      + 'Uploaded ' + esc(fmtDateTime(u.uploaded_at))
+      + (u.uploaded_by_name ? ' by ' + esc(u.uploaded_by_name) : '')
+      + (isApproved ? '<br>Stamped ' + esc(fmtDateTime(u.approved_at)) + (u.approved_by ? ' by ' + esc(u.approved_by) : '') : '')
+      + '</div>';
+    body += '<div id="rtCellStatus" class="status-line" style="margin-top:10px"></div>';
+    body += '<div class="modal-actions" style="gap:6px;flex-wrap:wrap">'
+      + '<button class="btn btn-outline" onclick="rtCloseModal()">Close</button>'
+      + '<a class="btn btn-outline btn-sm" href="' + esc(url) + '" target="_blank" rel="noopener">Open full</a>'
+      + (isApproved
+          ? '<button class="btn btn-warn btn-sm" onclick="rtUnstamp(' + u.id + ')">Un-stamp</button>'
+          : '<button class="btn btn-success btn-sm" onclick="rtApprove(' + u.id + ')">Stamp / approve</button>')
+      + '<button class="btn btn-danger btn-sm" onclick="rtDeleteUpload(' + u.id + ',' + JSON.stringify(u.r2_path).replace(/"/g, '&quot;') + ')">Delete</button>'
+      + '</div>';
+  }
+  body += '</div>';
+  rtShowModal(body);
+}
+
+async function rtApprove(uploadId) {
+  setStatus('rtCellStatus', 'Stamping…', '');
+  try {
+    await rtFetch('PATCH', 'uploads?id=eq.' + uploadId, {
+      approved_at: new Date().toISOString(),
+      approved_by: 'admin'
+    });
+    rtCloseModal();
+    rtOpenEvent(_rtActiveEvent.id);
+  } catch (e) {
+    setStatus('rtCellStatus', 'Failed: ' + e.message, 'err');
+  }
+}
+async function rtUnstamp(uploadId) {
+  setStatus('rtCellStatus', 'Un-stamping…', '');
+  try {
+    await rtFetch('PATCH', 'uploads?id=eq.' + uploadId, {
+      approved_at: null, approved_by: null
+    });
+    rtCloseModal();
+    rtOpenEvent(_rtActiveEvent.id);
+  } catch (e) {
+    setStatus('rtCellStatus', 'Failed: ' + e.message, 'err');
+  }
+}
+async function rtDeleteUpload(uploadId, r2Path) {
+  if (!confirm('Delete this paperwork submission? Team will need to re-upload.')) return;
+  setStatus('rtCellStatus', 'Deleting…', '');
+  try {
+    await rtFetch('DELETE', 'uploads?id=eq.' + uploadId);
+    try { await fetch(RT_R2_URL + '/' + r2Path, { method: 'DELETE' }); } catch (_) {}
+    rtCloseModal();
+    rtOpenEvent(_rtActiveEvent.id);
+  } catch (e) {
+    setStatus('rtCellStatus', 'Failed: ' + e.message, 'err');
+  }
+}
+
+/* ── Manage teams modal ───────────────────────────────────────── */
+async function rtOpenManageTeams() {
+  const e = _rtActiveEvent;
+  const teams = await rtLoadAllTeams();
+  const assignedIds = new Set(e.assignments.map(a => a.team_id));
+  // Group teams by division for the picker
+  const byDiv = new Map();
+  for (const t of teams) {
+    const key = t.division.division_number + ' — ' + t.division.name + ' (' + t.division.format + ', ' + (t.division.night_of_play || '?') + ')';
+    if (!byDiv.has(key)) byDiv.set(key, []);
+    byDiv.get(key).push(t);
+  }
+  let body = '<div class="modal-box" style="max-width:680px;max-height:80vh;overflow-y:auto">'
+    + '<div class="modal-title">Teams assigned to this event</div>'
+    + '<p class="hint" style="margin-top:0">Check teams that must submit paperwork. Unchecking a team REMOVES their assignment (and any of their uploads).</p>'
+    + '<div id="rtMTContainer">';
+  for (const [head, ts] of byDiv) {
+    body += '<div style="margin-bottom:10px"><div style="font-weight:700;font-size:0.84rem;color:var(--muted);margin-bottom:4px">' + esc(head) + '</div>';
+    body += ts.map(t => {
+      const isOn = assignedIds.has(t.id);
+      return '<label style="display:flex;align-items:center;gap:8px;padding:4px 8px;cursor:pointer;font-size:0.88rem">'
+        + '<input type="checkbox" data-team-id="' + t.id + '" data-team-number="' + esc(t.team_number) + '" data-team-name="' + esc(t.team_name) + '"' + (isOn ? ' checked' : '') + '>'
+        + '<span><code>' + esc(t.team_number) + '</code> ' + esc(t.team_name) + '</span>'
+        + '</label>';
+    }).join('');
+    body += '</div>';
+  }
+  body += '</div><div id="rtMTStatus" class="status-line" style="margin-top:10px"></div>'
+    + '<div class="modal-actions"><button class="btn btn-outline" onclick="rtCloseModal()">Cancel</button><button class="btn btn-primary" onclick="rtSaveTeams()">Save</button></div>'
+    + '</div>';
+  rtShowModal(body);
+}
+
+async function rtSaveTeams() {
+  const e = _rtActiveEvent;
+  const checks = document.querySelectorAll('#rtMTContainer input[type="checkbox"]');
+  const want = new Map();  // team_id → {team_number, team_name}
+  checks.forEach(c => {
+    if (c.checked) want.set(parseInt(c.dataset.teamId, 10), { team_number: c.dataset.teamNumber, team_name: c.dataset.teamName });
+  });
+  const haveIds = new Set(e.assignments.map(a => a.team_id));
+  const wantIds = new Set(want.keys());
+  const toAdd = [...wantIds].filter(id => !haveIds.has(id));
+  const toRemove = [...haveIds].filter(id => !wantIds.has(id));
+  setStatus('rtMTStatus', 'Saving…', '');
+  try {
+    if (toAdd.length) {
+      const rows = toAdd.map(id => ({
+        event_id: e.id, team_id: id,
+        team_number: want.get(id).team_number, team_name: want.get(id).team_name
+      }));
+      await rtFetch('POST', 'assignments', rows);
+    }
+    if (toRemove.length) {
+      await rtFetch('DELETE', 'assignments?event_id=eq.' + e.id + '&team_id=in.(' + toRemove.join(',') + ')');
+    }
+    rtCloseModal();
+    rtOpenEvent(e.id);
+  } catch (err) {
+    setStatus('rtMTStatus', 'Failed: ' + err.message, 'err');
+  }
+}
+
+/* ── Manage items modal ───────────────────────────────────────── */
+function rtOpenManageItems() {
+  const e = _rtActiveEvent;
+  let body = '<div class="modal-box" style="max-width:600px;max-height:80vh;overflow-y:auto">'
+    + '<div class="modal-title">Paperwork items for this event</div>'
+    + '<p class="hint" style="margin-top:0">Each item becomes one column in the grid. Teams upload one image per item.</p>'
+    + '<div id="rtMIList">'
+    + e.items.map((it, i) => rtItemRowHtml(it, i)).join('')
+    + '</div>'
+    + '<button class="btn btn-outline btn-sm" onclick="rtAddItemRow()" style="margin-top:6px">+ Add item</button>'
+    + '<div id="rtMIStatus" class="status-line" style="margin-top:10px"></div>'
+    + '<div class="modal-actions"><button class="btn btn-outline" onclick="rtCloseModal()">Cancel</button><button class="btn btn-primary" onclick="rtSaveItems()">Save</button></div>'
+    + '</div>';
+  rtShowModal(body);
+}
+
+function rtItemRowHtml(it, i) {
+  const id = it ? it.id : 'new-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+  return '<div class="rt-item-row" data-item-id="' + id + '" data-existing="' + (it ? '1' : '0') + '" style="padding:8px 0;border-bottom:1px solid var(--border)">'
+    + '<div style="display:flex;gap:6px;align-items:center">'
+    + '<input type="text" data-field="title" placeholder="Title (e.g. Team Certification Form)" value="' + esc(it ? it.title : '') + '" style="flex:1;padding:6px 8px">'
+    + '<button class="btn btn-outline btn-sm" onclick="rtRemoveItemRow(this)" style="padding:2px 8px;color:var(--danger)" title="Remove">×</button>'
+    + '</div>'
+    + '<input type="text" data-field="description" placeholder="Description (optional)" value="' + esc(it && it.description || '') + '" style="width:100%;padding:6px 8px;margin-top:4px;font-size:0.84rem;color:var(--muted)">'
+    + '</div>';
+}
+function rtAddItemRow() {
+  const list = document.getElementById('rtMIList');
+  const tmp = document.createElement('div');
+  tmp.innerHTML = rtItemRowHtml(null, list.children.length);
+  list.appendChild(tmp.firstChild);
+}
+function rtRemoveItemRow(btn) {
+  btn.closest('.rt-item-row').remove();
+}
+
+async function rtSaveItems() {
+  const e = _rtActiveEvent;
+  const rows = Array.from(document.querySelectorAll('.rt-item-row'));
+  const existing = new Map(e.items.map(it => [String(it.id), it]));
+  const kept = new Set();
+  const toCreate = [];
+  const toUpdate = [];
+  let order = 0;
+  for (const row of rows) {
+    const title = row.querySelector('[data-field="title"]').value.trim();
+    if (!title) continue;
+    const desc = row.querySelector('[data-field="description"]').value.trim() || null;
+    const idStr = row.dataset.itemId;
+    if (existing.has(idStr)) {
+      const cur = existing.get(idStr);
+      kept.add(cur.id);
+      if (cur.title !== title || (cur.description || null) !== desc || cur.sort_order !== order) {
+        toUpdate.push({ id: cur.id, title, description: desc, sort_order: order });
+      }
+    } else {
+      toCreate.push({ event_id: e.id, title, description: desc, sort_order: order });
+    }
+    order++;
+  }
+  const toDelete = e.items.filter(it => !kept.has(it.id)).map(it => it.id);
+  setStatus('rtMIStatus', 'Saving…', '');
+  try {
+    if (toDelete.length) await rtFetch('DELETE', 'items?id=in.(' + toDelete.join(',') + ')');
+    if (toCreate.length) await rtFetch('POST', 'items', toCreate);
+    for (const u of toUpdate) await rtFetch('PATCH', 'items?id=eq.' + u.id, { title: u.title, description: u.description, sort_order: u.sort_order });
+    rtCloseModal();
+    rtOpenEvent(e.id);
+  } catch (err) {
+    setStatus('rtMIStatus', 'Failed: ' + err.message, 'err');
+  }
+}
+
+/* ── Edit event ─────────────────────────────────────────────── */
+function rtOpenEditEvent() {
+  const e = _rtActiveEvent;
+  const html = '<div class="modal-box">'
+    + '<div class="modal-title">Edit event</div>'
+    + '<div class="form-row"><div style="flex:1"><label>Name</label><input type="text" id="rtEdName" value="' + esc(e.name) + '"></div></div>'
+    + '<div class="form-row"><div style="flex:1"><label>Description</label><textarea id="rtEdDesc">' + esc(e.description || '') + '</textarea></div></div>'
+    + '<div class="form-row">'
+    +   '<div><label>Due date</label><input type="date" id="rtEdDue" value="' + esc(e.due_date || '') + '"></div>'
+    +   '<label style="display:inline-flex;align-items:center;gap:6px;margin-top:18px"><input type="checkbox" id="rtEdActive"' + (e.is_active ? ' checked' : '') + '> Active</label>'
+    + '</div>'
+    + '<div id="rtEdStatus" class="status-line" style="margin-top:10px"></div>'
+    + '<div class="modal-actions">'
+    +   '<button class="btn btn-danger btn-sm" onclick="rtDeleteEvent()">Delete event</button>'
+    +   '<button class="btn btn-outline" onclick="rtCloseModal()">Cancel</button>'
+    +   '<button class="btn btn-primary" onclick="rtSaveEvent()">Save</button>'
+    + '</div></div>';
+  rtShowModal(html);
+}
+async function rtSaveEvent() {
+  const e = _rtActiveEvent;
+  const name = document.getElementById('rtEdName').value.trim();
+  const desc = document.getElementById('rtEdDesc').value.trim() || null;
+  const due  = document.getElementById('rtEdDue').value || null;
+  const act  = document.getElementById('rtEdActive').checked;
+  setStatus('rtEdStatus', 'Saving…', '');
+  try {
+    await rtFetch('PATCH', 'events?id=eq.' + e.id, { name, description: desc, due_date: due, is_active: act });
+    rtCloseModal();
+    rtOpenEvent(e.id);
+  } catch (err) {
+    setStatus('rtEdStatus', 'Failed: ' + err.message, 'err');
+  }
+}
+async function rtDeleteEvent() {
+  const e = _rtActiveEvent;
+  if (!confirm('Delete the entire event "' + e.name + '"? This removes all assignments and uploads. Cannot be undone.')) return;
+  setStatus('rtEdStatus', 'Deleting…', '');
+  try {
+    await rtFetch('DELETE', 'events?id=eq.' + e.id);
+    rtCloseModal();
+    rtBackToList();
+  } catch (err) {
+    setStatus('rtEdStatus', 'Failed: ' + err.message, 'err');
+  }
+}
+
+/* ── Lightweight modal helper (no Bootstrap, uses existing styles) ─ */
+function rtShowModal(innerHtml) {
+  let bg = document.getElementById('rtModalBg');
+  if (!bg) {
+    bg = document.createElement('div');
+    bg.id = 'rtModalBg';
+    bg.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;z-index:1000;padding:16px';
+    bg.onclick = (ev) => { if (ev.target === bg) rtCloseModal(); };
+    document.body.appendChild(bg);
+  }
+  bg.innerHTML = innerHtml;
+  bg.style.display = 'flex';
+  // Style inner modal-box generic
+  const box = bg.querySelector('.modal-box');
+  if (box) {
+    box.style.cssText = (box.style.cssText || '') + ';background:#fff;border-radius:10px;padding:18px;max-width:500px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 50px rgba(0,0,0,0.3)';
+  }
+}
+function rtCloseModal() {
+  const bg = document.getElementById('rtModalBg');
+  if (bg) bg.style.display = 'none';
+}
+
+window.rtInit = rtInit;
+window.rtOpenCreateEvent = rtOpenCreateEvent;
+window.rtCreateEvent = rtCreateEvent;
+window.rtOpenEvent = rtOpenEvent;
+window.rtBackToList = rtBackToList;
+window.rtOpenCell = rtOpenCell;
+window.rtApprove = rtApprove;
+window.rtUnstamp = rtUnstamp;
+window.rtDeleteUpload = rtDeleteUpload;
+window.rtOpenManageTeams = rtOpenManageTeams;
+window.rtSaveTeams = rtSaveTeams;
+window.rtOpenManageItems = rtOpenManageItems;
+window.rtAddItemRow = rtAddItemRow;
+window.rtRemoveItemRow = rtRemoveItemRow;
+window.rtSaveItems = rtSaveItems;
+window.rtOpenEditEvent = rtOpenEditEvent;
+window.rtSaveEvent = rtSaveEvent;
+window.rtDeleteEvent = rtDeleteEvent;
+window.rtCloseModal = rtCloseModal;
 
 </script>
 </body>
