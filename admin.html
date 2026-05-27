@@ -931,6 +931,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="spreports">SP Reports</button>
       <button class="tab" data-tab="scoresheets">Scoresheets</button>
       <button class="tab" data-tab="commonplayers">Common Players</button>
+      <button class="tab" data-tab="reports">Reports</button>
       <button class="tab" data-tab="playoffs">Playoffs</button>
     </div>
 
@@ -1541,6 +1542,76 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
     </div>
 
     <!-- ══════════════════════════════════════════════════════════════
+         TAB: REPORTS — recruitment / lapsed-player report (3.48+).
+         Container tab; for now holds one report ("9-Ball Outreach").
+         As more reports get added, swap the single-form layout for a
+         left-rail navigator. Data comes from slate.recruit_lapsed_players
+         RPC (service_role only — exposes PII: email, phone, address).
+         ══════════════════════════════════════════════════════════════ -->
+    <div id="tab-reports" class="tab-panel">
+      <div class="card">
+        <h2>9-Ball Outreach <span class="hint" style="font-weight:500">— find low-SL recruits</span></h2>
+        <p class="hint" style="margin-bottom:14px">
+          Pull a list of low-9-ball-SL players in a target county who have
+          played 8- or 9-ball recently and are <em>not</em> currently on the
+          excluded division's roster. Splits results into "already playing
+          this session" (warm leads) vs "not playing this session" (lapsed).
+        </p>
+
+        <!-- Filter bar -->
+        <div style="display:flex; gap:14px; flex-wrap:wrap; align-items:flex-end; padding:12px; background:var(--bg-soft, #f9fafb); border:1px solid var(--border); border-radius:10px; margin-bottom:14px;">
+          <div>
+            <label class="field-label">9-Ball SL is at most</label>
+            <select id="rptSlMax" class="select-sm" style="width:80px">
+              <option value="0">0</option><option value="1">1</option>
+              <option value="2" selected>2</option><option value="3">3</option>
+              <option value="4">4</option><option value="5">5</option>
+              <option value="6">6</option><option value="7">7</option>
+              <option value="8">8</option><option value="9">9</option>
+            </select>
+            <div class="hint" style="font-size:0.72rem; margin-top:2px">SL 0 (unrated) is always included</div>
+          </div>
+          <div>
+            <label class="field-label">County</label>
+            <select id="rptCounty" class="select-sm" style="min-width:200px">
+              <option value="">— Loading… —</option>
+            </select>
+          </div>
+          <div>
+            <label class="field-label">Last played 8 or 9-ball within</label>
+            <select id="rptWindow" class="select-sm" style="width:140px">
+              <option value="180">6 months</option>
+              <option value="365" selected>1 year</option>
+              <option value="540">18 months</option>
+              <option value="730">2 years</option>
+              <option value="1095">3 years</option>
+            </select>
+          </div>
+          <div>
+            <label class="field-label">Exclude division #</label>
+            <input id="rptExcludeDiv" type="text" value="996" class="select-sm"
+                   style="width:80px; font-family:ui-monospace, SFMono-Regular, monospace"
+                   placeholder="leave blank for none" />
+            <div class="hint" style="font-size:0.72rem; margin-top:2px">Current session's div #; people on it are excluded</div>
+          </div>
+          <button id="rptRunBtn" class="btn btn-primary" style="margin-left:auto">Run Report</button>
+        </div>
+
+        <div id="rptStatus" class="status-line" style="margin-bottom:10px"></div>
+
+        <!-- Results -->
+        <div id="rptResults" style="display:none">
+          <div id="rptSummary" style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px;"></div>
+
+          <!-- Bucket 1: already playing this session -->
+          <div id="rptPlayingSection" style="margin-bottom:22px"></div>
+          <!-- Bucket 2: not playing this session -->
+          <div id="rptLapsedSection"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════════
          TAB: PLAYOFFS — "show your work" breakdown of advancement math
          ══════════════════════════════════════════════════════════════ -->
     <div id="tab-playoffs" class="tab-panel">
@@ -1589,7 +1660,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.47';
+const APP_VERSION = '3.48';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -3125,6 +3196,7 @@ const TAB_LABEL = {
   spreports:     'SP Reports',
   scoresheets:   'Scoresheets',
   commonplayers: 'Common Players',
+  reports:       'Reports',
   playoffs:      'Playoffs'
 };
 
@@ -3139,6 +3211,7 @@ function switchTab(name) {
   if (name === 'spreports')   spOnEnterTab();
   if (name === 'scoresheets') { ssBindViewToggle(); renderScoresheetsGridView(); }
   if (name === 'commonplayers') cpInit();
+  if (name === 'reports')     rptInit();
   if (name === 'playoffs')    renderPlayoffsTab();
 }
 
@@ -9528,6 +9601,226 @@ async function cpCopyApas() {
 
 window.cpInit = cpInit;
 window.cpRenderApaNumbers = cpRenderApaNumbers;
+
+/* ══════════════════════════════════════════════════════════════════════
+   REPORTS TAB (3.48+) — first report: 9-Ball Outreach (lapsed-player /
+   low-SL recruitment).
+   ──────────────────────────────────────────────────────────────────
+   Data source: slate.recruit_lapsed_players RPC + slate.player_counties.
+   Both PostgreSQL functions; RPC is service_role-only since the row set
+   includes email/phone/address (PII). The admin app uses the service_role
+   key from the ?key= URL param.
+
+   UX choices:
+     • One filter bar across the top: SL≤N · County · Window · ExcludeDiv.
+     • Two stacked tables: "Already playing this session" (warm leads,
+       just want them to add another team) and "Not playing this session"
+       (lapsed members — bigger lift but recent enough to be reachable).
+     • Each bucket has a "Copy emails" button (one per line) — paste
+       straight into your email client's BCC field.
+     • Per-row "Copy email" / "Copy phone" mini-buttons for one-off use.
+     • Member-status badge (Active vs Inactive) so the admin knows at a
+       glance who's actively paid versus who needs a re-up first.
+   ══════════════════════════════════════════════════════════════════════ */
+const RPT_TAB_STYLE = `
+  #tab-reports .field-label {
+    display:block; font-size:0.72rem; font-weight:700; text-transform:uppercase;
+    letter-spacing:0.04em; color:var(--muted); margin-bottom:4px;
+  }
+  #tab-reports .rpt-chip {
+    padding:6px 12px; border-radius:999px; font-size:0.82rem; font-weight:700;
+    background:var(--spm-accent-bg, #eff6ff); color:var(--spm-accent);
+  }
+  #tab-reports .rpt-chip.warm  { background:#fef3c7; color:#92400e; }
+  #tab-reports .rpt-chip.lapsed{ background:#dbeafe; color:#1e40af; }
+  #tab-reports table.rpt-tbl {
+    width:100%; border-collapse:collapse; font-size:0.86rem; background:#fff;
+  }
+  #tab-reports table.rpt-tbl th, #tab-reports table.rpt-tbl td {
+    padding:6px 8px; border-bottom:1px solid var(--border); text-align:left;
+    white-space:nowrap; vertical-align:top;
+  }
+  #tab-reports table.rpt-tbl thead th {
+    position:sticky; top:0; background:#fff; font-weight:800; font-size:0.74rem;
+    text-transform:uppercase; letter-spacing:0.04em; color:var(--muted);
+    border-bottom:2px solid var(--border); z-index:1;
+  }
+  #tab-reports table.rpt-tbl tbody tr:hover { background:#f9fafb; }
+  #tab-reports .badge-sl   { display:inline-block; min-width:18px; padding:2px 6px;
+    border-radius:6px; background:#f3f4f6; color:#111; font-weight:700;
+    font-size:0.78rem; text-align:center; font-family:ui-monospace,monospace;
+  }
+  #tab-reports .badge-sl.low { background:#dcfce7; color:#166534; }
+  #tab-reports .badge-sl.unrated { background:#fafafa; color:#9ca3af; }
+  #tab-reports .badge-status { display:inline-block; padding:2px 8px; border-radius:999px;
+    font-size:0.7rem; font-weight:700; text-transform:uppercase; letter-spacing:0.04em;
+  }
+  #tab-reports .badge-status.active   { background:#dcfce7; color:#166534; }
+  #tab-reports .badge-status.inactive { background:#fee2e2; color:#991b1b; }
+  #tab-reports .copy-btn {
+    padding:1px 6px; font-size:0.68rem; border:1px solid var(--border);
+    background:#fff; border-radius:5px; cursor:pointer; margin-left:6px;
+    color:var(--muted); font-family:inherit;
+  }
+  #tab-reports .copy-btn:hover { background:#f3f4f6; color:var(--text); border-color:var(--border-strong); }
+`;
+(function injectRptStyle(){
+  if (document.getElementById('rpt-tab-style')) return;
+  const s = document.createElement('style');
+  s.id = 'rpt-tab-style'; s.textContent = RPT_TAB_STYLE;
+  document.head.appendChild(s);
+})();
+
+const _rptState = { counties: null, lastRun: null };
+
+async function rptInit() {
+  if (rptInit._wired) return;
+  rptInit._wired = true;
+  // Populate county dropdown once (289 entries — load on first tab visit).
+  try {
+    const cs = await sb('POST', 'rpc/player_counties', {});
+    _rptState.counties = cs || [];
+    const sel = document.getElementById('rptCounty');
+    sel.innerHTML =
+      '<option value="">— Any county —</option>' +
+      _rptState.counties.map(c =>
+        `<option value="${esc(c.county)}"${c.county === 'Clackamas County' ? ' selected' : ''}>${esc(c.county)} (${c.player_count})</option>`
+      ).join('');
+  } catch (e) {
+    setStatus('rptStatus', 'Failed to load counties: ' + e.message, 'err');
+  }
+  document.getElementById('rptRunBtn').onclick = rptRun;
+}
+
+async function rptRun() {
+  const slMax     = parseInt(document.getElementById('rptSlMax').value, 10);
+  const county    = document.getElementById('rptCounty').value || null;
+  const windowDays= parseInt(document.getElementById('rptWindow').value, 10);
+  const excludeDv = document.getElementById('rptExcludeDiv').value.trim() || null;
+
+  setStatus('rptStatus', 'Running query…', '');
+  document.getElementById('rptResults').style.display = 'none';
+
+  try {
+    const rows = await sb('POST', 'rpc/recruit_lapsed_players', {
+      p_sl9_max: slMax,
+      p_county: county,
+      p_last_played_days: windowDays,
+      p_exclude_division_number: excludeDv
+    });
+    _rptState.lastRun = { params: { slMax, county, windowDays, excludeDv }, rows: rows || [] };
+
+    const playing = (rows || []).filter(r => r.currently_playing);
+    const lapsed  = (rows || []).filter(r => !r.currently_playing);
+
+    document.getElementById('rptSummary').innerHTML = `
+      <span class="rpt-chip">${(rows || []).length} matches</span>
+      <span class="rpt-chip warm">${playing.length} already playing this session</span>
+      <span class="rpt-chip lapsed">${lapsed.length} not playing this session</span>
+      <span class="hint" style="align-self:center">
+        Filter: SL9 ≤ ${slMax} ·
+        ${county ? esc(county) : 'any county'} ·
+        played within ${windowDays} days ·
+        ${excludeDv ? 'exclude div ' + esc(excludeDv) : 'no exclusion'}
+      </span>`;
+
+    document.getElementById('rptPlayingSection').innerHTML = rptRenderBucket(
+      'Already playing this session', 'warm', playing, { showTeamCount: true });
+    document.getElementById('rptLapsedSection').innerHTML = rptRenderBucket(
+      'Not playing this session', 'lapsed', lapsed, { showTeamCount: false });
+    // Wire copy buttons after rendering.
+    document.querySelectorAll('#rptResults [data-copy]').forEach(b => {
+      b.onclick = () => rptCopy(b);
+    });
+    document.querySelectorAll('#rptResults [data-copy-all]').forEach(b => {
+      b.onclick = () => rptCopyAllEmails(b);
+    });
+
+    document.getElementById('rptResults').style.display = '';
+    setStatus('rptStatus', '', '');
+  } catch (e) {
+    setStatus('rptStatus', 'Failed: ' + e.message, 'err');
+  }
+}
+
+function rptRenderBucket(title, chipClass, rows, opts) {
+  const showTeamCount = !!(opts && opts.showTeamCount);
+  if (!rows.length) {
+    return `<div class="card" style="padding:14px"><h3 style="margin:0 0 4px">${esc(title)} (0)</h3>
+      <p class="hint" style="margin:0">No matching players for this filter.</p></div>`;
+  }
+  const allEmails = rows.filter(r => r.email).map(r => r.email).join('\n');
+  const headerCols = [
+    'Name', 'Member #', 'SL9', 'SL8', 'Status',
+    showTeamCount ? 'Teams' : null,
+    'Last 9-ball', 'Last 8-ball', 'City', 'Email', 'Phone'
+  ].filter(Boolean);
+  const rowsHtml = rows.map(r => {
+    const fullName = (r.first_name && r.last_name)
+      ? r.first_name + ' ' + r.last_name + (r.nickname && r.nickname !== r.first_name ? ` ("${r.nickname}")` : '')
+      : (r.nickname || r.member_number);
+    const sl9Cls = r.sl_9ball === 0 ? 'unrated' : (r.sl_9ball <= 2 ? 'low' : '');
+    const statusCls = (r.member_status || '').toLowerCase();
+    return `<tr>
+      <td><strong>${esc(fullName)}</strong></td>
+      <td style="font-family:ui-monospace,monospace; color:var(--muted); font-size:0.78rem">${esc(r.member_number)}</td>
+      <td><span class="badge-sl ${sl9Cls}">${r.sl_9ball}</span></td>
+      <td><span class="badge-sl">${r.sl_8ball}</span></td>
+      <td><span class="badge-status ${statusCls}">${esc(r.member_status || '—')}</span></td>
+      ${showTeamCount ? `<td style="text-align:center">${r.current_session_team_count}</td>` : ''}
+      <td style="font-size:0.78rem; color:var(--muted)">${esc(r.last_played_9 || '—')}</td>
+      <td style="font-size:0.78rem; color:var(--muted)">${esc(r.last_played_8 || '—')}</td>
+      <td>${esc(r.city || '—')}</td>
+      <td>${r.email
+        ? `${esc(r.email)}<button class="copy-btn" data-copy="${esc(r.email)}" title="Copy email">📋</button>`
+        : '<span class="hint">—</span>'}</td>
+      <td>${r.cell_phone
+        ? `${esc(r.cell_phone)}<button class="copy-btn" data-copy="${esc(r.cell_phone)}" title="Copy phone">📋</button>`
+        : '<span class="hint">—</span>'}</td>
+    </tr>`;
+  }).join('');
+
+  return `
+    <div class="card" style="padding:14px">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px; flex-wrap:wrap">
+        <h3 style="margin:0">${esc(title)}
+          <span class="rpt-chip ${chipClass}" style="margin-left:6px">${rows.length}</span>
+        </h3>
+        <button class="btn btn-outline btn-sm" data-copy-all="${esc(allEmails)}"
+                style="margin-left:auto; padding:4px 12px; font-size:0.78rem">
+          📋 Copy ${rows.filter(r=>r.email).length} emails
+        </button>
+      </div>
+      <div style="max-height:520px; overflow:auto; border:1px solid var(--border); border-radius:8px">
+        <table class="rpt-tbl">
+          <thead><tr>${headerCols.map(h => '<th>' + esc(h) + '</th>').join('')}</tr></thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+function rptCopy(btn) {
+  const txt = btn.dataset.copy;
+  if (!txt) return;
+  navigator.clipboard.writeText(txt).then(() => {
+    const old = btn.textContent;
+    btn.textContent = '✓';
+    setTimeout(() => { btn.textContent = old; }, 900);
+  });
+}
+function rptCopyAllEmails(btn) {
+  const txt = btn.dataset.copyAll;
+  if (!txt) { alert('No emails to copy.'); return; }
+  navigator.clipboard.writeText(txt).then(() => {
+    const old = btn.textContent;
+    btn.textContent = '✓ Copied';
+    setTimeout(() => { btn.textContent = old; }, 1200);
+  });
+}
+
+window.rptInit = rptInit;
+window.rptRun  = rptRun;
 
 </script>
 </body>
