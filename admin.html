@@ -1510,11 +1510,15 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             <div id="cpConflicts"></div>
           </div>
 
-          <!-- Section 2: transitive cluster groups -->
+          <!-- Section 2: transitive cluster groups (user-facing label: "Linked teams") -->
           <div id="cpClustersSection" style="margin-bottom:18px;">
-            <h3 style="margin:0 0 8px; font-size:1rem">Linked team clusters
-              <span class="hint" style="font-weight:400">(transitive — any chain of shared players)</span>
-            </h3>
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin:0 0 8px;">
+              <h3 style="margin:0; font-size:1rem">Linked teams
+                <span class="hint" style="font-weight:400">(transitive — any chain of shared players)</span>
+              </h3>
+              <button class="btn btn-outline btn-sm" id="cpPrintBtn" onclick="cpPrintReport()"
+                      style="padding:4px 12px;font-size:0.78rem">🖨️ Print groups</button>
+            </div>
             <div id="cpClusters"></div>
           </div>
 
@@ -1660,7 +1664,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.48';
+const APP_VERSION = '3.49';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -9508,7 +9512,23 @@ function cpRenderResults() {
     conflictsDiv.innerHTML = html;
   }
 
-  // Cluster groups
+  // ── Linked teams (groups) ─────────────────────────────────────────
+  // Pre-compute a team_number → required_host map from CP_HOST_RULES so
+  // we can flag the *specific* team within a group AND flag the group
+  // as a whole. Used by both the on-page render and cpPrintReport().
+  const hostByTeam = new Map();
+  for (const rule of CP_HOST_RULES) {
+    for (const t of teams) {
+      if (t.players.some(p => p.name.toLowerCase().includes(rule.matchName.toLowerCase()))) {
+        hostByTeam.set(t.team_number, { host: rule.requiredHost, playerName: t.players.find(p => p.name.toLowerCase().includes(rule.matchName.toLowerCase())).name });
+      }
+    }
+  }
+  // Stash so cpPrintReport() can re-use without recomputing (cheap, but cleaner).
+  _cpLastParse._hostByTeam = hostByTeam;
+  _cpLastParse._clusters   = clusters;
+  _cpLastParse._playerToTeams = playerToTeams;
+
   const clustersDiv = document.getElementById('cpClusters');
   if (!clusters.length) {
     clustersDiv.innerHTML = '<p class="hint" style="font-style:italic">No linked teams. Every team is independent. ✓</p>';
@@ -9521,12 +9541,14 @@ function cpRenderResults() {
     let html = '';
     clusters.forEach((group, idx) => {
       const label = letters(idx);
+      // Does this group contain any host-required team?
+      const groupHosts = group
+        .map(t => ({ team: t, host: hostByTeam.get(t.team_number) }))
+        .filter(x => x.host);
       const teamRows = group.map(t => {
-        // Players in this team that are also on another team in this cluster
         const shared = t.players.filter(p => {
           const onTeams = playerToTeams.get(p.apa_full || cpToFullApa(p.apa_number));
           if (!onTeams || onTeams.size < 2) return false;
-          // Any other team in cluster has this player
           for (const ot of onTeams) {
             if (ot !== t.team_number && group.some(g => g.team_number === ot)) return true;
           }
@@ -9535,11 +9557,25 @@ function cpRenderResults() {
         const sharedText = shared.length
           ? shared.map(p => `${esc(p.name)} (#${esc(p.apa_full || cpToFullApa(p.apa_number))})`).join('; ')
           : '<span class="hint">—</span>';
-        return `<tr><td style="font-family:ui-monospace,monospace">${esc(t.team_number)}</td><td>${esc(t.team_name)}</td><td>${sharedText}</td></tr>`;
+        const hostChip = hostByTeam.has(t.team_number)
+          ? ` <span style="display:inline-block;padding:1px 7px;background:#d97706;color:#fff;border-radius:4px;font-size:0.7rem;font-weight:800;letter-spacing:0.04em;text-transform:uppercase">🏠 Host: ${esc(hostByTeam.get(t.team_number).host)}</span>`
+          : '';
+        return `<tr${hostByTeam.has(t.team_number) ? ' style="background:#fffbeb"' : ''}>
+          <td style="font-family:ui-monospace,monospace">${esc(t.team_number)}</td>
+          <td>${esc(t.team_name)}${hostChip}</td>
+          <td>${sharedText}</td>
+        </tr>`;
       }).join('');
+      // Group header — accent stripe when host-required.
+      const groupHeaderBg = groupHosts.length
+        ? 'background:linear-gradient(90deg,#fef3c7,#fde68a);color:#78350f;border-bottom:2px solid #d97706'
+        : 'background:var(--accent-bg,#eff6ff);color:var(--spm-accent)';
+      const groupHeaderExtra = groupHosts.length
+        ? ` · <strong>🏠 Must host at ${esc(groupHosts[0].host.host)}</strong> (team ${esc(groupHosts[0].team.team_number)})`
+        : '';
       html += `<div style="margin-bottom:10px;border:1px solid var(--border);border-radius:8px;overflow:hidden">
-        <div style="padding:6px 12px;background:var(--accent-bg,#eff6ff);font-weight:700;font-size:0.88rem;color:var(--spm-accent)">
-          Cluster ${label} · ${group.length} teams
+        <div style="padding:6px 12px;font-weight:700;font-size:0.88rem;${groupHeaderBg}">
+          Group ${label} · ${group.length} teams${groupHeaderExtra}
         </div>
         <table class="table" style="margin:0;font-size:0.84rem">
           <thead><tr><th style="width:80px">Team #</th><th>Team Name</th><th>Shared Players</th></tr></thead>
@@ -9599,8 +9635,159 @@ async function cpCopyApas() {
   }
 }
 
+/* ── Print-friendly report (3.49+) ─────────────────────────────────────
+   Opens a self-contained HTML page in a new tab and auto-triggers the
+   browser print dialog (Cmd/Ctrl+P) so the user can Save as PDF. We use
+   document.write into a fresh window — no infrastructure, no server. The
+   data is pulled from _cpLastParse._clusters / _hostByTeam stashed during
+   render so this function doesn't recompute clusters. */
+function cpPrintReport() {
+  if (!_cpLastParse || !_cpLastParse._clusters) {
+    alert('Parse a roster PDF first.');
+    return;
+  }
+  const teams        = _cpLastParse.teams;
+  const clusters     = _cpLastParse._clusters;
+  const hostByTeam   = _cpLastParse._hostByTeam || new Map();
+  const playerToTeams= _cpLastParse._playerToTeams;
+  const letters = (i) => {
+    let n = i + 1, s = '';
+    while (n > 0) { n--; s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26); }
+    return s;
+  };
+  const esc2 = (s) => String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+  const now = new Date();
+  const stamp = now.toLocaleString(undefined, {
+    year: 'numeric', month: 'short', day: '2-digit',
+    hour: '2-digit', minute: '2-digit'
+  });
+
+  // Summary numbers
+  const totalTeams   = teams.length;
+  const totalGroups  = clusters.length;
+  const hostGroups   = clusters.filter(g => g.some(t => hostByTeam.has(t.team_number))).length;
+
+  const groupsHtml = clusters.map((group, idx) => {
+    const label = letters(idx);
+    const hostHits = group.filter(t => hostByTeam.has(t.team_number));
+    const hostBanner = hostHits.length
+      ? `<div class="host-banner">🏠 <strong>This group must host at ${esc2(hostByTeam.get(hostHits[0].team_number).host)}</strong>
+           — team <strong>${esc2(hostHits[0].team_number)} ${esc2(hostHits[0].team_name)}</strong>
+           (player: ${esc2(hostByTeam.get(hostHits[0].team_number).playerName)})
+         </div>`
+      : '';
+    const rows = group.map(t => {
+      const shared = t.players.filter(p => {
+        const onTeams = playerToTeams.get(p.apa_full || cpToFullApa(p.apa_number));
+        if (!onTeams || onTeams.size < 2) return false;
+        for (const ot of onTeams) {
+          if (ot !== t.team_number && group.some(g => g.team_number === ot)) return true;
+        }
+        return false;
+      });
+      const sharedText = shared.length
+        ? shared.map(p => `${esc2(p.name)} (#${esc2(p.apa_full || cpToFullApa(p.apa_number))})`).join('<br>')
+        : '<span class="muted">—</span>';
+      const isHost = hostByTeam.has(t.team_number);
+      return `<tr${isHost ? ' class="host-row"' : ''}>
+        <td class="mono">${esc2(t.team_number)}</td>
+        <td><strong>${esc2(t.team_name)}</strong>${isHost ? ` <span class="host-chip">🏠 ${esc2(hostByTeam.get(t.team_number).host)}</span>` : ''}</td>
+        <td>${sharedText}</td>
+      </tr>`;
+    }).join('');
+    return `<section class="group${hostHits.length ? ' is-host' : ''}">
+      <h2>Group ${label} <span class="count">· ${group.length} teams</span></h2>
+      ${hostBanner}
+      <table>
+        <thead><tr><th>Team #</th><th>Team</th><th>Shared players</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </section>`;
+  }).join('');
+
+  const html = `<!doctype html><html><head><meta charset="utf-8">
+<title>Common Players — Linked Teams</title>
+<style>
+  @page { size: letter; margin: 0.6in 0.6in 0.5in; }
+  * { box-sizing: border-box; }
+  body { font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    color: #111827; margin: 0; padding: 24px 32px; background: #fff; max-width: 8.4in; margin: 0 auto; }
+  header { border-bottom: 3px solid #2563eb; padding-bottom: 10px; margin-bottom: 18px; }
+  header h1 { margin: 0 0 4px; font-size: 22px; color: #1e3a8a; }
+  header .sub { color: #6b7280; font-size: 13px; }
+  .summary { display: flex; gap: 16px; flex-wrap: wrap; margin: 14px 0 20px; padding: 10px 14px;
+    background: #f9fafb; border-radius: 8px; }
+  .summary .pill { font-size: 13px; }
+  .summary strong { font-size: 18px; color: #1e3a8a; }
+  section.group { break-inside: avoid; page-break-inside: avoid; margin-bottom: 18px;
+    border: 1px solid #d1d5db; border-radius: 8px; overflow: hidden; }
+  section.group h2 { margin: 0; padding: 8px 14px; font-size: 15px;
+    background: #eff6ff; color: #1e40af; border-bottom: 1px solid #d1d5db; }
+  section.group h2 .count { font-weight: 400; color: #6b7280; font-size: 13px; }
+  section.group.is-host h2 { background: linear-gradient(90deg,#fef3c7,#fde68a); color: #78350f;
+    border-bottom: 2px solid #d97706; }
+  .host-banner { padding: 8px 14px; background: #fffbeb; color: #78350f;
+    border-bottom: 1px solid #fcd34d; font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 6px 12px; border-bottom: 1px solid #e5e7eb; text-align: left;
+    font-size: 13px; vertical-align: top; }
+  thead th { background: #f9fafb; font-size: 11px; font-weight: 700; color: #6b7280;
+    text-transform: uppercase; letter-spacing: 0.04em; }
+  tr.host-row { background: #fffbeb; }
+  .host-chip { display: inline-block; padding: 1px 7px; background: #d97706; color: #fff;
+    border-radius: 4px; font-size: 10px; font-weight: 800; letter-spacing: 0.04em;
+    text-transform: uppercase; margin-left: 6px; vertical-align: middle; }
+  .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace; }
+  .muted { color: #9ca3af; }
+  footer { margin-top: 20px; padding-top: 10px; border-top: 1px solid #e5e7eb;
+    font-size: 11px; color: #9ca3af; text-align: center; }
+  @media print {
+    body { padding: 0; }
+    header { page-break-after: avoid; }
+    section.group { break-inside: avoid; }
+    .no-print { display: none; }
+  }
+  .toolbar { position: sticky; top: 0; background: #fff; padding: 10px 0 14px;
+    margin-bottom: 6px; display: flex; gap: 8px; justify-content: flex-end; }
+  .toolbar button { padding: 6px 14px; font-size: 13px; border: 1px solid #d1d5db;
+    background: #fff; border-radius: 6px; cursor: pointer; font: inherit; }
+  .toolbar button.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+</style>
+</head><body>
+  <div class="toolbar no-print">
+    <button onclick="window.close()">Close</button>
+    <button class="primary" onclick="window.print()">🖨️ Print / Save as PDF</button>
+  </div>
+  <header>
+    <h1>Linked teams · Shared-roster check</h1>
+    <div class="sub">Generated ${esc2(stamp)} · Slate Common Players</div>
+  </header>
+  <div class="summary">
+    <span class="pill"><strong>${totalTeams}</strong> teams on roster</span>
+    <span class="pill"><strong>${totalGroups}</strong> linked-team group${totalGroups === 1 ? '' : 's'}</span>
+    ${hostGroups ? `<span class="pill" style="color:#78350f"><strong>${hostGroups}</strong> 🏠 host-required</span>` : ''}
+  </div>
+  ${groupsHtml || '<p class="muted" style="font-style:italic">No linked teams. Every team is independent.</p>'}
+  <footer>Slate · slate.spmapa</footer>
+  <script>setTimeout(() => window.print(), 350);</script>
+</body></html>`;
+
+  const win = window.open('', '_blank');
+  if (!win) {
+    alert('Pop-up blocked. Allow pop-ups for this site to use the print view.');
+    return;
+  }
+  win.document.open();
+  win.document.write(html);
+  win.document.close();
+}
+
 window.cpInit = cpInit;
 window.cpRenderApaNumbers = cpRenderApaNumbers;
+window.cpPrintReport = cpPrintReport;
 
 /* ══════════════════════════════════════════════════════════════════════
    REPORTS TAB (3.48+) — first report: 9-Ball Outreach (lapsed-player /
