@@ -1688,7 +1688,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.53';
+const APP_VERSION = '3.54';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -3119,9 +3119,13 @@ async function checkVersion() {
   if (_versionMismatch) return;
   try {
     // Anon-only fetch — version lookup shouldn't require the admin key.
+    // cache:'no-store' so the browser doesn't serve a stale apa_core
+    // response for the next 30s tick (happened in the wild with the
+    // version-loop bug — 3.54 fix).
     const r = await fetch(
       SB_URL + '/rest/v1/apps?app_name=eq.' + encodeURIComponent(APP_NAME) + '&select=version',
-      { headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON, 'Accept-Profile': 'apa_core' } }
+      { headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON, 'Accept-Profile': 'apa_core' },
+        cache: 'no-store' }
     );
     if (!r.ok) return;
     const data = await r.json();
@@ -3143,11 +3147,21 @@ function pollForDeploy(targetVersion) {
     try {
       // Cache-bust with a timestamp. If GitHub Pages has the new HTML,
       // the source will contain `APP_VERSION = 'X.X'` for the new X.X.
-      const resp = await fetch('admin.html?_=' + Date.now());
+      const resp = await fetch('admin.html?_=' + Date.now(), { cache: 'no-store' });
       if (resp.ok) {
         const html = await resp.text();
         if (html.indexOf("APP_VERSION = '" + targetVersion + "'") !== -1) {
-          location.reload(true);
+          // 3.54 fix: location.reload(true) busts the BROWSER cache but
+          // NOT Fastly's edge cache (Cache-Control: max-age=600 on GitHub
+          // Pages). The reloaded page would hit the same stale edge copy
+          // → re-trigger the mismatch → infinite overlay loop. Redirect
+          // to a cache-busted URL so the post-reload fetch is forced
+          // through Fastly to origin. The url params survive across
+          // reloads until the user navigates away.
+          const url = new URL(location.href);
+          url.searchParams.set('_v', targetVersion);
+          url.searchParams.set('_t', Date.now().toString());
+          location.replace(url.toString());
           return;
         }
       }
@@ -3177,8 +3191,14 @@ async function init() {
   // Kick off version check immediately, then every 30s. Runs regardless
   // of whether the admin key is valid — the overlay blocks the whole
   // page if a new build is out, independent of admin access.
+  // Also fire on tab visibility change so a backgrounded tab catches up
+  // the instant the user switches back to it (browser setInterval
+  // throttling can stretch the 30s tick to minutes when backgrounded).
   checkVersion();
   setInterval(checkVersion, 30000);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) checkVersion();
+  });
 
   if (!SB_KEY) { document.getElementById('keyGate').classList.remove('hidden'); return; }
   try {
