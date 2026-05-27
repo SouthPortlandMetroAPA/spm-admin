@@ -1541,6 +1541,30 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
                              font-size:0.84rem; padding:8px 10px; border:1px solid var(--border);
                              border-radius:6px; background:#fafafa; resize:vertical;"></textarea>
           </div>
+
+          <!-- Section 4: captains + co-captains APA numbers (3.53+).
+               First player listed on each team = captain; second = co-cap.
+               Includes ineligibles per user direction (leadership still gets
+               event emails). Sorted ascending. Same format options + copy
+               button as the all-numbers box above. -->
+          <div id="cpCapApasSection" style="margin-top:18px; margin-bottom:6px;">
+            <h3 style="margin:0 0 8px; font-size:1rem">Captain + Co-Captain APA numbers
+              <span class="hint" style="font-weight:400">(first &amp; second player on each roster; ineligibles included; sorted ascending)</span>
+            </h3>
+            <div style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">
+              <button class="btn btn-primary btn-sm" id="cpCopyCapApasBtn">📋 Copy all</button>
+              <select id="cpCapApaFormat" class="select-sm">
+                <option value="newline" selected>One per line (Email HQ format)</option>
+                <option value="comma">Comma-separated (12345,67890,…)</option>
+                <option value="space">Space-separated</option>
+              </select>
+              <span id="cpCapApaCount" class="hint"></span>
+            </div>
+            <textarea id="cpCapApaNumbers" readonly rows="6"
+                      style="width:100%; font-family:ui-monospace, SFMono-Regular, monospace;
+                             font-size:0.84rem; padding:8px 10px; border:1px solid var(--border);
+                             border-radius:6px; background:#fafafa; resize:vertical;"></textarea>
+          </div>
         </div>
       </div>
     </div>
@@ -1664,7 +1688,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.52';
+const APP_VERSION = '3.53';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -9171,6 +9195,8 @@ function cpInit() {
   });
   document.getElementById('cpCopyApasBtn').addEventListener('click', cpCopyApas);
   document.getElementById('cpApaFormat').addEventListener('change', cpRenderApaNumbers);
+  document.getElementById('cpCopyCapApasBtn').addEventListener('click', cpCopyCapApas);
+  document.getElementById('cpCapApaFormat').addEventListener('change', cpRenderCapApaNumbers);
 }
 
 async function cpHandleFile(file) {
@@ -9589,6 +9615,7 @@ function cpRenderResults() {
   // APA numbers panel
   document.getElementById('cpResults').style.display = 'block';
   cpRenderApaNumbers();
+  cpRenderCapApaNumbers();
 }
 
 function cpRenderApaNumbers() {
@@ -9623,6 +9650,55 @@ function cpRenderApaNumbers() {
 async function cpCopyApas() {
   const ta = document.getElementById('cpApaNumbers');
   const btn = document.getElementById('cpCopyApasBtn');
+  try {
+    await navigator.clipboard.writeText(ta.value);
+    const old = btn.textContent;
+    btn.textContent = '✓ Copied';
+    btn.style.background = '#16a34a';
+    setTimeout(() => { btn.textContent = old; btn.style.background = ''; }, 1600);
+  } catch (e) {
+    ta.select();
+    btn.textContent = '⚠ Select then ⌘+C';
+  }
+}
+
+/* ── Captain + Co-Captain APA numbers (3.53+) ─────────────────────────
+   The roster PDF lists players in a deterministic order — the parser
+   preserves it. By APA convention (and what the user uses to identify
+   leadership), players[0] is the captain and players[1] is the co-cap.
+   Output includes ineligibles (leadership still gets event emails),
+   sorted ascending, deduped (handles the rare case where the same
+   person is captain on one team and co-cap on another). */
+function cpRenderCapApaNumbers() {
+  if (!_cpLastParse) return;
+  const apaSet = new Set();
+  let captainsAdded = 0, coCapsAdded = 0, soloTeams = 0;
+  for (const t of _cpLastParse.teams) {
+    const cap = t.players[0];
+    const co  = t.players[1];
+    if (cap) {
+      apaSet.add(cap.apa_full || cpToFullApa(cap.apa_number));
+      captainsAdded++;
+    }
+    if (co) {
+      apaSet.add(co.apa_full || cpToFullApa(co.apa_number));
+      coCapsAdded++;
+    } else {
+      soloTeams++;
+    }
+  }
+  const apas = [...apaSet].sort((a, b) => a.localeCompare(b));
+  const fmt = document.getElementById('cpCapApaFormat').value;
+  const sep = fmt === 'comma' ? ',' : (fmt === 'space' ? ' ' : '\n');
+  document.getElementById('cpCapApaNumbers').value = apas.join(sep);
+  const soloNote = soloTeams ? ` · ${soloTeams} team${soloTeams === 1 ? ' has' : 's have'} no co-captain` : '';
+  document.getElementById('cpCapApaCount').textContent =
+    `${apas.length} unique APA #s (from ${captainsAdded} captain${captainsAdded === 1 ? '' : 's'} + ${coCapsAdded} co-captain${coCapsAdded === 1 ? '' : 's'})${soloNote}`;
+}
+
+async function cpCopyCapApas() {
+  const ta = document.getElementById('cpCapApaNumbers');
+  const btn = document.getElementById('cpCopyCapApasBtn');
   try {
     await navigator.clipboard.writeText(ta.value);
     const old = btn.textContent;
@@ -9820,6 +9896,7 @@ function cpPrintReport() {
 
 window.cpInit = cpInit;
 window.cpRenderApaNumbers = cpRenderApaNumbers;
+window.cpRenderCapApaNumbers = cpRenderCapApaNumbers;
 window.cpPrintReport = cpPrintReport;
 
 /* ══════════════════════════════════════════════════════════════════════
