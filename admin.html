@@ -1736,7 +1736,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.55';
+const APP_VERSION = '3.56';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -3011,6 +3011,19 @@ let currentSession   = null;
    ══════════════════════════════════════════════════════════════════════ */
 function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
 function pad5(x) { x = String(x || '').trim(); while (x.length < 5) x = '0' + x; return x; }
+/**
+ * Format ISO timestamp → short human form ("May 27, 2026, 4:12 PM").
+ * Returns empty string on null/invalid. Used by RedTape grid + cell views.
+ */
+function fmtDateTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleString(undefined, {
+    year: 'numeric', month: 'short', day: 'numeric',
+    hour: 'numeric', minute: '2-digit'
+  });
+}
 /**
  * Canonical team_number form: integer string, no leading zeros.
  * "00301" and "301" both become "301". Division number (first 3 of the
