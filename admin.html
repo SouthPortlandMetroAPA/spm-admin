@@ -1737,7 +1737,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.57';
+const APP_VERSION = '3.58';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10322,20 +10322,28 @@ async function rtCreateEvent() {
 }
 
 /* ── Event detail (grid view) ──────────────────────────────────── */
+/* Fetches events + items + assignments + uploads + item_stamps in
+   parallel. Each item × assignment cell can have:
+     - 0 uploads → ✗ "Not filed" (pending)
+     - 1+ active uploads + NO stamp row → ⏳ "Awaiting review"
+     - any uploads + a stamp row → ✓ "Stamped"
+   Soft-deleted uploads stay in the fetch so the cell modal can show
+   the captain-deleted history. */
 async function rtOpenEvent(eventId) {
   document.getElementById('rtEventsView').style.display = 'none';
   document.getElementById('rtEventDetailView').style.display = '';
   setStatus('rtGridStatus', 'Loading…', '');
   document.getElementById('rtGrid').innerHTML = '<p class="hint">Loading…</p>';
   try {
-    const [eRows, items, assignments, uploads] = await Promise.all([
+    const [eRows, items, assignments, uploads, stamps] = await Promise.all([
       rtFetch('GET', 'events?select=*&id=eq.' + eventId),
       rtFetch('GET', 'items?event_id=eq.' + eventId + '&order=sort_order.asc,id.asc'),
       rtFetch('GET', 'assignments?event_id=eq.' + eventId + '&order=team_number.asc'),
-      rtFetch('GET', 'uploads?select=*,assignment:assignments!uploads_assignment_id_fkey(event_id,team_id,team_number,team_name)&assignment.event_id=eq.' + eventId)
+      rtFetch('GET', 'uploads?select=*,assignment:assignments!uploads_assignment_id_fkey(event_id,team_id,team_number,team_name)&assignment.event_id=eq.' + eventId),
+      rtFetch('GET', 'item_stamps?select=*,assignment:assignments!item_stamps_assignment_id_fkey(event_id)&assignment.event_id=eq.' + eventId)
     ]);
     if (!eRows.length) throw new Error('Event not found');
-    _rtActiveEvent = { ...eRows[0], items, assignments, uploads };
+    _rtActiveEvent = { ...eRows[0], items, assignments, uploads, stamps };
     rtRenderGrid();
     setStatus('rtGridStatus', '', '');
   } catch (e) {
@@ -10367,15 +10375,22 @@ function rtRenderGrid() {
     gridEl.innerHTML = '<p class="hint" style="font-style:italic">No paperwork items defined. Click <strong>Manage items</strong> to add them.</p>';
     return;
   }
-  // Build upload map for fast lookup. Only the ACTIVE upload (deleted_at IS NULL)
-  // drives the cell's status icon; deleted ones still appear in the cell modal
-  // for admin review (soft delete pattern).
-  const uploadMap = new Map();
+  // v3.58+: cell status is derived from item_stamps + active uploads.
+  //   stamp row exists      → ✓ approved
+  //   active upload count>0 → ⏳ awaiting review
+  //   else                  → ✗ not filed
+  // Active = uploads with deleted_at IS NULL. Soft-deleted history stays
+  // visible in the cell modal.
+  const activeCountMap = new Map();   // 'aid:iid' → count of active uploads
   for (const u of e.uploads) {
     if (u.deleted_at) continue;
-    uploadMap.set(u.assignment_id + ':' + u.item_id, u);
+    const k = u.assignment_id + ':' + u.item_id;
+    activeCountMap.set(k, (activeCountMap.get(k) || 0) + 1);
   }
-  // Status counters
+  const stampMap = new Map();          // 'aid:iid' → stamp row
+  for (const s of (e.stamps || [])) {
+    stampMap.set(s.assignment_id + ':' + s.item_id, s);
+  }
   let pending = 0, uploaded = 0, approved = 0;
 
   let h = '<div style="overflow-x:auto;border:1px solid var(--border);border-radius:8px;background:#fff">'
@@ -10391,17 +10406,21 @@ function rtRenderGrid() {
       + '<div>' + esc(a.team_number) + ' ' + esc(a.team_name || '') + '</div>'
       + '</td>';
     for (const it of e.items) {
-      const u = uploadMap.get(a.id + ':' + it.id);
-      let cls, sym, color, title;
-      if (!u) {
-        cls = 'pending'; sym = '✗'; color = '#fef2f2;color:#dc2626'; title = 'Not filed';
-        pending++;
-      } else if (u.approved_at) {
-        cls = 'approved'; sym = '✓'; color = '#dcfce7;color:#16a34a'; title = 'Stamped';
+      const k = a.id + ':' + it.id;
+      const active = activeCountMap.get(k) || 0;
+      const stamp  = stampMap.get(k);
+      let sym, color, title;
+      if (stamp) {
+        sym = '✓'; color = '#dcfce7;color:#16a34a'; title = 'Stamped';
         approved++;
-      } else {
-        cls = 'uploaded'; sym = '⏳'; color = '#fef3c7;color:#92400e'; title = 'Awaiting review';
+      } else if (active > 0) {
+        sym = active > 1 ? ('⏳ ' + active) : '⏳';
+        color = '#fef3c7;color:#92400e';
+        title = 'Awaiting review · ' + active + ' submission' + (active === 1 ? '' : 's');
         uploaded++;
+      } else {
+        sym = '✗'; color = '#fef2f2;color:#dc2626'; title = 'Not filed';
+        pending++;
       }
       h += '<td style="text-align:center;padding:8px;background:' + color + ';cursor:pointer;font-size:1.05rem;font-weight:800"'
         + ' onclick="rtOpenCell(' + a.id + ',' + it.id + ')" title="' + esc(title) + '">' + sym + '</td>';
@@ -10417,103 +10436,111 @@ function rtRenderGrid() {
   gridEl.innerHTML = h;
 }
 
-/* ── Cell click: view / approve / delete ───────────────────────
-   Admin sees ALL uploads for the cell (current + soft-deleted history).
-   The captain only sees the active one (deleted_at IS NULL) on their
-   portal; admin sees every version that was ever filed, with a tag
-   showing who deleted it and when. */
+/* ── Cell click: item-level stamp + multi-upload gallery ───────────
+   v3.58+: stamps moved off uploads onto redtape.item_stamps.
+   - Top: item title + Stamp / Un-stamp button (item-level decision).
+   - Middle: gallery of all active uploads, each with its own Delete.
+   - Bottom: collapsible "deleted submissions" history. */
 async function rtOpenCell(assignmentId, itemId) {
   const e = _rtActiveEvent;
   const a = e.assignments.find(x => x.id === assignmentId);
   const it = e.items.find(x => x.id === itemId);
   if (!a || !it) return;
-  // All versions (active + soft-deleted), newest first.
+  const stamp = (e.stamps || []).find(s => s.assignment_id === assignmentId && s.item_id === itemId) || null;
   const allForCell = e.uploads
     .filter(x => x.assignment_id === assignmentId && x.item_id === itemId)
     .sort((x, y) => new Date(y.uploaded_at) - new Date(x.uploaded_at));
-  const active = allForCell.find(x => !x.deleted_at) || null;
+  const active  = allForCell.filter(u => !u.deleted_at);
+  const deleted = allForCell.filter(u =>  u.deleted_at);
 
-  let body = '<div class="modal-box" style="max-width:560px">'
+  let body = '<div class="modal-box" style="max-width:680px">'
     + '<div class="modal-title">' + esc(it.title) + '</div>'
-    + '<p class="hint" style="margin-top:0">' + esc(a.team_number) + ' ' + esc(a.team_name || '') + '</p>';
+    + '<p class="hint" style="margin-top:0">' + esc(a.team_number) + ' ' + esc(a.team_name || '')
+    + ' &middot; ' + active.length + ' active submission' + (active.length === 1 ? '' : 's')
+    + (deleted.length ? ' &middot; ' + deleted.length + ' deleted' : '')
+    + '</p>'
+    + '<div id="rtCellStatus" class="status-line" style="margin-bottom:10px"></div>';
 
-  if (!allForCell.length) {
-    body += '<div style="padding:24px;text-align:center;background:#fef2f2;border-radius:8px;color:#dc2626;font-weight:600;margin:12px 0">Not yet filed by this team.</div>';
-    body += '<div class="modal-actions"><button class="btn" onclick="rtCloseModal()">Close</button></div>';
+  // Item-level stamp state + action.
+  if (stamp) {
+    body += '<div style="display:flex;align-items:center;gap:10px;background:#dcfce7;color:#166534;padding:10px 12px;border-radius:8px;margin-bottom:14px;border-left:4px solid #16a34a">'
+      + '<div style="font-size:1.5rem;line-height:1">✓</div>'
+      + '<div style="flex:1">'
+      +   '<div style="font-weight:800;font-size:0.92rem">Stamped</div>'
+      +   '<div class="hint" style="color:#166534;font-size:0.78rem">' + esc(fmtDateTime(stamp.stamped_at))
+      +     (stamp.stamped_by ? ' by ' + esc(stamp.stamped_by) : '') + '</div>'
+      + '</div>'
+      + '<button class="btn btn-warn btn-sm" onclick="rtUnstampItem(' + assignmentId + ',' + itemId + ')">Un-stamp</button>'
+      + '</div>';
+  } else if (active.length) {
+    body += '<div style="display:flex;align-items:center;gap:10px;background:#fef3c7;color:#92400e;padding:10px 12px;border-radius:8px;margin-bottom:14px;border-left:4px solid #d97706">'
+      + '<div style="font-size:1.5rem;line-height:1">⏳</div>'
+      + '<div style="flex:1">'
+      +   '<div style="font-weight:800;font-size:0.92rem">Awaiting review</div>'
+      +   '<div class="hint" style="color:#92400e;font-size:0.78rem">' + active.length + ' submission' + (active.length === 1 ? '' : 's') + ' filed</div>'
+      + '</div>'
+      + '<button class="btn btn-success btn-sm" onclick="rtStampItem(' + assignmentId + ',' + itemId + ')">Stamp / approve</button>'
+      + '</div>';
   } else {
-    body += '<div id="rtCellStatus" class="status-line" style="margin-bottom:10px"></div>';
-    // Render each version. The newest active one is featured; soft-deleted
-    // versions are dimmed with a tag.
-    body += allForCell.map((u, i) => rtRenderUploadVersion(u, u === active)).join(
-      '<hr style="border:none;border-top:1px dashed var(--border);margin:14px 0">'
-    );
-    body += '<div class="modal-actions" style="gap:6px;flex-wrap:wrap;margin-top:14px">'
-      + '<button class="btn btn-outline" onclick="rtCloseModal()">Close</button>'
+    body += '<div style="padding:24px;text-align:center;background:#fef2f2;border-radius:8px;color:#dc2626;font-weight:600;margin-bottom:14px">Not yet filed by this team.</div>';
+  }
+
+  // Active uploads gallery.
+  if (active.length) {
+    body += '<h3 style="font-size:0.84rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--muted);margin:0 0 6px">Submissions</h3>';
+    body += '<div class="rt-cell-gallery" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px">'
+      + active.map(u => rtRenderActiveUploadTile(u)).join('')
       + '</div>';
   }
+
+  // Deleted history (collapsible).
+  if (deleted.length) {
+    body += '<details style="margin-top:14px"><summary style="cursor:pointer;font-size:0.84rem;font-weight:700;color:var(--muted)">'
+      + deleted.length + ' deleted submission' + (deleted.length === 1 ? '' : 's') + ' (captain hid these from their view)'
+      + '</summary>'
+      + '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-top:8px">'
+      + deleted.map(u => rtRenderDeletedUploadTile(u)).join('')
+      + '</div></details>';
+  }
+
+  body += '<div class="modal-actions" style="margin-top:14px"><button class="btn btn-outline" onclick="rtCloseModal()">Close</button></div>';
   body += '</div>';
   rtShowModal(body);
 }
 
-function rtRenderUploadVersion(u, isActive) {
+function rtRenderActiveUploadTile(u) {
   const url = RT_R2_URL + '/' + u.r2_path;
-  const isApproved = !!u.approved_at && isActive;  // only active can be stamped
-  const isDeleted = !!u.deleted_at;
-  let h = '<div style="' + (isDeleted ? 'opacity:0.72' : '') + '">';
-  if (isDeleted) {
-    h += '<div style="display:inline-flex;align-items:center;gap:6px;background:#fee2e2;color:#991b1b;padding:3px 9px;border-radius:999px;font-size:0.72rem;font-weight:800;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:8px">'
-       + 'Deleted by captain · ' + esc(fmtDateTime(u.deleted_at))
-       + '</div>';
-  } else if (isActive) {
-    h += '<div style="display:inline-flex;align-items:center;gap:6px;background:' + (isApproved ? '#dcfce7;color:#166534' : '#fef3c7;color:#92400e')
-       + ';padding:3px 9px;border-radius:999px;font-size:0.72rem;font-weight:800;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:8px">'
-       + (isApproved ? '✓ Stamped' : '⏳ Awaiting review')
-       + '</div>';
-  }
-  h += '<div style="position:relative;background:#000;border-radius:6px;overflow:hidden">'
-    +    '<img src="' + esc(url) + '" style="display:block;width:100%;max-height:60vh;object-fit:contain;background:#000">'
-    +    (isApproved ? '<div style="position:absolute;top:20%;right:10%;border:4px double #b91c1c;color:#b91c1c;padding:8px 16px;font-family:Georgia,serif;font-size:1.4rem;font-weight:900;letter-spacing:0.1em;transform:rotate(-12deg);background:rgba(255,253,247,0.92)">STAMPED</div>' : '')
-    +  '</div>'
-    +  '<div class="hint" style="font-size:0.82rem;margin-top:6px">'
-    +    'Uploaded ' + esc(fmtDateTime(u.uploaded_at))
-    +    (u.uploaded_by_name ? ' by ' + esc(u.uploaded_by_name) : '')
-    +    (isApproved ? '<br>Stamped ' + esc(fmtDateTime(u.approved_at)) + (u.approved_by ? ' by ' + esc(u.approved_by) : '') : '')
-    +  '</div>';
-  if (isActive) {
-    h += '<div class="modal-actions" style="gap:6px;flex-wrap:wrap;margin-top:8px">'
-       + '<a class="btn btn-outline btn-sm" href="' + esc(url) + '" target="_blank" rel="noopener">Open full</a>'
-       + (isApproved
-           ? '<button class="btn btn-warn btn-sm" onclick="rtUnstamp(' + u.id + ')">Un-stamp</button>'
-           : '<button class="btn btn-success btn-sm" onclick="rtApprove(' + u.id + ')">Stamp / approve</button>')
-       + '<button class="btn btn-danger btn-sm" onclick="rtDeleteUpload(' + u.id + ',' + JSON.stringify(u.r2_path).replace(/"/g, '&quot;') + ')">Delete</button>'
-       + '</div>';
-  } else if (isDeleted) {
-    h += '<div class="modal-actions" style="gap:6px;flex-wrap:wrap;margin-top:8px">'
-       + '<a class="btn btn-outline btn-sm" href="' + esc(url) + '" target="_blank" rel="noopener">Open full</a>'
-       + '<button class="btn btn-outline btn-sm" onclick="rtRestoreUpload(' + u.id + ')">Restore</button>'
-       + '</div>';
-  }
-  h += '</div>';
-  return h;
+  return '<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;background:#fff;position:relative">'
+    + '<a href="' + esc(url) + '" target="_blank" rel="noopener" style="display:block;aspect-ratio:4/3;background:#000;overflow:hidden">'
+    +   '<img src="' + esc(url) + '" style="width:100%;height:100%;object-fit:cover">'
+    + '</a>'
+    + '<button class="btn btn-danger btn-sm" style="position:absolute;top:6px;right:6px;padding:2px 8px;font-size:0.74rem" onclick="rtDeleteUpload(' + u.id + ',' + JSON.stringify(u.r2_path).replace(/"/g, '&quot;') + ')">Delete</button>'
+    + '<div class="hint" style="font-size:0.74rem;padding:6px 8px;line-height:1.3">'
+    +   (u.uploaded_by_name ? esc(u.uploaded_by_name) + ' &middot; ' : '')
+    +   esc(fmtDateTime(u.uploaded_at))
+    + '</div>'
+    + '</div>';
+}
+
+function rtRenderDeletedUploadTile(u) {
+  const url = RT_R2_URL + '/' + u.r2_path;
+  return '<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;background:#fff;opacity:0.7">'
+    + '<a href="' + esc(url) + '" target="_blank" rel="noopener" style="display:block;aspect-ratio:4/3;background:#000;overflow:hidden">'
+    +   '<img src="' + esc(url) + '" style="width:100%;height:100%;object-fit:cover">'
+    + '</a>'
+    + '<div class="hint" style="font-size:0.72rem;padding:6px 8px;line-height:1.3;color:#991b1b">'
+    +   '<strong>Deleted</strong> ' + esc(fmtDateTime(u.deleted_at)) + '<br>'
+    +   '<span style="color:var(--muted)">Uploaded ' + esc(fmtDateTime(u.uploaded_at))
+    +   (u.uploaded_by_name ? ' by ' + esc(u.uploaded_by_name) : '') + '</span>'
+    + '</div>'
+    + '<div style="padding:0 8px 8px"><button class="btn btn-outline btn-sm" style="font-size:0.72rem;padding:3px 8px" onclick="rtRestoreUpload(' + u.id + ')">Restore</button></div>'
+    + '</div>';
 }
 
 async function rtRestoreUpload(uploadId) {
   setStatus('rtCellStatus', 'Restoring…', '');
   try {
-    // First clear deleted_at on this upload, then soft-delete any newer active.
     await rtFetch('PATCH', 'uploads?id=eq.' + uploadId, { deleted_at: null, deleted_by_apa: null });
-    // If something else is active for this cell, soft-delete it (admin can't have two active).
-    const e = _rtActiveEvent;
-    const u = e.uploads.find(x => x.id === uploadId);
-    if (u) {
-      const otherActive = e.uploads.find(x =>
-        x.assignment_id === u.assignment_id && x.item_id === u.item_id
-        && !x.deleted_at && x.id !== uploadId);
-      if (otherActive) {
-        await rtFetch('PATCH', 'uploads?id=eq.' + otherActive.id,
-          { deleted_at: new Date().toISOString(), deleted_by_apa: 'admin-restore' });
-      }
-    }
     rtCloseModal();
     rtOpenEvent(_rtActiveEvent.id);
   } catch (e) {
@@ -10521,25 +10548,32 @@ async function rtRestoreUpload(uploadId) {
   }
 }
 
-async function rtApprove(uploadId) {
+/* v3.58+: item-level stamping. UPSERT into redtape.item_stamps when
+   stamping; DELETE the row when un-stamping. The cell modal re-renders
+   from the latest data after either action. */
+async function rtStampItem(assignmentId, itemId) {
   setStatus('rtCellStatus', 'Stamping…', '');
   try {
-    await rtFetch('PATCH', 'uploads?id=eq.' + uploadId, {
-      approved_at: new Date().toISOString(),
-      approved_by: 'admin'
+    await rtFetch('POST', 'item_stamps', {
+      assignment_id: assignmentId, item_id: itemId,
+      stamped_at: new Date().toISOString(), stamped_by: 'admin'
     });
     rtCloseModal();
     rtOpenEvent(_rtActiveEvent.id);
   } catch (e) {
-    setStatus('rtCellStatus', 'Failed: ' + e.message, 'err');
+    // Already stamped? Surface clearly.
+    if (/duplicate key|23505/.test(e.message)) {
+      setStatus('rtCellStatus', 'Already stamped — reload the event to see latest.', 'err');
+    } else {
+      setStatus('rtCellStatus', 'Failed: ' + e.message, 'err');
+    }
   }
 }
-async function rtUnstamp(uploadId) {
+async function rtUnstampItem(assignmentId, itemId) {
   setStatus('rtCellStatus', 'Un-stamping…', '');
   try {
-    await rtFetch('PATCH', 'uploads?id=eq.' + uploadId, {
-      approved_at: null, approved_by: null
-    });
+    await rtFetch('DELETE',
+      'item_stamps?assignment_id=eq.' + assignmentId + '&item_id=eq.' + itemId);
     rtCloseModal();
     rtOpenEvent(_rtActiveEvent.id);
   } catch (e) {
@@ -11124,8 +11158,8 @@ window.rtCreateEvent = rtCreateEvent;
 window.rtOpenEvent = rtOpenEvent;
 window.rtBackToList = rtBackToList;
 window.rtOpenCell = rtOpenCell;
-window.rtApprove = rtApprove;
-window.rtUnstamp = rtUnstamp;
+window.rtStampItem = rtStampItem;
+window.rtUnstampItem = rtUnstampItem;
 window.rtDeleteUpload = rtDeleteUpload;
 window.rtRestoreUpload = rtRestoreUpload;
 window.rtOpenRosterUpload = rtOpenRosterUpload;
