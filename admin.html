@@ -1671,7 +1671,8 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             <span class="hint" id="rtEventMeta"></span>
             <div style="margin-left:auto" class="actions">
               <button class="btn btn-outline btn-sm" onclick="rtOpenEditEvent()">Edit event</button>
-              <button class="btn btn-outline btn-sm" onclick="rtOpenManageTeams()">Manage teams</button>
+              <button class="btn btn-primary btn-sm" onclick="rtOpenRosterUpload()">Upload roster PDF</button>
+              <button class="btn btn-outline btn-sm" onclick="rtOpenEmailList()">Email captains</button>
               <button class="btn btn-outline btn-sm" onclick="rtOpenManageItems()">Manage items</button>
             </div>
           </div>
@@ -1736,7 +1737,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.56';
+const APP_VERSION = '3.57';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10359,16 +10360,21 @@ function rtRenderGrid() {
 
   const gridEl = document.getElementById('rtGrid');
   if (!e.assignments.length) {
-    gridEl.innerHTML = '<p class="hint" style="font-style:italic">No teams assigned. Click <strong>Manage teams</strong> to add them.</p>';
+    gridEl.innerHTML = '<p class="hint" style="font-style:italic">No teams assigned. Click <strong>Upload roster PDF</strong> to add them.</p>';
     return;
   }
   if (!e.items.length) {
     gridEl.innerHTML = '<p class="hint" style="font-style:italic">No paperwork items defined. Click <strong>Manage items</strong> to add them.</p>';
     return;
   }
-  // Build upload map for fast lookup: assignment_id+item_id → upload
+  // Build upload map for fast lookup. Only the ACTIVE upload (deleted_at IS NULL)
+  // drives the cell's status icon; deleted ones still appear in the cell modal
+  // for admin review (soft delete pattern).
   const uploadMap = new Map();
-  for (const u of e.uploads) uploadMap.set(u.assignment_id + ':' + u.item_id, u);
+  for (const u of e.uploads) {
+    if (u.deleted_at) continue;
+    uploadMap.set(u.assignment_id + ':' + u.item_id, u);
+  }
   // Status counters
   let pending = 0, uploaded = 0, approved = 0;
 
@@ -10411,45 +10417,108 @@ function rtRenderGrid() {
   gridEl.innerHTML = h;
 }
 
-/* ── Cell click: view / approve / delete ─────────────────────── */
+/* ── Cell click: view / approve / delete ───────────────────────
+   Admin sees ALL uploads for the cell (current + soft-deleted history).
+   The captain only sees the active one (deleted_at IS NULL) on their
+   portal; admin sees every version that was ever filed, with a tag
+   showing who deleted it and when. */
 async function rtOpenCell(assignmentId, itemId) {
   const e = _rtActiveEvent;
   const a = e.assignments.find(x => x.id === assignmentId);
   const it = e.items.find(x => x.id === itemId);
-  const u = e.uploads.find(x => x.assignment_id === assignmentId && x.item_id === itemId);
   if (!a || !it) return;
+  // All versions (active + soft-deleted), newest first.
+  const allForCell = e.uploads
+    .filter(x => x.assignment_id === assignmentId && x.item_id === itemId)
+    .sort((x, y) => new Date(y.uploaded_at) - new Date(x.uploaded_at));
+  const active = allForCell.find(x => !x.deleted_at) || null;
 
   let body = '<div class="modal-box" style="max-width:560px">'
     + '<div class="modal-title">' + esc(it.title) + '</div>'
     + '<p class="hint" style="margin-top:0">' + esc(a.team_number) + ' ' + esc(a.team_name || '') + '</p>';
 
-  if (!u) {
+  if (!allForCell.length) {
     body += '<div style="padding:24px;text-align:center;background:#fef2f2;border-radius:8px;color:#dc2626;font-weight:600;margin:12px 0">Not yet filed by this team.</div>';
     body += '<div class="modal-actions"><button class="btn" onclick="rtCloseModal()">Close</button></div>';
   } else {
-    const url = RT_R2_URL + '/' + u.r2_path;
-    const isApproved = !!u.approved_at;
-    body += '<div style="position:relative;background:#000;border-radius:6px;overflow:hidden;margin:10px 0">'
-      + '<img src="' + esc(url) + '" style="display:block;width:100%;max-height:60vh;object-fit:contain;background:#000">'
-      + (isApproved ? '<div style="position:absolute;top:20%;right:10%;border:4px double #b91c1c;color:#b91c1c;padding:8px 16px;font-family:Georgia,serif;font-size:1.4rem;font-weight:900;letter-spacing:0.1em;transform:rotate(-12deg);background:rgba(255,253,247,0.92)">STAMPED</div>' : '')
-      + '</div>';
-    body += '<div class="hint" style="font-size:0.82rem">'
-      + 'Uploaded ' + esc(fmtDateTime(u.uploaded_at))
-      + (u.uploaded_by_name ? ' by ' + esc(u.uploaded_by_name) : '')
-      + (isApproved ? '<br>Stamped ' + esc(fmtDateTime(u.approved_at)) + (u.approved_by ? ' by ' + esc(u.approved_by) : '') : '')
-      + '</div>';
-    body += '<div id="rtCellStatus" class="status-line" style="margin-top:10px"></div>';
-    body += '<div class="modal-actions" style="gap:6px;flex-wrap:wrap">'
+    body += '<div id="rtCellStatus" class="status-line" style="margin-bottom:10px"></div>';
+    // Render each version. The newest active one is featured; soft-deleted
+    // versions are dimmed with a tag.
+    body += allForCell.map((u, i) => rtRenderUploadVersion(u, u === active)).join(
+      '<hr style="border:none;border-top:1px dashed var(--border);margin:14px 0">'
+    );
+    body += '<div class="modal-actions" style="gap:6px;flex-wrap:wrap;margin-top:14px">'
       + '<button class="btn btn-outline" onclick="rtCloseModal()">Close</button>'
-      + '<a class="btn btn-outline btn-sm" href="' + esc(url) + '" target="_blank" rel="noopener">Open full</a>'
-      + (isApproved
-          ? '<button class="btn btn-warn btn-sm" onclick="rtUnstamp(' + u.id + ')">Un-stamp</button>'
-          : '<button class="btn btn-success btn-sm" onclick="rtApprove(' + u.id + ')">Stamp / approve</button>')
-      + '<button class="btn btn-danger btn-sm" onclick="rtDeleteUpload(' + u.id + ',' + JSON.stringify(u.r2_path).replace(/"/g, '&quot;') + ')">Delete</button>'
       + '</div>';
   }
   body += '</div>';
   rtShowModal(body);
+}
+
+function rtRenderUploadVersion(u, isActive) {
+  const url = RT_R2_URL + '/' + u.r2_path;
+  const isApproved = !!u.approved_at && isActive;  // only active can be stamped
+  const isDeleted = !!u.deleted_at;
+  let h = '<div style="' + (isDeleted ? 'opacity:0.72' : '') + '">';
+  if (isDeleted) {
+    h += '<div style="display:inline-flex;align-items:center;gap:6px;background:#fee2e2;color:#991b1b;padding:3px 9px;border-radius:999px;font-size:0.72rem;font-weight:800;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:8px">'
+       + 'Deleted by captain · ' + esc(fmtDateTime(u.deleted_at))
+       + '</div>';
+  } else if (isActive) {
+    h += '<div style="display:inline-flex;align-items:center;gap:6px;background:' + (isApproved ? '#dcfce7;color:#166534' : '#fef3c7;color:#92400e')
+       + ';padding:3px 9px;border-radius:999px;font-size:0.72rem;font-weight:800;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:8px">'
+       + (isApproved ? '✓ Stamped' : '⏳ Awaiting review')
+       + '</div>';
+  }
+  h += '<div style="position:relative;background:#000;border-radius:6px;overflow:hidden">'
+    +    '<img src="' + esc(url) + '" style="display:block;width:100%;max-height:60vh;object-fit:contain;background:#000">'
+    +    (isApproved ? '<div style="position:absolute;top:20%;right:10%;border:4px double #b91c1c;color:#b91c1c;padding:8px 16px;font-family:Georgia,serif;font-size:1.4rem;font-weight:900;letter-spacing:0.1em;transform:rotate(-12deg);background:rgba(255,253,247,0.92)">STAMPED</div>' : '')
+    +  '</div>'
+    +  '<div class="hint" style="font-size:0.82rem;margin-top:6px">'
+    +    'Uploaded ' + esc(fmtDateTime(u.uploaded_at))
+    +    (u.uploaded_by_name ? ' by ' + esc(u.uploaded_by_name) : '')
+    +    (isApproved ? '<br>Stamped ' + esc(fmtDateTime(u.approved_at)) + (u.approved_by ? ' by ' + esc(u.approved_by) : '') : '')
+    +  '</div>';
+  if (isActive) {
+    h += '<div class="modal-actions" style="gap:6px;flex-wrap:wrap;margin-top:8px">'
+       + '<a class="btn btn-outline btn-sm" href="' + esc(url) + '" target="_blank" rel="noopener">Open full</a>'
+       + (isApproved
+           ? '<button class="btn btn-warn btn-sm" onclick="rtUnstamp(' + u.id + ')">Un-stamp</button>'
+           : '<button class="btn btn-success btn-sm" onclick="rtApprove(' + u.id + ')">Stamp / approve</button>')
+       + '<button class="btn btn-danger btn-sm" onclick="rtDeleteUpload(' + u.id + ',' + JSON.stringify(u.r2_path).replace(/"/g, '&quot;') + ')">Delete</button>'
+       + '</div>';
+  } else if (isDeleted) {
+    h += '<div class="modal-actions" style="gap:6px;flex-wrap:wrap;margin-top:8px">'
+       + '<a class="btn btn-outline btn-sm" href="' + esc(url) + '" target="_blank" rel="noopener">Open full</a>'
+       + '<button class="btn btn-outline btn-sm" onclick="rtRestoreUpload(' + u.id + ')">Restore</button>'
+       + '</div>';
+  }
+  h += '</div>';
+  return h;
+}
+
+async function rtRestoreUpload(uploadId) {
+  setStatus('rtCellStatus', 'Restoring…', '');
+  try {
+    // First clear deleted_at on this upload, then soft-delete any newer active.
+    await rtFetch('PATCH', 'uploads?id=eq.' + uploadId, { deleted_at: null, deleted_by_apa: null });
+    // If something else is active for this cell, soft-delete it (admin can't have two active).
+    const e = _rtActiveEvent;
+    const u = e.uploads.find(x => x.id === uploadId);
+    if (u) {
+      const otherActive = e.uploads.find(x =>
+        x.assignment_id === u.assignment_id && x.item_id === u.item_id
+        && !x.deleted_at && x.id !== uploadId);
+      if (otherActive) {
+        await rtFetch('PATCH', 'uploads?id=eq.' + otherActive.id,
+          { deleted_at: new Date().toISOString(), deleted_by_apa: 'admin-restore' });
+      }
+    }
+    rtCloseModal();
+    rtOpenEvent(_rtActiveEvent.id);
+  } catch (e) {
+    setStatus('rtCellStatus', 'Failed: ' + e.message, 'err');
+  }
 }
 
 async function rtApprove(uploadId) {
@@ -10478,11 +10547,13 @@ async function rtUnstamp(uploadId) {
   }
 }
 async function rtDeleteUpload(uploadId, r2Path) {
-  if (!confirm('Delete this paperwork submission? Team will need to re-upload.')) return;
+  if (!confirm('Mark this submission as deleted? Captain will see "not filed" again; this version stays here for your reference.')) return;
   setStatus('rtCellStatus', 'Deleting…', '');
   try {
-    await rtFetch('DELETE', 'uploads?id=eq.' + uploadId);
-    try { await fetch(RT_R2_URL + '/' + r2Path, { method: 'DELETE' }); } catch (_) {}
+    // Soft delete — keep the row for audit history. The R2 object stays so
+    // admin can still preview it; we only GC on hard purge later.
+    await rtFetch('PATCH', 'uploads?id=eq.' + uploadId,
+      { deleted_at: new Date().toISOString(), deleted_by_apa: 'admin' });
     rtCloseModal();
     rtOpenEvent(_rtActiveEvent.id);
   } catch (e) {
@@ -10490,67 +10561,343 @@ async function rtDeleteUpload(uploadId, r2Path) {
   }
 }
 
-/* ── Manage teams modal ───────────────────────────────────────── */
-async function rtOpenManageTeams() {
-  const e = _rtActiveEvent;
-  const teams = await rtLoadAllTeams();
-  const assignedIds = new Set(e.assignments.map(a => a.team_id));
-  // Group teams by division for the picker
-  const byDiv = new Map();
-  for (const t of teams) {
-    const key = t.division.division_number + ' — ' + t.division.name + ' (' + t.division.format + ', ' + (t.division.night_of_play || '?') + ')';
-    if (!byDiv.has(key)) byDiv.set(key, []);
-    byDiv.get(key).push(t);
-  }
-  let body = '<div class="modal-box" style="max-width:680px;max-height:80vh;overflow-y:auto">'
-    + '<div class="modal-title">Teams assigned to this event</div>'
-    + '<p class="hint" style="margin-top:0">Check teams that must submit paperwork. Unchecking a team REMOVES their assignment (and any of their uploads).</p>'
-    + '<div id="rtMTContainer">';
-  for (const [head, ts] of byDiv) {
-    body += '<div style="margin-bottom:10px"><div style="font-weight:700;font-size:0.84rem;color:var(--muted);margin-bottom:4px">' + esc(head) + '</div>';
-    body += ts.map(t => {
-      const isOn = assignedIds.has(t.id);
-      return '<label style="display:flex;align-items:center;gap:8px;padding:4px 8px;cursor:pointer;font-size:0.88rem">'
-        + '<input type="checkbox" data-team-id="' + t.id + '" data-team-number="' + esc(t.team_number) + '" data-team-name="' + esc(t.team_name) + '"' + (isOn ? ' checked' : '') + '>'
-        + '<span><code>' + esc(t.team_number) + '</code> ' + esc(t.team_name) + '</span>'
-        + '</label>';
-    }).join('');
-    body += '</div>';
-  }
-  body += '</div><div id="rtMTStatus" class="status-line" style="margin-top:10px"></div>'
-    + '<div class="modal-actions"><button class="btn btn-outline" onclick="rtCloseModal()">Cancel</button><button class="btn btn-primary" onclick="rtSaveTeams()">Save</button></div>'
+/* ══════════════════════════════════════════════════════════════════════
+   ROSTER PDF UPLOAD FLOW (3.57+)
+   ──────────────────────────────────────────────────────────────────
+   Admin uploads a "9-Ball Roster & Handicap Report" (the standard APA
+   roster PDF). Parser extracts each team's number, name, city, plus the
+   first two player rows → Captain (row 1) and Co-Captain (row 2).
+   Submits to redtape.admin_assignments_from_roster which:
+     1. Normalizes 5-digit member# → 8-digit (prepends '972' for SPM)
+     2. Looks up email from slate.players for each captain pair
+     3. Upserts redtape.assignments with ON CONFLICT(event_id, team_number)
+     4. Returns the post-state assignment list with all emails
+   Admin then sees an email-copy modal with one click → clipboard for
+   pasting into Gmail.
+   ══════════════════════════════════════════════════════════════════════ */
+
+function rtOpenRosterUpload() {
+  const html = '<div class="modal-box" style="max-width:760px;max-height:88vh;overflow-y:auto">'
+    + '<div class="modal-title">Upload roster PDF</div>'
+    + '<p class="hint" style="margin-top:0">'
+    + 'Drop the standard APA <strong>9-Ball Roster &amp; Handicap Report</strong> (or 8-ball equivalent). '
+    + 'I will extract each team plus the first two player rows as Captain &amp; Co-Captain, '
+    + 'look up their emails, and create or update their event assignments.'
+    + '</p>'
+    + '<div id="rtRosterDrop" style="border:2px dashed var(--border-strong);border-radius:8px;padding:24px 16px;text-align:center;background:#fafafa">'
+    +   '<input type="file" id="rtRosterFile" accept="application/pdf,.pdf" style="display:none">'
+    +   '<button type="button" class="btn btn-outline" onclick="document.getElementById(\'rtRosterFile\').click()">Choose PDF…</button>'
+    +   '<div class="hint" style="margin-top:8px;font-size:0.82rem">or drag &amp; drop the file here</div>'
+    + '</div>'
+    + '<div id="rtRosterStatus" class="status-line" style="margin-top:10px"></div>'
+    + '<div id="rtRosterPreview" style="margin-top:14px"></div>'
+    + '<div class="modal-actions" style="gap:6px"><button class="btn btn-outline" onclick="rtCloseModal()">Cancel</button></div>'
     + '</div>';
-  rtShowModal(body);
+  rtShowModal(html);
+  const input = document.getElementById('rtRosterFile');
+  const drop  = document.getElementById('rtRosterDrop');
+  input.onchange = (e) => { if (e.target.files && e.target.files[0]) rtHandleRosterFile(e.target.files[0]); };
+  drop.ondragover = (e) => { e.preventDefault(); drop.style.background = '#fff7e6'; };
+  drop.ondragleave = () => { drop.style.background = '#fafafa'; };
+  drop.ondrop = (e) => {
+    e.preventDefault(); drop.style.background = '#fafafa';
+    const f = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) rtHandleRosterFile(f);
+  };
 }
 
-async function rtSaveTeams() {
-  const e = _rtActiveEvent;
-  const checks = document.querySelectorAll('#rtMTContainer input[type="checkbox"]');
-  const want = new Map();  // team_id → {team_number, team_name}
-  checks.forEach(c => {
-    if (c.checked) want.set(parseInt(c.dataset.teamId, 10), { team_number: c.dataset.teamNumber, team_name: c.dataset.teamName });
-  });
-  const haveIds = new Set(e.assignments.map(a => a.team_id));
-  const wantIds = new Set(want.keys());
-  const toAdd = [...wantIds].filter(id => !haveIds.has(id));
-  const toRemove = [...haveIds].filter(id => !wantIds.has(id));
-  setStatus('rtMTStatus', 'Saving…', '');
-  try {
-    if (toAdd.length) {
-      const rows = toAdd.map(id => ({
-        event_id: e.id, team_id: id,
-        team_number: want.get(id).team_number, team_name: want.get(id).team_name
-      }));
-      await rtFetch('POST', 'assignments', rows);
-    }
-    if (toRemove.length) {
-      await rtFetch('DELETE', 'assignments?event_id=eq.' + e.id + '&team_id=in.(' + toRemove.join(',') + ')');
-    }
-    rtCloseModal();
-    rtOpenEvent(e.id);
-  } catch (err) {
-    setStatus('rtMTStatus', 'Failed: ' + err.message, 'err');
+async function rtHandleRosterFile(file) {
+  if (!/\.pdf$/i.test(file.name) && file.type !== 'application/pdf') {
+    setStatus('rtRosterStatus', 'Drop a PDF file.', 'err'); return;
   }
+  setStatus('rtRosterStatus', 'Parsing ' + esc(file.name) + '…', '');
+  try {
+    const teams = await rtParseRosterPdf(file);
+    if (!teams.length) { setStatus('rtRosterStatus', 'No teams found in this PDF. Is it the right format?', 'err'); return; }
+    const okTeams = teams.filter(t => t.captain && t.captain.member_number);
+    const noCapTeams = teams.filter(t => !t.captain || !t.captain.member_number);
+    setStatus('rtRosterStatus',
+      'Parsed ' + teams.length + ' team' + (teams.length === 1 ? '' : 's') + '. '
+      + okTeams.length + ' have a captain' + (noCapTeams.length ? ' &middot; ' + noCapTeams.length + ' skipped (no captain row)' : '') + '.',
+      'ok');
+    rtRenderRosterPreview(teams);
+  } catch (e) {
+    setStatus('rtRosterStatus', 'Parse failed: ' + e.message, 'err');
+  }
+}
+
+/* Port of the Node parser (papertrail/redtape_roster_parse.mjs). Same
+   layout heuristics: detect 5-digit team numbers as column anchors, walk
+   the band downwards, pull the first 5-digit member# in each player row,
+   skill level to its left, name to its right. Row 1 = Captain, row 2 = Co-Captain. */
+async function rtParseRosterPdf(file) {
+  const pdfjs = await ensurePdfJs();
+  const buf = await file.arrayBuffer();
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(buf), useSystemFonts: true }).promise;
+  const Y_TOLERANCE = 3;
+  const isTeamNumberOnly = s => /^\d{5}$/.test(s);
+  const isSkillLevel     = s => /^[1-9]$/.test(s);
+  const isMemberNumber   = s => /^\d{5}$/.test(s);
+  const teams = [];
+  const seenTeamNums = new Set();
+
+  for (let p = 1; p <= doc.numPages; p++) {
+    const page = await doc.getPage(p);
+    const tc = await page.getTextContent();
+    const items = tc.items.filter(it => it.str && it.str.trim())
+      .map(it => ({ x: it.transform[4], y: it.transform[5], str: it.str.trim() }));
+    if (!items.length) continue;
+    const sortedByY = items.slice().sort((a, b) => b.y - a.y);
+    const rows = [];
+    for (const it of sortedByY) {
+      const last = rows[rows.length - 1];
+      if (last && Math.abs(it.y - last.y) <= Y_TOLERANCE) last.items.push(it);
+      else rows.push({ y: it.y, items: [it] });
+    }
+    for (const r of rows) r.items.sort((a, b) => a.x - b.x);
+
+    const headerAnchorsForRow = (row) => {
+      const anchors = [];
+      for (let i = 0; i < row.items.length; i++) {
+        const cur = row.items[i];
+        if (!isTeamNumberOnly(cur.str)) continue;
+        const prev = row.items[i - 1];
+        if (prev) {
+          const dxPrev = cur.x - prev.x;
+          if (dxPrev < 60 && /^[1-9]$/.test(prev.str)) continue;
+          if (dxPrev < 60 && /^[IN*]$/.test(prev.str)) continue;
+        }
+        const next = row.items[i + 1]; if (!next) continue;
+        const dx = next.x - cur.x;
+        if (dx < 8 || dx > 80) continue;
+        if (!/^[A-Za-z]/.test(next.str)) continue;
+        if (/,/.test(next.str)) continue;
+        anchors.push({ x: cur.x, team: cur.str });
+      }
+      return anchors;
+    };
+
+    let rIdx = 0;
+    while (rIdx < rows.length) {
+      const anchors = headerAnchorsForRow(rows[rIdx]);
+      if (!anchors.length) { rIdx++; continue; }
+      let endIdx = rIdx + 1;
+      while (endIdx < rows.length && !headerAnchorsForRow(rows[endIdx]).length) endIdx++;
+      const bounds = anchors.map((a, c) => ({
+        lo: c === 0 ? -Infinity : (anchors[c - 1].x + a.x) / 2,
+        hi: c === anchors.length - 1 ? Infinity : (a.x + anchors[c + 1].x) / 2
+      }));
+      for (let c = 0; c < anchors.length; c++) {
+        const teamNum = anchors[c].team;
+        if (seenTeamNums.has(teamNum)) continue;
+        const headerColItems = rows[rIdx].items.filter(i => i.x >= bounds[c].lo && i.x < bounds[c].hi);
+        const nameItems = []; let pastTeamNum = false;
+        for (const it of headerColItems) {
+          if (!pastTeamNum) { if (it.str === teamNum) pastTeamNum = true; continue; }
+          if (/^[NIH*]$/.test(it.str) && nameItems.length > 0) break;
+          nameItems.push(it.str);
+        }
+        const teamName = nameItems.join(' ')
+          .replace(/\s+/g, ' ')
+          .replace(/\s+[NIH*]\s+\d{3,}.*$/i, '')
+          .trim();
+        let city = null;
+        for (const br of rows.slice(rIdx + 1, endIdx)) {
+          const cells = br.items.filter(i => i.x >= bounds[c].lo && i.x < bounds[c].hi);
+          const text = cells.map(i => i.str).join(' ');
+          const m = text.match(/FROM\s*:\s*(.+)/);
+          if (m) { city = m[1].trim(); break; }
+        }
+        // Extract players within this team's column.
+        const players = [];
+        for (let ri = rIdx + 1; ri < endIdx; ri++) {
+          const cells = rows[ri].items.filter(i => i.x >= bounds[c].lo && i.x < bounds[c].hi);
+          if (!cells.length) continue;
+          let memIdx = -1;
+          for (let k = 0; k < cells.length; k++) if (isMemberNumber(cells[k].str)) { memIdx = k; break; }
+          if (memIdx < 0) continue;
+          let skl = null;
+          if (memIdx >= 1 && isSkillLevel(cells[memIdx - 1].str)) skl = cells[memIdx - 1].str;
+          let ineligible = false;
+          if (memIdx >= 2 && /^[I*]$/.test(cells[memIdx - 2].str)) ineligible = (cells[memIdx - 2].str === 'I');
+          const name = cells.slice(memIdx + 1).map(c => c.str).join(' ').trim();
+          if (!name) continue;
+          players.push({ skl, member_number: cells[memIdx].str, name, ineligible });
+        }
+        seenTeamNums.add(teamNum);
+        teams.push({
+          team_number: teamNum, team_name: teamName, city, players,
+          captain: players[0] || null, co_captain: players[1] || null
+        });
+      }
+      rIdx = endIdx;
+    }
+  }
+  return teams;
+}
+
+function rtRenderRosterPreview(teams) {
+  const wrap = document.getElementById('rtRosterPreview');
+  const okTeams = teams.filter(t => t.captain);
+  let html = '<h3 style="font-size:0.94rem;margin-bottom:8px">Preview</h3>'
+    + '<div style="border:1px solid var(--border);border-radius:8px;background:#fff;overflow:auto;max-height:50vh">'
+    + '<table class="table" style="width:100%;margin:0;font-size:0.84rem">'
+    + '<thead><tr>'
+    +   '<th style="text-align:left;padding:6px 10px;background:#f9fafb;width:36px"><input type="checkbox" id="rtRosterAll" checked></th>'
+    +   '<th style="text-align:left;padding:6px 10px;background:#f9fafb">Team</th>'
+    +   '<th style="text-align:left;padding:6px 10px;background:#f9fafb">Captain</th>'
+    +   '<th style="text-align:left;padding:6px 10px;background:#f9fafb">Co-Captain</th>'
+    + '</tr></thead><tbody>';
+  teams.forEach((t, i) => {
+    const hasCap = !!t.captain;
+    const dimStyle = hasCap ? '' : 'opacity:0.5';
+    html += '<tr style="border-top:1px solid var(--border);' + dimStyle + '">'
+      + '<td style="padding:6px 10px">' + (hasCap ? '<input type="checkbox" class="rt-roster-row" data-idx="' + i + '" checked>' : '—') + '</td>'
+      + '<td style="padding:6px 10px"><strong>' + esc(t.team_number) + '</strong> ' + esc(t.team_name)
+      + (t.city ? '<div class="hint" style="font-size:0.74rem">' + esc(t.city) + '</div>' : '')
+      + '</td>'
+      + '<td style="padding:6px 10px">'
+      + (t.captain ? esc(t.captain.name) + (t.captain.ineligible ? ' <span style="color:#dc2626;font-size:0.74rem">[INELIGIBLE]</span>' : '')
+        + '<div class="hint" style="font-size:0.74rem"><code>972' + esc(t.captain.member_number) + '</code></div>'
+        : '<span class="hint">(none)</span>')
+      + '</td>'
+      + '<td style="padding:6px 10px">'
+      + (t.co_captain ? esc(t.co_captain.name)
+        + '<div class="hint" style="font-size:0.74rem"><code>972' + esc(t.co_captain.member_number) + '</code></div>'
+        : '<span class="hint">(none)</span>')
+      + '</td>'
+      + '</tr>';
+  });
+  html += '</tbody></table></div>';
+  html += '<div class="hint" style="margin-top:8px;font-size:0.82rem">'
+    + 'Imports will UPSERT by team_number — re-running with the same PDF safely refreshes captain info.'
+    + '</div>';
+  html += '<div class="modal-actions" style="margin-top:10px"><button class="btn btn-primary" id="rtRosterImportBtn">Import ' + okTeams.length + ' team' + (okTeams.length === 1 ? '' : 's') + '</button></div>';
+  wrap.innerHTML = html;
+  // Wire select-all
+  document.getElementById('rtRosterAll').onchange = (e) => {
+    document.querySelectorAll('.rt-roster-row').forEach(cb => { cb.checked = e.target.checked; });
+  };
+  document.getElementById('rtRosterImportBtn').onclick = () => rtImportRoster(teams);
+}
+
+async function rtImportRoster(teams) {
+  const picks = [];
+  document.querySelectorAll('.rt-roster-row').forEach(cb => {
+    if (cb.checked) {
+      const i = parseInt(cb.dataset.idx, 10);
+      const t = teams[i];
+      if (!t.captain) return;
+      picks.push({
+        team_number: t.team_number,
+        team_name: t.team_name,
+        captain_apa: t.captain.member_number,
+        captain_name: t.captain.name,
+        co_captain_apa: t.co_captain ? t.co_captain.member_number : null,
+        co_captain_name: t.co_captain ? t.co_captain.name : null
+      });
+    }
+  });
+  if (!picks.length) { setStatus('rtRosterStatus', 'Nothing selected.', 'err'); return; }
+  setStatus('rtRosterStatus', 'Importing…', '');
+  try {
+    const r = await fetch(SB_URL + '/rest/v1/rpc/admin_assignments_from_roster', {
+      method: 'POST', headers: RT_HEADERS(),
+      body: JSON.stringify({ p_event_id: _rtActiveEvent.id, p_rows: picks })
+    });
+    if (!r.ok) throw new Error('RPC failed: ' + r.status + ' ' + (await r.text()).slice(0, 200));
+    const result = await r.json();
+    rtCloseModal();
+    await rtOpenEvent(_rtActiveEvent.id);
+    // Show email list automatically after import.
+    rtShowEmailList(result.assignments || []);
+  } catch (e) {
+    setStatus('rtRosterStatus', 'Import failed: ' + e.message, 'err');
+  }
+}
+
+/* ── Email list modal ─────────────────────────────────────────────────
+   Shows every captain + co-captain email tied to this event with a single
+   "Copy all" button. Pasting into Gmail's "To:" yields one comma-separated
+   recipient list. Includes name + role + APA for the admin to double-check
+   before sending. */
+async function rtOpenEmailList() {
+  // Pull live data — assignments might have been imported since last render.
+  const rows = await rtFetch('GET', 'assignments?select=team_number,team_name,captain_name,captain_email,captain_apa,co_captain_name,co_captain_email,co_captain_apa&event_id=eq.' + _rtActiveEvent.id + '&order=team_number');
+  rtShowEmailList(rows);
+}
+
+function rtShowEmailList(assignments) {
+  const emails = [];
+  const seen = new Set();
+  for (const a of assignments) {
+    for (const role of ['captain', 'co_captain']) {
+      const em = a[role + '_email']; if (!em) continue;
+      const key = em.toLowerCase().trim();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      emails.push({ email: em, name: a[role + '_name'] || '', team: a.team_number + ' ' + a.team_name, role: role === 'captain' ? 'Captain' : 'Co-Captain' });
+    }
+  }
+  // Count missing emails
+  let missing = 0;
+  for (const a of assignments) {
+    if (a.captain_apa && !a.captain_email) missing++;
+    if (a.co_captain_apa && !a.co_captain_email) missing++;
+  }
+  const joined = emails.map(e => e.email).join(', ');
+  let body = '<div class="modal-box" style="max-width:680px;max-height:88vh;overflow-y:auto">'
+    + '<div class="modal-title">Email captains &amp; co-captains</div>'
+    + '<p class="hint" style="margin-top:0">'
+    + emails.length + ' unique email' + (emails.length === 1 ? '' : 's')
+    + ' across ' + assignments.length + ' team' + (assignments.length === 1 ? '' : 's')
+    + (missing ? ' &middot; <span style="color:#dc2626">' + missing + ' missing from slate.players</span>' : '')
+    + '. Click <strong>Copy all</strong>, then paste into Gmail&rsquo;s <code>To:</code> field.'
+    + '</p>'
+    + '<textarea id="rtEmailTextarea" readonly style="width:100%;height:90px;padding:8px;border:1px solid var(--border);border-radius:4px;font-family:ui-monospace,monospace;font-size:0.84rem;resize:vertical">' + esc(joined) + '</textarea>'
+    + '<div class="modal-actions" style="margin-top:8px"><button class="btn btn-primary" id="rtCopyEmailsBtn">Copy all (' + emails.length + ')</button></div>'
+    + '<h3 style="font-size:0.9rem;margin-top:14px">Detail</h3>'
+    + '<div style="border:1px solid var(--border);border-radius:8px;background:#fff;overflow:auto;max-height:40vh">'
+    + '<table class="table" style="width:100%;margin:0;font-size:0.84rem">'
+    + '<thead><tr>'
+    +   '<th style="text-align:left;padding:6px 10px;background:#f9fafb">Team</th>'
+    +   '<th style="text-align:left;padding:6px 10px;background:#f9fafb">Role</th>'
+    +   '<th style="text-align:left;padding:6px 10px;background:#f9fafb">Name</th>'
+    +   '<th style="text-align:left;padding:6px 10px;background:#f9fafb">Email</th>'
+    + '</tr></thead><tbody>';
+  for (const a of assignments) {
+    for (const role of ['captain', 'co_captain']) {
+      const em = a[role + '_email'];
+      const nm = a[role + '_name'];
+      const apa = a[role + '_apa'];
+      if (!apa) continue;
+      body += '<tr style="border-top:1px solid var(--border)">'
+        + '<td style="padding:6px 10px;font-family:ui-monospace,monospace">' + esc(a.team_number) + ' ' + esc(a.team_name) + '</td>'
+        + '<td style="padding:6px 10px">' + (role === 'captain' ? 'Captain' : 'Co-Captain') + '</td>'
+        + '<td style="padding:6px 10px">' + esc(nm || '') + '</td>'
+        + '<td style="padding:6px 10px;font-size:0.78rem">' + (em ? esc(em) : '<span style="color:#dc2626">(not on file)</span>') + '</td>'
+        + '</tr>';
+    }
+  }
+  body += '</tbody></table></div>'
+    + '<div class="modal-actions" style="margin-top:10px"><button class="btn btn-outline" onclick="rtCloseModal()">Close</button></div>'
+    + '</div>';
+  rtShowModal(body);
+
+  document.getElementById('rtCopyEmailsBtn').onclick = async () => {
+    const ta = document.getElementById('rtEmailTextarea');
+    try {
+      await navigator.clipboard.writeText(ta.value);
+      document.getElementById('rtCopyEmailsBtn').textContent = '✓ Copied';
+      setTimeout(() => {
+        const btn = document.getElementById('rtCopyEmailsBtn');
+        if (btn) btn.textContent = 'Copy all (' + emails.length + ')';
+      }, 2000);
+    } catch (_) {
+      // Fallback: select + execCommand
+      ta.focus(); ta.select(); document.execCommand('copy');
+    }
+  };
 }
 
 /* ── Manage items modal ───────────────────────────────────────── */
@@ -10571,13 +10918,88 @@ function rtOpenManageItems() {
 
 function rtItemRowHtml(it, i) {
   const id = it ? it.id : 'new-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
-  return '<div class="rt-item-row" data-item-id="' + id + '" data-existing="' + (it ? '1' : '0') + '" style="padding:8px 0;border-bottom:1px solid var(--border)">'
+  const hasBlank = it && it.blank_form_r2_path;
+  const blankUrl = hasBlank ? (RT_R2_URL + '/' + it.blank_form_r2_path) : null;
+  return '<div class="rt-item-row" data-item-id="' + id + '" data-existing="' + (it ? '1' : '0') + '" style="padding:10px 0;border-bottom:1px solid var(--border)">'
     + '<div style="display:flex;gap:6px;align-items:center">'
     + '<input type="text" data-field="title" placeholder="Title (e.g. Team Certification Form)" value="' + esc(it ? it.title : '') + '" style="flex:1;padding:6px 8px">'
     + '<button class="btn btn-outline btn-sm" onclick="rtRemoveItemRow(this)" style="padding:2px 8px;color:var(--danger)" title="Remove">×</button>'
     + '</div>'
     + '<input type="text" data-field="description" placeholder="Description (optional)" value="' + esc(it && it.description || '') + '" style="width:100%;padding:6px 8px;margin-top:4px;font-size:0.84rem;color:var(--muted)">'
+    + '<div style="display:flex;gap:6px;align-items:center;margin-top:6px;font-size:0.82rem;flex-wrap:wrap">'
+    +   '<span class="hint" style="font-size:0.74rem;font-weight:700;text-transform:uppercase;letter-spacing:0.04em">Blank form</span>'
+    +   (hasBlank
+          ? '<a href="' + esc(blankUrl) + '" target="_blank" rel="noopener" style="font-size:0.82rem">View</a>'
+            + ' <span class="hint">·</span>'
+            + ' <button type="button" class="btn btn-outline btn-sm" onclick="rtUploadBlankFormForRow(this, \'' + id + '\')" style="font-size:0.78rem;padding:2px 8px">Replace</button>'
+            + ' <button type="button" class="btn btn-outline btn-sm" onclick="rtRemoveBlankFormForRow(this, \'' + id + '\')" style="font-size:0.78rem;padding:2px 8px;color:var(--danger)">Remove</button>'
+          : (it
+              ? '<button type="button" class="btn btn-outline btn-sm" onclick="rtUploadBlankFormForRow(this, \'' + id + '\')" style="font-size:0.78rem;padding:2px 8px">Upload PDF or image</button>'
+              : '<span class="hint" style="font-size:0.76rem">(save the item first, then upload)</span>'
+            )
+        )
+    +   '<span class="hint blank-form-status" style="font-size:0.76rem"></span>'
+    + '</div>'
     + '</div>';
+}
+
+/* Upload a blank form for an existing item. We need an item ID, so this is
+   only offered for items that are already persisted (new items must Save
+   first). PUT to R2 at redtape/blank-forms/<event-slug>/<item-id>.<ext>,
+   then PATCH the item with r2 path + content type. */
+async function rtUploadBlankFormForRow(btn, itemId) {
+  if (String(itemId).startsWith('new-')) {
+    const row = btn.closest('.rt-item-row');
+    row.querySelector('.blank-form-status').textContent = 'Save the item first, then upload.';
+    return;
+  }
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'application/pdf,image/*';
+  input.onchange = async () => {
+    const f = input.files && input.files[0]; if (!f) return;
+    const row = btn.closest('.rt-item-row');
+    const status = row.querySelector('.blank-form-status');
+    status.textContent = 'Uploading…';
+    try {
+      const e = _rtActiveEvent;
+      const ext = (f.name.match(/\.([a-z0-9]+)$/i) || [,'bin'])[1].toLowerCase();
+      const path = 'redtape/blank-forms/' + encodeURIComponent(e.slug) + '/' + itemId + '.' + ext;
+      const r2 = await fetch(RT_R2_URL + '/' + path, {
+        method: 'PUT', headers: { 'Content-Type': f.type || 'application/octet-stream' }, body: f
+      });
+      if (!r2.ok) throw new Error('R2 ' + r2.status);
+      await rtFetch('PATCH', 'items?id=eq.' + itemId, {
+        blank_form_r2_path: path,
+        blank_form_content_type: f.type || 'application/octet-stream',
+        blank_form_uploaded_at: new Date().toISOString()
+      });
+      status.textContent = '✓ Uploaded.';
+      // Re-render the items modal to reflect the new blank form.
+      setTimeout(() => { rtCloseModal(); rtOpenManageItems(); }, 600);
+    } catch (err) {
+      status.textContent = 'Failed: ' + err.message;
+    }
+  };
+  input.click();
+}
+
+async function rtRemoveBlankFormForRow(btn, itemId) {
+  if (!confirm('Remove the blank form? Captains will no longer see a "View blank form" link.')) return;
+  const row = btn.closest('.rt-item-row');
+  const status = row.querySelector('.blank-form-status');
+  status.textContent = 'Removing…';
+  try {
+    await rtFetch('PATCH', 'items?id=eq.' + itemId, {
+      blank_form_r2_path: null,
+      blank_form_content_type: null,
+      blank_form_uploaded_at: null
+    });
+    status.textContent = '✓ Removed.';
+    setTimeout(() => { rtCloseModal(); rtOpenManageItems(); }, 600);
+  } catch (err) {
+    status.textContent = 'Failed: ' + err.message;
+  }
 }
 function rtAddItemRow() {
   const list = document.getElementById('rtMIList');
@@ -10705,12 +11127,15 @@ window.rtOpenCell = rtOpenCell;
 window.rtApprove = rtApprove;
 window.rtUnstamp = rtUnstamp;
 window.rtDeleteUpload = rtDeleteUpload;
-window.rtOpenManageTeams = rtOpenManageTeams;
-window.rtSaveTeams = rtSaveTeams;
+window.rtRestoreUpload = rtRestoreUpload;
+window.rtOpenRosterUpload = rtOpenRosterUpload;
+window.rtOpenEmailList = rtOpenEmailList;
 window.rtOpenManageItems = rtOpenManageItems;
 window.rtAddItemRow = rtAddItemRow;
 window.rtRemoveItemRow = rtRemoveItemRow;
 window.rtSaveItems = rtSaveItems;
+window.rtUploadBlankFormForRow = rtUploadBlankFormForRow;
+window.rtRemoveBlankFormForRow = rtRemoveBlankFormForRow;
 window.rtOpenEditEvent = rtOpenEditEvent;
 window.rtSaveEvent = rtSaveEvent;
 window.rtDeleteEvent = rtDeleteEvent;
