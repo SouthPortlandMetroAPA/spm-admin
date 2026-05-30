@@ -1738,7 +1738,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.65';
+const APP_VERSION = '3.66';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -8054,6 +8054,22 @@ window.spSaveOpProfile = spSaveOpProfile;
    both the DB row (papertrail.photos) AND the R2 object (best-effort).
    ══════════════════════════════════════════════════════════════════════ */
 const SS_R2_URL = 'https://apa-photos.spmapa.workers.dev';
+
+/* Build an R2 image URL with a per-version cache-buster.
+   Pass the photo row (must have `uploaded_at`). Re-uploads now bump
+   `uploaded_at` server-side via the upsert body — this query param
+   changes whenever the bytes might have changed, so the browser's HTTP
+   cache (and Cloudflare's edge cache) treats the new upload as a fresh
+   resource instead of serving the deleted/previous image. Without this,
+   delete-then-re-upload appeared to show the stale image because the URL
+   was identical (path is deterministic on session+match+team+side). */
+function ssR2Url(r2Path, photo) {
+  const ms = photo && photo.uploaded_at
+    ? new Date(photo.uploaded_at).getTime()
+    : Date.now();
+  return SS_R2_URL + '/' + r2Path + '?v=' + ms;
+}
+
 let _ssRows = null;
 
 async function renderScoresheetsTab() {
@@ -8169,7 +8185,7 @@ function renderScoresheetsGrid() {
     for (const r of rs) {
       const m = r.match;
       const p = r.photo;
-      const photoUrl = SS_R2_URL + '/' + r.photo.r2_path;
+      const photoUrl = ssR2Url(r.photo.r2_path, r.photo);
       const sideLabel = p.side === 'single' ? 'Scoresheet' : (p.side.charAt(0).toUpperCase() + p.side.slice(1));
       const home = m.home_team ? `${m.home_team.team_number} ${m.home_team.team_name}` : '(unfilled)';
       const away = m.away_team ? `${m.away_team.team_number} ${m.away_team.team_name}` : '(unfilled)';
@@ -8546,7 +8562,7 @@ function ssgCellClick(ev, matchId, teamId) {
   } else {
     body += '<div style="display:grid;gap:8px">';
     for (const p of photos) {
-      const url = SS_R2_URL + '/' + p.r2_path;
+      const url = ssR2Url(p.r2_path, p);
       const sideLabel = p.side === 'single' ? 'Scoresheet' : (p.side.charAt(0).toUpperCase() + p.side.slice(1));
       const sizeKB = p.bytes ? Math.round(p.bytes / 1024) + ' KB' : '';
       body += `<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden">
@@ -8828,7 +8844,12 @@ async function ssgUploadOnBehalf(matchId, teamId, inputId, missingSidesEscaped) 
         uploader_name: 'Admin (Slate)',
         bytes: pg.blob.size,
         content_type: pg.contentType,
-        width, height
+        width, height,
+        // Explicit uploaded_at so it changes on EVERY upload, including
+        // in-place merge-duplicates UPSERTs (which would otherwise preserve
+        // the row's original uploaded_at and leave the cache-bust value
+        // unchanged, shadowing the new bytes with the cached old image).
+        uploaded_at: new Date().toISOString()
       }];
       const dbR = await fetch(SB_URL + '/rest/v1/photos?on_conflict=match_id,team_id,side', {
         method: 'POST',
@@ -9073,7 +9094,7 @@ async function ssgDownloadToFolder(weekSel) {
         dir = await targetDir.getDirectoryHandle(subdirPath, { create: true });
         dirCache.set(subdirPath, dir);
       }
-      const resp = await fetch(SS_R2_URL + '/' + p.r2_path);
+      const resp = await fetch(ssR2Url(p.r2_path, p));
       if (!resp.ok) throw new Error('Fetch ' + p.r2_path + ': ' + resp.status);
       const blob = await resp.blob();
       const fh = await dir.getFileHandle(baseName, { create: true });
@@ -9099,7 +9120,7 @@ async function ssgDownloadAsZip(weekSel, div, queued) {
     const zip = new JSZip();
     let fetched = 0;
     for (const { p, filename } of queued) {
-      const resp = await fetch(SS_R2_URL + '/' + p.r2_path);
+      const resp = await fetch(ssR2Url(p.r2_path, p));
       if (!resp.ok) throw new Error('Fetch ' + p.r2_path + ': ' + resp.status);
       zip.file(filename, await resp.blob());
       fetched++;
