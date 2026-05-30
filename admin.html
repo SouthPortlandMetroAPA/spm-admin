@@ -5608,8 +5608,6 @@ window.copyEmail = copyEmail;
    Auto-detects from PDF title text (per MEMORY rule). Each upload is
    tagged with session_id, operator_id (defaults to the current operator
    filter selection), week_no (asked at upload time), and is_cumulative.
-   Parsers ported from Apps/SPReconciler/site/index.html v0.7 — the
-   standalone app will be retired in a later phase once this is proven.
    ════════════════════════════════════════════════════════════════════════ */
 const SP_OPERATOR_SHORTS = { SPM: 1, CRA: 2 };
 let _spOperatorFilter = 'SPM';   // 'SPM' | 'CRA' | 'ALL'
@@ -5712,7 +5710,7 @@ function spDeriveWeekNo(fromISO) {
   return Math.max(1, Math.floor(days / 7) + 1);
 }
 
-/* ─── Parsers (ported from SPReconciler v0.10) ───────────────────────*/
+/* ─── SP report PDF parsers (All-League + By-Division). ────────────── */
 const SP_INT_ROW_RE        = /^\d+(?:\s+\d+){5}$/;
 const SP_INT_ROW_WITH_TAIL = /^(\d+(?:\s+\d+){5})\s+(\S+)\s*$/;
 function spFindIntsAfter(lines, i) {
