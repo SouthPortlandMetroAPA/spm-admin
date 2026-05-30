@@ -1738,7 +1738,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.64';
+const APP_VERSION = '3.65';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10697,23 +10697,15 @@ async function rtPrintCellSubmissions(assignmentId, itemId, btnEl) {
     .filter(u => u.assignment_id === assignmentId && u.item_id === itemId && !u.deleted_at)
     .sort((x, y) => new Date(x.uploaded_at) - new Date(y.uploaded_at));
   if (!active.length) { setStatus('rtCellStatus', 'Nothing to print.', 'err'); return; }
-
-  // Open the print window IN the user-gesture stack so the popup blocker
-  // doesn't engage on the async fetches below.
-  const win = window.open('', '_blank', 'noopener');
-  if (!win) { setStatus('rtCellStatus', 'Pop-up blocked — allow pop-ups for this site and retry.', 'err'); return; }
-  const docTitle = a.team_number + ' ' + (a.team_name || '') + ' · ' + it.title;
-  win.document.write(rtPrintWindowHtml(docTitle));
-  win.document.close();
-
   if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Preparing…'; }
   try {
     const work = active.map(u => ({ assignment: a, item: it, upload: u }));
-    await rtRenderAndPrint(win, work, e.name || '');
+    const docTitle = a.team_number + ' ' + (a.team_name || '') + ' · ' + it.title;
+    await rtPrintViaIframe(work, e.name || '', docTitle,
+      msg => setStatus('rtCellStatus', msg, 'progress'));
+    setStatus('rtCellStatus', '', '');
   } catch (err) {
-    try { win.document.getElementById('status').innerHTML =
-      '<span class="err">' + esc(err && err.message || String(err)) + '</span>';
-    } catch (_) {}
+    setStatus('rtCellStatus', 'Print failed: ' + (err && err.message || String(err)), 'err');
   } finally {
     if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = '&#128424; Print all (' + active.length + ')'; }
   }
@@ -10754,52 +10746,47 @@ async function rtPrintEventSubmissions(btnEl) {
     work.length + ' submissions will be rendered for printing — this can take a minute or two and uses a lot of memory. Continue?')) {
     return;
   }
-  // Open the print window IN the gesture stack so popup blocker stays quiet.
-  const win = window.open('', '_blank', 'noopener');
-  if (!win) { setStatus('rtGridStatus', 'Pop-up blocked — allow pop-ups for this site and retry.', 'err'); return; }
-  win.document.write(rtPrintWindowHtml(e.name + ' — every submission'));
-  win.document.close();
   if (btnEl) { btnEl.disabled = true; btnEl.innerHTML = '&#128424; Preparing…'; }
   try {
-    await rtRenderAndPrint(win, work, e.name);
+    await rtPrintViaIframe(work, e.name, e.name + ' — every submission',
+      msg => setStatus('rtGridStatus', msg, 'progress'));
+    setStatus('rtGridStatus', '', '');
   } catch (err) {
-    try { win.document.getElementById('status').innerHTML =
-      '<span class="err">' + esc(err && err.message || String(err)) + '</span>';
-    } catch (_) {}
+    setStatus('rtGridStatus', 'Print failed: ' + (err && err.message || String(err)), 'err');
   } finally {
     if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = '&#128424; Print all'; }
   }
 }
 
-/* Shared print-window scaffold — used by both per-cell and event-wide. */
-function rtPrintWindowHtml(title) {
-  return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + esc(title) + '</title>'
-    + '<style>'
-    + '@page { margin: 0.5in; }'
-    + 'html, body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #1f2937; background: #fff; }'
-    + '.pg { page-break-after: always; break-after: page; padding: 0; }'
-    + '.pg:last-child { page-break-after: auto; break-after: auto; }'
-    + '.hdr { font-size: 11px; color: #6b7280; padding: 6px 0 8px; border-bottom: 1px solid #e5e7eb; margin-bottom: 8px; }'
-    + '.hdr b { color: #111827; }'
-    + '.img-wrap { text-align: center; }'
-    + 'img { max-width: 100%; max-height: 9.5in; height: auto; display: inline-block; }'
-    + '#status { padding: 32px 24px; font-size: 14px; color: #6b7280; line-height: 1.5; }'
-    + '#status .err { color: #b91c1c; }'
-    + '</style></head><body>'
-    + '<div id="status">Preparing print preview&hellip;</div>'
-    + '</body></html>';
-}
+/* ──────────────────────────────────────────────────────────────────────
+   Print pipeline — hidden iframe pattern (3.65+).
+   ─────────────────────────────────────────────────────────────────────
+   Previous attempts used window.open('', '_blank', 'noopener') which
+   silently returns null in every current Chromium/Firefox/Safari (per
+   spec: when noopener is set, the open() return value is null). That
+   tripped the "Pop-up blocked" early-return so the print never fired.
 
-/* Shared render-then-print loop. work[] = [{ assignment, item, upload }, ...]
-   in the order the caller wants them printed. eventName goes into each page
-   header alongside the team/item/uploader breadcrumb so the printed sheet
-   says where this submission came from at a glance. */
-async function rtRenderAndPrint(win, work, eventName) {
-  const setWinStatus = (msg, isErr) => {
-    const el = win.document.getElementById('status');
-    if (!el || !el.isConnected) return;
-    el.innerHTML = isErr ? '<span class="err">' + esc(msg) + '</span>' : esc(msg);
-  };
+   The current pattern, matching how Stripe / Notion / Linear / AWS
+   Console implement "Print this view":
+     1. Inject a hidden <iframe> into the host document.
+     2. Wait for its initial about:blank to load (so contentDocument
+        exists and is writable).
+     3. document.write the print scaffold + every <img> tile.
+     4. Wait for every <img> in the iframe to finish loading.
+     5. iframe.contentWindow.focus() + .print() — same-origin, no popup
+        blocker involved.
+     6. Remove the iframe a tick after print() returns (system print
+        dialog already has the rendered pixels).
+   Progress goes to a caller-supplied status callback so admin sees
+   "Preparing N of M…" right where they clicked, instead of in a
+   detached popup window. */
+async function rtPrintViaIframe(work, eventName, docTitle, onProgress) {
+  if (!work || !work.length) throw new Error('Nothing to print');
+  const progress = onProgress || (() => {});
+  progress('Preparing print preview…');
+
+  // 1. Build the page list. PDFs → rasterize each page to data URL.
+  //    Images → use the R2 URL directly as <img src>.
   const pdfjs = await ensurePdfJs();
   const pages = [];
   for (let i = 0; i < work.length; i++) {
@@ -10809,7 +10796,7 @@ async function rtRenderAndPrint(win, work, eventName) {
       + ' · ' + it.title
       + (u.uploaded_by_name ? ' · uploaded by ' + u.uploaded_by_name : '')
       + (eventName ? ' · ' + eventName : '');
-    setWinStatus('Preparing ' + (i + 1) + ' of ' + work.length + '…');
+    progress('Preparing ' + (i + 1) + ' of ' + work.length + '…');
     try {
       if (isPdf) {
         const fetched = await fetch(RT_R2_URL + '/' + u.r2_path);
@@ -10835,31 +10822,86 @@ async function rtRenderAndPrint(win, work, eventName) {
         pages.push({ src: RT_R2_URL + '/' + u.r2_path, caption: baseCaption });
       }
     } catch (err) {
-      // Per-file errors don't kill the whole batch.
-      console.error('[rtRenderAndPrint] item failed:', err);
+      console.warn('[rtPrintViaIframe] skipping upload', u && u.id, ':', err && err.message || err);
     }
   }
-  if (!pages.length) {
-    setWinStatus('Could not prepare any pages for printing.', true);
-    return;
-  }
-  win.document.body.innerHTML = pages.map(p =>
-    '<div class="pg">'
-    + '<div class="hdr"><b>' + esc(p.caption) + '</b></div>'
-    + '<div class="img-wrap"><img src="' + esc(p.src) + '" alt=""></div>'
-    + '</div>'
-  ).join('');
-  const imgs = win.document.querySelectorAll('img');
+  if (!pages.length) throw new Error('No pages could be prepared');
+
+  // 2. Build the print HTML.
+  const html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + esc(docTitle) + '</title>'
+    + '<style>'
+    + '@page { margin: 0.5in; }'
+    + 'html, body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #1f2937; background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }'
+    + '.pg { page-break-after: always; break-after: page; padding: 0; }'
+    + '.pg:last-child { page-break-after: auto; break-after: auto; }'
+    + '.hdr { font-size: 11px; color: #6b7280; padding: 6px 0 8px; border-bottom: 1px solid #e5e7eb; margin-bottom: 8px; }'
+    + '.hdr b { color: #111827; }'
+    + '.img-wrap { text-align: center; }'
+    + 'img { max-width: 100%; max-height: 9.5in; height: auto; display: inline-block; }'
+    + '</style></head><body>'
+    + pages.map(p =>
+        '<div class="pg">'
+        + '<div class="hdr"><b>' + esc(p.caption) + '</b></div>'
+        + '<div class="img-wrap"><img src="' + esc(p.src) + '" alt=""></div>'
+        + '</div>'
+      ).join('')
+    + '</body></html>';
+
+  // 3. Inject hidden iframe + write HTML into it. Wait for the initial
+  //    about:blank "load" so contentDocument exists, then open/write/close.
+  const iframe = document.createElement('iframe');
+  iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;pointer-events:none';
+  iframe.setAttribute('aria-hidden', 'true');
+  document.body.appendChild(iframe);
   await new Promise(resolve => {
-    let loaded = 0; const total = imgs.length;
-    if (!total) return resolve();
-    imgs.forEach(im => {
-      if (im.complete && im.naturalWidth > 0) { if (++loaded >= total) resolve(); }
-      else im.addEventListener('load',  () => { if (++loaded >= total) resolve(); }, { once: true });
-      im.addEventListener('error', () => { if (++loaded >= total) resolve(); }, { once: true });
-    });
+    if (iframe.contentDocument && iframe.contentDocument.readyState === 'complete') return resolve();
+    iframe.addEventListener('load', () => resolve(), { once: true });
+    // Fallback if 'load' never fires (shouldn't happen for about:blank)
+    setTimeout(resolve, 1500);
   });
-  setTimeout(() => { try { win.focus(); win.print(); } catch (_) {} }, 200);
+  const doc = iframe.contentDocument;
+  if (!doc) {
+    iframe.remove();
+    throw new Error('Could not access print iframe document');
+  }
+  doc.open();
+  doc.write(html);
+  doc.close();
+
+  // 4. Wait for every <img> in the iframe to finish loading (or error
+  //    out). Each image has both event listeners; whichever fires
+  //    first counts. Without this, .print() can race the image
+  //    decoding and produce a blank-image PDF.
+  progress('Loading images…');
+  const imgs = doc.querySelectorAll('img');
+  await new Promise(resolve => {
+    let resolved = 0; const total = imgs.length;
+    if (!total) return resolve();
+    const tick = () => { if (++resolved >= total) resolve(); };
+    imgs.forEach(im => {
+      if (im.complete && im.naturalWidth > 0) { tick(); return; }
+      im.addEventListener('load',  tick, { once: true });
+      im.addEventListener('error', tick, { once: true });
+    });
+    // Safety: never wait more than 30 s on image loads.
+    setTimeout(resolve, 30000);
+  });
+
+  // 5. Focus the iframe + invoke print. window.print() blocks until
+  //    the dialog closes; the user's "Print" / "Cancel" both return
+  //    control to this script.
+  progress('Opening print dialog…');
+  try {
+    iframe.contentWindow.focus();
+    iframe.contentWindow.print();
+  } catch (printErr) {
+    iframe.remove();
+    throw new Error('Print dialog failed: ' + printErr.message);
+  }
+
+  // 6. Tear down the iframe after a beat so the print engine has the
+  //    pixels even on browsers that read them lazily.
+  setTimeout(() => { try { iframe.remove(); } catch (_) {} }, 1000);
 }
 
 function rtLoadImage(file) {
