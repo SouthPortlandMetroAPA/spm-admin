@@ -1737,7 +1737,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.59';
+const APP_VERSION = '3.60';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10508,10 +10508,10 @@ async function rtOpenCell(assignmentId, itemId) {
   body += '<div style="margin-top:18px;padding-top:14px;border-top:1px dashed var(--border)">'
     + '<h3 style="font-size:0.84rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--muted);margin:0 0 6px">Upload on behalf of this team</h3>'
     + '<p class="hint" style="font-size:0.82rem;margin:0 0 8px">'
-    + 'Pick a PDF or image. It will be attributed to <strong>admin</strong> in the gallery '
-    + '(captain still sees it on their portal). New uploads un-stamp the item.'
+    + 'Pick one or more PDFs or images. They&rsquo;re attributed to <strong>admin</strong> in '
+    + 'the gallery (captain still sees them on their portal). New uploads un-stamp the item.'
     + '</p>'
-    + '<input type="file" id="rtAdminUploadFile" accept="application/pdf,image/*" '
+    + '<input type="file" id="rtAdminUploadFile" accept="application/pdf,image/*" multiple '
     + 'style="font-family:inherit;font-size:0.86rem" '
     + 'onchange="rtAdminUploadOnBehalf(' + assignmentId + ',' + itemId + ', this)">'
     + '<div id="rtAdminUploadStatus" class="status-line" style="font-size:0.82rem;margin-top:6px"></div>'
@@ -10521,68 +10521,90 @@ async function rtOpenCell(assignmentId, itemId) {
   rtShowModal(body);
 }
 
-/* Admin upload-on-behalf flow.
-   Generates the same path scheme the captain UI uses in v0.8+:
+/* Admin upload-on-behalf flow (3.60+: multi-file).
+   Path scheme matches captain UI:
      redtape/<event-slug>/<assignment_id>/<item_id>/<unique>.<ext>
    For images, captures natural width/height for the DB row; for PDFs
-   we leave width/height NULL. Auto-unstamps the item if it was stamped
-   (matches captain_record_upload semantics). */
+   we leave width/height NULL. Auto-unstamps the item once at the end if
+   it was stamped (matches captain_record_upload semantics — new evidence
+   demands re-review).
+
+   v3.60: input has `multiple` — loop over each file sequentially with
+   "Uploading N of M" progress. On any failure, surface which file # and
+   leave previously-completed uploads in place. */
 async function rtAdminUploadOnBehalf(assignmentId, itemId, inputEl) {
-  const f = inputEl.files && inputEl.files[0];
-  if (!f) return;
+  const files = Array.from(inputEl.files || []);
+  if (!files.length) return;
+  inputEl.value = '';
   const e = _rtActiveEvent;
   const a = e.assignments.find(x => x.id === assignmentId);
   if (!a) { setStatus('rtAdminUploadStatus', 'Assignment not found', 'err'); return; }
-  setStatus('rtAdminUploadStatus', 'Uploading…', '');
-  try {
-    const isPdf = /\.pdf$/i.test(f.name) || f.type === 'application/pdf';
-    const ext = isPdf ? 'pdf' : 'jpg';
-    const unique = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
-    const path = 'redtape/' + encodeURIComponent(a.slug || _rtActiveEvent.slug) + '/'
-      + assignmentId + '/' + itemId + '/' + unique + '.' + ext;
-    // Image: compress to JPEG (max 2200px, q=0.85). PDF: send as-is.
-    let blob, contentType, width = null, height = null;
-    if (isPdf) {
-      blob = f;
-      contentType = 'application/pdf';
-    } else {
-      const img = await rtLoadImage(f);
-      width = img.naturalWidth; height = img.naturalHeight;
-      const MAX = 2200;
-      let w = width, h = height;
-      if (Math.max(w, h) > MAX) { const s = MAX / Math.max(w, h); w = Math.round(w * s); h = Math.round(h * s); }
-      const canvas = document.createElement('canvas');
-      canvas.width = w; canvas.height = h;
-      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-      blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.85));
-      contentType = 'image/jpeg';
-      width = w; height = h;
+  let done = 0;
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i];
+    const n = i + 1, total = files.length;
+    const label = total === 1 ? 'Uploading' : 'Uploading ' + n + ' of ' + total;
+    setStatus('rtAdminUploadStatus', label + '…', '');
+    try {
+      await rtAdminUploadOneFile(assignmentId, itemId, f);
+      done++;
+    } catch (err) {
+      setStatus('rtAdminUploadStatus',
+        'File ' + n + ' of ' + total + ' failed: ' + err.message
+        + (done ? ' (' + done + ' filed earlier)' : ''),
+        'err');
+      // Try to refresh state to show what did upload, then bail.
+      try { await rtOpenEvent(_rtActiveEvent.id); rtOpenCell(assignmentId, itemId); } catch (_) {}
+      return;
     }
-    // R2 PUT
-    const r2 = await fetch(RT_R2_URL + '/' + path, {
-      method: 'PUT', headers: { 'Content-Type': contentType }, body: blob
-    });
-    if (!r2.ok) throw new Error('R2 ' + r2.status);
-    // DB row — service-role REST, attributed to admin.
-    await rtFetch('POST', 'uploads', [{
-      assignment_id: assignmentId, item_id: itemId, r2_path: path,
-      uploaded_by_apa: null, uploaded_by_name: 'admin',
-      bytes: blob.size, content_type: contentType,
-      width: width, height: height
-    }]);
-    // Auto-unstamp if the item was previously stamped (new evidence demands re-review).
+  }
+  // Un-stamp once after all uploads (item is stale now; admin re-reviews).
+  try {
     await rtFetch('DELETE',
       'item_stamps?assignment_id=eq.' + assignmentId + '&item_id=eq.' + itemId);
-    setStatus('rtAdminUploadStatus', '✓ Uploaded.', 'ok');
-    // Reload event + re-open the cell modal so admin sees the new row.
-    setTimeout(async () => {
-      rtCloseModal();
-      await rtOpenEvent(_rtActiveEvent.id);
-      rtOpenCell(assignmentId, itemId);
-    }, 500);
-  } catch (err) {
-    setStatus('rtAdminUploadStatus', 'Failed: ' + err.message, 'err');
+  } catch (_) {}
+  setStatus('rtAdminUploadStatus',
+    '✓ ' + (done === 1 ? 'Uploaded.' : done + ' uploaded.'), 'ok');
+  setTimeout(async () => {
+    rtCloseModal();
+    await rtOpenEvent(_rtActiveEvent.id);
+    rtOpenCell(assignmentId, itemId);
+  }, 500);
+}
+
+async function rtAdminUploadOneFile(assignmentId, itemId, f) {
+  const isPdf = /\.pdf$/i.test(f.name) || f.type === 'application/pdf';
+  const ext = isPdf ? 'pdf' : 'jpg';
+  const unique = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+  const path = 'redtape/' + encodeURIComponent(_rtActiveEvent.slug) + '/'
+    + assignmentId + '/' + itemId + '/' + unique + '.' + ext;
+  let blob, contentType, width = null, height = null;
+  if (isPdf) {
+    blob = f;
+    contentType = 'application/pdf';
+  } else {
+    const img = await rtLoadImage(f);
+    width = img.naturalWidth; height = img.naturalHeight;
+    const MAX = 2200;
+    let w = width, h = height;
+    if (Math.max(w, h) > MAX) { const s = MAX / Math.max(w, h); w = Math.round(w * s); h = Math.round(h * s); }
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+    blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.85));
+    contentType = 'image/jpeg';
+    width = w; height = h;
   }
+  const r2 = await fetch(RT_R2_URL + '/' + path, {
+    method: 'PUT', headers: { 'Content-Type': contentType }, body: blob
+  });
+  if (!r2.ok) throw new Error('R2 ' + r2.status);
+  await rtFetch('POST', 'uploads', [{
+    assignment_id: assignmentId, item_id: itemId, r2_path: path,
+    uploaded_by_apa: null, uploaded_by_name: 'admin',
+    bytes: blob.size, content_type: contentType,
+    width: width, height: height
+  }]);
 }
 
 function rtLoadImage(file) {
