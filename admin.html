@@ -1737,7 +1737,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.62';
+const APP_VERSION = '3.63';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -8577,16 +8577,16 @@ function ssgCellClick(ev, matchId, teamId) {
       s === 'single' ? 'Scoresheet' : (s.charAt(0).toUpperCase() + s.slice(1))
     ).join(' + ');
     const inputId = 'ssgUpload_' + matchId + '_' + teamId;
-    const acceptAttr = missingSides.length > 1 ? 'multiple' : '';
     body += `<div style="margin-top:10px;padding:10px;background:var(--accent-bg,#eff6ff);border:1px dashed var(--spm-accent);border-radius:8px">
       <div style="font-size:0.78rem;font-weight:700;color:var(--spm-accent);margin-bottom:6px">
         📤 Upload on behalf of this team
       </div>
       <div style="font-size:0.72rem;color:var(--muted);margin-bottom:8px">
-        Needed: <strong>${esc(slotsLabel)}</strong>${missingSides.length > 1 ? ' (select ' + missingSides.length + ' files — front, back)' : ''}.
-        Full-resolution upload, no compression.
+        Missing: <strong>${esc(slotsLabel)}</strong>. Drop in any combination of images or
+        PDFs — pages are mapped to missing sides in order. Multi-page PDFs split into
+        their pages (front + back atomic scan = 2 pages → front, then back).
       </div>
-      <input id="${inputId}" type="file" accept="image/*" ${acceptAttr} style="font-size:0.78rem;width:100%" />
+      <input id="${inputId}" type="file" accept="image/*,application/pdf" multiple style="font-size:0.78rem;width:100%" />
       <div style="display:flex;gap:8px;margin-top:6px;align-items:center;flex-wrap:wrap">
         <button class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:0.74rem"
           onclick="event.stopPropagation();ssgUploadOnBehalf(${matchId}, ${teamId}, '${inputId}', ${JSON.stringify(missingSides).replace(/"/g, '&quot;')})">
@@ -8712,6 +8712,21 @@ window.ssCellPopoverClose = ssCellPopoverClose;
    from full-resolution scans/photos already on a desktop, so we preserve
    the original bytes. The uploader_name is set to "Admin (Slate)" so the
    admin path is distinguishable in the log + the popover credit line. */
+/* 3.63+: PDFs accepted, exact-count requirement removed.
+
+   The captain UI (PaperTrail 2.6) accepts PDFs from "scan document"
+   apps, and admin upload-on-behalf needs the same. PDF pages are
+   rasterized to JPEG via pdf.js and treated as separate "files" so
+   the natural 9-Ball-Doubles workflow — a single 2-page scan covers
+   front + back — maps cleanly without forcing the admin to split it
+   first.
+
+   Mapping rule: walk through the input files, expanding each PDF into
+   its page sequence, building a flat list of pages. Take the first
+   missingSides.length pages and assign them in order to the missing
+   sides. Extras are ignored with a warning. Fewer than needed → fill
+   what you have, the remaining sides stay missing (admin can re-open
+   the popover later). */
 async function ssgUploadOnBehalf(matchId, teamId, inputId, missingSidesEscaped) {
   const missingSides = typeof missingSidesEscaped === 'string'
     ? JSON.parse(missingSidesEscaped.replace(/&quot;/g, '"'))
@@ -8720,44 +8735,91 @@ async function ssgUploadOnBehalf(matchId, teamId, inputId, missingSidesEscaped) 
   const status = document.getElementById(inputId + '_status');
   const files  = Array.from(input.files || []);
   if (!files.length) {
-    status.textContent = 'Choose ' + missingSides.length + ' file(s) first.';
+    status.textContent = 'Choose at least one file first.';
     status.style.color = 'var(--danger)';
     return;
   }
-  if (files.length !== missingSides.length) {
-    status.textContent = 'Need exactly ' + missingSides.length + ' file' + (missingSides.length === 1 ? '' : 's') + ' (' + missingSides.join(' + ') + ').';
+  status.textContent = 'Preparing…';
+  status.style.color = 'var(--muted)';
+
+  /* Build a flat list of "pages." Each page is a Blob ready to PUT.
+     - Image input → 1 page (the file itself, no compression).
+     - PDF input   → N pages (one Blob per PDF page, rendered at scale=2
+       → JPEG quality 0.92 against a white background). */
+  const pages = [];
+  try {
+    let pdfjs = null;
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
+      if (isPdf) {
+        if (!pdfjs) pdfjs = await ensurePdfJs();
+        const buf = await file.arrayBuffer();
+        const doc = await pdfjs.getDocument({ data: new Uint8Array(buf), useSystemFonts: true }).promise;
+        for (let p = 1; p <= doc.numPages; p++) {
+          const page = await doc.getPage(p);
+          const vp = page.getViewport({ scale: 2 });
+          const canvas = document.createElement('canvas');
+          canvas.width  = Math.round(vp.width);
+          canvas.height = Math.round(vp.height);
+          const ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          await page.render({ canvasContext: ctx, viewport: vp }).promise;
+          const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.92));
+          pages.push({ blob, width: canvas.width, height: canvas.height, contentType: 'image/jpeg' });
+        }
+      } else {
+        // Image — push as-is. Width/height are best-effort below.
+        pages.push({ blob: file, width: null, height: null,
+                     contentType: file.type || 'image/jpeg' });
+      }
+    }
+  } catch (e) {
+    status.textContent = 'Could not read input: ' + e.message;
     status.style.color = 'var(--danger)';
     return;
   }
+
+  if (!pages.length) {
+    status.textContent = 'No usable pages in the selected files.';
+    status.style.color = 'var(--danger)';
+    return;
+  }
+
+  // How many pages we'll actually use. Extras are ignored with a note.
+  const slots = pages.slice(0, missingSides.length);
+  if (pages.length > missingSides.length) {
+    console.warn('[ssgUploadOnBehalf] ' + pages.length + ' pages but only '
+      + missingSides.length + ' missing side(s); using the first ' + slots.length + '.');
+  }
+
   status.textContent = 'Uploading…';
   status.style.color = 'var(--muted)';
   try {
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
+    for (let i = 0; i < slots.length; i++) {
+      const pg   = slots[i];
       const side = missingSides[i];
-      // R2 path mirrors PaperTrail's r2PathFor — keep keys identical so
-      // the public renderer / popover URL building doesn't have to know
-      // who uploaded it.
+      // R2 path mirrors PaperTrail's r2PathFor — same keys so the renderer
+      // / popover URL builder doesn't care who uploaded it.
       const path = 'papertrail/' + currentSession.id + '/' + matchId + '/' + teamId + '/' + side + '.jpg';
-      // Upload raw bytes — no compression. Use the original Content-Type
-      // when the file is JPEG; for PNG/HEIC the worker stores as-is too,
-      // but we standardize the path suffix to .jpg for compatibility
-      // with the existing renderer (which assumes the .jpg path).
       const r = await fetch(SS_R2_URL + '/' + path, {
         method: 'PUT',
-        headers: { 'Content-Type': file.type || 'image/jpeg' },
-        body: file
+        headers: { 'Content-Type': pg.contentType },
+        body: pg.blob
       });
       if (!r.ok) throw new Error('R2 PUT ' + r.status + ': ' + (await r.text()).slice(0, 160));
-      // Best-effort dimensions for the DB row — not critical if it fails.
-      let width = null, height = null;
-      try {
-        const bitmap = await createImageBitmap(file);
-        width  = bitmap.width;
-        height = bitmap.height;
-        bitmap.close && bitmap.close();
-      } catch (_) {}
-      // UPSERT photo row (on_conflict matches PaperTrail's unique constraint).
+      // Best-effort dimensions for the DB row. PDF-derived pages already
+      // have canvas dims; raw image inputs need a probe.
+      let width = pg.width, height = pg.height;
+      if (width == null || height == null) {
+        try {
+          const bitmap = await createImageBitmap(pg.blob);
+          width  = bitmap.width;
+          height = bitmap.height;
+          bitmap.close && bitmap.close();
+        } catch (_) {}
+      }
       const dbBody = [{
         match_id: matchId,
         team_id:  teamId,
@@ -8765,8 +8827,8 @@ async function ssgUploadOnBehalf(matchId, teamId, inputId, missingSidesEscaped) 
         r2_path:  path,
         uploader_apa_number: null,
         uploader_name: 'Admin (Slate)',
-        bytes: file.size,
-        content_type: file.type || 'image/jpeg',
+        bytes: pg.blob.size,
+        content_type: pg.contentType,
         width, height
       }];
       const dbR = await fetch(SB_URL + '/rest/v1/photos?on_conflict=match_id,team_id,side', {
@@ -8780,11 +8842,13 @@ async function ssgUploadOnBehalf(matchId, teamId, inputId, missingSidesEscaped) 
         body: JSON.stringify(dbBody)
       });
       if (!dbR.ok) throw new Error('DB upsert ' + dbR.status + ': ' + (await dbR.text()).slice(0, 160));
-      status.textContent = (i + 1) + ' / ' + files.length + ' uploaded…';
+      status.textContent = (i + 1) + ' / ' + slots.length + ' uploaded…';
     }
-    status.textContent = '✓ Uploaded · refreshing…';
+    const note = pages.length > slots.length
+      ? ' (ignored ' + (pages.length - slots.length) + ' extra page' + (pages.length - slots.length === 1 ? '' : 's') + ')'
+      : '';
+    status.textContent = '✓ ' + slots.length + ' uploaded' + note + ' · refreshing…';
     status.style.color = 'var(--success, #16a34a)';
-    // Close popover and re-render so the cell flips green.
     setTimeout(() => {
       ssCellPopoverClose();
       ssgRenderGridForDivision(_ssgState.divisionId);
