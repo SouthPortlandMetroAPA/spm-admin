@@ -1673,6 +1673,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
               <button class="btn btn-outline btn-sm" onclick="rtOpenEditEvent()">Edit event</button>
               <button class="btn btn-primary btn-sm" onclick="rtOpenRosterUpload()">Upload roster PDF</button>
               <button class="btn btn-outline btn-sm" onclick="rtOpenEmailList()">Email captains</button>
+              <button class="btn btn-outline btn-sm" onclick="rtPrintEventSubmissions(this)" title="Print every active submission across all teams + all items">&#128424; Print all</button>
               <button class="btn btn-outline btn-sm" onclick="rtOpenManageItems()">Manage items</button>
             </div>
           </div>
@@ -1737,7 +1738,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.63';
+const APP_VERSION = '3.64';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10697,13 +10698,82 @@ async function rtPrintCellSubmissions(assignmentId, itemId, btnEl) {
     .sort((x, y) => new Date(x.uploaded_at) - new Date(y.uploaded_at));
   if (!active.length) { setStatus('rtCellStatus', 'Nothing to print.', 'err'); return; }
 
-  // Open the print window IMMEDIATELY in the user-gesture stack so the
-  // popup blocker doesn't engage on the async fetches below.
+  // Open the print window IN the user-gesture stack so the popup blocker
+  // doesn't engage on the async fetches below.
   const win = window.open('', '_blank', 'noopener');
   if (!win) { setStatus('rtCellStatus', 'Pop-up blocked — allow pop-ups for this site and retry.', 'err'); return; }
   const docTitle = a.team_number + ' ' + (a.team_name || '') + ' · ' + it.title;
-  win.document.write(
-    '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + esc(docTitle) + '</title>'
+  win.document.write(rtPrintWindowHtml(docTitle));
+  win.document.close();
+
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Preparing…'; }
+  try {
+    const work = active.map(u => ({ assignment: a, item: it, upload: u }));
+    await rtRenderAndPrint(win, work, e.name || '');
+  } catch (err) {
+    try { win.document.getElementById('status').innerHTML =
+      '<span class="err">' + esc(err && err.message || String(err)) + '</span>';
+    } catch (_) {}
+  } finally {
+    if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = '&#128424; Print all (' + active.length + ')'; }
+  }
+}
+
+/* Print every active submission across the whole event. Big-batch version
+   of rtPrintCellSubmissions — same render pipeline, just walks every
+   (assignment × item) cell in the grid. Sorted team-then-item to match
+   how admin reads the grid left-to-right. Asks for confirmation when the
+   page count gets big because rasterizing 100+ PDF pages is heavy on
+   memory. */
+async function rtPrintEventSubmissions(btnEl) {
+  const e = _rtActiveEvent;
+  if (!e) return;
+  // Build the ordered work list: for each assignment (sorted by team_number),
+  // for each item (sorted by sort_order), pick its active uploads in
+  // upload order. This matches how the grid is rendered, so the print stack
+  // matches what admin sees on screen.
+  const sortedAssignments = (e.assignments || []).slice().sort((a, b) =>
+    String(a.team_number || '').localeCompare(String(b.team_number || '')));
+  const sortedItems = (e.items || []).slice().sort((a, b) =>
+    (a.sort_order || 0) - (b.sort_order || 0) || a.id - b.id);
+  const work = [];   // { assignment, item, upload }
+  for (const a of sortedAssignments) {
+    for (const it of sortedItems) {
+      const cellUploads = (e.uploads || [])
+        .filter(u => u.assignment_id === a.id && u.item_id === it.id && !u.deleted_at)
+        .sort((x, y) => new Date(x.uploaded_at) - new Date(y.uploaded_at));
+      for (const u of cellUploads) work.push({ assignment: a, item: it, upload: u });
+    }
+  }
+  if (!work.length) {
+    setStatus('rtGridStatus', 'No submissions to print yet.', 'err');
+    return;
+  }
+  // Confirm large batches — rasterizing PDFs at scale=2 chews RAM and time.
+  if (work.length > 30 && !confirm(
+    work.length + ' submissions will be rendered for printing — this can take a minute or two and uses a lot of memory. Continue?')) {
+    return;
+  }
+  // Open the print window IN the gesture stack so popup blocker stays quiet.
+  const win = window.open('', '_blank', 'noopener');
+  if (!win) { setStatus('rtGridStatus', 'Pop-up blocked — allow pop-ups for this site and retry.', 'err'); return; }
+  win.document.write(rtPrintWindowHtml(e.name + ' — every submission'));
+  win.document.close();
+  if (btnEl) { btnEl.disabled = true; btnEl.innerHTML = '&#128424; Preparing…'; }
+  try {
+    await rtRenderAndPrint(win, work, e.name);
+  } catch (err) {
+    try { win.document.getElementById('status').innerHTML =
+      '<span class="err">' + esc(err && err.message || String(err)) + '</span>';
+    } catch (_) {}
+  } finally {
+    if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = '&#128424; Print all'; }
+  }
+}
+
+/* Shared print-window scaffold — used by both per-cell and event-wide. */
+function rtPrintWindowHtml(title) {
+  return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + esc(title) + '</title>'
     + '<style>'
     + '@page { margin: 0.5in; }'
     + 'html, body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #1f2937; background: #fff; }'
@@ -10717,89 +10787,79 @@ async function rtPrintCellSubmissions(assignmentId, itemId, btnEl) {
     + '#status .err { color: #b91c1c; }'
     + '</style></head><body>'
     + '<div id="status">Preparing print preview&hellip;</div>'
-    + '</body></html>'
-  );
-  win.document.close();
-  const statusEl = win.document.getElementById('status');
+    + '</body></html>';
+}
+
+/* Shared render-then-print loop. work[] = [{ assignment, item, upload }, ...]
+   in the order the caller wants them printed. eventName goes into each page
+   header alongside the team/item/uploader breadcrumb so the printed sheet
+   says where this submission came from at a glance. */
+async function rtRenderAndPrint(win, work, eventName) {
   const setWinStatus = (msg, isErr) => {
-    if (!statusEl || !statusEl.isConnected) return;
-    statusEl.innerHTML = isErr ? '<span class="err">' + esc(msg) + '</span>' : esc(msg);
+    const el = win.document.getElementById('status');
+    if (!el || !el.isConnected) return;
+    el.innerHTML = isErr ? '<span class="err">' + esc(msg) + '</span>' : esc(msg);
   };
-
-  if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Preparing…'; }
-
-  try {
-    const pdfjs = await ensurePdfJs();
-    /* Build a flat list of pages. Image uploads → one page each (use
-       the R2 URL directly so the print engine fetches normally). PDF
-       uploads → one page per PDF page (render via pdf.js → JPEG data-URL,
-       scale=2 for a clean ~150–200 DPI on Letter). */
-    const pages = [];
-    for (let i = 0; i < active.length; i++) {
-      const u = active[i];
-      const isPdf = (u.content_type === 'application/pdf') || /\.pdf$/i.test(u.r2_path || '');
-      const baseCaption = a.team_number + ' ' + (a.team_name || '')
-        + ' · ' + it.title
-        + (u.uploaded_by_name ? ' · uploaded by ' + u.uploaded_by_name : '');
-      setWinStatus('Preparing ' + (i + 1) + ' of ' + active.length + '…');
-      try {
-        if (isPdf) {
-          const fetched = await fetch(RT_R2_URL + '/' + u.r2_path);
-          if (!fetched.ok) throw new Error('R2 ' + fetched.status);
-          const buf = await fetched.arrayBuffer();
-          const doc = await pdfjs.getDocument({ data: new Uint8Array(buf), useSystemFonts: true }).promise;
-          for (let p = 1; p <= doc.numPages; p++) {
-            const page = await doc.getPage(p);
-            const vp = page.getViewport({ scale: 2 });
-            const canvas = document.createElement('canvas');
-            canvas.width  = Math.round(vp.width);
-            canvas.height = Math.round(vp.height);
-            const ctx = canvas.getContext('2d');
-            ctx.fillStyle = '#ffffff';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            await page.render({ canvasContext: ctx, viewport: vp }).promise;
-            pages.push({
-              src: canvas.toDataURL('image/jpeg', 0.92),
-              caption: baseCaption + (doc.numPages > 1 ? ' · page ' + p + ' of ' + doc.numPages : '')
-            });
-          }
-        } else {
-          pages.push({ src: RT_R2_URL + '/' + u.r2_path, caption: baseCaption });
+  const pdfjs = await ensurePdfJs();
+  const pages = [];
+  for (let i = 0; i < work.length; i++) {
+    const { assignment: a, item: it, upload: u } = work[i];
+    const isPdf = (u.content_type === 'application/pdf') || /\.pdf$/i.test(u.r2_path || '');
+    const baseCaption = a.team_number + ' ' + (a.team_name || '')
+      + ' · ' + it.title
+      + (u.uploaded_by_name ? ' · uploaded by ' + u.uploaded_by_name : '')
+      + (eventName ? ' · ' + eventName : '');
+    setWinStatus('Preparing ' + (i + 1) + ' of ' + work.length + '…');
+    try {
+      if (isPdf) {
+        const fetched = await fetch(RT_R2_URL + '/' + u.r2_path);
+        if (!fetched.ok) throw new Error('R2 ' + fetched.status);
+        const buf = await fetched.arrayBuffer();
+        const doc = await pdfjs.getDocument({ data: new Uint8Array(buf), useSystemFonts: true }).promise;
+        for (let p = 1; p <= doc.numPages; p++) {
+          const page = await doc.getPage(p);
+          const vp = page.getViewport({ scale: 2 });
+          const canvas = document.createElement('canvas');
+          canvas.width  = Math.round(vp.width);
+          canvas.height = Math.round(vp.height);
+          const ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          await page.render({ canvasContext: ctx, viewport: vp }).promise;
+          pages.push({
+            src: canvas.toDataURL('image/jpeg', 0.92),
+            caption: baseCaption + (doc.numPages > 1 ? ' · page ' + p + ' of ' + doc.numPages : '')
+          });
         }
-      } catch (err) {
-        // Per-file errors don't kill the whole batch.
-        console.error('[rtPrintCellSubmissions] upload', u.id, 'failed:', err);
+      } else {
+        pages.push({ src: RT_R2_URL + '/' + u.r2_path, caption: baseCaption });
       }
+    } catch (err) {
+      // Per-file errors don't kill the whole batch.
+      console.error('[rtRenderAndPrint] item failed:', err);
     }
-    if (!pages.length) {
-      setWinStatus('Could not prepare any pages for printing.', true);
-      return;
-    }
-    // Swap the body to the print content.
-    win.document.body.innerHTML = pages.map(p =>
-      '<div class="pg">'
-      + '<div class="hdr"><b>' + esc(p.caption) + '</b></div>'
-      + '<div class="img-wrap"><img src="' + esc(p.src) + '" alt=""></div>'
-      + '</div>'
-    ).join('');
-    // Wait for all images to load before firing print.
-    const imgs = win.document.querySelectorAll('img');
-    await new Promise(resolve => {
-      let loaded = 0; const total = imgs.length;
-      if (!total) return resolve();
-      imgs.forEach(im => {
-        if (im.complete && im.naturalWidth > 0) { if (++loaded >= total) resolve(); }
-        else im.addEventListener('load',  () => { if (++loaded >= total) resolve(); }, { once: true });
-        im.addEventListener('error', () => { if (++loaded >= total) resolve(); }, { once: true });
-      });
-    });
-    // Give layout one tick before invoking the OS print dialog.
-    setTimeout(() => { try { win.focus(); win.print(); } catch (_) {} }, 200);
-  } catch (e) {
-    setWinStatus('Failed: ' + (e && e.message || String(e)), true);
-  } finally {
-    if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = '&#128424; Print all (' + active.length + ')'; }
   }
+  if (!pages.length) {
+    setWinStatus('Could not prepare any pages for printing.', true);
+    return;
+  }
+  win.document.body.innerHTML = pages.map(p =>
+    '<div class="pg">'
+    + '<div class="hdr"><b>' + esc(p.caption) + '</b></div>'
+    + '<div class="img-wrap"><img src="' + esc(p.src) + '" alt=""></div>'
+    + '</div>'
+  ).join('');
+  const imgs = win.document.querySelectorAll('img');
+  await new Promise(resolve => {
+    let loaded = 0; const total = imgs.length;
+    if (!total) return resolve();
+    imgs.forEach(im => {
+      if (im.complete && im.naturalWidth > 0) { if (++loaded >= total) resolve(); }
+      else im.addEventListener('load',  () => { if (++loaded >= total) resolve(); }, { once: true });
+      im.addEventListener('error', () => { if (++loaded >= total) resolve(); }, { once: true });
+    });
+  });
+  setTimeout(() => { try { win.focus(); win.print(); } catch (_) {} }, 200);
 }
 
 function rtLoadImage(file) {
@@ -11477,6 +11537,7 @@ window.rtOpenCell = rtOpenCell;
 window.rtStampItem = rtStampItem;
 window.rtAdminUploadOnBehalf = rtAdminUploadOnBehalf;
 window.rtPrintCellSubmissions = rtPrintCellSubmissions;
+window.rtPrintEventSubmissions = rtPrintEventSubmissions;
 window.rtUnstampItem = rtUnstampItem;
 window.rtDeleteUpload = rtDeleteUpload;
 window.rtRestoreUpload = rtRestoreUpload;
