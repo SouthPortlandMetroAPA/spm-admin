@@ -1788,7 +1788,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.67';
+const APP_VERSION = '3.68';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11774,19 +11774,51 @@ async function rolHandleFile(file) {
       splits.push({ ...g, bytes });
     }
 
-    /* 5. Upload each split + write DB row (R2 PUT then UPSERT) */
+    /* 5. Upload each split + write DB row (R2 PUT then UPSERT)
+       3.68 (security lockdown):
+         - R2 path is now content-addressed via crypto.randomUUID() so
+           the URL cannot be enumerated by guessing session+division.
+         - PUT to rolodex/ requires Authorization: Bearer SB_KEY (the
+           service-role JWT, only present when admin loads with ?key=).
+         - The OLD r2_path (if any) is deleted AFTER the DB row is
+           updated, so re-uploads orphan-clean without race-windows. */
     let i = 0;
     for (const s of splits) {
       i++;
       status.textContent = 'Uploading ' + i + ' / ' + splits.length
         + ': ' + s.division_number + ' (' + s.division_name + ')…';
-      const path = 'rolodex/' + currentSession.id + '/' + s.division_number + '.pdf';
+      const path = 'rolodex/' + crypto.randomUUID() + '.pdf';
       const r = await fetch(ROL_R2_URL + '/' + path, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/pdf' },
+        headers: {
+          'Content-Type': 'application/pdf',
+          /* Worker accepts PUT on rolodex/ only with this Bearer. SB_KEY
+             is the service-role JWT (loaded from ?key= URL param). */
+          'Authorization': 'Bearer ' + SB_KEY
+        },
         body: s.bytes
       });
       if (!r.ok) throw new Error('R2 ' + r.status + ' for ' + s.division_number);
+
+      /* Look up the prior r2_path for this (session, division) so we can
+         orphan-clean after the UPSERT. UUID paths mean a re-upload writes
+         to a DIFFERENT R2 key; without explicit cleanup the old object
+         would linger forever. */
+      let oldR2Path = null;
+      try {
+        const lookupR = await fetch(
+          SB_URL + '/rest/v1/captain_pdfs?select=r2_path&session_id=eq.' + currentSession.id +
+          '&division_number=eq.' + encodeURIComponent(s.division_number),
+          { headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Accept-Profile': 'slate' } }
+        );
+        if (lookupR.ok) {
+          const prior = await lookupR.json();
+          if (prior && prior[0] && prior[0].r2_path && prior[0].r2_path !== path) {
+            oldR2Path = prior[0].r2_path;
+          }
+        }
+      } catch (_) { /* non-fatal — orphan stays */ }
+
       const dbBody = [{
         session_id: currentSession.id,
         division_number: s.division_number,
@@ -11808,6 +11840,16 @@ async function rolHandleFile(file) {
         body: JSON.stringify(dbBody)
       });
       if (!dbR.ok) throw new Error('DB ' + dbR.status + ': ' + (await dbR.text()).slice(0,160));
+
+      /* Orphan cleanup — only after DB row points at the new path. */
+      if (oldR2Path) {
+        try {
+          await fetch(ROL_R2_URL + '/' + oldR2Path, {
+            method: 'DELETE',
+            headers: { 'Authorization': 'Bearer ' + SB_KEY }
+          });
+        } catch (_) { /* non-fatal */ }
+      }
     }
 
     status.textContent = '✓ Uploaded ' + splits.length + ' division(s).';
@@ -11838,8 +11880,13 @@ async function rolRenderList() {
     el.innerHTML =
       '<div style="display:grid;gap:6px">' +
       rows.map(row => {
-        const url = ROL_R2_URL + '/' + row.r2_path + '?v=' + new Date(row.uploaded_at).getTime();
         const kb = row.bytes ? Math.round(row.bytes/1024) + ' KB' : '';
+        /* 3.68: Open-link removed. The rolodex/ prefix now requires a
+           short-lived HMAC token to GET (per the security lockdown);
+           admin can't mint one without server-side help. Verify uploads
+           by inspecting the metadata (page_count, bytes, division name)
+           below, or by requesting the PDF as a captain via the public
+           Rolodex page. */
         return '<div style="display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:8px;padding:8px 10px">' +
           '<div style="flex:1;min-width:0">' +
             '<div style="font-weight:700">' + esc(row.division_number) +
@@ -11850,7 +11897,6 @@ async function rolRenderList() {
               ' &middot; uploaded ' + esc(new Date(row.uploaded_at).toLocaleString()) +
             '</div>' +
           '</div>' +
-          '<a class="btn btn-outline btn-sm" href="' + esc(url) + '" target="_blank" rel="noopener">Open</a>' +
           '<button class="btn btn-danger btn-sm" onclick="rolDelete(' + row.id + ', \'' + esc(row.r2_path) + '\')">Delete</button>' +
         '</div>';
       }).join('') +
@@ -11869,7 +11915,13 @@ async function rolDelete(id, r2Path) {
                  'Accept-Profile': 'slate', 'Content-Profile': 'slate' }
     });
     if (!r.ok) throw new Error('DB ' + r.status);
-    try { await fetch(ROL_R2_URL + '/' + r2Path, { method: 'DELETE' }); } catch (_) {}
+    /* DELETE on rolodex/ requires the same Bearer auth as PUT. */
+    try {
+      await fetch(ROL_R2_URL + '/' + r2Path, {
+        method: 'DELETE',
+        headers: { 'Authorization': 'Bearer ' + SB_KEY }
+      });
+    } catch (_) {}
     rolRenderList();
   } catch (e) {
     alert('Delete failed: ' + e.message);
