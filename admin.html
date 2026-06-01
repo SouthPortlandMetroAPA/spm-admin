@@ -933,6 +933,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="commonplayers">Common Players</button>
       <button class="tab" data-tab="reports">Reports</button>
       <button class="tab" data-tab="redtape">RedTape</button>
+      <button class="tab" data-tab="rolodex">Rolodex</button>
       <button class="tab" data-tab="playoffs">Playoffs</button>
     </div>
 
@@ -1690,6 +1691,55 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
     </div>
 
     <!-- ══════════════════════════════════════════════════════════════
+         TAB: ROLODEX — Captain Contacts PDF upload + manage
+         Admin drops a multi-page PDF (RackTime-style captain directory,
+         one division per page with captain info at bottom). Slate
+         parses each page via pdf.js, extracts the division number with
+         the same regex as the PaperTrail schedule parser, splits the
+         source into per-division single-page PDFs, uploads each to R2,
+         and writes a row to slate.captain_pdfs. The public rolodex/
+         app reads those rows via the apa-mailer GAS endpoint.
+         ══════════════════════════════════════════════════════════════ -->
+    <div id="tab-rolodex" class="tab-panel">
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
+          <h2 style="margin:0">Rolodex — Captain Contacts</h2>
+          <span class="hint" id="rolStatus"></span>
+        </div>
+        <p class="hint" style="margin-top:0">
+          Drop a multi-page captain-contact PDF below. Each page is parsed for its
+          division number (RackTime-style), then split into a single-division PDF
+          and uploaded. Players request these via
+          <a href="https://southportlandmetroapa.github.io/rolodex/" target="_blank" rel="noopener"><code>rolodex</code></a> &mdash;
+          they enter their APA number and receive the PDF(s) for the divisions
+          they play in this session at their email on file.
+        </p>
+
+        <!-- Drop zone — same single-box pattern as SP Reports / PaperTrail upload -->
+        <div class="upload-zone" id="rolDropZone"
+             style="border:2px dashed var(--border);border-radius:12px;padding:24px;text-align:center;cursor:pointer;background:#fafafa">
+          <div style="font-size:1.05rem;font-weight:700;color:var(--spm-accent)">
+            Drop captain-directory PDF here
+          </div>
+          <div class="hint" style="margin-top:6px">
+            …or tap to choose a file. Multi-page PDF; one division per page.
+            Re-uploading a division overwrites the prior one.
+          </div>
+          <input type="file" id="rolFileInput" accept="application/pdf" style="display:none">
+        </div>
+        <div id="rolUploadStatus" class="status-line" style="margin-top:8px"></div>
+      </div>
+
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+          <h2 style="margin:0">Uploaded divisions</h2>
+          <span class="hint" id="rolListStatus"></span>
+        </div>
+        <div id="rolList"><p class="hint">Loading…</p></div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════════
          TAB: PLAYOFFS — "show your work" breakdown of advancement math
          ══════════════════════════════════════════════════════════════ -->
     <div id="tab-playoffs" class="tab-panel">
@@ -1738,7 +1788,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.66';
+const APP_VERSION = '3.67';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -3309,6 +3359,7 @@ const TAB_LABEL = {
   commonplayers: 'Common Players',
   reports:       'Reports',
   redtape:       'RedTape',
+  rolodex:       'Rolodex',
   playoffs:      'Playoffs'
 };
 
@@ -3325,6 +3376,7 @@ function switchTab(name) {
   if (name === 'commonplayers') cpInit();
   if (name === 'reports')     rptInit();
   if (name === 'redtape')     rtInit();
+  if (name === 'rolodex')     rolInit();
   if (name === 'playoffs')    renderPlayoffsTab();
 }
 
@@ -11614,6 +11666,244 @@ window.rtOpenEditEvent = rtOpenEditEvent;
 window.rtSaveEvent = rtSaveEvent;
 window.rtDeleteEvent = rtDeleteEvent;
 window.rtCloseModal = rtCloseModal;
+
+/* ════════════════════════════════════════════════════════════════════════
+   ROLODEX (Captain Contacts) — admin upload + manage (3.66+)
+   ────────────────────────────────────────────────────────────────────────
+   Admin drops a multi-page captain-directory PDF (RackTime-style).
+   Each page is parsed for its division number using the same regex
+   as the PaperTrail schedule parser, then the source PDF is split
+   into per-division single-page PDFs via pdf-lib, each uploaded to R2
+   at rolodex/<session_id>/<division_number>.pdf, with a row written
+   to slate.captain_pdfs.
+
+   The public rolodex/ app + apa-mailer GAS endpoint consume those rows
+   (covered in subsequent work — this admin tab only handles ingest).
+   ════════════════════════════════════════════════════════════════════════ */
+const ROL_R2_URL = 'https://apa-photos.spmapa.workers.dev';
+
+/* Lazy-load pdf-lib for PDF splitting (pdf.js is read-only). */
+let _pdfLib = null;
+async function rolLoadPdfLib() {
+  if (_pdfLib) return _pdfLib;
+  _pdfLib = await import('https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/+esm');
+  return _pdfLib;
+}
+
+/* RackTime-style division-number regex (cribbed from PaperTrail parse.mjs):
+     /(\d{3})\s*-\s*(.+?)(?:\s+(?:Start Time|Day of Play|Edit Mode):.*)?$/i
+   Returns { division_number, division_name } or null. */
+function rolParseDivisionFromPageLines(lines) {
+  for (const ln of lines) {
+    const m = ln.match(/(\d{3})\s*-\s*(.+?)(?:\s+(?:Start Time|Day of Play|Edit Mode):.*)?$/i);
+    if (m && !/^\s*\d/.test(m[2])) {
+      return {
+        division_number: m[1],
+        division_name:   m[2].trim()
+      };
+    }
+  }
+  return null;
+}
+
+/* Extract text lines per page using the SAME helper SP Reports uses
+   (spPdfPageLines). pdf.js text-item coords → y-bucket → sorted lines. */
+async function rolPdfPageLines(file) {
+  return await spPdfPageLines(file);   /* reuses SP Reports' helper */
+}
+
+async function rolHandleFile(file) {
+  const status = document.getElementById('rolUploadStatus');
+  status.textContent = 'Reading PDF…';
+  status.style.color = 'var(--muted)';
+  try {
+    /* Current session — same lookup the rest of the tabs use. */
+    if (!currentSession) {
+      status.textContent = 'No current session selected.';
+      status.style.color = 'var(--danger)';
+      return;
+    }
+
+    /* 1. Parse text per page */
+    const pages = await rolPdfPageLines(file);
+    status.textContent = 'Parsing ' + pages.length + ' page(s)…';
+
+    /* 2. Identify division per page */
+    const perPage = pages.map((lines, i) => {
+      const detected = rolParseDivisionFromPageLines(lines);
+      return { pageIndex: i, ...detected };
+    });
+    const matched = perPage.filter(p => p.division_number);
+    const unmatched = perPage.filter(p => !p.division_number);
+    if (!matched.length) {
+      status.textContent = 'No division numbers detected on any page. '
+        + 'Check the PDF format (expecting "### - Name" header on each page).';
+      status.style.color = 'var(--danger)';
+      return;
+    }
+
+    /* 3. Group pages by division (multiple pages per division possible —
+       e.g. if captain info spans pages). Order preserved. */
+    const groups = {};
+    for (const p of matched) {
+      if (!groups[p.division_number]) {
+        groups[p.division_number] = {
+          division_number: p.division_number,
+          division_name: p.division_name,
+          pageIndexes: []
+        };
+      }
+      groups[p.division_number].pageIndexes.push(p.pageIndex);
+    }
+    const divisionList = Object.values(groups);
+
+    status.textContent = 'Detected ' + divisionList.length + ' division(s)'
+      + (unmatched.length ? ' (' + unmatched.length + ' unmatched page(s) skipped)' : '')
+      + '. Splitting…';
+
+    /* 4. Split source PDF into per-division PDFs */
+    const pdfLib = await rolLoadPdfLib();
+    const srcBytes = await file.arrayBuffer();
+    const srcDoc = await pdfLib.PDFDocument.load(srcBytes);
+    const splits = [];
+    for (const g of divisionList) {
+      const outDoc = await pdfLib.PDFDocument.create();
+      const copiedPages = await outDoc.copyPages(srcDoc, g.pageIndexes);
+      copiedPages.forEach(p => outDoc.addPage(p));
+      const bytes = await outDoc.save();
+      splits.push({ ...g, bytes });
+    }
+
+    /* 5. Upload each split + write DB row (R2 PUT then UPSERT) */
+    let i = 0;
+    for (const s of splits) {
+      i++;
+      status.textContent = 'Uploading ' + i + ' / ' + splits.length
+        + ': ' + s.division_number + ' (' + s.division_name + ')…';
+      const path = 'rolodex/' + currentSession.id + '/' + s.division_number + '.pdf';
+      const r = await fetch(ROL_R2_URL + '/' + path, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/pdf' },
+        body: s.bytes
+      });
+      if (!r.ok) throw new Error('R2 ' + r.status + ' for ' + s.division_number);
+      const dbBody = [{
+        session_id: currentSession.id,
+        division_number: s.division_number,
+        division_name: s.division_name,
+        r2_path: path,
+        bytes: s.bytes.length || s.bytes.byteLength || 0,
+        page_count: s.pageIndexes.length,
+        source_filename: file.name || null,
+        uploaded_at: new Date().toISOString()
+      }];
+      const dbR = await fetch(SB_URL + '/rest/v1/captain_pdfs?on_conflict=session_id,division_number', {
+        method: 'POST',
+        headers: {
+          apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY,
+          'Accept-Profile': 'slate', 'Content-Profile': 'slate',
+          'Content-Type': 'application/json',
+          Prefer: 'resolution=merge-duplicates,return=minimal'
+        },
+        body: JSON.stringify(dbBody)
+      });
+      if (!dbR.ok) throw new Error('DB ' + dbR.status + ': ' + (await dbR.text()).slice(0,160));
+    }
+
+    status.textContent = '✓ Uploaded ' + splits.length + ' division(s).';
+    status.style.color = 'var(--success)';
+    setTimeout(() => { status.textContent = ''; rolRenderList(); }, 1200);
+  } catch (e) {
+    status.textContent = 'Failed: ' + e.message;
+    status.style.color = 'var(--danger)';
+  }
+}
+
+async function rolRenderList() {
+  const el = document.getElementById('rolList');
+  const stat = document.getElementById('rolListStatus');
+  if (!currentSession) { el.innerHTML = '<p class="hint">No current session.</p>'; return; }
+  stat.textContent = 'Loading…';
+  try {
+    const r = await fetch(SB_URL + '/rest/v1/captain_pdfs?select=*&session_id=eq.' + currentSession.id + '&order=division_number.asc', {
+      headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Accept-Profile': 'slate' }
+    });
+    if (!r.ok) throw new Error('Fetch ' + r.status);
+    const rows = await r.json();
+    stat.textContent = '';
+    if (!rows.length) {
+      el.innerHTML = '<p class="hint">No captain PDFs uploaded for the current session yet.</p>';
+      return;
+    }
+    el.innerHTML =
+      '<div style="display:grid;gap:6px">' +
+      rows.map(row => {
+        const url = ROL_R2_URL + '/' + row.r2_path + '?v=' + new Date(row.uploaded_at).getTime();
+        const kb = row.bytes ? Math.round(row.bytes/1024) + ' KB' : '';
+        return '<div style="display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:8px;padding:8px 10px">' +
+          '<div style="flex:1;min-width:0">' +
+            '<div style="font-weight:700">' + esc(row.division_number) +
+              ' &mdash; ' + esc(row.division_name || '(no name)') + '</div>' +
+            '<div class="hint" style="font-size:0.74rem">' +
+              esc(row.page_count) + ' page' + (row.page_count === 1 ? '' : 's') +
+              ' &middot; ' + esc(kb) +
+              ' &middot; uploaded ' + esc(new Date(row.uploaded_at).toLocaleString()) +
+            '</div>' +
+          '</div>' +
+          '<a class="btn btn-outline btn-sm" href="' + esc(url) + '" target="_blank" rel="noopener">Open</a>' +
+          '<button class="btn btn-danger btn-sm" onclick="rolDelete(' + row.id + ', \'' + esc(row.r2_path) + '\')">Delete</button>' +
+        '</div>';
+      }).join('') +
+      '</div>';
+  } catch (e) {
+    stat.textContent = 'Load failed: ' + e.message;
+  }
+}
+
+async function rolDelete(id, r2Path) {
+  if (!confirm('Delete this captain PDF? Removes the DB row and the R2 object.')) return;
+  try {
+    const r = await fetch(SB_URL + '/rest/v1/captain_pdfs?id=eq.' + id, {
+      method: 'DELETE',
+      headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY,
+                 'Accept-Profile': 'slate', 'Content-Profile': 'slate' }
+    });
+    if (!r.ok) throw new Error('DB ' + r.status);
+    try { await fetch(ROL_R2_URL + '/' + r2Path, { method: 'DELETE' }); } catch (_) {}
+    rolRenderList();
+  } catch (e) {
+    alert('Delete failed: ' + e.message);
+  }
+}
+
+/* Drop-zone wiring: click + drag-and-drop both feed rolHandleFile. */
+function rolInit() {
+  const zone = document.getElementById('rolDropZone');
+  const input = document.getElementById('rolFileInput');
+  if (!zone || !input) return;
+  zone.onclick = () => input.click();
+  input.onchange = (ev) => {
+    const f = ev.target.files && ev.target.files[0];
+    if (f) rolHandleFile(f);
+    input.value = '';
+  };
+  ['dragenter','dragover'].forEach(evt => zone.addEventListener(evt, e => {
+    e.preventDefault(); e.stopPropagation();
+    zone.style.background = '#eef4ff';
+  }));
+  ['dragleave','drop'].forEach(evt => zone.addEventListener(evt, e => {
+    e.preventDefault(); e.stopPropagation();
+    zone.style.background = '#fafafa';
+  }));
+  zone.addEventListener('drop', e => {
+    const f = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) rolHandleFile(f);
+  });
+  rolRenderList();
+}
+
+window.rolDelete = rolDelete;
+window.rolInit = rolInit;
 
 </script>
 </body>
