@@ -1811,7 +1811,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.69';
+const APP_VERSION = '3.70';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11778,9 +11778,43 @@ async function rolHandleFile(file) {
       }
       groups[p.division_number].pageIndexes.push(p.pageIndex);
     }
-    const divisionList = Object.values(groups);
+    let divisionList = Object.values(groups);
 
-    status.textContent = 'Detected ' + divisionList.length + ' division(s)'
+    /* 3.69+ — SPM-only filter. The Rolodex feature is restricted to SPM
+       divisions; if the source PDF has pages for CRA or other operators,
+       they're skipped here (with a notice). Verify each detected
+       division_number exists in slate.divisions for the current session
+       with operator_id = 1 (SPM). */
+    const SPM_OPERATOR_ID = 1;
+    const divNums = divisionList.map(g => g.division_number);
+    if (divNums.length) {
+      const inList = divNums.map(n => '"' + n + '"').join(',');
+      const checkR = await fetch(SB_URL + '/rest/v1/divisions?select=division_number,operator_id'
+        + '&session_id=eq.' + currentSession.id
+        + '&division_number=in.(' + encodeURIComponent(inList) + ')',
+        { headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Accept-Profile': 'slate' } });
+      if (!checkR.ok) throw new Error('Operator lookup failed: ' + checkR.status);
+      const rows = await checkR.json();
+      const opByDiv = {};
+      rows.forEach(r => { opByDiv[r.division_number] = Number(r.operator_id); });
+      const skippedNonSpm = [];
+      divisionList = divisionList.filter(g => {
+        const op = opByDiv[g.division_number];
+        if (op === SPM_OPERATOR_ID) return true;
+        skippedNonSpm.push(g.division_number + (op == null ? ' (not in current session)' : ' (operator ' + op + ')'));
+        return false;
+      });
+      if (skippedNonSpm.length) {
+        console.warn('[Rolodex] skipped non-SPM divisions:', skippedNonSpm);
+      }
+      if (!divisionList.length) {
+        status.textContent = 'No SPM divisions detected. Skipped: ' + skippedNonSpm.join(', ');
+        status.style.color = 'var(--danger)';
+        return;
+      }
+    }
+
+    status.textContent = 'Detected ' + divisionList.length + ' SPM division(s)'
       + (unmatched.length ? ' (' + unmatched.length + ' unmatched page(s) skipped)' : '')
       + '. Splitting…';
 
