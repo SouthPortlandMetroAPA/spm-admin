@@ -1737,6 +1737,29 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         </div>
         <div id="rolList"><p class="hint">Loading…</p></div>
       </div>
+
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
+          <h2 style="margin:0">Activity log</h2>
+          <span class="hint" id="rolLogStatus"></span>
+          <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
+            <select id="rolLogFilter" class="btn btn-outline btn-sm" style="padding:5px 8px">
+              <option value="all">All actions</option>
+              <option value="lookup">Lookups only</option>
+              <option value="send">Sends only</option>
+              <option value="failed">Failures only</option>
+            </select>
+            <button class="btn btn-outline btn-sm" onclick="rolLogRender()">↻ Refresh</button>
+          </div>
+        </div>
+        <p class="hint" style="margin-top:0">
+          Every Rolodex lookup + send is logged here (newest first). Service-role-only RLS on <code>slate.rolodex_log</code>.
+        </p>
+        <div id="rolLog"><p class="hint">Loading…</p></div>
+        <div style="text-align:center;margin-top:10px">
+          <button class="btn btn-outline btn-sm" id="rolLogMoreBtn" onclick="rolLogLoadMore()" hidden>Show 100 more</button>
+        </div>
+      </div>
     </div>
 
     <!-- ══════════════════════════════════════════════════════════════
@@ -1788,7 +1811,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.68';
+const APP_VERSION = '3.69';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11951,11 +11974,98 @@ function rolInit() {
     const f = e.dataTransfer.files && e.dataTransfer.files[0];
     if (f) rolHandleFile(f);
   });
+  /* Filter change re-renders the log without paging reset. */
+  const filterEl = document.getElementById('rolLogFilter');
+  if (filterEl) filterEl.onchange = () => { _rolLogLimit = 50; rolLogRender(); };
   rolRenderList();
+  rolLogRender();
 }
 
 window.rolDelete = rolDelete;
 window.rolInit = rolInit;
+
+/* ────── Activity log viewer (3.69+) ──────
+   Reads slate.rolodex_log via service-role JWT (the same SB_KEY the
+   admin page already uses). Filter chip lets admin scope to lookup/send
+   /failures. Pagination: initial 50 rows, "Show more" loads next 100. */
+let _rolLogLimit = 50;
+
+async function rolLogRender() {
+  const el = document.getElementById('rolLog');
+  const stat = document.getElementById('rolLogStatus');
+  const filter = (document.getElementById('rolLogFilter') || {}).value || 'all';
+  stat.textContent = 'Loading…';
+  try {
+    let q = '?select=*&order=happened_at.desc&limit=' + _rolLogLimit;
+    if (filter === 'lookup') q += '&action=eq.lookup';
+    if (filter === 'send')   q += '&action=eq.send';
+    if (filter === 'failed') q += '&ok=eq.false';
+    const r = await fetch(SB_URL + '/rest/v1/rolodex_log' + q, {
+      headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY,
+                 'Accept-Profile': 'slate', Prefer: 'count=exact' }
+    });
+    if (!r.ok) throw new Error('Log fetch ' + r.status);
+    const total = r.headers.get('content-range');   // "0-49/N"
+    const rows = await r.json();
+    const totalN = total ? parseInt(total.split('/')[1] || '0', 10) : rows.length;
+    stat.textContent = 'showing ' + rows.length + ' of ' + totalN;
+    if (!rows.length) {
+      el.innerHTML = '<p class="hint">No transactions logged yet.</p>';
+      document.getElementById('rolLogMoreBtn').hidden = true;
+      return;
+    }
+    document.getElementById('rolLogMoreBtn').hidden = (rows.length >= totalN);
+
+    el.innerHTML =
+      '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:0.82rem">' +
+      '<thead><tr style="border-bottom:2px solid var(--border);text-align:left">' +
+        '<th style="padding:6px 8px">When</th>' +
+        '<th style="padding:6px 8px">Action</th>' +
+        '<th style="padding:6px 8px">Who</th>' +
+        '<th style="padding:6px 8px">Division</th>' +
+        '<th style="padding:6px 8px">Result</th>' +
+      '</tr></thead><tbody>' +
+      rows.map(r => {
+        const when = new Date(r.happened_at);
+        const dateStr = when.toLocaleString(undefined, {
+          month: 'short', day: 'numeric',
+          hour: 'numeric', minute: '2-digit'
+        });
+        const who = r.player_name
+          ? esc(r.player_name) + ' <span class="hint">· ' + esc(r.email_masked || r.input_redacted || '') + '</span>'
+          : '<span class="hint">' + esc(r.input_redacted || '?') + ' (unresolved)</span>';
+        const div = r.division_number
+          ? esc(r.division_number) + ' &mdash; ' + esc(r.division_name || '')
+          : (r.action === 'lookup'
+              ? '<span class="hint">' + (r.is_captain ? esc(r.eligible_count) + ' captain div(s)' : 'no captain access') + '</span>'
+              : '');
+        const result = r.ok
+          ? '<span style="color:var(--success);font-weight:700">✓ OK</span>'
+          : '<span style="color:var(--danger);font-weight:700">✗ ' + esc(r.error_code || 'error') + '</span>';
+        return '<tr style="border-bottom:1px solid var(--border)">' +
+          '<td style="padding:6px 8px;white-space:nowrap;color:var(--muted);font-variant-numeric:tabular-nums">' + dateStr + '</td>' +
+          '<td style="padding:6px 8px"><span style="background:' + (r.action === 'send' ? '#0031a1' : '#f3f3f3') +
+              ';color:' + (r.action === 'send' ? '#fff' : '#333') +
+              ';padding:2px 8px;border-radius:10px;font-size:0.7rem;font-weight:700">' + esc(r.action) + '</span></td>' +
+          '<td style="padding:6px 8px">' + who + '</td>' +
+          '<td style="padding:6px 8px">' + div + '</td>' +
+          '<td style="padding:6px 8px">' + result + '</td>' +
+        '</tr>';
+      }).join('') +
+      '</tbody></table></div>';
+  } catch (e) {
+    stat.textContent = '';
+    el.innerHTML = '<p class="hint" style="color:var(--danger)">Failed to load: ' + esc(e.message) + '</p>';
+  }
+}
+
+function rolLogLoadMore() {
+  _rolLogLimit += 100;
+  rolLogRender();
+}
+
+window.rolLogRender = rolLogRender;
+window.rolLogLoadMore = rolLogLoadMore;
 
 </script>
 </body>
