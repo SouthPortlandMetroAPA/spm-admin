@@ -616,6 +616,34 @@ input:focus, select:focus, textarea:focus {
 .ehq-btn.active[data-facet="format"]{ background: #f0fdf4; border-color: #16a34a; color: #15803d; }
 .ehq-btn.active[data-facet="night"] { background: #fffbeb; border-color: #f59e0b; color: #b45309; }
 
+/* TMS Roster Report — role toggle buttons. Same shape as ehq-btn, purple
+   active state matching Email HQ's role facet color (#fdf4ff bg / #a855f7
+   border / #7e22ce text). */
+.cp-role-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 12px;
+  min-height: 28px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  border-radius: 12px;
+  border: 1.5px solid var(--border);
+  background: #fff;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.cp-role-btn:hover { background: #f5f5f5; border-color: #aaa; color: var(--text); }
+.cp-role-btn.active { background: #fdf4ff; border-color: #a855f7; color: #7e22ce; }
+.cp-team-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+.cp-team-row label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; flex: 1; }
+.cp-team-row .cp-tn { font-family: ui-monospace, SFMono-Regular, monospace; font-weight: 700; color: var(--spm-accent); }
+
 /* Division cards — stacked, click header to expand, checkbox for select */
 .ehq-div-card {
   background: #fff;
@@ -930,7 +958,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab active" data-tab="emailhq">Email HQ</button>
       <button class="tab" data-tab="spreports">SP Reports</button>
       <button class="tab" data-tab="scoresheets">PaperTrail</button>
-      <button class="tab" data-tab="commonplayers">Common Players</button>
+      <button class="tab" data-tab="commonplayers">TMS Roster Report</button>
       <button class="tab" data-tab="reports">Reports</button>
       <button class="tab" data-tab="redtape">RedTape</button>
       <button class="tab" data-tab="rolodex">Rolodex</button>
@@ -1471,13 +1499,13 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
          ══════════════════════════════════════════════════════════════ -->
     <div id="tab-commonplayers" class="tab-panel">
       <div class="card">
-        <h2>Common Players — Roster check</h2>
+        <h2>TMS Roster Report — Roster check</h2>
         <p class="hint" style="margin-bottom:10px">
           Drop an APA <strong>Roster &amp; Handicap Report</strong> PDF. Finds
           players who appear on more than one team (a typical World-Qualifier
           violation), groups teams transitively (if A↔B and B↔C share players,
-          A, B, C all cluster), and gives you a flat list of every APA number
-          on the roster — paste-ready for <strong>Email HQ</strong>.
+          A, B, C all cluster), and gives you a filtered list of APA numbers
+          (by role &amp; team) — paste-ready for <strong>Email HQ</strong>.
         </p>
 
         <div id="cpDropzone" tabindex="0" role="button"
@@ -1524,11 +1552,44 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             <div id="cpClusters"></div>
           </div>
 
-          <!-- Section 3: all APA numbers for Email HQ -->
-          <div id="cpApaNumbersSection" style="margin-bottom:6px;">
-            <h3 style="margin:0 0 8px; font-size:1rem">All APA numbers
-              <span class="hint" style="font-weight:400">(8-digit, eligible-only; paste into Email HQ &rarr; Look Up Emails by Player Number)</span>
+          <!-- Section 3: filtered APA numbers for Email HQ (3.71+).
+               Replaced the previous dual-box "All APA #s" / "Cap+Co-Cap APA #s"
+               with ONE box driven by role + team filters. Role inferred from
+               PDF order: players[0] = Captain, players[1] = Co-Captain, rest
+               = Player. Default selection (Captain + Co-Captain, all teams,
+               include-ineligibles ON) reproduces the prior Cap+Co-Cap output. -->
+          <div id="cpFilteredSection" style="margin-bottom:6px;">
+            <h3 style="margin:0 0 8px; font-size:1rem">APA numbers for Email HQ
+              <span class="hint" style="font-weight:400">(filter by role + team; 8-digit; paste into Email HQ &rarr; Look Up Emails by Player Number)</span>
             </h3>
+
+            <!-- Role filter: multi-select toggle buttons -->
+            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
+              <span class="hint" style="font-weight:600; min-width:46px">Role</span>
+              <div id="cpRoleBtns" style="display:flex; gap:6px; flex-wrap:wrap;">
+                <button type="button" class="cp-role-btn" data-role="Captain">Captains</button>
+                <button type="button" class="cp-role-btn" data-role="Co-Captain">Co-Captains</button>
+                <button type="button" class="cp-role-btn" data-role="Player">Players</button>
+              </div>
+              <label style="display:inline-flex; align-items:center; gap:5px; margin-left:auto; font-size:0.82rem;">
+                <input type="checkbox" id="cpIncludeIneligible">
+                <span class="hint">Include ineligibles</span>
+              </label>
+            </div>
+
+            <!-- Team filter: All / None buttons + scrollable checkbox list -->
+            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px;">
+              <span class="hint" style="font-weight:600; min-width:46px">Teams</span>
+              <button type="button" class="btn btn-outline btn-sm" id="cpTeamsAllBtn" style="padding:3px 10px; font-size:0.78rem">All</button>
+              <button type="button" class="btn btn-outline btn-sm" id="cpTeamsNoneBtn" style="padding:3px 10px; font-size:0.78rem">None</button>
+              <span id="cpTeamsSelCount" class="hint"></span>
+            </div>
+            <div id="cpTeamList"
+                 style="max-height:160px; overflow-y:auto; border:1px solid var(--border);
+                        border-radius:6px; padding:6px 10px; margin-bottom:10px;
+                        background:#fafafa; font-size:0.84rem;"></div>
+
+            <!-- Output -->
             <div style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">
               <button class="btn btn-primary btn-sm" id="cpCopyApasBtn">📋 Copy all</button>
               <select id="cpApaFormat" class="select-sm">
@@ -1539,30 +1600,6 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
               <span id="cpApaCount" class="hint"></span>
             </div>
             <textarea id="cpApaNumbers" readonly rows="6"
-                      style="width:100%; font-family:ui-monospace, SFMono-Regular, monospace;
-                             font-size:0.84rem; padding:8px 10px; border:1px solid var(--border);
-                             border-radius:6px; background:#fafafa; resize:vertical;"></textarea>
-          </div>
-
-          <!-- Section 4: captains + co-captains APA numbers (3.53+).
-               First player listed on each team = captain; second = co-cap.
-               Includes ineligibles per user direction (leadership still gets
-               event emails). Sorted ascending. Same format options + copy
-               button as the all-numbers box above. -->
-          <div id="cpCapApasSection" style="margin-top:18px; margin-bottom:6px;">
-            <h3 style="margin:0 0 8px; font-size:1rem">Captain + Co-Captain APA numbers
-              <span class="hint" style="font-weight:400">(first &amp; second player on each roster; ineligibles included; sorted ascending)</span>
-            </h3>
-            <div style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">
-              <button class="btn btn-primary btn-sm" id="cpCopyCapApasBtn">📋 Copy all</button>
-              <select id="cpCapApaFormat" class="select-sm">
-                <option value="newline" selected>One per line (Email HQ format)</option>
-                <option value="comma">Comma-separated (12345,67890,…)</option>
-                <option value="space">Space-separated</option>
-              </select>
-              <span id="cpCapApaCount" class="hint"></span>
-            </div>
-            <textarea id="cpCapApaNumbers" readonly rows="6"
                       style="width:100%; font-family:ui-monospace, SFMono-Regular, monospace;
                              font-size:0.84rem; padding:8px 10px; border:1px solid var(--border);
                              border-radius:6px; background:#fafafa; resize:vertical;"></textarea>
@@ -1811,7 +1848,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.70';
+const APP_VERSION = '3.71';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -3379,7 +3416,7 @@ const TAB_LABEL = {
   emailhq:       'Email HQ',
   spreports:     'SP Reports',
   scoresheets:   'Scoresheets',
-  commonplayers: 'Common Players',
+  commonplayers: 'TMS Roster Report',
   reports:       'Reports',
   redtape:       'RedTape',
   rolodex:       'Rolodex',
@@ -9416,6 +9453,17 @@ function cpToFullApa(num) {
 
 let _cpLastParse = null; // { teams: [{number, name, city, players}], allPlayers: [], ... }
 
+/* ── TMS Roster Report state (3.71+) ──────────────────────────────────
+   _cpFilter holds the live filter selection so changes don't reset on
+   parse (sticky between PDFs in a session). Defaults: Captain + Co-Captain,
+   all teams, include-ineligibles ON — reproduces the pre-filter
+   "Cap+Co-Cap APA #s" box behavior. */
+const _cpFilter = {
+  roles: new Set(['Captain', 'Co-Captain']),
+  teamNumbers: null,            // null = "all" sentinel; Set<string> when narrowed
+  includeIneligible: true
+};
+
 function cpInit() {
   // Idempotent — wire dropzone listeners once
   if (cpInit._wired) return;
@@ -9436,10 +9484,49 @@ function cpInit() {
     if (f) cpHandleFile(f);
     e.target.value = '';
   });
+
+  // Role toggle buttons (multi-select; at least one must remain selected —
+  // clicking the only-active button is a no-op rather than producing an
+  // empty list).
+  document.querySelectorAll('#cpRoleBtns .cp-role-btn').forEach(btn => {
+    if (_cpFilter.roles.has(btn.dataset.role)) btn.classList.add('active');
+    btn.addEventListener('click', () => {
+      const role = btn.dataset.role;
+      const next = new Set(_cpFilter.roles);
+      if (next.has(role)) {
+        if (next.size === 1) return;  // last one — refuse to clear
+        next.delete(role);
+      } else {
+        next.add(role);
+      }
+      _cpFilter.roles = next;
+      btn.classList.toggle('active', next.has(role));
+      cpRenderApaNumbers();
+    });
+  });
+
+  // Team All / None buttons
+  document.getElementById('cpTeamsAllBtn').addEventListener('click', () => {
+    _cpFilter.teamNumbers = null;  // "all" sentinel
+    cpRenderTeamList();
+    cpRenderApaNumbers();
+  });
+  document.getElementById('cpTeamsNoneBtn').addEventListener('click', () => {
+    _cpFilter.teamNumbers = new Set();
+    cpRenderTeamList();
+    cpRenderApaNumbers();
+  });
+
+  // Include-ineligibles checkbox
+  const incEl = document.getElementById('cpIncludeIneligible');
+  incEl.checked = _cpFilter.includeIneligible;
+  incEl.addEventListener('change', () => {
+    _cpFilter.includeIneligible = incEl.checked;
+    cpRenderApaNumbers();
+  });
+
   document.getElementById('cpCopyApasBtn').addEventListener('click', cpCopyApas);
   document.getElementById('cpApaFormat').addEventListener('change', cpRenderApaNumbers);
-  document.getElementById('cpCopyCapApasBtn').addEventListener('click', cpCopyCapApas);
-  document.getElementById('cpCapApaFormat').addEventListener('change', cpRenderCapApaNumbers);
 }
 
 async function cpHandleFile(file) {
@@ -9855,27 +9942,92 @@ function cpRenderResults() {
     clustersDiv.innerHTML = html;
   }
 
-  // APA numbers panel
+  // APA numbers panel — render team checkbox list (filter sticks across
+  // re-parses; if a previously-selected team no longer exists in the new
+  // PDF its ID is silently dropped on next filter eval). Then re-render
+  // the filtered output.
   document.getElementById('cpResults').style.display = 'block';
+  cpRenderTeamList();
   cpRenderApaNumbers();
-  cpRenderCapApaNumbers();
 }
 
+/* ── Role inference from roster position (3.71+) ──────────────────────
+   The roster PDF lists players in a deterministic order — the parser
+   preserves it. By APA convention: players[0] = Captain, players[1] =
+   Co-Captain, rest = Player. Returns one of: 'Captain' | 'Co-Captain' |
+   'Player'. */
+function cpRoleForIdx(idx) {
+  if (idx === 0) return 'Captain';
+  if (idx === 1) return 'Co-Captain';
+  return 'Player';
+}
+
+/* ── Team checkbox list (3.71+) ───────────────────────────────────────
+   Renders one checkbox per team in the parsed PDF. _cpFilter.teamNumbers
+   null = "all" sentinel (every box checked, no narrow). When the user
+   clicks a checkbox we materialize the set from the current visible state
+   so subsequent ops have a concrete set to mutate. */
+function cpRenderTeamList() {
+  if (!_cpLastParse) return;
+  const list = document.getElementById('cpTeamList');
+  const teams = _cpLastParse.teams.slice().sort((a, b) => a.team_number.localeCompare(b.team_number));
+  const allSelected = _cpFilter.teamNumbers === null;
+  list.innerHTML = teams.map(t => {
+    const checked = allSelected || _cpFilter.teamNumbers.has(t.team_number);
+    return `<div class="cp-team-row">
+      <label>
+        <input type="checkbox" data-team="${esc(t.team_number)}" ${checked ? 'checked' : ''}>
+        <span class="cp-tn">${esc(t.team_number)}</span>
+        <span>${esc(t.team_name)}</span>
+      </label>
+    </div>`;
+  }).join('');
+  list.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      // Materialize concrete set from current DOM state if we were on "all"
+      if (_cpFilter.teamNumbers === null) {
+        _cpFilter.teamNumbers = new Set(teams.map(t => t.team_number));
+      }
+      const tn = cb.dataset.team;
+      if (cb.checked) _cpFilter.teamNumbers.add(tn);
+      else _cpFilter.teamNumbers.delete(tn);
+      cpRenderApaNumbers();
+      cpUpdateTeamCountChip();
+    });
+  });
+  cpUpdateTeamCountChip();
+}
+
+function cpUpdateTeamCountChip() {
+  if (!_cpLastParse) return;
+  const total = _cpLastParse.teams.length;
+  const sel   = _cpFilter.teamNumbers === null ? total : _cpFilter.teamNumbers.size;
+  const chip = document.getElementById('cpTeamsSelCount');
+  chip.textContent = sel === total ? `${total} team${total === 1 ? '' : 's'} (all)` : `${sel} of ${total} team${total === 1 ? '' : 's'}`;
+}
+
+/* ── Filtered APA numbers (3.71+) ─────────────────────────────────────
+   Replaces the prior dual-box "All APA #s" + "Cap+Co-Cap APA #s" rendering.
+   Output = unique 8-digit APA numbers from players whose
+     (1) team is selected (or _cpFilter.teamNumbers === null = all),
+     (2) role (by roster position) is in _cpFilter.roles, AND
+     (3) eligibility passes _cpFilter.includeIneligible.
+   Sorted ascending, deduped (handles same person captain-on-A and
+   player-on-B — they appear once). */
 function cpRenderApaNumbers() {
   if (!_cpLastParse) return;
-  // Output the 8-digit canonical form — works directly in Email HQ's
-  // "Look Up Emails by Player Number" (which accepts 5 or 8, and prepends
-  // 972 to 5-digit). Using 8-digit avoids any prefix ambiguity for users
-  // whose rosters might come from a different operator area.
-  //
-  // Ineligible players (I marker on the roster) are EXCLUDED — they
-  // shouldn't receive event emails because they can't play. Surface
-  // the count in the helper text so the operator knows the filter ran.
   const apaSet = new Set();
-  let ineligExcluded = 0;
+  let totalRows = 0, ineligExcluded = 0;
+  const teamFilterActive = _cpFilter.teamNumbers !== null;
+  const roles = _cpFilter.roles;
   for (const t of _cpLastParse.teams) {
-    for (const p of t.players) {
-      if (p.ineligible) { ineligExcluded++; continue; }
+    if (teamFilterActive && !_cpFilter.teamNumbers.has(t.team_number)) continue;
+    for (let i = 0; i < t.players.length; i++) {
+      const p = t.players[i];
+      const role = cpRoleForIdx(i);
+      if (!roles.has(role)) continue;
+      totalRows++;
+      if (p.ineligible && !_cpFilter.includeIneligible) { ineligExcluded++; continue; }
       apaSet.add(p.apa_full || cpToFullApa(p.apa_number));
     }
   }
@@ -9883,65 +10035,19 @@ function cpRenderApaNumbers() {
   const fmt = document.getElementById('cpApaFormat').value;
   const sep = fmt === 'comma' ? ',' : (fmt === 'space' ? ' ' : '\n');
   document.getElementById('cpApaNumbers').value = apas.join(sep);
+
+  // Helper text: role summary + ineligible note.
+  const roleList = [...roles].join(', ');
   const tail = ineligExcluded
     ? ` · ${ineligExcluded} ineligible excluded`
-    : '';
+    : (_cpFilter.includeIneligible ? ' · ineligibles included' : '');
   document.getElementById('cpApaCount').textContent =
-    `${apas.length} unique APA #s (8-digit, Email HQ ready)${tail}`;
+    `${apas.length} unique APA #s — role: ${roleList}${tail}`;
 }
 
 async function cpCopyApas() {
   const ta = document.getElementById('cpApaNumbers');
   const btn = document.getElementById('cpCopyApasBtn');
-  try {
-    await navigator.clipboard.writeText(ta.value);
-    const old = btn.textContent;
-    btn.textContent = '✓ Copied';
-    btn.style.background = '#16a34a';
-    setTimeout(() => { btn.textContent = old; btn.style.background = ''; }, 1600);
-  } catch (e) {
-    ta.select();
-    btn.textContent = '⚠ Select then ⌘+C';
-  }
-}
-
-/* ── Captain + Co-Captain APA numbers (3.53+) ─────────────────────────
-   The roster PDF lists players in a deterministic order — the parser
-   preserves it. By APA convention (and what the user uses to identify
-   leadership), players[0] is the captain and players[1] is the co-cap.
-   Output includes ineligibles (leadership still gets event emails),
-   sorted ascending, deduped (handles the rare case where the same
-   person is captain on one team and co-cap on another). */
-function cpRenderCapApaNumbers() {
-  if (!_cpLastParse) return;
-  const apaSet = new Set();
-  let captainsAdded = 0, coCapsAdded = 0, soloTeams = 0;
-  for (const t of _cpLastParse.teams) {
-    const cap = t.players[0];
-    const co  = t.players[1];
-    if (cap) {
-      apaSet.add(cap.apa_full || cpToFullApa(cap.apa_number));
-      captainsAdded++;
-    }
-    if (co) {
-      apaSet.add(co.apa_full || cpToFullApa(co.apa_number));
-      coCapsAdded++;
-    } else {
-      soloTeams++;
-    }
-  }
-  const apas = [...apaSet].sort((a, b) => a.localeCompare(b));
-  const fmt = document.getElementById('cpCapApaFormat').value;
-  const sep = fmt === 'comma' ? ',' : (fmt === 'space' ? ' ' : '\n');
-  document.getElementById('cpCapApaNumbers').value = apas.join(sep);
-  const soloNote = soloTeams ? ` · ${soloTeams} team${soloTeams === 1 ? ' has' : 's have'} no co-captain` : '';
-  document.getElementById('cpCapApaCount').textContent =
-    `${apas.length} unique APA #s (from ${captainsAdded} captain${captainsAdded === 1 ? '' : 's'} + ${coCapsAdded} co-captain${coCapsAdded === 1 ? '' : 's'})${soloNote}`;
-}
-
-async function cpCopyCapApas() {
-  const ta = document.getElementById('cpCapApaNumbers');
-  const btn = document.getElementById('cpCopyCapApasBtn');
   try {
     await navigator.clipboard.writeText(ta.value);
     const old = btn.textContent;
@@ -10139,7 +10245,7 @@ function cpPrintReport() {
 
 window.cpInit = cpInit;
 window.cpRenderApaNumbers = cpRenderApaNumbers;
-window.cpRenderCapApaNumbers = cpRenderCapApaNumbers;
+window.cpRenderTeamList = cpRenderTeamList;
 window.cpPrintReport = cpPrintReport;
 
 /* ══════════════════════════════════════════════════════════════════════
