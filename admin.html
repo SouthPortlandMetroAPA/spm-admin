@@ -1848,7 +1848,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.71';
+const APP_VERSION = '3.72';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -9619,8 +9619,14 @@ async function cpParseRosterPdf(file) {
         const dx = next.x - cur.x;
         if (dx < 8 || dx > 80) continue;
         if (!/^[A-Za-z]/.test(next.str)) continue;
-        // Player surnames contain a comma ("Clemenson,"). Team names don't.
-        if (/,/.test(next.str)) continue;
+        // NOTE (3.72+): do NOT exclude on comma in the next item. APA rosters
+        // occasionally have typo'd team names that contain a comma (e.g.
+        // "O.C, Misfits" in WQ 8-Ball June 2026 — should have been "O.C."
+        // with a period). The prev-item check above (skill or I/N/* marker
+        // at small dx) already discriminates player rows from team headers;
+        // an additional comma rule was paranoid overkill that silently
+        // dropped legitimate teams. See tools/claude/test-roster-parser.mjs
+        // for the regression corpus.
         anchors.push({ x: cur.x, team: cur.str, nameStart: next.x });
       }
       return anchors;
@@ -9654,16 +9660,23 @@ async function cpParseRosterPdf(file) {
         // Team name = items between team# and first "N" status (or end of column).
         // Then strip any trailing "N 0000" pattern that arrived as one combined
         // item (split items don't trip the break; combined items would).
+        // NOTE (3.72+): status-marker character class is [NIHO*] (added 'O').
+        // APA rosters use "O 0000" (open/operational) as a team-level
+        // status code that lands on the same Y-row as the team header for
+        // some teams (e.g. "Even Sloppier" in WQ 8-Ball June 2026 leaked
+        // to "Even Sloppier O 0000" before this fix). Without 'O' in the
+        // marker class, the loop's break never fires and the trailing
+        // cleanup regex doesn't catch it either.
         const nameItems = [];
         let pastTeamNum = false;
         for (const it of headerColItems) {
           if (!pastTeamNum) { if (it.str === teamNum) pastTeamNum = true; continue; }
-          if (/^[NIH*]$/.test(it.str) && nameItems.length > 0) break;
+          if (/^[NIHO*]$/.test(it.str) && nameItems.length > 0) break;
           nameItems.push(it.str);
         }
         const teamName = nameItems.join(' ')
           .replace(/\s+/g, ' ')
-          .replace(/\s+[NIH*]\s+\d{4,}.*$/i, '')
+          .replace(/\s+[NIHO*]\s+\d{4,}.*$/i, '')
           .trim();
 
         // Walk band rows in this column for FROM line and player rows.
@@ -9680,8 +9693,9 @@ async function cpParseRosterPdf(file) {
           if (fromM) { city = fromM[1].trim(); continue; }
           // Skip column header row
           if (/^Skl\s+Number\s+Name/i.test(text)) continue;
-          // Skip standalone status indicators ("N 0000" etc.)
-          if (/^[NIH*]\s+\d{4,}$/.test(text)) continue;
+          // Skip standalone status indicators ("N 0000", "O 0000" etc.).
+          // [NIHO*] — 'O' added 3.72+ to catch team-level open status.
+          if (/^[NIHO*]\s+\d{4,}$/.test(text)) continue;
           // Player row: optional leading "I" (ineligible), then skill, apa#, name
           // Player rows in this format have items: [skill] [apa#] [name-parts...]
           // Sometimes prefixed with "I" indicator (ineligible).
@@ -11323,7 +11337,10 @@ async function rtParseRosterPdf(file) {
         const dx = next.x - cur.x;
         if (dx < 8 || dx > 80) continue;
         if (!/^[A-Za-z]/.test(next.str)) continue;
-        if (/,/.test(next.str)) continue;
+        // NOTE (3.72+): comma check removed — see cpParseRosterPdf for rationale.
+        // APA rosters occasionally have typo'd team names with commas (e.g.
+        // "O.C, Misfits" in WQ 8-Ball June 2026). Prev-check above already
+        // discriminates player rows.
         anchors.push({ x: cur.x, team: cur.str });
       }
       return anchors;
@@ -11343,15 +11360,17 @@ async function rtParseRosterPdf(file) {
         const teamNum = anchors[c].team;
         if (seenTeamNums.has(teamNum)) continue;
         const headerColItems = rows[rIdx].items.filter(i => i.x >= bounds[c].lo && i.x < bounds[c].hi);
+        // [NIHO*] — 'O' added 3.72+ to catch open/operational team status
+        // (e.g. "O 0000" leak in WQ 8-Ball "Even Sloppier").
         const nameItems = []; let pastTeamNum = false;
         for (const it of headerColItems) {
           if (!pastTeamNum) { if (it.str === teamNum) pastTeamNum = true; continue; }
-          if (/^[NIH*]$/.test(it.str) && nameItems.length > 0) break;
+          if (/^[NIHO*]$/.test(it.str) && nameItems.length > 0) break;
           nameItems.push(it.str);
         }
         const teamName = nameItems.join(' ')
           .replace(/\s+/g, ' ')
-          .replace(/\s+[NIH*]\s+\d{3,}.*$/i, '')
+          .replace(/\s+[NIHO*]\s+\d{3,}.*$/i, '')
           .trim();
         let city = null;
         for (const br of rows.slice(rIdx + 1, endIdx)) {
