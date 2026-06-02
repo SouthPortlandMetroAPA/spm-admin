@@ -1559,8 +1559,8 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
                = Player. Default selection (Captain + Co-Captain, all teams,
                include-ineligibles ON) reproduces the prior Cap+Co-Cap output. -->
           <div id="cpFilteredSection" style="margin-bottom:6px;">
-            <h3 style="margin:0 0 8px; font-size:1rem">APA numbers for Email HQ
-              <span class="hint" style="font-weight:400">(filter by role + team; 8-digit; paste into Email HQ &rarr; Look Up Emails by Player Number)</span>
+            <h3 style="margin:0 0 8px; font-size:1rem">Email addresses
+              <span class="hint" style="font-weight:400">(filter by role + team; paste directly into Gmail's To/Bcc field)</span>
             </h3>
 
             <!-- Role filter: multi-select toggle buttons -->
@@ -1589,20 +1589,32 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
                         border-radius:6px; padding:6px 10px; margin-bottom:10px;
                         background:#fafafa; font-size:0.84rem;"></div>
 
-            <!-- Output -->
-            <div style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">
-              <button class="btn btn-primary btn-sm" id="cpCopyApasBtn">📋 Copy all</button>
-              <select id="cpApaFormat" class="select-sm">
-                <option value="newline" selected>One per line (Email HQ format)</option>
-                <option value="comma">Comma-separated (12345,67890,…)</option>
-                <option value="space">Space-separated</option>
-              </select>
-              <span id="cpApaCount" class="hint"></span>
+            <!-- Output: email addresses, Gmail-paste-ready.
+                 Lookup runs ONCE per PDF parse (RPC lookup_emails_by_number
+                 hits the same table Email HQ uses). Filter changes after
+                 that re-render locally — instant, no extra DB calls.
+                 Chunking matches Email HQ pattern (450/group, Gmail's
+                 500-recipient ceiling). Issues popup matches Email HQ. -->
+            <div id="cpEmailControls" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:6px;">
+              <span id="cpEmailCopyBtnArea" style="display:inline-flex; gap:6px; flex-wrap:wrap; align-items:center;">
+                <button class="btn btn-primary btn-sm" id="cpCopyEmailsBtn">📋 Copy emails</button>
+              </span>
+              <span id="cpEmailCount" class="hint"></span>
+              <button type="button" id="cpEmailIssuesBtn" class="btn btn-outline btn-sm"
+                      style="padding:3px 10px; font-size:0.78rem; display:none;"></button>
+              <details style="margin-left:auto; font-size:0.78rem;">
+                <summary style="cursor:pointer; color:var(--muted);">APA #s instead</summary>
+                <div style="margin-top:6px;">
+                  <button class="btn btn-outline btn-sm" id="cpCopyApasBtn" style="padding:3px 10px; font-size:0.78rem;">📋 Copy APA #s</button>
+                </div>
+              </details>
             </div>
-            <textarea id="cpApaNumbers" readonly rows="6"
+            <textarea id="cpEmailOut" readonly rows="6"
                       style="width:100%; font-family:ui-monospace, SFMono-Regular, monospace;
                              font-size:0.84rem; padding:8px 10px; border:1px solid var(--border);
-                             border-radius:6px; background:#fafafa; resize:vertical;"></textarea>
+                             border-radius:6px; background:#fafafa; resize:vertical;"
+                      placeholder="Looking up emails…"></textarea>
+            <textarea id="cpApaNumbers" readonly hidden></textarea>
           </div>
         </div>
       </div>
@@ -1848,7 +1860,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.72';
+const APP_VERSION = '3.73';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -9464,6 +9476,25 @@ const _cpFilter = {
   includeIneligible: true
 };
 
+/* Email-lookup state (3.73+).
+     _cpEmailMap   apa_full → { name, email, member_number } or null when no
+                   email on file. Populated ONCE per PDF parse via the
+                   lookup_emails_by_number RPC (same RPC Email HQ uses).
+                   Filter changes then re-render locally — no DB round-trip.
+     _cpEmailIssues  Aggregate of players the lookup couldn't email
+                     (not-found in DB, found-but-no-email). Surfaces in
+                     the "issues" button + popup matching Email HQ pattern.
+     _cpLookupState  'idle' | 'loading' | 'done' | 'error' — drives the
+                     textarea placeholder and copy-button enable state. */
+let _cpEmailMap = new Map();
+let _cpEmailIssues = { notFound: [], noEmail: [] };
+let _cpLookupState = 'idle';
+
+/* Gmail's recipient cap is 500; match Email HQ's 450 chunk size so a
+   single copy never overflows. Same constant intent, scoped to cp.
+   (Keeping CP-prefixed so future divergence is safe.) */
+const CP_GROUP_SIZE = 450;
+
 function cpInit() {
   // Idempotent — wire dropzone listeners once
   if (cpInit._wired) return;
@@ -9526,7 +9557,7 @@ function cpInit() {
   });
 
   document.getElementById('cpCopyApasBtn').addEventListener('click', cpCopyApas);
-  document.getElementById('cpApaFormat').addEventListener('change', cpRenderApaNumbers);
+  document.getElementById('cpEmailIssuesBtn').addEventListener('click', cpShowEmailIssues);
 }
 
 async function cpHandleFile(file) {
@@ -9535,6 +9566,10 @@ async function cpHandleFile(file) {
   status.className = 'status-line progress';
   status.textContent = 'Parsing ' + file.name + '…';
   results.style.display = 'none';
+  // Reset email state — previous PDF's lookup is stale.
+  _cpEmailMap = new Map();
+  _cpEmailIssues = { notFound: [], noEmail: [] };
+  _cpLookupState = 'idle';
   try {
     const teams = await cpParseRosterPdf(file);
     if (!teams.length) throw new Error('No teams parsed from PDF — is this a Roster & Handicap Report?');
@@ -9543,6 +9578,8 @@ async function cpHandleFile(file) {
     status.className = 'status-line ok';
     const players = teams.reduce((n, t) => n + t.players.length, 0);
     status.textContent = `✓ Parsed ${teams.length} teams, ${players} players from ${file.name}`;
+    // Kick off email lookup (non-blocking — re-renders when done).
+    cpFetchEmails().catch(err => console.error('email lookup failed:', err));
   } catch (e) {
     status.className = 'status-line err';
     status.textContent = 'Parse failed: ' + e.message;
@@ -10020,18 +10057,21 @@ function cpUpdateTeamCountChip() {
   chip.textContent = sel === total ? `${total} team${total === 1 ? '' : 's'} (all)` : `${sel} of ${total} team${total === 1 ? '' : 's'}`;
 }
 
-/* ── Filtered APA numbers (3.71+) ─────────────────────────────────────
-   Replaces the prior dual-box "All APA #s" + "Cap+Co-Cap APA #s" rendering.
-   Output = unique 8-digit APA numbers from players whose
-     (1) team is selected (or _cpFilter.teamNumbers === null = all),
-     (2) role (by roster position) is in _cpFilter.roles, AND
-     (3) eligibility passes _cpFilter.includeIneligible.
-   Sorted ascending, deduped (handles same person captain-on-A and
-   player-on-B — they appear once). */
-function cpRenderApaNumbers() {
-  if (!_cpLastParse) return;
+/* ── Filtered APA list → email lookup (3.73+) ────────────────────────
+   Pipeline:
+     1. cpFilteredApas() — apply role + team + eligibility filters to
+        produce a sorted unique APA list (pure local computation).
+     2. After PDF parse, cpFetchEmails() POSTs THE SAME list of every
+        roster APA to rpc/lookup_emails_by_number (one DB round-trip)
+        and populates _cpEmailMap.
+     3. cpRenderApaNumbers() (kept by name for back-compat — it now
+        renders BOTH the primary email output AND the hidden APA-#s-
+        instead textarea). Each filter change re-renders locally.
+   ─────────────────────────────────────────────────────────────────── */
+function cpFilteredApas() {
+  if (!_cpLastParse) return { apas: [], stats: { ineligExcluded: 0 } };
   const apaSet = new Set();
-  let totalRows = 0, ineligExcluded = 0;
+  let ineligExcluded = 0;
   const teamFilterActive = _cpFilter.teamNumbers !== null;
   const roles = _cpFilter.roles;
   for (const t of _cpLastParse.teams) {
@@ -10040,23 +10080,224 @@ function cpRenderApaNumbers() {
       const p = t.players[i];
       const role = cpRoleForIdx(i);
       if (!roles.has(role)) continue;
-      totalRows++;
       if (p.ineligible && !_cpFilter.includeIneligible) { ineligExcluded++; continue; }
       apaSet.add(p.apa_full || cpToFullApa(p.apa_number));
     }
   }
   const apas = [...apaSet].sort((a, b) => a.localeCompare(b));
-  const fmt = document.getElementById('cpApaFormat').value;
-  const sep = fmt === 'comma' ? ',' : (fmt === 'space' ? ' ' : '\n');
-  document.getElementById('cpApaNumbers').value = apas.join(sep);
+  return { apas, stats: { ineligExcluded } };
+}
 
-  // Helper text: role summary + ineligible note.
-  const roleList = [...roles].join(', ');
-  const tail = ineligExcluded
-    ? ` · ${ineligExcluded} ineligible excluded`
-    : (_cpFilter.includeIneligible ? ' · ineligibles included' : '');
-  document.getElementById('cpApaCount').textContent =
-    `${apas.length} unique APA #s — role: ${roleList}${tail}`;
+/* Single RPC call per PDF — gets emails for EVERY player on the
+   roster up front. Filter changes thereafter render from the cached
+   map. The RPC is the same one Email HQ's "Look Up Emails by Player
+   Number" panel uses; service_role required for the email column.
+   _cpLookupState drives placeholder + button-enable. */
+async function cpFetchEmails() {
+  if (!_cpLastParse) return;
+  // Collect every unique APA from the parsed roster — not just the
+  // currently-filtered subset. Filter is purely local so we don't
+  // want to re-fetch on every role/team click.
+  const allApas = new Set();
+  for (const t of _cpLastParse.teams) {
+    for (const p of t.players) {
+      allApas.add(p.apa_full || cpToFullApa(p.apa_number));
+    }
+  }
+  const nums = [...allApas];
+  if (!nums.length) return;
+
+  _cpLookupState = 'loading';
+  cpRenderApaNumbers();   // re-render to show "Looking up…" placeholder
+
+  try {
+    const rows = await sb('POST', 'rpc/lookup_emails_by_number', { p_nums: nums });
+    const map = new Map();
+    const noEmail = [];
+    const notFound = [];
+    const byInput = new Map();
+    for (const r of (rows || [])) byInput.set(String(r.input_number), r);
+    for (const apa of nums) {
+      const r = byInput.get(apa);
+      if (!r) {
+        // Find the player record so we can show name in issues popup
+        const player = _findPlayerByApa(apa);
+        notFound.push({ apa, name: player ? player.name : '(unknown)' });
+        map.set(apa, null);
+        continue;
+      }
+      const email = (r.email || '').trim();
+      if (!email) {
+        noEmail.push({ apa, name: ehqPlayerName(r), member: r.member_number });
+        map.set(apa, null);
+        continue;
+      }
+      map.set(apa, { email, name: ehqPlayerName(r), member_number: r.member_number });
+    }
+    _cpEmailMap = map;
+    _cpEmailIssues = { notFound, noEmail };
+    _cpLookupState = 'done';
+  } catch (e) {
+    console.error('cpFetchEmails:', e);
+    _cpLookupState = 'error';
+  }
+  cpRenderApaNumbers();
+}
+
+/* Helper: walk the parsed roster to find the player record for an APA.
+   Used to label not-found-in-DB players in the issues popup with their
+   name from the PDF. */
+function _findPlayerByApa(apa) {
+  if (!_cpLastParse) return null;
+  for (const t of _cpLastParse.teams) {
+    for (const p of t.players) {
+      const full = p.apa_full || cpToFullApa(p.apa_number);
+      if (full === apa) return p;
+    }
+  }
+  return null;
+}
+
+/* Renders BOTH outputs:
+     • primary email textarea (Gmail-paste-ready, comma-separated)
+     • hidden APA-# textarea (fed to "APA #s instead" copy button)
+   Plus: helper-text count, issues button, copy-button chunking when
+   the filtered list exceeds CP_GROUP_SIZE recipients. */
+function cpRenderApaNumbers() {
+  if (!_cpLastParse) return;
+  const { apas, stats } = cpFilteredApas();
+  const roleList = [...(_cpFilter.roles || [])].join(', ');
+
+  // ── Hidden APA-# fallback ──
+  const apaTa = document.getElementById('cpApaNumbers');
+  if (apaTa) apaTa.value = apas.join('\n');
+
+  // ── Primary email output ──
+  const emailTa  = document.getElementById('cpEmailOut');
+  const countEl  = document.getElementById('cpEmailCount');
+  const issuesBtn= document.getElementById('cpEmailIssuesBtn');
+  const btnArea  = document.getElementById('cpEmailCopyBtnArea');
+  if (!emailTa) return;
+
+  // Map APAs → emails (dedupe identical addresses — handles a person on
+  // multiple teams within the filter).
+  let emails = [];
+  let noEmailCount = 0;
+  if (_cpLookupState === 'done' || _cpLookupState === 'error') {
+    const seen = new Set();
+    for (const apa of apas) {
+      const rec = _cpEmailMap.get(apa);
+      if (!rec || !rec.email) { noEmailCount++; continue; }
+      if (seen.has(rec.email.toLowerCase())) continue;
+      seen.add(rec.email.toLowerCase());
+      emails.push(rec.email);
+    }
+  }
+
+  if (_cpLookupState === 'loading') {
+    emailTa.value = '';
+    emailTa.placeholder = 'Looking up emails for ' +
+      (_cpLastParse.teams.reduce((n,t)=>n+t.players.length,0)) + ' players…';
+    countEl.textContent = '(loading)';
+    issuesBtn.style.display = 'none';
+  } else if (_cpLookupState === 'error') {
+    emailTa.value = '';
+    emailTa.placeholder = 'Email lookup failed — falling back to APA numbers (see "APA #s instead").';
+    countEl.textContent = `${apas.length} APA #s available · email lookup failed`;
+    issuesBtn.style.display = 'none';
+  } else if (_cpLookupState === 'done') {
+    // Single string for non-chunked copy; chunks rebuilt on every render.
+    emailTa.value = emails.join(', ');
+    const tail = stats.ineligExcluded ? ` · ${stats.ineligExcluded} ineligible excluded` : '';
+    const missing = noEmailCount ? ` · ${noEmailCount} without email` : '';
+    countEl.textContent = `${emails.length} email${emails.length === 1 ? '' : 's'} ready — role: ${roleList}${tail}${missing}`;
+    // Issues button visible only when something needs attention AND it
+    // affects the current filter (only count missing within selected APAs).
+    const filteredApasSet = new Set(apas);
+    const filteredNotFound = _cpEmailIssues.notFound.filter(x => filteredApasSet.has(x.apa));
+    const filteredNoEmail  = _cpEmailIssues.noEmail.filter(x => filteredApasSet.has(x.apa));
+    const issuesTotal = filteredNotFound.length + filteredNoEmail.length;
+    if (issuesTotal > 0) {
+      issuesBtn.style.display = '';
+      issuesBtn.textContent = `⚠ ${issuesTotal} need attention`;
+      issuesBtn.dataset.notFound = JSON.stringify(filteredNotFound);
+      issuesBtn.dataset.noEmail  = JSON.stringify(filteredNoEmail);
+    } else {
+      issuesBtn.style.display = 'none';
+    }
+  } else {
+    // 'idle' — pre-parse state.
+    emailTa.value = '';
+    countEl.textContent = '';
+    issuesBtn.style.display = 'none';
+  }
+
+  // ── Copy-button chunking ──
+  // Same pattern as Email HQ v2.3: 1 button when ≤ CP_GROUP_SIZE,
+  // N buttons "Copy 1-450" / "Copy 451-…" otherwise.
+  if (btnArea) {
+    const n = emails.length;
+    if (_cpLookupState !== 'done' || n === 0) {
+      btnArea.innerHTML = '<button class="btn btn-primary btn-sm" id="cpCopyEmailsBtn" disabled>📋 Copy emails</button>';
+    } else if (n <= CP_GROUP_SIZE) {
+      btnArea.innerHTML = '<button class="btn btn-primary btn-sm" id="cpCopyEmailsBtn">📋 Copy emails</button>';
+      document.getElementById('cpCopyEmailsBtn').addEventListener('click', () => cpCopyEmails(emails, 0));
+    } else {
+      const numGroups = Math.ceil(n / CP_GROUP_SIZE);
+      const buttons = [];
+      for (let g = 0; g < numGroups; g++) {
+        const start = g * CP_GROUP_SIZE + 1;
+        const end   = Math.min((g + 1) * CP_GROUP_SIZE, n);
+        buttons.push(`<button class="btn btn-primary btn-sm" data-cp-grp="${g}">📋 Copy ${start}-${end}</button>`);
+      }
+      btnArea.innerHTML = buttons.join('');
+      btnArea.querySelectorAll('button[data-cp-grp]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const g = parseInt(btn.dataset.cpGrp, 10);
+          const startIdx = g * CP_GROUP_SIZE;
+          const endIdx   = Math.min(startIdx + CP_GROUP_SIZE, emails.length);
+          cpCopyEmails(emails.slice(startIdx, endIdx), g);
+        });
+      });
+    }
+  }
+}
+
+async function cpCopyEmails(emails, groupIndex) {
+  const text = emails.join(', ');
+  const btn = (typeof groupIndex === 'number')
+    ? document.querySelector(`#cpEmailCopyBtnArea button[data-cp-grp="${groupIndex}"]`) || document.getElementById('cpCopyEmailsBtn')
+    : document.getElementById('cpCopyEmailsBtn');
+  try {
+    await navigator.clipboard.writeText(text);
+    if (btn) {
+      const old = btn.textContent;
+      btn.textContent = '✓ Copied';
+      btn.style.background = '#16a34a';
+      setTimeout(() => { btn.textContent = old; btn.style.background = ''; }, 1600);
+    }
+  } catch (e) {
+    const ta = document.getElementById('cpEmailOut');
+    if (ta) { ta.value = text; ta.select(); }
+    if (btn) btn.textContent = '⚠ Select then ⌘+C';
+  }
+}
+
+function cpShowEmailIssues() {
+  const btn = document.getElementById('cpEmailIssuesBtn');
+  const notFound = JSON.parse(btn.dataset.notFound || '[]');
+  const noEmail  = JSON.parse(btn.dataset.noEmail  || '[]');
+  const parts = [];
+  if (notFound.length) {
+    parts.push(`NOT IN DB (${notFound.length}):\n  ` +
+      notFound.map(x => `${x.name}  (APA #${x.apa})`).join('\n  '));
+  }
+  if (noEmail.length) {
+    parts.push(`NO EMAIL ON FILE (${noEmail.length}):\n  ` +
+      noEmail.map(x => `${x.name}  (APA #${x.apa})`).join('\n  '));
+  }
+  const total = notFound.length + noEmail.length;
+  alert(`${total} player${total === 1 ? '' : 's'} excluded from email list:\n\n` + parts.join('\n\n'));
 }
 
 async function cpCopyApas() {
