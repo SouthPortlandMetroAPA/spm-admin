@@ -1715,34 +1715,39 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         <div class="ot-toolbar" style="display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; margin-bottom:14px;">
           <div class="field-mini">
             <label for="otSource">Source</label>
-            <select id="otSource" style="width:170px">
-              <option value="lapsed" selected>Lapsed players (played, then stopped)</option>
+            <select id="otSource" style="min-width:300px">
+              <option value="lapsed" selected>Lapsed (played, then stopped)</option>
               <option value="new">Never played (new, paid)</option>
               <option value="both">Both — full outreach pool</option>
             </select>
           </div>
-          <div class="field-mini" id="otLastPlayedField">
-            <label for="otLastPlayedDays">Hasn't played in (days)</label>
-            <input type="number" id="otLastPlayedDays" min="0" max="3650" value="180" style="width:90px">
+          <div class="field-mini" id="otLastPlayedField" title="Date range for the most recent play of 8- or 9-ball. Both bounds inclusive. Bigger 'to' = more lapsed candidates; bigger 'from' = excludes anyone who played too recently.">
+            <label>Last played — range (days ago)</label>
+            <div style="display:flex; align-items:center; gap:6px">
+              <input type="number" id="otLastPlayedDaysMin" min="0" max="36500" value="0"   style="width:70px" title="Lower bound — exclude people who played MORE recently than this (0 = include today's players)">
+              <span class="hint" style="color:var(--muted)">to</span>
+              <input type="number" id="otLastPlayedDaysMax" min="0" max="36500" value="365" style="width:70px" title="Upper bound — exclude people who haven't played for LONGER than this. 365 = within the last year.">
+              <span class="hint" style="color:var(--muted)">days ago</span>
+            </div>
           </div>
           <div class="field-mini">
             <label for="otCounty">County (optional)</label>
             <input type="text" id="otCounty" placeholder="Multnomah" style="width:160px">
           </div>
           <div class="field-mini" id="otFormatField">
-            <label for="otFormat">Format</label>
-            <select id="otFormat" style="width:120px">
+            <label for="otFormat">Format played</label>
+            <select id="otFormat" style="width:130px">
               <option value="either" selected>Either 8 or 9</option>
               <option value="8">8-ball only</option>
               <option value="9">9-ball only</option>
               <option value="both">Both 8 and 9</option>
             </select>
           </div>
-          <div class="field-mini">
-            <label for="otActiveOnly">Active only</label>
-            <select id="otActiveOnly" style="width:100px">
-              <option value="yes" selected>Yes</option>
-              <option value="no">No</option>
+          <div class="field-mini" title="APA member_status field: 'Active' = paid membership in good standing. 'Inactive' = expired or never paid. 'Active only' filters out anyone whose membership has lapsed — they'd need to re-up before they can play again.">
+            <label for="otActiveOnly">Member status</label>
+            <select id="otActiveOnly" style="width:200px">
+              <option value="yes">Active members only</option>
+              <option value="no" selected>All (Active + Inactive)</option>
             </select>
           </div>
           <div class="field-mini">
@@ -1953,7 +1958,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.77';
+const APP_VERSION = '3.78';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11101,7 +11106,11 @@ function otMatchesSearch(c, rawQuery) {
    source='both'. Each row is tagged with _source for the UI badge. */
 async function otRun() {
   const source = document.getElementById('otSource').value;   /* 'lapsed' | 'new' | 'both' */
-  const days = parseInt(document.getElementById('otLastPlayedDays').value, 10) || 180;
+  /* Last-played range (3.78+): two inputs. Min = lower bound (how recent
+     they can be); Max = upper bound (how far back to look). Defaults
+     0 / 365 = anyone who played in the last year. */
+  const daysMin = Math.max(0, parseInt(document.getElementById('otLastPlayedDaysMin').value, 10) || 0);
+  const daysMax = Math.max(daysMin, parseInt(document.getElementById('otLastPlayedDaysMax').value, 10) || 365);
   const county = document.getElementById('otCounty').value.trim() || null;
   const fmt = document.getElementById('otFormat').value;
   const activeOnly = document.getElementById('otActiveOnly').value === 'yes';
@@ -11123,7 +11132,8 @@ async function otRun() {
       const lapsed = await sb('POST', 'rpc/recruit_lapsed_players', {
         p_sl9_max: 9,
         p_county: county,
-        p_last_played_days: days,
+        p_last_played_days: daysMax,
+        p_last_played_days_min: daysMin,
         p_exclude_division_number: null,
         p_only_lapsed: true
       });
