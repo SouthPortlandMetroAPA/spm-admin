@@ -1770,6 +1770,12 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <span id="otStatusLine" class="hint" style="align-self:center"></span>
         </div>
 
+        <!-- Follow-up reminders for the CURRENT session — always visible
+             when there's anything to remind about; collapsed by default
+             so it doesn't dominate the layout but draws the eye when
+             present. Independent of the main list filters. -->
+        <div id="otReminderBanner" style="display:none; margin-bottom:14px;"></div>
+
         <div id="otResults" style="display:none">
           <!-- Stats row + status-filter pills -->
           <div id="otStatsRow" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px;"></div>
@@ -1961,7 +1967,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.79';
+const APP_VERSION = '3.80';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10976,6 +10982,44 @@ const OT_TAB_STYLE = `
   #tab-outreach .ot-empty-msg {
     text-align:center; color:var(--muted); padding:30px 20px; font-style:italic;
   }
+
+  /* Follow-up reminder banner (3.80+) — distinctive but not noisy.
+     Sits at the top of the Outreach canvas and lists everyone whose
+     follow_up_session matches the current active session. Each entry
+     gets a compact "Mark contacted" / "Snooze again" action row. */
+  #tab-outreach .ot-rem-card {
+    background:#fffbeb;
+    border:1.5px solid #fde68a;
+    border-radius:12px;
+    padding:14px 16px;
+    box-shadow:0 1px 3px rgba(0,0,0,0.04);
+  }
+  #tab-outreach .ot-rem-title {
+    display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+    font-weight:800; font-size:0.94rem; color:#92400e; margin-bottom:10px;
+  }
+  #tab-outreach .ot-rem-title .count {
+    background:#92400e; color:#fff; padding:2px 10px; border-radius:999px;
+    font-size:0.74rem; font-weight:700;
+  }
+  #tab-outreach .ot-rem-list { display:grid; gap:8px; }
+  #tab-outreach .ot-rem-row {
+    background:#fff; border:1px solid #fde68a; border-radius:10px;
+    padding:10px 12px;
+    display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+  }
+  #tab-outreach .ot-rem-row .rem-name { font-weight:700; font-size:0.94rem; color:var(--text); flex:1; min-width:140px; }
+  #tab-outreach .ot-rem-row .rem-meta { font-size:0.78rem; color:var(--muted); }
+  #tab-outreach .ot-rem-actions { display:flex; gap:6px; flex-wrap:wrap; }
+  #tab-outreach .ot-rem-actions button {
+    padding:6px 12px; border-radius:6px; font-size:0.8rem; font-weight:700; cursor:pointer; border:1px solid var(--border); background:#fff; color:var(--text);
+  }
+  #tab-outreach .ot-rem-actions button:hover { border-color:var(--spm-accent); color:var(--spm-accent); }
+  #tab-outreach .ot-rem-actions button.primary { background:var(--spm-accent); color:#fff; border-color:var(--spm-accent); }
+  #tab-outreach .ot-rem-actions button.primary:hover { background:#00257a; color:#fff; }
+  #tab-outreach .ot-rem-empty-state {
+    color:#92400e; font-size:0.86rem; font-style:italic;
+  }
 `;
 (function injectOtStyle(){
   if (document.getElementById('ot-tab-style')) return;
@@ -11096,9 +11140,132 @@ async function otLoadCurrentSession() {
     if (!s) return;
     _otSessionState.current = s;
     _otSessionState.nextThree = otComputeNextSessions(s.year, s.season, 3);
+    /* As soon as we know the current session, pull reminders. */
+    otRefreshReminders();
   } catch (e) {
     console.error('current session lookup failed', e);
   }
+}
+
+/* Follow-up reminder banner (3.80+).
+   Calls slate.outreach_follow_up_reminders with the current session's
+   label, shows the bucket as a callout above the main outreach list.
+   These are people who were tagged "follow up at <this session>" in a
+   PREVIOUS session and the deferral has now come due.
+
+   Called:
+     • On otInit (via otLoadCurrentSession)
+     • After any otSetStatus / otEditFollowUp / otToggleDnc that could
+       affect the bucket (someone changes their follow-up label, or
+       converts from follow_up to working, or marks DNC).
+
+   Independent of the main list filters — reminders for the current
+   session show regardless of how the operator has the rest of the
+   tab configured. */
+async function otRefreshReminders() {
+  const cur = _otSessionState.current;
+  if (!cur) return;
+  const label = _capSeason(cur.season) + ' ' + cur.year;   // e.g. "Summer 2026"
+  let rows = [];
+  try {
+    rows = await sb('POST', 'rpc/outreach_follow_up_reminders',
+      { p_session_label: label },
+      { 'Accept-Profile': 'slate', 'Content-Profile': 'slate' });
+  } catch (e) {
+    console.error('reminders fetch failed', e);
+    return;
+  }
+  _otState.reminders = rows || [];
+  otRenderReminders();
+}
+
+function otRenderReminders() {
+  const wrap = document.getElementById('otReminderBanner');
+  if (!wrap) return;
+  const cur = _otSessionState.current;
+  const list = _otState.reminders || [];
+  if (!cur || !list.length) {
+    wrap.style.display = 'none';
+    wrap.innerHTML = '';
+    return;
+  }
+  const label = _capSeason(cur.season) + ' ' + cur.year;
+  const rowsHtml = list.map(r => {
+    const name = (r.first_name && r.last_name)
+      ? r.first_name + ' ' + r.last_name + (r.nickname && r.nickname !== r.first_name ? ` ("${r.nickname}")` : '')
+      : (r.nickname || r.member_number);
+    /* Pick the best phone — cell first, then home, then any other real one */
+    let bestPhone = '';
+    for (const k of ['cell_phone','home_phone','work_phone','alt_phone']) {
+      if (otIsRealPhone(r[k])) { bestPhone = r[k]; break; }
+    }
+    const meta = [
+      r.city ? esc(r.city) : null,
+      bestPhone ? esc(bestPhone) : null,
+      r.last_note ? '“' + esc(r.last_note) + '”' : null
+    ].filter(Boolean).join(' · ');
+    return `
+      <div class="ot-rem-row" data-mn="${esc(r.member_number)}">
+        <div style="flex:1; min-width:140px">
+          <div class="rem-name">${esc(name)} <span class="hint" style="font-weight:500;font-family:ui-monospace,monospace">#${esc(r.member_number)}</span></div>
+          ${meta ? '<div class="rem-meta">' + meta + '</div>' : ''}
+        </div>
+        <div class="ot-rem-actions">
+          <button type="button" data-act="contacted">📞 Mark contacted</button>
+          <button type="button" data-act="snooze">⏰ Snooze again</button>
+          <button type="button" data-act="dismiss">✓ Done</button>
+        </div>
+      </div>`;
+  }).join('');
+  wrap.style.display = '';
+  wrap.innerHTML = `
+    <div class="ot-rem-card">
+      <div class="ot-rem-title">🔔 Follow up — ${esc(label)} <span class="count">${list.length}</span>
+        <span style="margin-left:auto; font-size:0.78rem; font-weight:500; color:var(--muted)">
+          People you deferred to this session
+        </span>
+      </div>
+      <div class="ot-rem-list">${rowsHtml}</div>
+    </div>`;
+  /* Wire actions */
+  wrap.querySelectorAll('.ot-rem-row').forEach(row => {
+    const mn = row.dataset.mn;
+    row.querySelector('[data-act="contacted"]').addEventListener('click', () => otReminderContacted(mn));
+    row.querySelector('[data-act="snooze"]').addEventListener('click',    () => otReminderSnooze(mn));
+    row.querySelector('[data-act="dismiss"]').addEventListener('click',   () => otReminderDismiss(mn));
+  });
+}
+
+/* Reminder actions — all bypass the main list (these people may or
+   may not be in the current pool). They update outreach_status + log
+   directly, then refresh the banner.
+   • Mark contacted → status='working' (you're working on this person now)
+   • Snooze again   → re-open the session picker → defer to a later session
+   • Done           → status='not_interested' (closed loop, don't bug me) */
+async function otReminderContacted(mn) {
+  await otUpsertStatus(mn, { status: 'working', last_touched_at: new Date().toISOString() });
+  await otAppendLog(mn, 'status', 'Reminder → marked Working (contacted this session)');
+  /* Reflect change in the main candidates list if present */
+  const c = _otState.candidates.find(x => x.member_number === mn);
+  if (c) { c._status = { ...c._status, status: 'working' }; otRenderStats(); otRenderList(); }
+  otRefreshReminders();
+}
+async function otReminderSnooze(mn) {
+  const newSession = await otPickFollowUpSession(null);
+  if (newSession === null) return;
+  await otUpsertStatus(mn, { follow_up_session: newSession, last_touched_at: new Date().toISOString() });
+  await otAppendLog(mn, 'snooze', 'Reminder → re-deferred to: ' + newSession);
+  const c = _otState.candidates.find(x => x.member_number === mn);
+  if (c) { c._status = { ...c._status, follow_up_session: newSession }; otRenderList(); }
+  otRefreshReminders();
+}
+async function otReminderDismiss(mn) {
+  if (!confirm('Mark Done? They will move to "Not interested" and drop off the reminder list.')) return;
+  await otUpsertStatus(mn, { status: 'not_interested', last_touched_at: new Date().toISOString() });
+  await otAppendLog(mn, 'status', 'Reminder → marked Done (Not interested)');
+  const c = _otState.candidates.find(x => x.member_number === mn);
+  if (c) { c._status = { ...c._status, status: 'not_interested' }; otRenderStats(); otRenderList(); }
+  otRefreshReminders();
 }
 
 /* ── Search normalization (3.76+) ─────────────────────────────────────
@@ -11599,6 +11766,9 @@ async function otSetStatus(memberNumber, status) {
   c._status = { ...c._status, status, follow_up_session: followUpSession };
   otRenderStats();
   otRenderList();
+  /* Reminder banner may have changed (someone moved into/out of the
+     current-session follow-up bucket). */
+  otRefreshReminders();
 }
 
 /* Modal-ish picker for follow-up session. Resolves to:
@@ -11660,6 +11830,7 @@ async function otEditFollowUp(memberNumber) {
   await otAppendLog(memberNumber, 'snooze', 'Follow-up session: ' + (followUpSession || '(cleared)'));
   c._status = { ...c._status, follow_up_session: followUpSession };
   otRenderList();
+  otRefreshReminders();   /* session label may have changed → re-check bucket */
 }
 
 async function otSaveNote(memberNumber) {
@@ -11695,6 +11866,7 @@ async function otToggleDnc(memberNumber) {
   c._status = { ...c._status, do_not_contact: next };
   otRenderStats();
   otRenderList();
+  otRefreshReminders();   /* DNC entries don't appear in reminders → re-check */
 }
 
 /* UPSERT the row — INSERT new on first touch, UPDATE thereafter.
