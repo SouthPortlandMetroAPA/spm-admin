@@ -2008,7 +2008,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.85';
+const APP_VERSION = '3.86';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10926,6 +10926,9 @@ const OT_TAB_STYLE = `
   #tab-outreach .ot-stat.s-returning      { background:#d1fae5; color:#065f46; }
   #tab-outreach .ot-stat.s-not_interested { background:#fee2e2; color:#991b1b; }
   #tab-outreach .ot-stat.s-dnc            { background:#1a1a1a; color:#fff; }
+  #tab-outreach .ot-stat.s-touch-email    { background:#dbeafe; color:#1e40af; }
+  #tab-outreach .ot-stat.s-touch-text     { background:#ede9fe; color:#5b21b6; }
+  #tab-outreach .ot-stat.s-touch-call     { background:#d1fae5; color:#065f46; }
 
   /* Player cards */
   #tab-outreach .ot-card {
@@ -11024,6 +11027,22 @@ const OT_TAB_STYLE = `
     text-align:center; color:var(--muted); padding:30px 20px; font-style:italic;
   }
 
+  /* Notes textarea (3.86+) — always-visible free-text field. */
+  #tab-outreach .ot-notes-wrap { margin-top:8px; }
+  #tab-outreach .ot-notes-label {
+    display:block; font-size:0.72rem; font-weight:700; color:var(--muted);
+    text-transform:uppercase; letter-spacing:0.04em; margin-bottom:3px;
+  }
+  #tab-outreach .ot-notes-input {
+    width:100%; min-height:38px; max-height:140px; resize:vertical;
+    padding:6px 8px; border:1px solid var(--border); border-radius:6px;
+    font-size:0.84rem; font-family:inherit; background:#fafafa; color:var(--text);
+    outline:none; transition:border-color 0.12s, background 0.12s;
+  }
+  #tab-outreach .ot-notes-input:focus { border-color:var(--spm-accent); background:#fff; }
+  #tab-outreach .ot-notes-input.saving { border-color:var(--warn); }
+  #tab-outreach .ot-notes-input.saved  { border-color:var(--success); }
+
   /* Quick-touch buttons (3.84+) — log "I emailed/texted/called today"
      in one click. Lighter-weight than the popover. */
   #tab-outreach .ot-qt-btn {
@@ -11033,9 +11052,14 @@ const OT_TAB_STYLE = `
   }
   #tab-outreach .ot-qt-btn:hover { border-color: var(--spm-accent); color: var(--spm-accent); }
   #tab-outreach .ot-qt-btn:active { background: var(--spm-accent); color:#fff; }
-  #tab-outreach .ot-qt-btn.just-logged {
+  #tab-outreach .ot-qt-btn.just-logged,
+  #tab-outreach .ot-qt-btn.done {
     background:#d1fae5; border-color:#065f46; color:#065f46;
   }
+  /* Per-method tint when done — subtle differentiation */
+  #tab-outreach .ot-qt-btn.done.s-email { background:#dbeafe; border-color:#1e40af; color:#1e40af; }
+  #tab-outreach .ot-qt-btn.done.s-text  { background:#ede9fe; border-color:#5b21b6; color:#5b21b6; }
+  #tab-outreach .ot-qt-btn.done.s-call  { background:#d1fae5; border-color:#065f46; color:#065f46; }
 
   /* Preferences section (3.84+) — shown when a card is expanded.
      Captures the player's stated preferences so future outreach can
@@ -11168,7 +11192,7 @@ function otPhoneDigits(p) {
 
 const _otState = {
   candidates: [],     // raw RPC rows joined with status
-  filter: { status: 'all', search: '' },
+  filter: { status: 'all', search: '', touch: new Set() },   /* touch ∈ {email, text, call} */
   expanded: new Set(),
   undoStack: []       // LIFO of { mn, name, description, prevStatus, at }; max OT_UNDO_MAX
 };
@@ -11227,6 +11251,10 @@ async function otUndo() {
       pref_days_per_week:  entry.prevStatus.pref_days_per_week  ?? null,
       pref_formats:        entry.prevStatus.pref_formats        ?? null,
       pref_cities:         entry.prevStatus.pref_cities         ?? null,
+      notes:               entry.prevStatus.notes               ?? null,
+      last_emailed_at:     entry.prevStatus.last_emailed_at     ?? null,
+      last_texted_at:      entry.prevStatus.last_texted_at      ?? null,
+      last_called_at:      entry.prevStatus.last_called_at      ?? null,
       updated_at:          new Date().toISOString()
     };
     await otUpsertStatus(entry.mn, restoreBody);
@@ -11807,6 +11835,19 @@ function otRenderStats() {
     wrap.innerHTML = `<span class="ot-stat">Players: <strong>${counts.all}</strong></span>`;
     return;
   }
+  /* Touch counters (3.86+) — how many have been emailed/texted/called
+     so far. Independent of the status filter so the operator can see
+     all-time totals at a glance. */
+  const touchCounts = { email:0, text:0, call:0 };
+  for (const c of _otState.candidates) {
+    if (c._status.do_not_contact) continue;
+    if (c._status.last_emailed_at) touchCounts.email++;
+    if (c._status.last_texted_at)  touchCounts.text++;
+    if (c._status.last_called_at)  touchCounts.call++;
+  }
+  const tFilter = _otState.filter.touch || new Set();
+  const tk = (k, lbl, icon) => `<span class="ot-stat s-touch-${k} ${tFilter.has(k)?'active':''}" data-touch-filter="${k}">${icon} ${lbl}: <strong>${touchCounts[k]}</strong></span>`;
+
   wrap.innerHTML =
     `<span class="ot-stat ${f==='all'?'active':''}" data-filter="all">All: <strong>${counts.all - counts.dnc}</strong></span>` +
     mk('new', 'New') +
@@ -11814,10 +11855,26 @@ function otRenderStats() {
     mk('follow_up', 'Follow up') +
     mk('returning', 'Returning') +
     mk('not_interested', 'Not interested') +
-    (counts.dnc > 0 ? `<span class="ot-stat s-dnc ${f==='dnc'?'active':''}" data-filter="dnc">🚫 DNC: <strong>${counts.dnc}</strong></span>` : '');
-  wrap.querySelectorAll('.ot-stat').forEach(el => {
+    (counts.dnc > 0 ? `<span class="ot-stat s-dnc ${f==='dnc'?'active':''}" data-filter="dnc">🚫 DNC: <strong>${counts.dnc}</strong></span>` : '') +
+    '<span style="width:1px;background:var(--border);margin:0 4px"></span>' +
+    tk('email', 'Emailed', '📧') +
+    tk('text',  'Texted',  '💬') +
+    tk('call',  'Called',  '📞');
+  wrap.querySelectorAll('.ot-stat[data-filter]').forEach(el => {
     el.addEventListener('click', () => {
       _otState.filter.status = el.dataset.filter;
+      otRenderStats();
+      otRenderList();
+    });
+  });
+  /* Touch-filter pills: independent multi-toggle. Click to add/remove
+     from the filter Set. List is AND'd across multiple touch filters
+     (e.g. "emailed AND called" only shows people you've done both). */
+  wrap.querySelectorAll('.ot-stat[data-touch-filter]').forEach(el => {
+    el.addEventListener('click', () => {
+      const k = el.dataset.touchFilter;
+      const set = _otState.filter.touch;
+      if (set.has(k)) set.delete(k); else set.add(k);
       otRenderStats();
       otRenderList();
     });
@@ -11827,11 +11884,20 @@ function otRenderStats() {
 function otRenderList() {
   const list = document.getElementById('otCardList');
   const f = _otState.filter;
+  const touchSet = f.touch || new Set();
   const allEligible = _otState.candidates.filter(c => {
     const isDnc = c._status.do_not_contact;
     if (f.status === 'dnc') return isDnc;
     if (f.status === 'all') return !isDnc;
     return !isDnc && c._status.status === f.status;
+  }).filter(c => {
+    /* Touch filter — AND across selected touches. None selected = no filter. */
+    if (!touchSet.size) return true;
+    const s = c._status;
+    if (touchSet.has('email') && !s.last_emailed_at) return false;
+    if (touchSet.has('text')  && !s.last_texted_at)  return false;
+    if (touchSet.has('call')  && !s.last_called_at)  return false;
+    return true;
   });
   const visible = allEligible.filter(c => otMatchesSearch(c, f.search));
 
@@ -11907,8 +11973,19 @@ function otCardHtml(c) {
     ? `<div class="ot-meta" style="margin-top:6px">${s.status === 'returning' ? '🎯' : '⏰'} ${s.status === 'returning' ? 'Returning' : 'Follow up'}: <b>${esc(s.follow_up_session || '(no session set)')}</b> <button type="button" class="ot-card-toggle" data-edit-follow-up style="margin:0">Edit</button></div>`
     : '';
 
+  /* 3.86+: free-text notes field on every card. Editable inline,
+     auto-saves on blur. Distinct from last_note (denormalized log
+     preview) so the operator has a stable place for working memory. */
+  const notesHtml = `
+    <div class="ot-notes-wrap">
+      <label class="ot-notes-label">📝 Notes</label>
+      <textarea class="ot-notes-input" data-notes-input rows="2"
+                placeholder="Free-text notes about this person…">${esc(s.notes || '')}</textarea>
+    </div>`;
+  /* Keep the auto-quoted last_note from the activity log when present —
+     it's a different signal than the editable notes field. */
   const lastNote = s.last_note
-    ? `<div class="ot-last-note">"${esc(s.last_note)}"</div>`
+    ? `<div class="ot-last-note" style="font-size:0.78rem">Last log: "${esc(s.last_note)}"</div>`
     : '';
 
   let sourceBadge = '';
@@ -11954,15 +12031,17 @@ function otCardHtml(c) {
         ${c.email ? `<a href="mailto:${esc(c.email)}">✉️ ${esc(c.email)}</a>` : ''}
         ${otRenderPhones(c)}
       </div>
-      <!-- Quick-touch buttons: log a call/text/email + bump last_touched_at.
-           Lighter-weight than the popover; just records "I did this today." -->
+      <!-- Quick-touch buttons. Persistent highlight when the corresponding
+           timestamp column is set (last_emailed_at / _texted_at / _called_at).
+           Date shown inline so the operator sees recency at a glance. -->
       <div class="ot-quicktouch" style="display:flex; gap:6px; margin-top:8px; flex-wrap:wrap;">
-        <button type="button" class="ot-qt-btn" data-touch="email"  title="Log: I emailed them today">📧 Emailed</button>
-        <button type="button" class="ot-qt-btn" data-touch="text"   title="Log: I texted them today">💬 Texted</button>
-        <button type="button" class="ot-qt-btn" data-touch="call"   title="Log: I called them today">📞 Called</button>
+        ${otQuickTouchBtn(s, 'email', 'Emailed', '📧')}
+        ${otQuickTouchBtn(s, 'text',  'Texted',  '💬')}
+        ${otQuickTouchBtn(s, 'call',  'Called',  '📞')}
         ${s.last_touched_at ? '<span class="hint" style="align-self:center; font-size:0.74rem">Last touched ' + esc(otFmtDate(s.last_touched_at)) + '</span>' : ''}
       </div>
       ${followUpHtml}
+      ${notesHtml}
       ${lastNote}
       <div class="ot-status-row">${pillsHtml}</div>
       <button type="button" class="ot-card-toggle" data-toggle-expand>
@@ -11989,6 +12068,21 @@ function otCardHtml(c) {
         </div>
       </div>
     </div>`;
+}
+
+/* Quick-touch button renderer (3.86+) — persistent highlight + date
+   when the column is set. NULL = never done → muted look. */
+function otQuickTouchBtn(s, kind, label, icon) {
+  const col = kind === 'email' ? 'last_emailed_at' : kind === 'text' ? 'last_texted_at' : 'last_called_at';
+  const ts = s && s[col];
+  const done = !!ts;
+  const dateChip = done ? ' <span style="font-size:0.66rem; font-weight:500; opacity:0.85; margin-left:4px">' + esc(otFmtDateOnly(ts)) + '</span>' : '';
+  return `<button type="button" class="ot-qt-btn ${done?'done s-'+kind:''}" data-touch="${kind}" title="${done ? 'Last ' + label.toLowerCase() + ' ' + otFmtDateOnly(ts) + ' — click to update' : 'Click to log: I ' + label.toLowerCase() + ' them today'}">${icon} ${label}${dateChip}</button>`;
+}
+function otFmtDateOnly(iso) {
+  if (!iso) return '';
+  try { return new Date(iso).toLocaleDateString(undefined, { month:'short', day:'numeric' }); }
+  catch (_) { return ''; }
 }
 
 /* Player preferences (3.84+) — inline pill UI captured under the
@@ -12102,19 +12196,48 @@ async function otSavePrefs(memberNumber) {
 /* Quick-touch action (3.84+) — one-click logging of email/text/call with
    today's stamp. Bumps last_touched_at, appends to outreach_log, gives
    visual feedback. */
+/* Free-text notes save (3.86+) — blur-fired. Skips no-ops. */
+async function otSaveNotes(memberNumber, textarea) {
+  const c = _otState.candidates.find(x => x.member_number === memberNumber);
+  if (!c) return;
+  const newVal = textarea.value;
+  const prev = c._status.notes || '';
+  if (newVal === prev) return;  /* no change → no write */
+  otPushUndo(memberNumber, 'Edited notes');
+  textarea.classList.add('saving');
+  try {
+    await otUpsertStatus(memberNumber, {
+      notes: newVal || null,
+      last_touched_at: new Date().toISOString()
+    });
+    c._status = { ...c._status, notes: newVal || null };
+    textarea.classList.remove('saving');
+    textarea.classList.add('saved');
+    setTimeout(() => textarea.classList.remove('saved'), 1500);
+  } catch (e) {
+    textarea.classList.remove('saving');
+    console.error('notes save failed', e);
+    toast('Notes save failed — see console.');
+  }
+}
+
 async function otQuickTouch(memberNumber, kind, btn) {
   const c = _otState.candidates.find(x => x.member_number === memberNumber);
   if (!c) return;
-  otPushUndo(memberNumber, 'Logged: ' + kind.charAt(0).toUpperCase() + kind.slice(1) + 'ed');
-  await otAppendLog(memberNumber, kind, kind.charAt(0).toUpperCase() + kind.slice(1) + 'ed (quick-log)');
-  await otUpsertStatus(memberNumber, { last_touched_at: new Date().toISOString() });
-  c._status = { ...c._status, last_touched_at: new Date().toISOString() };
-  if (btn) {
-    btn.classList.add('just-logged');
-    const orig = btn.textContent;
-    btn.textContent = '✓ Logged';
-    setTimeout(() => { btn.classList.remove('just-logged'); btn.textContent = orig; }, 1500);
-  }
+  const niceLabel = kind === 'email' ? 'Emailed' : kind === 'text' ? 'Texted' : 'Called';
+  otPushUndo(memberNumber, 'Logged: ' + niceLabel);
+  await otAppendLog(memberNumber, kind, niceLabel + ' (quick-log)');
+  /* 3.86+: persist per-method timestamp so the button stays highlighted
+     across reloads AND the list is filterable by "touched via X". */
+  const now = new Date().toISOString();
+  const patch = { last_touched_at: now };
+  if (kind === 'email') patch.last_emailed_at = now;
+  if (kind === 'text')  patch.last_texted_at  = now;
+  if (kind === 'call')  patch.last_called_at  = now;
+  await otUpsertStatus(memberNumber, patch);
+  c._status = { ...c._status, ...patch };
+  /* Re-render the whole card so the persistent highlight + date appear. */
+  otRenderList();
 }
 
 function otWireCard(cardEl) {
@@ -12134,6 +12257,11 @@ function otWireCard(cardEl) {
   cardEl.querySelectorAll('[data-touch]').forEach(btn => {
     btn.addEventListener('click', () => otQuickTouch(mn, btn.dataset.touch, btn));
   });
+  /* Free-text notes — save on blur (no Save button — auto-persist). */
+  const notesInput = cardEl.querySelector('[data-notes-input]');
+  if (notesInput) {
+    notesInput.addEventListener('blur', () => otSaveNotes(mn, notesInput));
+  }
   /* Preferences pill toggles + save */
   cardEl.querySelectorAll('[data-pref-day], [data-pref-fmt]').forEach(btn => {
     btn.addEventListener('click', () => btn.classList.toggle('active'));
