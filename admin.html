@@ -1940,7 +1940,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.75';
+const APP_VERSION = '3.76';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10981,9 +10981,66 @@ async function otInit() {
   otInit._wired = true;
   document.getElementById('otRunBtn').addEventListener('click', otRun);
   document.getElementById('otSearch').addEventListener('input', () => {
-    _otState.filter.search = document.getElementById('otSearch').value.toLowerCase().trim();
+    /* Tokens preserved so multi-word search is AND across fields.
+       Diacritic-strip + lowercase + whitespace-collapse handled
+       inside otMatchesSearch via otNormalize. */
+    _otState.filter.search = document.getElementById('otSearch').value;
     otRenderList();
   });
+}
+
+/* ── Search normalization (3.76+) ─────────────────────────────────────
+   Defects fixed in this revision:
+     B1 — diacritic-strip: "joaquin" now matches "Joaquín"
+     B2 — multi-token AND: "smith john" now matches "John Smith"
+            (each whitespace-separated token must appear somewhere)
+     B3 — email included in haystack
+     B4 — phone included as both raw and digit-stripped forms so
+            both "(503) 555-1234" and "5035551234" match
+     B5 — empty/template phones like "(___) ___-____" stripped to ''
+            and don't pollute the digit-stripped match
+     B6 — search result count visible (added separately)
+   ───────────────────────────────────────────────────────────────── */
+function otNormalize(s) {
+  if (!s) return '';
+  /* NFD decomposes "í" → "i" + combining acute. Stripping the combining
+     range U+0300–U+036F leaves the ASCII letter. Standard pattern. */
+  return String(s)
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/* Build a single haystack string from every searchable field. Phone
+   appears in two forms: raw (so "(503)" matches) and digit-stripped
+   (so "5035551234" matches). Template/empty phones like "(___) ___-____"
+   produce no digits — filtered out so they don't cause spurious hits
+   on "_". */
+function otBuildHaystack(c) {
+  const phoneRaw    = c.cell_phone || '';
+  const phoneDigits = phoneRaw.replace(/\D+/g, '');
+  return otNormalize([
+    c.first_name, c.last_name, c.nickname,
+    c.member_number,
+    c.email,
+    phoneRaw,
+    phoneDigits.length >= 7 ? phoneDigits : '',   /* skip placeholder phones */
+    c.city, c.state, c.county
+  ].filter(Boolean).join(' '));
+}
+
+/* Multi-token AND: all tokens (whitespace-split) must be substrings
+   of the normalized haystack. Empty / whitespace-only query matches
+   everything. */
+function otMatchesSearch(c, rawQuery) {
+  const q = otNormalize(rawQuery);
+  if (!q) return true;
+  const tokens = q.split(' ').filter(Boolean);
+  if (!tokens.length) return true;
+  const hay = otBuildHaystack(c);
+  return tokens.every(t => hay.includes(t));
 }
 
 /* Main fetch — combines two data sources:
@@ -11007,14 +11064,20 @@ async function otRun() {
   try {
     const tagged = [];
 
+    /* P0 fix (3.76+): pass p_only_lapsed=true so the RPC filters
+       server-side. Without this, the playing-first ORDER BY + 1000-row
+       PostgREST cap means lapsed candidates never reach the client. */
+    let lapsedCappedAt1000 = false;
     if (source === 'lapsed' || source === 'both') {
       const lapsed = await sb('POST', 'rpc/recruit_lapsed_players', {
         p_sl9_max: 9,
         p_county: county,
         p_last_played_days: days,
-        p_exclude_division_number: null
+        p_exclude_division_number: null,
+        p_only_lapsed: true
       });
-      let rows = (lapsed || []).filter(r => !r.currently_playing);
+      if ((lapsed || []).length >= 1000) lapsedCappedAt1000 = true;
+      let rows = (lapsed || []);   /* already filtered to not-playing server-side */
       if (fmt === '8')    rows = rows.filter(r => r.last_played_8);
       if (fmt === '9')    rows = rows.filter(r => r.last_played_9);
       if (fmt === 'both') rows = rows.filter(r => r.last_played_8 && r.last_played_9);
@@ -11084,8 +11147,12 @@ async function otRun() {
     otRenderList();
     const lapsedCount = candidates.filter(c => c._source === 'lapsed').length;
     const newCount = candidates.filter(c => c._source === 'new').length;
+    const capWarning = lapsedCappedAt1000
+      ? ' ⚠ Results capped at 1000 — tighten the date window for full coverage.'
+      : '';
     status.textContent = candidates.length + ' candidates loaded' +
-      (source === 'both' ? ' (' + lapsedCount + ' lapsed · ' + newCount + ' never-played)' : '') + '.';
+      (source === 'both' ? ' (' + lapsedCount + ' lapsed · ' + newCount + ' never-played)' : '') +
+      '.' + capWarning;
   } catch (e) {
     status.textContent = 'Failed: ' + e.message;
     console.error(e);
@@ -11122,29 +11189,29 @@ function otRenderStats() {
 function otRenderList() {
   const list = document.getElementById('otCardList');
   const f = _otState.filter;
-  const visible = _otState.candidates.filter(c => {
+  const allEligible = _otState.candidates.filter(c => {
     const isDnc = c._status.do_not_contact;
-    if (f.status === 'dnc') {
-      if (!isDnc) return false;
-    } else if (f.status === 'all') {
-      if (isDnc) return false;
-    } else {
-      if (isDnc) return false;
-      if (c._status.status !== f.status) return false;
-    }
-    if (f.search) {
-      const hay = [c.first_name, c.last_name, c.nickname, c.member_number, c.city]
-        .filter(Boolean).join(' ').toLowerCase();
-      if (!hay.includes(f.search)) return false;
-    }
-    return true;
+    if (f.status === 'dnc') return isDnc;
+    if (f.status === 'all') return !isDnc;
+    return !isDnc && c._status.status === f.status;
   });
+  const visible = allEligible.filter(c => otMatchesSearch(c, f.search));
+
+  /* Result counter for the search box — shows "showing X of Y" when
+     a search is active, plain count otherwise. Fixes B6 from validation. */
+  const searchActive = !!otNormalize(f.search);
+  const hitsLine = searchActive
+    ? `<div class="hint" style="margin-bottom:8px">${visible.length} of ${allEligible.length} match "${esc(f.search.trim())}"</div>`
+    : '';
 
   if (!visible.length) {
-    list.innerHTML = '<div class="ot-empty-msg">No candidates match this filter.</div>';
+    list.innerHTML = hitsLine +
+      '<div class="ot-empty-msg">' +
+      (searchActive ? 'No candidates match your search.' : 'No candidates match this filter.') +
+      '</div>';
     return;
   }
-  list.innerHTML = visible.map(c => otCardHtml(c)).join('');
+  list.innerHTML = hitsLine + visible.map(c => otCardHtml(c)).join('');
   list.querySelectorAll('.ot-card').forEach(otWireCard);
 }
 
