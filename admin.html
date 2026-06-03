@@ -1737,6 +1737,13 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
               <!-- Populated by otLoadCounties() on first init -->
             </select>
           </div>
+          <div class="field-mini">
+            <label for="otCity">City</label>
+            <select id="otCity" style="min-width:180px">
+              <option value="" selected>All cities</option>
+              <!-- Populated by otLoadCities() on init + on County change -->
+            </select>
+          </div>
           <div class="field-mini" id="otFormatField">
             <label for="otFormat">Format played</label>
             <select id="otFormat" style="width:130px">
@@ -1967,7 +1974,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.80';
+const APP_VERSION = '3.81';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11090,10 +11097,18 @@ async function otInit() {
     _otState.filter.search = document.getElementById('otSearch').value;
     otRenderList();
   });
-  /* One-shot fetches: county list + current session. Both populate
-     dropdowns that don't change between sessions. */
+  /* One-shot fetches: county list + city list + current session. */
   otLoadCounties().catch(e => console.error('counties load failed', e));
+  otLoadCities(null).catch(e => console.error('cities load failed', e));
   otLoadCurrentSession().catch(e => console.error('session load failed', e));
+
+  /* Cascade: when County changes, repopulate the City dropdown to show
+     only cities in that county. Preserve the city selection if the
+     newly-loaded list still contains it; reset to "All cities" if not. */
+  document.getElementById('otCounty').addEventListener('change', () => {
+    const county = document.getElementById('otCounty').value || null;
+    otLoadCities(county).catch(e => console.error('cities reload failed', e));
+  });
 }
 
 /* 3.79+: county dropdown is populated from slate.outreach_counties.
@@ -11110,6 +11125,37 @@ async function otLoadCounties() {
     opt.value = r.county;
     opt.textContent = r.county + ' (' + r.player_count + ')';
     sel.appendChild(opt);
+  }
+}
+
+/* 3.81+: cascading city dropdown — populated from slate.outreach_cities.
+   When called with a non-null county, returns only cities in that county
+   (Multnomah → Portland, Gresham, Troutdale, …). When called with null,
+   returns the full ranked list across all counties.
+
+   Preserves the user's existing city selection across cascades when
+   possible: if Multnomah → Portland is selected and they switch to
+   "All counties", Portland stays selected because it's still in the
+   full list. Switching to a county that doesn't contain Portland
+   resets to "All cities". */
+async function otLoadCities(county) {
+  const sel = document.getElementById('otCity');
+  if (!sel) return;
+  const prevSelection = sel.value;
+  const rows = await sb('POST', 'rpc/outreach_cities',
+    { p_county: county || null },
+    { 'Accept-Profile': 'slate', 'Content-Profile': 'slate' });
+  /* Rebuild options. Keep the "All cities" sentinel as option[0]. */
+  sel.innerHTML = '<option value="">All cities</option>';
+  for (const r of (rows || [])) {
+    const opt = document.createElement('option');
+    opt.value = r.city;
+    opt.textContent = r.city + ' (' + r.player_count + ')';
+    sel.appendChild(opt);
+  }
+  /* Restore prior selection if it's still in the (possibly narrower) list. */
+  if (prevSelection && [...sel.options].some(o => o.value === prevSelection)) {
+    sel.value = prevSelection;
   }
 }
 
@@ -11335,6 +11381,7 @@ async function otRun() {
   const daysMin = Math.max(0, parseInt(document.getElementById('otLastPlayedDaysMin').value, 10) || 0);
   const daysMax = Math.max(daysMin, parseInt(document.getElementById('otLastPlayedDaysMax').value, 10) || 365);
   const county = document.getElementById('otCounty').value.trim() || null;
+  const city   = (document.getElementById('otCity')?.value || '').trim() || null;
   const fmt = document.getElementById('otFormat').value;
   const activeOnly = document.getElementById('otActiveOnly').value === 'yes';
   const status = document.getElementById('otStatusLine');
@@ -11355,6 +11402,7 @@ async function otRun() {
       const lapsed = await sb('POST', 'rpc/recruit_lapsed_players', {
         p_sl9_max: 9,
         p_county: county,
+        p_city: city,
         p_last_played_days: daysMax,
         p_last_played_days_min: daysMin,
         p_exclude_division_number: null,
@@ -11370,7 +11418,8 @@ async function otRun() {
 
     if (source === 'new' || source === 'both') {
       const fresh = await sb('POST', 'rpc/outreach_new_members', {
-        p_county: county
+        p_county: county,
+        p_city: city
       });
       for (const r of (fresh || [])) tagged.push({ ...r, _source: 'new' });
     }
