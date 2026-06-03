@@ -2011,7 +2011,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.89';
+const APP_VERSION = '3.90';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11853,14 +11853,9 @@ function otRenderStats() {
   const wrap = document.getElementById('otStatsRow');
   const f = _otState.filter.status;
   const mk = (key, label) => `<span class="ot-stat s-${key} ${f===key?'active':''}" data-filter="${key}">${label}: <strong>${counts[key]}</strong></span>`;
-  /* Hide all status pills when the source is "playing" — those people
-     don't get outreach statuses (per user direction). Show just the
-     total count then. */
-  const source = document.getElementById('otSource').value;
-  if (source === 'playing') {
-    wrap.innerHTML = `<span class="ot-stat">Players: <strong>${counts.all}</strong></span>`;
-    return;
-  }
+  /* 3.90+: Playing source now also gets the full status-filter
+     breakdown — current players can still be flagged Follow up /
+     Returning for "want to play more next session". */
   /* Touch counters (3.86+) + negative variants (3.88+). Operator can
      filter by what they HAVE done AND what they HAVEN'T — "called but
      not emailed or texted," "texted but not called," etc.
@@ -12049,14 +12044,17 @@ function otCardHtml(c) {
   const last9 = c.last_played_9 || '—';
   const expanded = _otState.expanded.has(c.member_number);
 
-  /* Playing-source cards have NO status pills — those people are
-     already on a team, they're not outreach targets per user direction. */
-  const pillsHtml = (c._source === 'playing')
-    ? ''
-    : STATUSES.map(st => {
-        const active = (s.status === st) ? 'active s-' + st : '';
-        return `<button type="button" class="ot-pill ${active}" data-set-status="${st}">${esc(STATUS_LABEL[st])}</button>`;
-      }).join('');
+  /* 3.90+: status pills now also rendered on Playing source. The original
+     reasoning (they're already playing, not outreach targets) doesn't
+     cover the "I'd play another night, just not this session" case —
+     where the operator needs to mark a Follow up / Returning on a
+     currently-playing player to revisit later. Same pill set; the
+     reminder banner already picks them up since it joins on
+     outreach_status regardless of currently_playing. */
+  const pillsHtml = STATUSES.map(st => {
+    const active = (s.status === st) ? 'active s-' + st : '';
+    return `<button type="button" class="ot-pill ${active}" data-set-status="${st}">${esc(STATUS_LABEL[st])}</button>`;
+  }).join('');
 
   /* "Follow up" + "Returning" are both session-anchored deferrals.
      Show the deferred-session label inline so the operator sees what
