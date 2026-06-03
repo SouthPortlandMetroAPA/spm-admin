@@ -2008,7 +2008,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.87';
+const APP_VERSION = '3.88';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10929,6 +10929,22 @@ const OT_TAB_STYLE = `
   #tab-outreach .ot-stat.s-touch-email    { background:#dbeafe; color:#1e40af; }
   #tab-outreach .ot-stat.s-touch-text     { background:#ede9fe; color:#5b21b6; }
   #tab-outreach .ot-stat.s-touch-call     { background:#d1fae5; color:#065f46; }
+  /* Negative-touch pills (3.88+): striped or muted to distinguish from
+     positive. Same hue family but lighter + dashed border accent. */
+  #tab-outreach .ot-stat.s-touch-not {
+    background:#fff; color:var(--muted); text-decoration:line-through;
+    text-decoration-color: var(--muted); text-decoration-thickness:1px;
+  }
+  #tab-outreach .ot-stat.s-touch-not.active {
+    background:#fef2f2; color:#991b1b; border:1.5px solid #ef4444;
+    text-decoration:line-through; text-decoration-color:#991b1b;
+  }
+  #tab-outreach .ot-stat.s-touch-none {
+    background:#f3f4f6; color:var(--muted); font-weight:700;
+  }
+  #tab-outreach .ot-stat.s-touch-none.active {
+    background:#1a1a1a; color:#fff; border:1.5px solid #1a1a1a;
+  }
 
   /* Player cards */
   #tab-outreach .ot-card {
@@ -11192,7 +11208,12 @@ function otPhoneDigits(p) {
 
 const _otState = {
   candidates: [],     // raw RPC rows joined with status
-  filter: { status: 'all', search: '', touch: new Set() },   /* touch ∈ {email, text, call} */
+  filter: {
+    status: 'all',
+    search: '',
+    touch:    new Set(),   /* must HAVE done: subset of {email,text,call} */
+    touchNot: new Set()    /* must NOT have done: subset of {email,text,call} */
+  },
   expanded: new Set(),
   undoStack: []       // LIFO of { mn, name, description, prevStatus, at }; max OT_UNDO_MAX
 };
@@ -11835,18 +11856,30 @@ function otRenderStats() {
     wrap.innerHTML = `<span class="ot-stat">Players: <strong>${counts.all}</strong></span>`;
     return;
   }
-  /* Touch counters (3.86+) — how many have been emailed/texted/called
-     so far. Independent of the status filter so the operator can see
-     all-time totals at a glance. */
-  const touchCounts = { email:0, text:0, call:0 };
+  /* Touch counters (3.86+) + negative variants (3.88+). Operator can
+     filter by what they HAVE done AND what they HAVEN'T — "called but
+     not emailed or texted," "texted but not called," etc.
+     Counts respect the do-not-contact exclusion (same as status pills).
+     "None" = no email/text/call timestamps set. */
+  const touchCounts    = { email:0, text:0, call:0 };
+  const touchNotCounts = { email:0, text:0, call:0 };
+  let noneCount = 0;
   for (const c of _otState.candidates) {
     if (c._status.do_not_contact) continue;
-    if (c._status.last_emailed_at) touchCounts.email++;
-    if (c._status.last_texted_at)  touchCounts.text++;
-    if (c._status.last_called_at)  touchCounts.call++;
+    const s = c._status;
+    if (s.last_emailed_at) touchCounts.email++;   else touchNotCounts.email++;
+    if (s.last_texted_at)  touchCounts.text++;    else touchNotCounts.text++;
+    if (s.last_called_at)  touchCounts.call++;    else touchNotCounts.call++;
+    if (!s.last_emailed_at && !s.last_texted_at && !s.last_called_at) noneCount++;
   }
-  const tFilter = _otState.filter.touch || new Set();
-  const tk = (k, lbl, icon) => `<span class="ot-stat s-touch-${k} ${tFilter.has(k)?'active':''}" data-touch-filter="${k}">${icon} ${lbl}: <strong>${touchCounts[k]}</strong></span>`;
+  const tFilter    = _otState.filter.touch    || new Set();
+  const tNotFilter = _otState.filter.touchNot || new Set();
+  const tk    = (k, lbl, icon) => `<span class="ot-stat s-touch-${k} ${tFilter.has(k)?'active':''}" data-touch-filter="${k}">${icon} ${lbl}: <strong>${touchCounts[k]}</strong></span>`;
+  const tkNot = (k, lbl, icon) => `<span class="ot-stat s-touch-not s-touch-not-${k} ${tNotFilter.has(k)?'active':''}" data-touch-not-filter="${k}">${icon} Not ${lbl}: <strong>${touchNotCounts[k]}</strong></span>`;
+  /* "None" derives its active state from all three negatives being on
+     + no positives. Click toggles into/out of that combined state. */
+  const noneActive = tFilter.size === 0 && tNotFilter.size === 3;
+  const noneBtn = `<span class="ot-stat s-touch-none ${noneActive?'active':''}" data-touch-none>🚫 None: <strong>${noneCount}</strong></span>`;
 
   wrap.innerHTML =
     `<span class="ot-stat ${f==='all'?'active':''}" data-filter="all">All: <strong>${counts.all - counts.dnc}</strong></span>` +
@@ -11859,7 +11892,12 @@ function otRenderStats() {
     '<span style="width:1px;background:var(--border);margin:0 4px"></span>' +
     tk('email', 'Emailed', '📧') +
     tk('text',  'Texted',  '💬') +
-    tk('call',  'Called',  '📞');
+    tk('call',  'Called',  '📞') +
+    '<span style="width:1px;background:var(--border);margin:0 4px"></span>' +
+    tkNot('email', 'emailed', '📧') +
+    tkNot('text',  'texted',  '💬') +
+    tkNot('call',  'called',  '📞') +
+    noneBtn;
   wrap.querySelectorAll('.ot-stat[data-filter]').forEach(el => {
     el.addEventListener('click', () => {
       _otState.filter.status = el.dataset.filter;
@@ -11869,12 +11907,56 @@ function otRenderStats() {
   });
   /* Touch-filter pills: independent multi-toggle. Click to add/remove
      from the filter Set. List is AND'd across multiple touch filters
-     (e.g. "emailed AND called" only shows people you've done both). */
+     (e.g. "emailed AND called" only shows people you've done both).
+     Positive and negative pills coexist — "called AND not texted"
+     finds people you've called but never texted. */
   wrap.querySelectorAll('.ot-stat[data-touch-filter]').forEach(el => {
     el.addEventListener('click', () => {
       const k = el.dataset.touchFilter;
       const set = _otState.filter.touch;
-      if (set.has(k)) set.delete(k); else set.add(k);
+      const notSet = _otState.filter.touchNot;
+      if (set.has(k)) {
+        set.delete(k);
+      } else {
+        set.add(k);
+        /* Mutually exclusive on the same axis: turning on "Emailed"
+           clears "Not emailed" — they contradict. */
+        notSet.delete(k);
+      }
+      otRenderStats();
+      otRenderList();
+    });
+  });
+  wrap.querySelectorAll('.ot-stat[data-touch-not-filter]').forEach(el => {
+    el.addEventListener('click', () => {
+      const k = el.dataset.touchNotFilter;
+      const set = _otState.filter.touch;
+      const notSet = _otState.filter.touchNot;
+      if (notSet.has(k)) {
+        notSet.delete(k);
+      } else {
+        notSet.add(k);
+        set.delete(k);   /* contradicts positive */
+      }
+      otRenderStats();
+      otRenderList();
+    });
+  });
+  /* "None" shortcut — toggles all three negative filters together.
+     If already active → clear everything. Otherwise enable "not emailed",
+     "not texted", "not called" + clear positives. */
+  wrap.querySelectorAll('.ot-stat[data-touch-none]').forEach(el => {
+    el.addEventListener('click', () => {
+      const set = _otState.filter.touch;
+      const notSet = _otState.filter.touchNot;
+      const isNoneActive = set.size === 0 && notSet.size === 3;
+      if (isNoneActive) {
+        notSet.clear();
+      } else {
+        set.clear();
+        notSet.clear();
+        notSet.add('email'); notSet.add('text'); notSet.add('call');
+      }
       otRenderStats();
       otRenderList();
     });
@@ -11884,19 +11966,24 @@ function otRenderStats() {
 function otRenderList() {
   const list = document.getElementById('otCardList');
   const f = _otState.filter;
-  const touchSet = f.touch || new Set();
+  const touchSet    = f.touch    || new Set();
+  const touchNotSet = f.touchNot || new Set();
   const allEligible = _otState.candidates.filter(c => {
     const isDnc = c._status.do_not_contact;
     if (f.status === 'dnc') return isDnc;
     if (f.status === 'all') return !isDnc;
     return !isDnc && c._status.status === f.status;
   }).filter(c => {
-    /* Touch filter — AND across selected touches. None selected = no filter. */
-    if (!touchSet.size) return true;
+    /* Touch filters — positive Set (must have done) AND negative Set
+       (must NOT have done) all combine with AND semantics. None
+       selected = no filter. */
     const s = c._status;
     if (touchSet.has('email') && !s.last_emailed_at) return false;
     if (touchSet.has('text')  && !s.last_texted_at)  return false;
     if (touchSet.has('call')  && !s.last_called_at)  return false;
+    if (touchNotSet.has('email') && s.last_emailed_at) return false;
+    if (touchNotSet.has('text')  && s.last_texted_at)  return false;
+    if (touchNotSet.has('call')  && s.last_called_at)  return false;
     return true;
   });
   const visible = allEligible.filter(c => otMatchesSearch(c, f.search));
