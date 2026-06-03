@@ -1785,6 +1785,22 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <span id="otStatusLine" class="hint" style="align-self:center"></span>
         </div>
 
+        <!-- Skill-level multi-select (3.83+). Two independent pill rows:
+             8-ball SLs (0-7) and 9-ball SLs (0-9). 0 = unrated. None
+             selected = no filter for that format. Both rows AND together
+             when both populated. -->
+        <div id="otSlRow" style="display:flex; flex-wrap:wrap; gap:14px; margin-bottom:14px; padding:8px 12px; background:#f9fafb; border:1px solid var(--border); border-radius:8px;" title="Filter by skill level. Click pills to toggle. None selected = include all SLs.">
+          <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+            <span style="font-size:0.78rem; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.04em">SL 8-ball:</span>
+            <div id="otSl8Pills" class="ot-sl-pills" data-fmt="8"></div>
+          </div>
+          <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+            <span style="font-size:0.78rem; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.04em">SL 9-ball:</span>
+            <div id="otSl9Pills" class="ot-sl-pills" data-fmt="9"></div>
+          </div>
+          <button type="button" id="otSlClearBtn" class="hint" style="background:none; border:0; color:var(--muted); cursor:pointer; text-decoration:underline; font-size:0.78rem;">Clear all</button>
+        </div>
+
         <!-- Follow-up reminders for the CURRENT session — always visible
              when there's anything to remind about; collapsed by default
              so it doesn't dominate the layout but draws the eye when
@@ -1982,7 +1998,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.82';
+const APP_VERSION = '3.83';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10998,6 +11014,20 @@ const OT_TAB_STYLE = `
     text-align:center; color:var(--muted); padding:30px 20px; font-style:italic;
   }
 
+  /* SL pill row (3.83+) — compact 0-9 toggles, two rows (8-ball, 9-ball) */
+  #tab-outreach .ot-sl-pills { display:inline-flex; gap:4px; flex-wrap:wrap; }
+  #tab-outreach .ot-sl-pill {
+    min-width:30px; padding:4px 8px;
+    border:1px solid var(--border); border-radius:6px;
+    background:#fff; color:var(--text);
+    font-size:0.82rem; font-weight:700; cursor:pointer;
+    font-variant-numeric: tabular-nums;
+    line-height:1;
+  }
+  #tab-outreach .ot-sl-pill:hover { border-color: var(--spm-accent); color: var(--spm-accent); }
+  #tab-outreach .ot-sl-pill.active { background: var(--spm-accent); color:#fff; border-color: var(--spm-accent); }
+  #tab-outreach .ot-sl-pill.unrated { font-weight:500; opacity:0.75; }
+
   /* Follow-up reminder banner (3.80+) — distinctive but not noisy.
      Sits at the top of the Outreach canvas and lists everyone whose
      follow_up_session matches the current active session. Each entry
@@ -11116,6 +11146,41 @@ async function otInit() {
     const county = document.getElementById('otCounty').value || null;
     otLoadCities(county).catch(e => console.error('cities reload failed', e));
   });
+
+  /* Initial SL pill render. */
+  otRenderSlPills();
+  document.getElementById('otSlClearBtn').addEventListener('click', () => {
+    _otState.sl8 = new Set(); _otState.sl9 = new Set();
+    otRenderSlPills();
+  });
+}
+
+/* SL pill rendering. _otState.sl8 / _otState.sl9 are Sets of selected
+   integers. 0 means "unrated" — shown as "U" with lower visual weight. */
+function otRenderSlPills() {
+  if (!_otState.sl8) _otState.sl8 = new Set();
+  if (!_otState.sl9) _otState.sl9 = new Set();
+  function build(elId, max, selected) {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    let html = '';
+    for (let i = 0; i <= max; i++) {
+      const active = selected.has(i) ? 'active' : '';
+      const unrated = i === 0 ? 'unrated' : '';
+      const label = i === 0 ? 'U' : String(i);
+      html += '<button type="button" class="ot-sl-pill ' + active + ' ' + unrated + '" data-sl="' + i + '" title="' + (i === 0 ? 'Unrated' : 'Skill level ' + i) + '">' + label + '</button>';
+    }
+    el.innerHTML = html;
+    el.querySelectorAll('[data-sl]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const v = parseInt(btn.dataset.sl, 10);
+        if (selected.has(v)) selected.delete(v); else selected.add(v);
+        otRenderSlPills();
+      });
+    });
+  }
+  build('otSl8Pills', 7, _otState.sl8);
+  build('otSl9Pills', 9, _otState.sl9);
 }
 
 /* 3.79+: county dropdown is populated from slate.outreach_counties.
@@ -11398,6 +11463,9 @@ async function otRun() {
   const citiesEl = document.getElementById('otCity');
   const cities = citiesEl ? [...citiesEl.selectedOptions].map(o => o.value) : [];
   const minTeams = Math.max(1, parseInt(document.getElementById('otMinTeams').value, 10) || 1);
+  /* SL filters (3.83+). Empty Sets → null = no filter for that format. */
+  const sl8Arr = _otState.sl8 && _otState.sl8.size ? [..._otState.sl8] : null;
+  const sl9Arr = _otState.sl9 && _otState.sl9.size ? [..._otState.sl9] : null;
   const fmt = document.getElementById('otFormat').value;
   const activeOnly = document.getElementById('otActiveOnly').value === 'yes';
   const status = document.getElementById('otStatusLine');
@@ -11424,7 +11492,9 @@ async function otRun() {
         p_last_played_days: daysMax,
         p_last_played_days_min: daysMin,
         p_exclude_division_number: null,
-        p_only_lapsed: true
+        p_only_lapsed: true,
+        p_sl_8ball_in: sl8Arr,
+        p_sl_9ball_in: sl9Arr
       });
       if ((lapsed || []).length >= 1000) lapsedCappedAt1000 = true;
       let rows = (lapsed || []);   /* already filtered to not-playing server-side */
@@ -11437,7 +11507,9 @@ async function otRun() {
     if (source === 'new' || source === 'both') {
       const fresh = await sb('POST', 'rpc/outreach_new_members', {
         p_county: county,
-        p_cities: cities.length ? cities : null
+        p_cities: cities.length ? cities : null,
+        p_sl_8ball_in: sl8Arr,
+        p_sl_9ball_in: sl9Arr
       });
       for (const r of (fresh || [])) tagged.push({ ...r, _source: 'new' });
     }
@@ -11446,7 +11518,9 @@ async function otRun() {
       const playing = await sb('POST', 'rpc/outreach_currently_playing', {
         p_county: county,
         p_cities: cities.length ? cities : null,
-        p_min_teams: minTeams
+        p_min_teams: minTeams,
+        p_sl_8ball_in: sl8Arr,
+        p_sl_9ball_in: sl9Arr
       });
       if ((playing || []).length >= 1000) lapsedCappedAt1000 = true;
       for (const r of (playing || [])) tagged.push({ ...r, _source: 'playing' });
