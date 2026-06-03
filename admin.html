@@ -1745,6 +1745,19 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
               <option value="no">No</option>
             </select>
           </div>
+          <div class="field-mini">
+            <label for="otJoinedWithin">Joined within (days, blank = all)</label>
+            <input type="number" id="otJoinedWithin" min="0" max="36500" placeholder="(any)" style="width:130px">
+          </div>
+          <div class="field-mini">
+            <label for="otSort">Sort by</label>
+            <select id="otSort" style="width:200px">
+              <option value="joined_desc" selected>Joined date — newest first</option>
+              <option value="joined_asc">Joined date — oldest first</option>
+              <option value="last_played_desc">Last played — most recent first</option>
+              <option value="name_asc">Name — A → Z</option>
+            </select>
+          </div>
           <button class="btn btn-primary" id="otRunBtn">🔄 Refresh list</button>
           <span id="otStatusLine" class="hint" style="align-self:center"></span>
         </div>
@@ -1940,7 +1953,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.76';
+const APP_VERSION = '3.77';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10877,12 +10890,14 @@ const OT_TAB_STYLE = `
     display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; font-size:0.85rem;
   }
   #tab-outreach .ot-contact a,
-  #tab-outreach .ot-contact .ot-noemail {
+  #tab-outreach .ot-contact .ot-phone-btn {
     padding:4px 10px; border-radius:6px; background:#f3f4f6; color:var(--text);
-    text-decoration:none; font-weight:600;
+    text-decoration:none; font-weight:600; border:0; cursor:pointer;
+    font-size:0.85rem; font-family:inherit;
   }
-  #tab-outreach .ot-contact a:hover { background:#e5e7eb; }
-  #tab-outreach .ot-contact .ot-noemail { color:var(--muted); font-weight:500; }
+  #tab-outreach .ot-contact a:hover,
+  #tab-outreach .ot-contact .ot-phone-btn:hover { background:#e5e7eb; }
+  #tab-outreach .ot-contact .ot-phone-btn:active { background:#d5d8dc; }
 
   /* Status pill row */
   #tab-outreach .ot-status-row {
@@ -10961,14 +10976,50 @@ const OT_TAB_STYLE = `
   document.head.appendChild(s);
 })();
 
-const STATUSES = ['new','working','follow_up','joined','not_interested'];
+/* 3.77+: "joined" removed — by definition the outreach list contains
+   people who HAVEN'T joined. If they join, they drop off the candidate
+   list automatically (RPC filters currently_playing=true). DB constraint
+   still allows 'joined' for backward compat; never produced by the UI. */
+const STATUSES = ['new','working','follow_up','not_interested'];
 const STATUS_LABEL = {
   new: 'New',
   working: 'Working',
   follow_up: 'Follow up',
-  joined: 'Joined',
   not_interested: 'Not interested'
 };
+
+/* Parse MM/DD/YY → epoch ms for sorting. Standard Y2K pivot: YY 00-69
+   → 20YY, YY 70-99 → 19YY. Caught in 3.77 validation — APA data has
+   BOTH centuries (members who joined in 1999 + 2026 alike) and the
+   v0.1 "always 21st century" assumption put 1999 joiners at the TOP
+   of joined-desc sort. Returns 0 for unparseable so it sorts last
+   on desc / first on asc — caller can choose. */
+function otParseDate(s) {
+  if (!s) return 0;
+  const m = String(s).match(/^(\d{1,2})\/(\d{1,2})\/(\d{2})$/);
+  if (!m) return 0;
+  const yy = parseInt(m[3], 10);
+  const year = yy < 70 ? 2000 + yy : 1900 + yy;
+  return new Date(year, parseInt(m[1],10)-1, parseInt(m[2],10)).getTime();
+}
+function otFmtDateShort(s) {
+  /* Convert MM/DD/YY → "MMM YY 'YY" or compact display */
+  const t = otParseDate(s);
+  if (!t) return s || '—';
+  const d = new Date(t);
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+/* "Real phone" = not blank, not the empty-template "(___) ___-____" the
+   APA export uses. We strip non-digits and require ≥7 to count as real. */
+function otIsRealPhone(p) {
+  if (!p) return false;
+  const digits = String(p).replace(/\D+/g, '');
+  return digits.length >= 7;
+}
+function otPhoneDigits(p) {
+  return String(p || '').replace(/\D+/g, '');
+}
 
 const _otState = {
   candidates: [],     // raw RPC rows joined with status
@@ -11107,16 +11158,38 @@ async function otRun() {
         byMember.set(r.member_number, r);
       }
     }
-    const deduped = [...byMember.values()];
+    let deduped = [...byMember.values()];
 
-    /* Sort: never-played at bottom by default (lapsed first — they're warmer
-       leads, having played at some point). Then by last_any descending. */
-    deduped.sort((a, b) => {
-      if (a._source !== b._source) return a._source === 'lapsed' ? -1 : 1;
-      const da = a.last_any || '1900-01-01';
-      const db = b.last_any || '1900-01-01';
-      return db.localeCompare(da);
-    });
+    /* Joined-within filter (client-side; RPC doesn't support a date_started
+       window yet). Blank = no filter. Per user direction in v0.3. */
+    const joinedWithinRaw = document.getElementById('otJoinedWithin').value;
+    const joinedWithinDays = joinedWithinRaw === '' ? null : (parseInt(joinedWithinRaw, 10) || null);
+    if (joinedWithinDays != null && joinedWithinDays > 0) {
+      const cutoffMs = Date.now() - joinedWithinDays * 86400000;
+      deduped = deduped.filter(r => {
+        const t = otParseDate(r.date_started);
+        return t && t >= cutoffMs;
+      });
+    }
+
+    /* Sort per user-selected order. Default: joined date descending
+       (newest joiners first — most likely-to-convert outreach). */
+    const sort = document.getElementById('otSort').value;
+    const cmpJoinedDesc = (a, b) => otParseDate(b.date_started) - otParseDate(a.date_started);
+    const cmpJoinedAsc  = (a, b) => otParseDate(a.date_started) - otParseDate(b.date_started);
+    const cmpLastPlayed = (a, b) => {
+      const aa = a.last_any || '1900-01-01';
+      const bb = b.last_any || '1900-01-01';
+      return bb.localeCompare(aa);
+    };
+    const cmpName = (a, b) =>
+      String(a.last_name||'').localeCompare(b.last_name||'') ||
+      String(a.first_name||'').localeCompare(b.first_name||'');
+    const sortFn = sort === 'joined_asc'      ? cmpJoinedAsc
+                : sort === 'last_played_desc' ? cmpLastPlayed
+                : sort === 'name_asc'         ? cmpName
+                : /* default */                 cmpJoinedDesc;
+    deduped.sort(sortFn);
 
     /* Join with outreach_status — one batch query */
     const memberNumbers = deduped.map(r => r.member_number);
@@ -11215,6 +11288,35 @@ function otRenderList() {
   list.querySelectorAll('.ot-card').forEach(otWireCard);
 }
 
+/* Render every real phone on a candidate as a clickable pill.
+   • Skips blank phones AND the APA template "(___) ___-____" (per user
+     direction: blank phones should not display at all).
+   • Dedupes identical numbers across cell/home/work/alt (common in the
+     data — cell and home often the same).
+   • Clicking opens a small popover menu: Call / Text / Copy.
+     (Phone label e.g. "Cell" shown inline.) */
+function otRenderPhones(c) {
+  const phones = [
+    { label: 'Cell', raw: c.cell_phone },
+    { label: 'Home', raw: c.home_phone },
+    { label: 'Work', raw: c.work_phone },
+    { label: 'Alt',  raw: c.alt_phone }
+  ].filter(p => otIsRealPhone(p.raw));
+  if (!phones.length) return '';
+  /* Dedupe by digits */
+  const seen = new Set();
+  const unique = [];
+  for (const p of phones) {
+    const d = otPhoneDigits(p.raw);
+    if (seen.has(d)) continue;
+    seen.add(d);
+    unique.push(p);
+  }
+  return unique.map(p =>
+    `<button type="button" class="ot-phone-btn" data-phone-raw="${esc(p.raw)}" data-phone-digits="${esc(otPhoneDigits(p.raw))}" data-phone-label="${esc(p.label)}" data-mn="${esc(c.member_number)}">📞 ${esc(p.label)}: ${esc(p.raw)}</button>`
+  ).join('');
+}
+
 function otCardHtml(c) {
   const s = c._status;
   const fullName = (c.first_name && c.last_name)
@@ -11241,6 +11343,9 @@ function otCardHtml(c) {
     ? '<span style="margin-left:6px; padding:1px 8px; background:#fef3c7; color:#92400e; border-radius:999px; font-size:0.7rem; font-weight:700; text-transform:uppercase; letter-spacing:0.04em">Never played</span>'
     : '';
 
+  const joinedLine = c.date_started
+    ? '<div class="ot-meta">Joined: <b>' + esc(otFmtDateShort(c.date_started)) + '</b></div>'
+    : '';
   const lastPlayedLine = c._source === 'new'
     ? '<div class="ot-meta">No play history — cold-outreach candidate.</div>'
     : '<div class="ot-meta">Last 8-ball: <b>' + esc(last8) + '</b> · Last 9-ball: <b>' + esc(last9) + '</b></div>';
@@ -11255,12 +11360,13 @@ function otCardHtml(c) {
             ${c.city ? ' · ' + esc(c.city) : ''}
             ${c.member_status ? ' · status: <b>' + esc(c.member_status) + '</b>' : ''}
           </div>
+          ${joinedLine}
           ${lastPlayedLine}
         </div>
       </div>
       <div class="ot-contact">
-        ${c.email ? `<a href="mailto:${esc(c.email)}">✉️ ${esc(c.email)}</a>` : '<span class="ot-noemail">no email</span>'}
-        ${c.cell_phone ? `<a href="tel:${esc(c.cell_phone)}">📞 ${esc(c.cell_phone)}</a>` : '<span class="ot-noemail">no phone</span>'}
+        ${c.email ? `<a href="mailto:${esc(c.email)}">✉️ ${esc(c.email)}</a>` : ''}
+        ${otRenderPhones(c)}
       </div>
       ${followUpHtml}
       ${lastNote}
@@ -11294,6 +11400,13 @@ function otWireCard(cardEl) {
   cardEl.querySelectorAll('[data-set-status]').forEach(btn => {
     btn.addEventListener('click', () => otSetStatus(mn, btn.dataset.setStatus));
   });
+  /* Phone pill clicks → popover menu (Call / Text / Copy / Log) */
+  cardEl.querySelectorAll('.ot-phone-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      otOpenPhoneMenu(btn);
+    });
+  });
   /* Expand toggle */
   const tog = cardEl.querySelector('[data-toggle-expand]');
   if (tog) tog.addEventListener('click', () => {
@@ -11317,6 +11430,85 @@ function otWireCard(cardEl) {
   if (fuBtn) fuBtn.addEventListener('click', () => otEditFollowUp(mn));
   /* Auto-load log if expanded */
   if (_otState.expanded.has(mn)) otFetchLog(mn);
+}
+
+/* Phone action popover (3.77+).
+   Anchored to the clicked .ot-phone-btn. Options:
+     • Call    — tel: link, also logs as 'call'
+     • Text    — sms: link, also logs as 'text'
+     • Copy    — copies the raw number to clipboard
+   Clicking outside or pressing Escape closes.
+   The auto-log on call/text means the user doesn't have to type a
+   note every time — just clicking through the action records that
+   it happened.  They can still add a free-text note via the regular
+   note row. */
+let _otPhoneMenuEl = null;
+function otClosePhoneMenu() {
+  if (_otPhoneMenuEl) {
+    _otPhoneMenuEl.remove();
+    _otPhoneMenuEl = null;
+    document.removeEventListener('click', _otPhoneMenuOutside, true);
+    document.removeEventListener('keydown', _otPhoneMenuKey, true);
+  }
+}
+function _otPhoneMenuOutside(e) {
+  if (_otPhoneMenuEl && !_otPhoneMenuEl.contains(e.target)) otClosePhoneMenu();
+}
+function _otPhoneMenuKey(e) {
+  if (e.key === 'Escape') otClosePhoneMenu();
+}
+function otOpenPhoneMenu(btn) {
+  otClosePhoneMenu();
+  const raw = btn.dataset.phoneRaw;
+  const digits = btn.dataset.phoneDigits;
+  const label = btn.dataset.phoneLabel;
+  const mn = btn.dataset.mn;
+
+  const menu = document.createElement('div');
+  menu.style.cssText = 'position:absolute; background:#fff; border:1px solid var(--border); border-radius:10px; box-shadow:0 4px 16px rgba(0,0,0,0.16); z-index:1000; padding:6px; min-width:200px; font-size:0.88rem;';
+  menu.innerHTML =
+    '<div style="padding:6px 10px 8px; color:var(--muted); font-size:0.74rem; font-weight:700; border-bottom:1px solid #f3f4f6; margin-bottom:4px;">' + esc(label) + ': ' + esc(raw) + '</div>' +
+    '<a href="tel:' + esc(digits) + '" data-act="call" style="display:block; padding:10px 12px; text-decoration:none; color:var(--text); font-weight:600; border-radius:6px;">📞 Call</a>' +
+    '<a href="sms:' + esc(digits) + '" data-act="text" style="display:block; padding:10px 12px; text-decoration:none; color:var(--text); font-weight:600; border-radius:6px;">💬 Text</a>' +
+    '<button type="button" data-act="copy" style="display:block; width:100%; text-align:left; padding:10px 12px; background:none; border:0; cursor:pointer; color:var(--text); font-weight:600; border-radius:6px; font-size:0.88rem;">📋 Copy number</button>';
+  /* Position menu just below the button */
+  const rect = btn.getBoundingClientRect();
+  menu.style.left = (window.scrollX + rect.left) + 'px';
+  menu.style.top  = (window.scrollY + rect.bottom + 4) + 'px';
+  document.body.appendChild(menu);
+  _otPhoneMenuEl = menu;
+
+  /* Hover highlight */
+  menu.querySelectorAll('a, button').forEach(el => {
+    el.addEventListener('mouseenter', () => el.style.background = '#f3f4f6');
+    el.addEventListener('mouseleave', () => el.style.background = '');
+  });
+
+  /* Wire actions — auto-log call/text, copy → clipboard */
+  menu.querySelector('[data-act="call"]').addEventListener('click', async () => {
+    await otAppendLog(mn, 'call', label + ': ' + raw);
+    await otUpsertStatus(mn, { last_touched_at: new Date().toISOString() });
+    /* don't close immediately — let the tel: link navigate */
+    setTimeout(otClosePhoneMenu, 100);
+  });
+  menu.querySelector('[data-act="text"]').addEventListener('click', async () => {
+    await otAppendLog(mn, 'text', label + ': ' + raw);
+    await otUpsertStatus(mn, { last_touched_at: new Date().toISOString() });
+    setTimeout(otClosePhoneMenu, 100);
+  });
+  menu.querySelector('[data-act="copy"]').addEventListener('click', async (e) => {
+    e.preventDefault();
+    try { await navigator.clipboard.writeText(raw); }
+    catch (_) {}
+    otClosePhoneMenu();
+  });
+
+  /* Outside-click + Escape to dismiss; capture-phase listener so
+     we win over any sibling stopPropagation. */
+  setTimeout(() => {
+    document.addEventListener('click',   _otPhoneMenuOutside, true);
+    document.addEventListener('keydown', _otPhoneMenuKey,     true);
+  }, 0);
 }
 
 async function otSetStatus(memberNumber, status) {
