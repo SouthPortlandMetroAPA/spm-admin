@@ -1723,8 +1723,13 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             </select>
           </div>
           <div class="field-mini" id="otMinTeamsField" style="display:none">
-            <label for="otMinTeams">On at least (teams)</label>
-            <input type="number" id="otMinTeams" min="1" max="20" value="1" style="width:80px">
+            <label>Team count (min–max)</label>
+            <div style="display:flex; align-items:center; gap:6px">
+              <input type="number" id="otMinTeams" min="1" max="20" value="1" placeholder="min" style="width:65px">
+              <span class="hint" style="color:var(--muted)">to</span>
+              <input type="number" id="otMaxTeams" min="1" max="20" placeholder="any" style="width:65px"
+                     title="Leave blank for no upper bound. Set to 1 to find players on EXACTLY one team — prime candidates to recruit for another.">
+            </div>
           </div>
           <div class="field-mini" id="otLastPlayedField" title="Date range for the most recent play of 8- or 9-ball. Both bounds inclusive. Bigger 'to' = more lapsed candidates; bigger 'from' = excludes anyone who played too recently.">
             <label>Last played — range (days ago)</label>
@@ -1998,7 +2003,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.83';
+const APP_VERSION = '3.84';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11014,6 +11019,45 @@ const OT_TAB_STYLE = `
     text-align:center; color:var(--muted); padding:30px 20px; font-style:italic;
   }
 
+  /* Quick-touch buttons (3.84+) — log "I emailed/texted/called today"
+     in one click. Lighter-weight than the popover. */
+  #tab-outreach .ot-qt-btn {
+    padding:5px 10px; font-size:0.78rem; font-weight:700;
+    border-radius:6px; border:1px solid var(--border); background:#fff;
+    color:var(--text); cursor:pointer; font-family:inherit;
+  }
+  #tab-outreach .ot-qt-btn:hover { border-color: var(--spm-accent); color: var(--spm-accent); }
+  #tab-outreach .ot-qt-btn:active { background: var(--spm-accent); color:#fff; }
+  #tab-outreach .ot-qt-btn.just-logged {
+    background:#d1fae5; border-color:#065f46; color:#065f46;
+  }
+
+  /* Preferences section (3.84+) — shown when a card is expanded.
+     Captures the player's stated preferences so future outreach can
+     match them with the right divisions / sessions. */
+  #tab-outreach .ot-prefs {
+    margin-top:10px; padding:10px 12px; background:#fafafa;
+    border:1px solid var(--border); border-radius:8px;
+  }
+  #tab-outreach .ot-prefs-title {
+    font-size:0.76rem; font-weight:700; color:var(--muted);
+    text-transform:uppercase; letter-spacing:0.04em; margin-bottom:8px;
+  }
+  #tab-outreach .ot-prefs-row {
+    display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px;
+  }
+  #tab-outreach .ot-prefs-row > .ot-prefs-label {
+    font-size:0.78rem; font-weight:600; color:var(--text); min-width:90px;
+  }
+  #tab-outreach .ot-pref-pill {
+    min-width:30px; padding:5px 10px; border-radius:6px;
+    border:1px solid var(--border); background:#fff; color:var(--text);
+    font-size:0.78rem; font-weight:700; cursor:pointer;
+    font-variant-numeric:tabular-nums; font-family:inherit;
+  }
+  #tab-outreach .ot-pref-pill:hover { border-color: var(--spm-accent); color: var(--spm-accent); }
+  #tab-outreach .ot-pref-pill.active { background: var(--spm-accent); color:#fff; border-color: var(--spm-accent); }
+
   /* SL pill row (3.83+) — compact 0-9 toggles, two rows (8-ball, 9-ball) */
   #tab-outreach .ot-sl-pills { display:inline-flex; gap:4px; flex-wrap:wrap; }
   #tab-outreach .ot-sl-pill {
@@ -11216,7 +11260,7 @@ async function otLoadCities(county) {
   /* Preserve the prior set of selections (multi-select). */
   const prevSelections = new Set([...sel.selectedOptions].map(o => o.value));
   const rows = await sb('POST', 'rpc/outreach_cities',
-    { p_county: county || null },
+    { p_counties: county ? [county] : null },
     { 'Accept-Profile': 'slate', 'Content-Profile': 'slate' });
   /* Rebuild options. No sentinel — empty multi-select selection means
      "all cities" by convention (see otRun). */
@@ -11463,6 +11507,9 @@ async function otRun() {
   const citiesEl = document.getElementById('otCity');
   const cities = citiesEl ? [...citiesEl.selectedOptions].map(o => o.value) : [];
   const minTeams = Math.max(1, parseInt(document.getElementById('otMinTeams').value, 10) || 1);
+  /* Max teams = NULL when blank (no upper bound). */
+  const maxTeamsRaw = document.getElementById('otMaxTeams').value;
+  const maxTeams = maxTeamsRaw === '' ? null : Math.max(minTeams, parseInt(maxTeamsRaw, 10) || minTeams);
   /* SL filters (3.83+). Empty Sets → null = no filter for that format. */
   const sl8Arr = _otState.sl8 && _otState.sl8.size ? [..._otState.sl8] : null;
   const sl9Arr = _otState.sl9 && _otState.sl9.size ? [..._otState.sl9] : null;
@@ -11519,6 +11566,7 @@ async function otRun() {
         p_county: county,
         p_cities: cities.length ? cities : null,
         p_min_teams: minTeams,
+        p_max_teams: maxTeams,
         p_sl_8ball_in: sl8Arr,
         p_sl_9ball_in: sl9Arr
       });
@@ -11751,11 +11799,18 @@ function otCardHtml(c) {
   const joinedLine = c.date_started
     ? '<div class="ot-meta">Joined: <b>' + esc(otFmtDateShort(c.date_started)) + '</b></div>'
     : '';
-  const lastPlayedLine = c._source === 'new'
-    ? '<div class="ot-meta">No play history — cold-outreach candidate.</div>'
-    : (c._source === 'playing'
-        ? '<div class="ot-meta">Currently playing in <b>' + (c.current_session_team_count || 1) + '</b> team' + ((c.current_session_team_count || 1) === 1 ? '' : 's') + ' this session.</div>'
-        : '<div class="ot-meta">Last 8-ball: <b>' + esc(last8) + '</b> · Last 9-ball: <b>' + esc(last9) + '</b></div>');
+  let lastPlayedLine = '';
+  if (c._source === 'new') {
+    lastPlayedLine = '<div class="ot-meta">No play history — cold-outreach candidate.</div>';
+  } else if (c._source === 'playing') {
+    const n = c.current_session_team_count || 1;
+    const days = Array.isArray(c.playing_days) && c.playing_days.length
+      ? ' · plays <b>' + c.playing_days.map(d => esc(d)).join(', ') + '</b>'
+      : '';
+    lastPlayedLine = '<div class="ot-meta">Currently in <b>' + n + '</b> team' + (n === 1 ? '' : 's') + ' this session' + days + '.</div>';
+  } else {
+    lastPlayedLine = '<div class="ot-meta">Last 8-ball: <b>' + esc(last8) + '</b> · Last 9-ball: <b>' + esc(last9) + '</b></div>';
+  }
 
   return `
     <div class="ot-card ${s.do_not_contact ? 'dnc' : ''} ${expanded ? 'expanded' : ''}" data-mn="${esc(c.member_number)}">
@@ -11776,6 +11831,14 @@ function otCardHtml(c) {
         ${c.email ? `<a href="mailto:${esc(c.email)}">✉️ ${esc(c.email)}</a>` : ''}
         ${otRenderPhones(c)}
       </div>
+      <!-- Quick-touch buttons: log a call/text/email + bump last_touched_at.
+           Lighter-weight than the popover; just records "I did this today." -->
+      <div class="ot-quicktouch" style="display:flex; gap:6px; margin-top:8px; flex-wrap:wrap;">
+        <button type="button" class="ot-qt-btn" data-touch="email"  title="Log: I emailed them today">📧 Emailed</button>
+        <button type="button" class="ot-qt-btn" data-touch="text"   title="Log: I texted them today">💬 Texted</button>
+        <button type="button" class="ot-qt-btn" data-touch="call"   title="Log: I called them today">📞 Called</button>
+        ${s.last_touched_at ? '<span class="hint" style="align-self:center; font-size:0.74rem">Last touched ' + esc(otFmtDate(s.last_touched_at)) + '</span>' : ''}
+      </div>
       ${followUpHtml}
       ${lastNote}
       <div class="ot-status-row">${pillsHtml}</div>
@@ -11794,12 +11857,139 @@ function otCardHtml(c) {
           <button type="button" class="btn btn-primary btn-sm" data-note-save>Save</button>
         </div>
         <div class="ot-log" data-log></div>
+        <!-- Player preferences (3.84+). Captures what they told you they
+             want — used for matching with future divisions / sessions. -->
+        ${otPrefsHtml(c)}
         <div class="ot-more-row">
           <span class="hint">More:</span>
           <span class="ot-dnc-toggle" data-toggle-dnc>${s.do_not_contact ? '✓ Marked DO NOT CONTACT — click to undo' : '🚫 Mark as DO NOT CONTACT'}</span>
         </div>
       </div>
     </div>`;
+}
+
+/* Player preferences (3.84+) — inline pill UI captured under the
+   note row of the expanded card. Days are 0-6 (Sun..Sat). Formats
+   are { dj, doubles, masters, ladies }. Cities are restricted at the
+   UI layer to Washington + Clackamas counties per user direction.
+   Days-per-week is a 1-7 pill row. Cities dropdown is multi-select. */
+const OT_DAY_LABELS  = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const OT_FORMAT_KEYS = [
+  { key: 'dj',      label: 'DJ' },
+  { key: 'doubles', label: 'Doubles' },
+  { key: 'masters', label: 'Masters' },
+  { key: 'ladies',  label: 'Ladies' }
+];
+/* Cache of Wash+Clack city list. Populated lazily on first render. */
+let _otPrefsCityList = null;
+async function otEnsurePrefsCityList() {
+  if (_otPrefsCityList) return _otPrefsCityList;
+  const rows = await sb('POST', 'rpc/outreach_cities',
+    { p_counties: ['Washington County', 'Clackamas County'] },
+    { 'Accept-Profile': 'slate', 'Content-Profile': 'slate' });
+  _otPrefsCityList = (rows || []).map(r => r.city);
+  return _otPrefsCityList;
+}
+function otPrefsHtml(c) {
+  const s = c._status || {};
+  const days = new Set(s.pref_days || []);
+  const dpw  = s.pref_days_per_week || 0;
+  const fmts = new Set(s.pref_formats || []);
+  const cities = new Set(s.pref_cities || []);
+  const dayPills = OT_DAY_LABELS.map((lbl, i) =>
+    `<button type="button" class="ot-pref-pill ${days.has(i)?'active':''}" data-pref-day="${i}">${lbl}</button>`).join('');
+  const dpwPills = [1,2,3,4,5,6,7].map(n =>
+    `<button type="button" class="ot-pref-pill ${dpw===n?'active':''}" data-pref-dpw="${n}">${n}</button>`).join('');
+  const fmtPills = OT_FORMAT_KEYS.map(f =>
+    `<button type="button" class="ot-pref-pill ${fmts.has(f.key)?'active':''}" data-pref-fmt="${f.key}">${f.label}</button>`).join('');
+  /* Cities dropdown placeholder — populated lazily on expand (next func) */
+  const citiesHint = cities.size ? [...cities].join(', ') : '(none picked)';
+  return `
+    <div class="ot-prefs">
+      <div class="ot-prefs-title">Player preferences</div>
+      <div class="ot-prefs-row">
+        <span class="ot-prefs-label">Wants to play:</span>
+        ${dayPills}
+      </div>
+      <div class="ot-prefs-row">
+        <span class="ot-prefs-label">Days / week:</span>
+        ${dpwPills}
+      </div>
+      <div class="ot-prefs-row">
+        <span class="ot-prefs-label">Formats:</span>
+        ${fmtPills}
+      </div>
+      <div class="ot-prefs-row">
+        <span class="ot-prefs-label">Areas:</span>
+        <select multiple size="3" data-pref-cities style="min-width:200px; padding:4px 6px; max-height:90px">
+          <option disabled>loading…</option>
+        </select>
+        <span class="hint" style="font-size:0.72rem">Wash + Clack only · Ctrl-click to multi-select</span>
+      </div>
+      <div style="display:flex; gap:8px; margin-top:6px;">
+        <button type="button" class="btn btn-primary btn-sm" data-pref-save>Save preferences</button>
+        <span class="hint" data-pref-feedback style="align-self:center;font-size:0.74rem"></span>
+      </div>
+    </div>`;
+}
+
+async function otPopulatePrefsCities(cardEl, c) {
+  const sel = cardEl.querySelector('[data-pref-cities]');
+  if (!sel) return;
+  const list = await otEnsurePrefsCityList();
+  const selected = new Set((c._status && c._status.pref_cities) || []);
+  sel.innerHTML = list.map(city =>
+    `<option value="${esc(city)}" ${selected.has(city)?'selected':''}>${esc(city)}</option>`).join('');
+}
+
+async function otSavePrefs(memberNumber) {
+  const cardEl = document.querySelector(`.ot-card[data-mn="${memberNumber}"]`);
+  if (!cardEl) return;
+  const c = _otState.candidates.find(x => x.member_number === memberNumber);
+  if (!c) return;
+  const days = [...cardEl.querySelectorAll('[data-pref-day].active')].map(b => parseInt(b.dataset.prefDay,10));
+  const dpwBtn = cardEl.querySelector('[data-pref-dpw].active');
+  const dpw = dpwBtn ? parseInt(dpwBtn.dataset.prefDpw, 10) : null;
+  const fmts = [...cardEl.querySelectorAll('[data-pref-fmt].active')].map(b => b.dataset.prefFmt);
+  const cities = [...cardEl.querySelectorAll('[data-pref-cities] option:checked')].map(o => o.value);
+  await otUpsertStatus(memberNumber, {
+    pref_days: days.length ? days : null,
+    pref_days_per_week: dpw,
+    pref_formats: fmts.length ? fmts : null,
+    pref_cities: cities.length ? cities : null,
+    last_touched_at: new Date().toISOString()
+  });
+  await otAppendLog(memberNumber, 'note',
+    'Preferences updated: ' +
+    (days.length ? days.map(d=>OT_DAY_LABELS[d]).join(',') : '—') + ' / ' +
+    (dpw ? dpw + 'x' : '—') + ' / ' +
+    (fmts.length ? fmts.join(',') : '—') + ' / ' +
+    (cities.length ? cities.join(',') : '—'));
+  c._status = { ...c._status,
+    pref_days: days.length ? days : null,
+    pref_days_per_week: dpw,
+    pref_formats: fmts.length ? fmts : null,
+    pref_cities: cities.length ? cities : null
+  };
+  const fb = cardEl.querySelector('[data-pref-feedback]');
+  if (fb) { fb.textContent = '✓ Saved'; setTimeout(() => { fb.textContent = ''; }, 1800); }
+}
+
+/* Quick-touch action (3.84+) — one-click logging of email/text/call with
+   today's stamp. Bumps last_touched_at, appends to outreach_log, gives
+   visual feedback. */
+async function otQuickTouch(memberNumber, kind, btn) {
+  const c = _otState.candidates.find(x => x.member_number === memberNumber);
+  if (!c) return;
+  await otAppendLog(memberNumber, kind, kind.charAt(0).toUpperCase() + kind.slice(1) + 'ed (quick-log)');
+  await otUpsertStatus(memberNumber, { last_touched_at: new Date().toISOString() });
+  c._status = { ...c._status, last_touched_at: new Date().toISOString() };
+  if (btn) {
+    btn.classList.add('just-logged');
+    const orig = btn.textContent;
+    btn.textContent = '✓ Logged';
+    setTimeout(() => { btn.classList.remove('just-logged'); btn.textContent = orig; }, 1500);
+  }
 }
 
 function otWireCard(cardEl) {
@@ -11815,6 +12005,23 @@ function otWireCard(cardEl) {
       otOpenPhoneMenu(btn);
     });
   });
+  /* Quick-touch buttons */
+  cardEl.querySelectorAll('[data-touch]').forEach(btn => {
+    btn.addEventListener('click', () => otQuickTouch(mn, btn.dataset.touch, btn));
+  });
+  /* Preferences pill toggles + save */
+  cardEl.querySelectorAll('[data-pref-day], [data-pref-fmt]').forEach(btn => {
+    btn.addEventListener('click', () => btn.classList.toggle('active'));
+  });
+  cardEl.querySelectorAll('[data-pref-dpw]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const wasActive = btn.classList.contains('active');
+      cardEl.querySelectorAll('[data-pref-dpw]').forEach(b => b.classList.remove('active'));
+      if (!wasActive) btn.classList.add('active');
+    });
+  });
+  const prefSave = cardEl.querySelector('[data-pref-save]');
+  if (prefSave) prefSave.addEventListener('click', () => otSavePrefs(mn));
   /* Expand toggle */
   const tog = cardEl.querySelector('[data-toggle-expand]');
   if (tog) tog.addEventListener('click', () => {
@@ -11836,8 +12043,12 @@ function otWireCard(cardEl) {
   /* Follow-up session edit */
   const fuBtn = cardEl.querySelector('[data-edit-follow-up]');
   if (fuBtn) fuBtn.addEventListener('click', () => otEditFollowUp(mn));
-  /* Auto-load log if expanded */
-  if (_otState.expanded.has(mn)) otFetchLog(mn);
+  /* Auto-load log if expanded — also populate the prefs city dropdown */
+  if (_otState.expanded.has(mn)) {
+    otFetchLog(mn);
+    const c = _otState.candidates.find(x => x.member_number === mn);
+    if (c) otPopulatePrefsCities(cardEl, c).catch(e => console.error('prefs cities load failed', e));
+  }
 }
 
 /* Phone action popover (3.77+).
