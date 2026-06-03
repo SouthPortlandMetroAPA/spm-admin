@@ -1731,8 +1731,11 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             </div>
           </div>
           <div class="field-mini">
-            <label for="otCounty">County (optional)</label>
-            <input type="text" id="otCounty" placeholder="Multnomah" style="width:160px">
+            <label for="otCounty">County</label>
+            <select id="otCounty" style="min-width:200px">
+              <option value="" selected>All counties</option>
+              <!-- Populated by otLoadCounties() on first init -->
+            </select>
           </div>
           <div class="field-mini" id="otFormatField">
             <label for="otFormat">Format played</label>
@@ -1958,7 +1961,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.78';
+const APP_VERSION = '3.79';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11043,6 +11046,59 @@ async function otInit() {
     _otState.filter.search = document.getElementById('otSearch').value;
     otRenderList();
   });
+  /* One-shot fetches: county list + current session. Both populate
+     dropdowns that don't change between sessions. */
+  otLoadCounties().catch(e => console.error('counties load failed', e));
+  otLoadCurrentSession().catch(e => console.error('session load failed', e));
+}
+
+/* 3.79+: county dropdown is populated from slate.outreach_counties.
+   Previously this was a free-text input; the RPC's `pa.county = p_county`
+   exact-match always failed because the DB stores "Multnomah County"
+   (with the " County" suffix) but users typed bare names. */
+async function otLoadCounties() {
+  const rows = await sb('POST', 'rpc/outreach_counties', {}, { 'Accept-Profile': 'slate', 'Content-Profile': 'slate' });
+  const sel = document.getElementById('otCounty');
+  if (!sel || !rows) return;
+  /* Keep the "All counties" option as the first entry. */
+  for (const r of rows) {
+    const opt = document.createElement('option');
+    opt.value = r.county;
+    opt.textContent = r.county + ' (' + r.player_count + ')';
+    sel.appendChild(opt);
+  }
+}
+
+/* 3.79+: compute the next 3 APA sessions for the follow-up dropdown.
+   Season cycle is spring → summer → fall (3 per year). Year rolls over
+   after fall. The user can defer outreach to "follow up at <session>";
+   v0.1 used a free-text prompt(), now a constrained dropdown. */
+const _otSessionState = { current: null, nextThree: [] };
+const OT_SEASONS = ['spring', 'summer', 'fall'];
+function _capSeason(s) { return String(s||'').charAt(0).toUpperCase() + String(s||'').slice(1); }
+function otComputeNextSessions(year, season, n) {
+  const idx = OT_SEASONS.indexOf(String(season||'').toLowerCase());
+  if (idx < 0) return [];
+  const out = [];
+  for (let i = 1; i <= n; i++) {
+    const j = (idx + i) % OT_SEASONS.length;
+    const yearOff = Math.floor((idx + i) / OT_SEASONS.length);
+    out.push({ season: OT_SEASONS[j], year: year + yearOff, label: _capSeason(OT_SEASONS[j]) + ' ' + (year + yearOff) });
+  }
+  return out;
+}
+async function otLoadCurrentSession() {
+  try {
+    const rows = await sb('GET',
+      'sessions?is_current=is.true&select=year,season,name&limit=1',
+      null, { 'Accept-Profile': 'slate' });
+    const s = rows && rows[0];
+    if (!s) return;
+    _otSessionState.current = s;
+    _otSessionState.nextThree = otComputeNextSessions(s.year, s.season, 3);
+  } catch (e) {
+    console.error('current session lookup failed', e);
+  }
 }
 
 /* ── Search normalization (3.76+) ─────────────────────────────────────
@@ -11368,7 +11424,8 @@ function otCardHtml(c) {
           <div class="ot-meta">
             SL8 <b>${c.sl_8ball ?? '—'}</b> · SL9 <b>${c.sl_9ball ?? '—'}</b>
             ${c.city ? ' · ' + esc(c.city) : ''}
-            ${c.member_status ? ' · status: <b>' + esc(c.member_status) + '</b>' : ''}
+            ${c.county ? ' · ' + esc(c.county) : ''}
+            ${c.member_status ? ' · <b>' + esc(c.member_status) + '</b>' : ''}
           </div>
           ${joinedLine}
           ${lastPlayedLine}
@@ -11526,9 +11583,10 @@ async function otSetStatus(memberNumber, status) {
   if (!c) return;
   let followUpSession = c._status.follow_up_session;
   if (status === 'follow_up') {
-    const val = prompt('Follow up for which session? (free text, e.g. "Summer 2026 8-Ball")', followUpSession || '');
-    if (val === null) return; /* user cancelled */
-    followUpSession = val.trim() || null;
+    /* 3.79+: dropdown of next 3 computed sessions instead of free-text
+       prompt(). User explicitly requested merged "season + year" options. */
+    followUpSession = await otPickFollowUpSession(c._status.follow_up_session);
+    if (followUpSession === null) return; /* user cancelled */
   }
   await otUpsertStatus(memberNumber, {
     status,
@@ -11543,12 +11601,58 @@ async function otSetStatus(memberNumber, status) {
   otRenderList();
 }
 
+/* Modal-ish picker for follow-up session. Resolves to:
+     • a season-year label string ("Fall 2026")  → defer to that session
+     • null                                       → user cancelled
+   Uses _otSessionState.nextThree which was prefetched at otInit().
+   Falls back to a free-text input if session lookup failed (e.g. RPC
+   blocked) so the feature never hard-fails. */
+function otPickFollowUpSession(current) {
+  return new Promise((resolve) => {
+    const choices = _otSessionState.nextThree;
+    if (!choices.length) {
+      /* Defensive fallback — keep the old prompt() so the feature never
+         leaves the user stuck with no way to set a follow-up. */
+      const v = prompt('Follow up for which session?', current || '');
+      resolve(v === null ? null : (v.trim() || null));
+      return;
+    }
+    /* Build a centered modal with the dropdown options. */
+    const back = document.createElement('div');
+    back.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.45); z-index:2000; display:flex; align-items:center; justify-content:center; padding:20px;';
+    const box = document.createElement('div');
+    box.style.cssText = 'background:#fff; border-radius:14px; padding:20px; max-width:340px; width:100%; box-shadow:0 10px 30px rgba(0,0,0,0.25);';
+    const optsHtml = choices.map((c, i) =>
+      `<button type="button" data-pick="${esc(c.label)}" style="display:block; width:100%; text-align:left; padding:14px 16px; margin-bottom:8px; background:${i===0?'#eef3ff':'#f5f5f5'}; border:1.5px solid ${i===0?'var(--spm-accent)':'var(--border)'}; border-radius:10px; cursor:pointer; font-weight:600; font-size:0.95rem; color:var(--text);">${esc(c.label)}</button>`
+    ).join('');
+    box.innerHTML =
+      '<div style="font-weight:800; font-size:1rem; margin-bottom:12px; color:var(--text);">Follow up for which session?</div>' +
+      (current ? '<div class="hint" style="font-size:0.78rem; margin-bottom:10px;">Currently set: <b>' + esc(current) + '</b></div>' : '') +
+      optsHtml +
+      '<div style="display:flex; gap:8px; margin-top:8px;">' +
+        '<button type="button" id="otFuClear" style="flex:1; padding:10px; background:#fff; border:1px solid var(--border); border-radius:8px; cursor:pointer; font-size:0.86rem; color:var(--muted);">Clear</button>' +
+        '<button type="button" id="otFuCancel" style="flex:1; padding:10px; background:#fff; border:1px solid var(--border); border-radius:8px; cursor:pointer; font-size:0.86rem; color:var(--muted);">Cancel</button>' +
+      '</div>';
+    back.appendChild(box);
+    document.body.appendChild(back);
+    const cleanup = () => { back.remove(); document.removeEventListener('keydown', onKey, true); };
+    const onKey = (e) => { if (e.key === 'Escape') { cleanup(); resolve(null); } };
+    document.addEventListener('keydown', onKey, true);
+    back.addEventListener('click', (e) => { if (e.target === back) { cleanup(); resolve(null); } });
+    box.querySelectorAll('[data-pick]').forEach(btn => btn.addEventListener('click', () => {
+      const label = btn.dataset.pick;
+      cleanup(); resolve(label);
+    }));
+    document.getElementById('otFuClear').addEventListener('click', () => { cleanup(); resolve(null); /* clear = cancel (status stays unchanged) */ });
+    document.getElementById('otFuCancel').addEventListener('click', () => { cleanup(); resolve(null); });
+  });
+}
+
 async function otEditFollowUp(memberNumber) {
   const c = _otState.candidates.find(x => x.member_number === memberNumber);
   if (!c) return;
-  const val = prompt('Follow up for which session?', c._status.follow_up_session || '');
-  if (val === null) return;
-  const followUpSession = val.trim() || null;
+  const followUpSession = await otPickFollowUpSession(c._status.follow_up_session);
+  if (followUpSession === null) return;
   await otUpsertStatus(memberNumber, {
     follow_up_session: followUpSession,
     last_touched_at: new Date().toISOString()
