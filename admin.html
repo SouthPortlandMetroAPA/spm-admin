@@ -1787,6 +1787,11 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             </select>
           </div>
           <button class="btn btn-primary" id="otRunBtn">🔄 Refresh list</button>
+          <button class="btn btn-outline btn-sm" id="otUndoBtn" disabled
+                  title="Undo last action (Ctrl/⌘-Z). Holds up to 10."
+                  style="align-self:flex-end; padding:6px 12px;">
+            ↶ Undo <span id="otUndoCount" style="color:var(--muted)"></span>
+          </button>
           <span id="otStatusLine" class="hint" style="align-self:center"></span>
         </div>
 
@@ -2003,7 +2008,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.84';
+const APP_VERSION = '3.85';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11164,8 +11169,104 @@ function otPhoneDigits(p) {
 const _otState = {
   candidates: [],     // raw RPC rows joined with status
   filter: { status: 'all', search: '' },
-  expanded: new Set()
+  expanded: new Set(),
+  undoStack: []       // LIFO of { mn, name, description, prevStatus, at }; max OT_UNDO_MAX
 };
+const OT_UNDO_MAX = 10;
+
+/* Undo support (3.85+) ─ session-local stack of the last 10 mutations.
+   Each entry captures the FULL prior outreach_status row for one
+   member, so any subset of mutated fields can be reverted in one shot.
+   The original log entries are preserved (audit history intact); undo
+   appends a "↶ Undid: …" log line so the timeline shows what happened.
+
+   Call pattern: every mutation function calls otPushUndo(mn, desc)
+   BEFORE writing. The next otUndo() pops and restores. otUpsertStatus
+   is "dumb" (just an API call) so calling it from inside otUndo doesn't
+   create another undo entry — preventing infinite loops. */
+function otPushUndo(memberNumber, description) {
+  const c = _otState.candidates.find(x => x.member_number === memberNumber);
+  if (!c) return;   /* member not in current list — undo unavailable for them */
+  /* Deep-clone the status to capture array/object fields by value. */
+  const prevStatus = JSON.parse(JSON.stringify(c._status || {}));
+  const name = (c.first_name && c.last_name) ? (c.first_name + ' ' + c.last_name)
+             : (c.nickname || c.member_number);
+  _otState.undoStack.push({ mn: memberNumber, name, description, prevStatus, at: Date.now() });
+  while (_otState.undoStack.length > OT_UNDO_MAX) _otState.undoStack.shift();
+  otRenderUndoButton();
+}
+function otRenderUndoButton() {
+  const btn   = document.getElementById('otUndoBtn');
+  const count = document.getElementById('otUndoCount');
+  if (!btn) return;
+  const n = _otState.undoStack.length;
+  btn.disabled = n === 0;
+  count.textContent = n ? '(' + n + ')' : '';
+  if (n) {
+    const top = _otState.undoStack[_otState.undoStack.length - 1];
+    btn.title = 'Undo: ' + top.description + '  (Ctrl/⌘-Z)';
+  } else {
+    btn.title = 'Nothing to undo.';
+  }
+}
+async function otUndo() {
+  const entry = _otState.undoStack.pop();
+  if (!entry) return;
+  otRenderUndoButton();
+  try {
+    /* Restore prev state — outreach_status UPSERT with the captured row.
+       Send only the columns we manage so we don't trample created_at /
+       member_number / updated_at semantics. */
+    const restoreBody = {
+      status:              entry.prevStatus.status              || 'new',
+      follow_up_session:   entry.prevStatus.follow_up_session   ?? null,
+      do_not_contact:      entry.prevStatus.do_not_contact      || false,
+      last_note:           entry.prevStatus.last_note           ?? null,
+      last_touched_at:     entry.prevStatus.last_touched_at     ?? null,
+      pref_days:           entry.prevStatus.pref_days           ?? null,
+      pref_days_per_week:  entry.prevStatus.pref_days_per_week  ?? null,
+      pref_formats:        entry.prevStatus.pref_formats        ?? null,
+      pref_cities:         entry.prevStatus.pref_cities         ?? null,
+      updated_at:          new Date().toISOString()
+    };
+    await otUpsertStatus(entry.mn, restoreBody);
+    await otAppendLog(entry.mn, 'note', '↶ Undid: ' + entry.description);
+    const c = _otState.candidates.find(x => x.member_number === entry.mn);
+    if (c) c._status = { ...c._status, ...restoreBody };
+    otRenderStats();
+    otRenderList();
+    otRefreshReminders();
+    toast('↶ Undid: ' + entry.description);
+  } catch (e) {
+    console.error('undo failed', e);
+    /* Push back so the user can retry — restoring failed mid-way. */
+    _otState.undoStack.push(entry);
+    otRenderUndoButton();
+    toast('Undo failed — see console.');
+  }
+}
+
+/* Tiny inline toast (reuses existing wrap if present, else creates one).
+   Slate doesn't have a global toast — this fills that gap for Outreach. */
+function toast(msg) {
+  let el = document.getElementById('otToast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'otToast';
+    el.style.cssText = 'position:fixed; left:50%; bottom:30px; transform:translateX(-50%) translateY(40px); background:rgba(26,26,26,0.96); color:#fff; padding:10px 20px; border-radius:8px; font-size:0.88rem; font-weight:600; z-index:5000; opacity:0; transition:opacity 0.2s,transform 0.2s; pointer-events:none; max-width:90vw;';
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  requestAnimationFrame(() => {
+    el.style.opacity = '1';
+    el.style.transform = 'translateX(-50%) translateY(0)';
+  });
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => {
+    el.style.opacity = '0';
+    el.style.transform = 'translateX(-50%) translateY(40px)';
+  }, 2400);
+}
 
 async function otInit() {
   if (otInit._wired) return;
@@ -11197,6 +11298,25 @@ async function otInit() {
     _otState.sl8 = new Set(); _otState.sl9 = new Set();
     otRenderSlPills();
   });
+
+  /* Undo button + Ctrl/⌘-Z hotkey. Hotkey fires only when the Outreach
+     tab is the active tab — otherwise we'd hijack normal Ctrl-Z in
+     other tabs' inputs. */
+  document.getElementById('otUndoBtn').addEventListener('click', otUndo);
+  document.addEventListener('keydown', (e) => {
+    const isUndo = (e.key === 'z' || e.key === 'Z') && (e.ctrlKey || e.metaKey) && !e.shiftKey;
+    if (!isUndo) return;
+    /* Only intercept when Outreach tab is active AND focus is NOT in a
+       text input (let native undo work in inputs). */
+    const tabActive = document.querySelector('.tab.active')?.dataset.tab === 'outreach';
+    if (!tabActive) return;
+    const t = e.target;
+    const isText = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA');
+    if (isText) return;
+    e.preventDefault();
+    otUndo();
+  });
+  otRenderUndoButton();
 }
 
 /* SL pill rendering. _otState.sl8 / _otState.sl9 are Sets of selected
@@ -11408,6 +11528,7 @@ function otRenderReminders() {
    • Snooze again   → re-open the session picker → defer to a later session
    • Done           → status='not_interested' (closed loop, don't bug me) */
 async function otReminderContacted(mn) {
+  otPushUndo(mn, 'Reminder: marked Working');
   await otUpsertStatus(mn, { status: 'working', last_touched_at: new Date().toISOString() });
   await otAppendLog(mn, 'status', 'Reminder → marked Working (contacted this session)');
   /* Reflect change in the main candidates list if present */
@@ -11418,6 +11539,7 @@ async function otReminderContacted(mn) {
 async function otReminderSnooze(mn) {
   const newSession = await otPickFollowUpSession(null);
   if (newSession === null) return;
+  otPushUndo(mn, 'Reminder: snoozed to ' + newSession);
   await otUpsertStatus(mn, { follow_up_session: newSession, last_touched_at: new Date().toISOString() });
   await otAppendLog(mn, 'snooze', 'Reminder → re-deferred to: ' + newSession);
   const c = _otState.candidates.find(x => x.member_number === mn);
@@ -11426,6 +11548,7 @@ async function otReminderSnooze(mn) {
 }
 async function otReminderDismiss(mn) {
   if (!confirm('Mark Done? They will move to "Not interested" and drop off the reminder list.')) return;
+  otPushUndo(mn, 'Reminder: marked Not interested');
   await otUpsertStatus(mn, { status: 'not_interested', last_touched_at: new Date().toISOString() });
   await otAppendLog(mn, 'status', 'Reminder → marked Done (Not interested)');
   const c = _otState.candidates.find(x => x.member_number === mn);
@@ -11952,6 +12075,7 @@ async function otSavePrefs(memberNumber) {
   const dpw = dpwBtn ? parseInt(dpwBtn.dataset.prefDpw, 10) : null;
   const fmts = [...cardEl.querySelectorAll('[data-pref-fmt].active')].map(b => b.dataset.prefFmt);
   const cities = [...cardEl.querySelectorAll('[data-pref-cities] option:checked')].map(o => o.value);
+  otPushUndo(memberNumber, 'Saved preferences');
   await otUpsertStatus(memberNumber, {
     pref_days: days.length ? days : null,
     pref_days_per_week: dpw,
@@ -11981,6 +12105,7 @@ async function otSavePrefs(memberNumber) {
 async function otQuickTouch(memberNumber, kind, btn) {
   const c = _otState.candidates.find(x => x.member_number === memberNumber);
   if (!c) return;
+  otPushUndo(memberNumber, 'Logged: ' + kind.charAt(0).toUpperCase() + kind.slice(1) + 'ed');
   await otAppendLog(memberNumber, kind, kind.charAt(0).toUpperCase() + kind.slice(1) + 'ed (quick-log)');
   await otUpsertStatus(memberNumber, { last_touched_at: new Date().toISOString() });
   c._status = { ...c._status, last_touched_at: new Date().toISOString() };
@@ -12149,6 +12274,7 @@ async function otSetStatus(memberNumber, status) {
     );
     if (followUpSession === null) return;
   }
+  otPushUndo(memberNumber, 'Set status to ' + STATUS_LABEL[status]);
   await otUpsertStatus(memberNumber, {
     status,
     follow_up_session: followUpSession,
@@ -12217,6 +12343,7 @@ async function otEditFollowUp(memberNumber) {
   if (!c) return;
   const followUpSession = await otPickFollowUpSession(c._status.follow_up_session);
   if (followUpSession === null) return;
+  otPushUndo(memberNumber, 'Changed follow-up to ' + (followUpSession || 'cleared'));
   await otUpsertStatus(memberNumber, {
     follow_up_session: followUpSession,
     last_touched_at: new Date().toISOString()
@@ -12234,6 +12361,7 @@ async function otSaveNote(memberNumber) {
   const input = card.querySelector('[data-note-input]');
   const detail = input.value.trim();
   if (!detail) { input.focus(); return; }
+  otPushUndo(memberNumber, 'Saved note: "' + detail.slice(0, 30) + (detail.length > 30 ? '…' : '') + '"');
   await otAppendLog(memberNumber, kind, detail);
   /* Denormalize last_note for fast card preview */
   await otUpsertStatus(memberNumber, {
@@ -12252,6 +12380,7 @@ async function otToggleDnc(memberNumber) {
   if (!c) return;
   const next = !c._status.do_not_contact;
   if (next && !confirm('Mark as DO NOT CONTACT? This hides them from outreach unless you specifically filter for DNC.')) return;
+  otPushUndo(memberNumber, next ? 'Marked DO NOT CONTACT' : 'Cleared DO NOT CONTACT');
   await otUpsertStatus(memberNumber, {
     do_not_contact: next,
     last_touched_at: new Date().toISOString()
