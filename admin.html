@@ -960,6 +960,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="scoresheets">PaperTrail</button>
       <button class="tab" data-tab="commonplayers">TMS Roster Report</button>
       <button class="tab" data-tab="reports">Reports</button>
+      <button class="tab" data-tab="outreach">Outreach</button>
       <button class="tab" data-tab="redtape">RedTape</button>
       <button class="tab" data-tab="rolodex">Rolodex</button>
       <button class="tab" data-tab="playoffs">Playoffs</button>
@@ -1691,6 +1692,70 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
     </div>
 
     <!-- ══════════════════════════════════════════════════════════════
+         TAB: OUTREACH (3.74+) — lapsed-player + new-signup follow-up
+         pipeline. Lightweight CRM. Data source: slate.recruit_lapsed_players
+         RPC (same data Reports / 9-Ball Outreach already uses). Status &
+         notes stored in slate.outreach_status + slate.outreach_log,
+         service-role only.
+
+         Status taxonomy: new / working / follow_up / joined /
+         not_interested.  do_not_contact is a hard opt-out (separate).
+         Research-grounded best practice (HubSpot, Pipedrive, Close 2026).
+         ══════════════════════════════════════════════════════════════ -->
+    <div id="tab-outreach" class="tab-panel">
+      <div class="card">
+        <h2>Outreach <span class="hint" style="font-weight:500">— follow up with lapsed players</span></h2>
+        <p class="hint" style="margin-bottom:14px">
+          Surfaces APA members who <strong>aren't currently on a team</strong>
+          (either never were, or haven't played 8- or 9-ball in the last
+          <em>N</em> days). Mark statuses, snooze to next session, log notes,
+          set "do not contact" — everything's saved per-player.
+        </p>
+
+        <div class="ot-toolbar" style="display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; margin-bottom:14px;">
+          <div class="field-mini">
+            <label for="otLastPlayedDays">Hasn't played in (days)</label>
+            <input type="number" id="otLastPlayedDays" min="0" max="3650" value="180" style="width:90px">
+          </div>
+          <div class="field-mini">
+            <label for="otCounty">County (optional)</label>
+            <input type="text" id="otCounty" placeholder="Multnomah" style="width:160px">
+          </div>
+          <div class="field-mini">
+            <label for="otFormat">Format</label>
+            <select id="otFormat" style="width:120px">
+              <option value="either" selected>Either 8 or 9</option>
+              <option value="8">8-ball only</option>
+              <option value="9">9-ball only</option>
+              <option value="both">Both 8 and 9</option>
+            </select>
+          </div>
+          <button class="btn btn-primary" id="otRunBtn">🔄 Refresh list</button>
+          <span id="otStatusLine" class="hint" style="align-self:center"></span>
+        </div>
+
+        <div id="otResults" style="display:none">
+          <!-- Stats row + status-filter pills -->
+          <div id="otStatsRow" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px;"></div>
+
+          <!-- Quick search -->
+          <div style="margin-bottom:10px">
+            <input type="text" id="otSearch" placeholder="🔍 Search by name, member #, city…"
+                   style="width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:8px; font-size:0.92rem;">
+          </div>
+
+          <!-- Card list -->
+          <div id="otCardList"></div>
+        </div>
+
+        <div id="otEmptyState" class="card" style="padding:24px; text-align:center; color:var(--muted)">
+          <p style="font-size:1rem; margin-bottom:6px">🎯 Set the parameters above and tap <strong>Refresh list</strong>.</p>
+          <p class="hint">Lapsed members who haven't played recently will appear here, plus active members with no current-session team.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════════
          TAB: REDTAPE (3.55+) — admin view for the captain-facing
          paperwork-upload app. Lives in the redtape schema; the
          captain UI is at southportlandmetroapa.github.io/redtape/.
@@ -1860,7 +1925,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.73';
+const APP_VERSION = '3.74';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -3430,6 +3495,7 @@ const TAB_LABEL = {
   scoresheets:   'Scoresheets',
   commonplayers: 'TMS Roster Report',
   reports:       'Reports',
+  outreach:      'Outreach',
   redtape:       'RedTape',
   rolodex:       'Rolodex',
   playoffs:      'Playoffs'
@@ -3447,6 +3513,7 @@ function switchTab(name) {
   if (name === 'scoresheets') { ssBindViewToggle(); renderScoresheetsGridView(); }
   if (name === 'commonplayers') cpInit();
   if (name === 'reports')     rptInit();
+  if (name === 'outreach')    otInit();
   if (name === 'redtape')     rtInit();
   if (name === 'rolodex')     rolInit();
   if (name === 'playoffs')    renderPlayoffsTab();
@@ -10722,6 +10789,532 @@ function rptCopyAllEmails(btn) {
 
 window.rptInit = rptInit;
 window.rptRun  = rptRun;
+
+/* ══════════════════════════════════════════════════════════════════════
+   OUTREACH TAB (3.74+) — lapsed-player follow-up CRM
+   ──────────────────────────────────────────────────────────────────
+   Data source: same recruit_lapsed_players RPC the Reports tab uses,
+   joined client-side with slate.outreach_status + slate.outreach_log.
+   Status taxonomy: new / working / follow_up / joined / not_interested.
+   do_not_contact is a hard opt-out (decoupled, GDPR-style).
+
+   UX choices (research-grounded):
+     • Card list, single column. Each card: name + status pill + key
+       contact bits at a glance.
+     • Click any status pill to change (5 buttons). Click "follow up"
+       opens a session-label prompt.
+     • Notes textarea + Save = appends to outreach_log + sets last_note.
+     • Activity log shown when card expanded.
+     • Hard "do not contact" toggle hidden behind "More" — irreversible-
+       feeling action shouldn't be one accidental click.
+     • Search filters in-memory; status filter pills also in-memory.
+     • Single Refresh button — outreach is low-frequency (you sit down to
+       call 20 people once a week, not background sync).
+   ══════════════════════════════════════════════════════════════════════ */
+const OT_TAB_STYLE = `
+  #tab-outreach .field-mini {
+    display:flex; flex-direction:column; gap:4px;
+  }
+  #tab-outreach .field-mini label {
+    font-size:0.72rem; font-weight:700; text-transform:uppercase;
+    letter-spacing:0.04em; color:var(--muted);
+  }
+  #tab-outreach .field-mini input,
+  #tab-outreach .field-mini select {
+    padding:8px 10px; border:1px solid var(--border); border-radius:6px;
+    font-size:0.92rem; background:#fff; color:var(--text); outline:none;
+  }
+  #tab-outreach .field-mini input:focus,
+  #tab-outreach .field-mini select:focus { border-color: var(--spm-accent); }
+
+  /* Stats chips (top of results) */
+  #tab-outreach .ot-stat {
+    padding:6px 12px; border-radius:999px; font-size:0.82rem; font-weight:700;
+    background:#f3f4f6; color:var(--text);
+    border:1.5px solid transparent;
+    cursor:pointer; user-select:none;
+    transition: border-color 0.1s;
+  }
+  #tab-outreach .ot-stat:hover { border-color: var(--spm-accent); }
+  #tab-outreach .ot-stat.active { border-color: var(--spm-accent); background:#eef3ff; color:var(--spm-accent); }
+  #tab-outreach .ot-stat.s-new            { background:#f3f4f6; color:#374151; }
+  #tab-outreach .ot-stat.s-working        { background:#dbeafe; color:#1e40af; }
+  #tab-outreach .ot-stat.s-follow_up      { background:#fef3c7; color:#92400e; }
+  #tab-outreach .ot-stat.s-joined         { background:#d1fae5; color:#065f46; }
+  #tab-outreach .ot-stat.s-not_interested { background:#fee2e2; color:#991b1b; }
+  #tab-outreach .ot-stat.s-dnc            { background:#1a1a1a; color:#fff; }
+
+  /* Player cards */
+  #tab-outreach .ot-card {
+    background:#fff; border:1px solid var(--border); border-radius:10px;
+    padding:14px 14px 12px; margin-bottom:10px;
+    box-shadow:0 1px 2px rgba(0,0,0,0.04);
+  }
+  #tab-outreach .ot-card.dnc { opacity:0.55; }
+  #tab-outreach .ot-card-head {
+    display:flex; justify-content:space-between; align-items:flex-start;
+    gap:10px; flex-wrap:wrap;
+  }
+  #tab-outreach .ot-name { font-weight:700; font-size:1rem; color:var(--text); }
+  #tab-outreach .ot-meta { color:var(--muted); font-size:0.82rem; margin-top:2px; }
+  #tab-outreach .ot-meta b { color:var(--text); font-weight:600; }
+  #tab-outreach .ot-contact {
+    display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; font-size:0.85rem;
+  }
+  #tab-outreach .ot-contact a,
+  #tab-outreach .ot-contact .ot-noemail {
+    padding:4px 10px; border-radius:6px; background:#f3f4f6; color:var(--text);
+    text-decoration:none; font-weight:600;
+  }
+  #tab-outreach .ot-contact a:hover { background:#e5e7eb; }
+  #tab-outreach .ot-contact .ot-noemail { color:var(--muted); font-weight:500; }
+
+  /* Status pill row */
+  #tab-outreach .ot-status-row {
+    display:flex; flex-wrap:wrap; gap:6px; margin-top:10px;
+  }
+  #tab-outreach .ot-pill {
+    padding:6px 10px; border-radius:999px; font-size:0.78rem; font-weight:700;
+    background:#fff; border:1.5px solid var(--border); color:var(--muted);
+    cursor:pointer;
+  }
+  #tab-outreach .ot-pill:hover { border-color: var(--spm-accent); color: var(--spm-accent); }
+  #tab-outreach .ot-pill.active.s-new            { background:#f3f4f6; border-color:#374151; color:#374151; }
+  #tab-outreach .ot-pill.active.s-working        { background:#dbeafe; border-color:#1e40af; color:#1e40af; }
+  #tab-outreach .ot-pill.active.s-follow_up      { background:#fef3c7; border-color:#92400e; color:#92400e; }
+  #tab-outreach .ot-pill.active.s-joined         { background:#d1fae5; border-color:#065f46; color:#065f46; }
+  #tab-outreach .ot-pill.active.s-not_interested { background:#fee2e2; border-color:#991b1b; color:#991b1b; }
+
+  /* Expand toggle + body */
+  #tab-outreach .ot-expand {
+    margin-top:10px; padding-top:10px; border-top:1px dashed var(--border);
+    display:none;
+  }
+  #tab-outreach .ot-card.expanded .ot-expand { display:block; }
+  #tab-outreach .ot-card-toggle {
+    background:none; border:0; color:var(--muted); font-size:0.78rem;
+    font-weight:700; cursor:pointer; margin-top:8px; padding:4px 0;
+  }
+  #tab-outreach .ot-card-toggle:hover { color:var(--spm-accent); }
+  #tab-outreach .ot-note-row {
+    display:flex; gap:6px; margin-top:8px;
+  }
+  #tab-outreach .ot-note-row input {
+    flex:1; padding:8px 10px; border:1px solid var(--border); border-radius:6px;
+    font-size:0.86rem; outline:none;
+  }
+  #tab-outreach .ot-note-row input:focus { border-color: var(--spm-accent); }
+  #tab-outreach .ot-note-kind {
+    padding:8px 10px; border:1px solid var(--border); border-radius:6px;
+    font-size:0.84rem; background:#fff;
+  }
+  #tab-outreach .ot-log {
+    margin-top:10px; max-height:200px; overflow-y:auto;
+    border-top:1px dashed var(--border); padding-top:8px;
+    font-size:0.82rem;
+  }
+  #tab-outreach .ot-log-entry {
+    padding:4px 0; line-height:1.4;
+    border-bottom:1px solid #f3f4f6;
+  }
+  #tab-outreach .ot-log-entry:last-child { border-bottom:0; }
+  #tab-outreach .ot-log-when { color:var(--muted); font-size:0.74rem; margin-right:8px; }
+  #tab-outreach .ot-log-kind {
+    display:inline-block; padding:1px 6px; border-radius:4px; font-size:0.7rem;
+    background:#f3f4f6; color:var(--muted); font-weight:700; margin-right:6px;
+    text-transform:uppercase; letter-spacing:0.04em;
+  }
+  #tab-outreach .ot-more-row {
+    margin-top:10px; padding-top:8px; border-top:1px solid #f3f4f6;
+    display:flex; gap:8px; align-items:center; font-size:0.82rem;
+  }
+  #tab-outreach .ot-dnc-toggle {
+    color:var(--spm-primary); cursor:pointer; font-weight:600;
+  }
+  #tab-outreach .ot-last-note {
+    margin-top:6px; padding:6px 10px; background:#f9fafb; border-left:3px solid var(--spm-accent);
+    border-radius:0 6px 6px 0; font-size:0.84rem; color:var(--text); font-style:italic;
+  }
+  #tab-outreach .ot-empty-msg {
+    text-align:center; color:var(--muted); padding:30px 20px; font-style:italic;
+  }
+`;
+(function injectOtStyle(){
+  if (document.getElementById('ot-tab-style')) return;
+  const s = document.createElement('style');
+  s.id = 'ot-tab-style'; s.textContent = OT_TAB_STYLE;
+  document.head.appendChild(s);
+})();
+
+const STATUSES = ['new','working','follow_up','joined','not_interested'];
+const STATUS_LABEL = {
+  new: 'New',
+  working: 'Working',
+  follow_up: 'Follow up',
+  joined: 'Joined',
+  not_interested: 'Not interested'
+};
+
+const _otState = {
+  candidates: [],     // raw RPC rows joined with status
+  filter: { status: 'all', search: '' },
+  expanded: new Set()
+};
+
+async function otInit() {
+  if (otInit._wired) return;
+  otInit._wired = true;
+  document.getElementById('otRunBtn').addEventListener('click', otRun);
+  document.getElementById('otSearch').addEventListener('input', () => {
+    _otState.filter.search = document.getElementById('otSearch').value.toLowerCase().trim();
+    otRenderList();
+  });
+}
+
+/* Main fetch — recruit_lapsed_players RPC + outreach_status JOIN */
+async function otRun() {
+  const days = parseInt(document.getElementById('otLastPlayedDays').value, 10) || 180;
+  const county = document.getElementById('otCounty').value.trim() || null;
+  const fmt = document.getElementById('otFormat').value;
+  const status = document.getElementById('otStatusLine');
+  status.textContent = 'Loading candidates…';
+
+  try {
+    /* Pull everyone the existing RPC surfaces — we'll filter to
+       not-on-team in JS. Setting p_sl9_max=9 so we get all SLs. */
+    const rpcRows = await sb('POST', 'rpc/recruit_lapsed_players', {
+      p_sl9_max: 9,
+      p_county: county,
+      p_last_played_days: days,
+      p_exclude_division_number: null
+    });
+
+    /* Filter to "not currently playing" — that's the outreach target. */
+    let rows = (rpcRows || []).filter(r => !r.currently_playing);
+
+    /* Format filter (8 / 9 / either / both) */
+    if (fmt === '8') {
+      rows = rows.filter(r => r.last_played_8);
+    } else if (fmt === '9') {
+      rows = rows.filter(r => r.last_played_9);
+    } else if (fmt === 'both') {
+      rows = rows.filter(r => r.last_played_8 && r.last_played_9);
+    } /* 'either' = no filter */
+
+    /* Pull all status records — cheap, single query, small table */
+    const memberNumbers = rows.map(r => r.member_number);
+    const statusRows = memberNumbers.length
+      ? await sb('GET',
+          'outreach_status?member_number=in.(' + memberNumbers.join(',') + ')&select=*',
+          null, { 'Accept-Profile': 'slate' })
+      : [];
+    const statusByMember = Object.fromEntries((statusRows || []).map(s => [s.member_number, s]));
+
+    /* Hide do-not-contacts from main list (they show in a separate filter) */
+    const candidates = rows.map(r => {
+      const s = statusByMember[r.member_number] || { status: 'new', do_not_contact: false };
+      return { ...r, _status: s };
+    });
+
+    _otState.candidates = candidates;
+    document.getElementById('otResults').style.display = '';
+    document.getElementById('otEmptyState').style.display = 'none';
+    otRenderStats();
+    otRenderList();
+    status.textContent = candidates.length + ' candidate' + (candidates.length === 1 ? '' : 's') + ' loaded.';
+  } catch (e) {
+    status.textContent = 'Failed: ' + e.message;
+    console.error(e);
+  }
+}
+
+function otRenderStats() {
+  const counts = { all: 0, new: 0, working: 0, follow_up: 0, joined: 0, not_interested: 0, dnc: 0 };
+  for (const c of _otState.candidates) {
+    counts.all++;
+    if (c._status.do_not_contact) { counts.dnc++; continue; }
+    counts[c._status.status]++;
+  }
+  const wrap = document.getElementById('otStatsRow');
+  const f = _otState.filter.status;
+  const mk = (key, label) => `<span class="ot-stat s-${key} ${f===key?'active':''}" data-filter="${key}">${label}: <strong>${counts[key]}</strong></span>`;
+  wrap.innerHTML =
+    `<span class="ot-stat ${f==='all'?'active':''}" data-filter="all">All: <strong>${counts.all - counts.dnc}</strong></span>` +
+    mk('new', 'New') +
+    mk('working', 'Working') +
+    mk('follow_up', 'Follow up') +
+    mk('joined', 'Joined') +
+    mk('not_interested', 'Not interested') +
+    (counts.dnc > 0 ? `<span class="ot-stat s-dnc ${f==='dnc'?'active':''}" data-filter="dnc">🚫 DNC: <strong>${counts.dnc}</strong></span>` : '');
+  wrap.querySelectorAll('.ot-stat').forEach(el => {
+    el.addEventListener('click', () => {
+      _otState.filter.status = el.dataset.filter;
+      otRenderStats();
+      otRenderList();
+    });
+  });
+}
+
+function otRenderList() {
+  const list = document.getElementById('otCardList');
+  const f = _otState.filter;
+  const visible = _otState.candidates.filter(c => {
+    const isDnc = c._status.do_not_contact;
+    if (f.status === 'dnc') {
+      if (!isDnc) return false;
+    } else if (f.status === 'all') {
+      if (isDnc) return false;
+    } else {
+      if (isDnc) return false;
+      if (c._status.status !== f.status) return false;
+    }
+    if (f.search) {
+      const hay = [c.first_name, c.last_name, c.nickname, c.member_number, c.city]
+        .filter(Boolean).join(' ').toLowerCase();
+      if (!hay.includes(f.search)) return false;
+    }
+    return true;
+  });
+
+  if (!visible.length) {
+    list.innerHTML = '<div class="ot-empty-msg">No candidates match this filter.</div>';
+    return;
+  }
+  list.innerHTML = visible.map(c => otCardHtml(c)).join('');
+  list.querySelectorAll('.ot-card').forEach(otWireCard);
+}
+
+function otCardHtml(c) {
+  const s = c._status;
+  const fullName = (c.first_name && c.last_name)
+    ? c.first_name + ' ' + c.last_name + (c.nickname && c.nickname !== c.first_name ? ` ("${c.nickname}")` : '')
+    : (c.nickname || c.member_number);
+  const last8 = c.last_played_8 || '—';
+  const last9 = c.last_played_9 || '—';
+  const expanded = _otState.expanded.has(c.member_number);
+
+  const pillsHtml = STATUSES.map(st => {
+    const active = (s.status === st) ? 'active s-' + st : '';
+    return `<button type="button" class="ot-pill ${active}" data-set-status="${st}">${esc(STATUS_LABEL[st])}</button>`;
+  }).join('');
+
+  const followUpHtml = s.status === 'follow_up'
+    ? `<div class="ot-meta" style="margin-top:6px">⏰ Follow up: <b>${esc(s.follow_up_session || '(no session set)')}</b> <button type="button" class="ot-card-toggle" data-edit-follow-up style="margin:0">Edit</button></div>`
+    : '';
+
+  const lastNote = s.last_note
+    ? `<div class="ot-last-note">"${esc(s.last_note)}"</div>`
+    : '';
+
+  return `
+    <div class="ot-card ${s.do_not_contact ? 'dnc' : ''} ${expanded ? 'expanded' : ''}" data-mn="${esc(c.member_number)}">
+      <div class="ot-card-head">
+        <div style="flex:1; min-width:0">
+          <div class="ot-name">${esc(fullName)} <span class="hint" style="font-weight:500; font-family:ui-monospace,monospace">#${esc(c.member_number)}</span></div>
+          <div class="ot-meta">
+            SL8 <b>${c.sl_8ball ?? '—'}</b> · SL9 <b>${c.sl_9ball ?? '—'}</b>
+            ${c.city ? ' · ' + esc(c.city) : ''}
+            ${c.member_status ? ' · status: <b>' + esc(c.member_status) + '</b>' : ''}
+          </div>
+          <div class="ot-meta">Last 8-ball: <b>${esc(last8)}</b> · Last 9-ball: <b>${esc(last9)}</b></div>
+        </div>
+      </div>
+      <div class="ot-contact">
+        ${c.email ? `<a href="mailto:${esc(c.email)}">✉️ ${esc(c.email)}</a>` : '<span class="ot-noemail">no email</span>'}
+        ${c.cell_phone ? `<a href="tel:${esc(c.cell_phone)}">📞 ${esc(c.cell_phone)}</a>` : '<span class="ot-noemail">no phone</span>'}
+      </div>
+      ${followUpHtml}
+      ${lastNote}
+      <div class="ot-status-row">${pillsHtml}</div>
+      <button type="button" class="ot-card-toggle" data-toggle-expand>
+        ${expanded ? '▲ Less' : '▼ Add note / log / more'}
+      </button>
+      <div class="ot-expand">
+        <div class="ot-note-row">
+          <select class="ot-note-kind" data-note-kind>
+            <option value="call">Called</option>
+            <option value="text">Texted</option>
+            <option value="email">Emailed</option>
+            <option value="note" selected>Note</option>
+          </select>
+          <input type="text" placeholder="What happened? (e.g. 'left voicemail', 'wants to join in fall')" data-note-input>
+          <button type="button" class="btn btn-primary btn-sm" data-note-save>Save</button>
+        </div>
+        <div class="ot-log" data-log></div>
+        <div class="ot-more-row">
+          <span class="hint">More:</span>
+          <span class="ot-dnc-toggle" data-toggle-dnc>${s.do_not_contact ? '✓ Marked DO NOT CONTACT — click to undo' : '🚫 Mark as DO NOT CONTACT'}</span>
+        </div>
+      </div>
+    </div>`;
+}
+
+function otWireCard(cardEl) {
+  const mn = cardEl.dataset.mn;
+  /* Status pill clicks */
+  cardEl.querySelectorAll('[data-set-status]').forEach(btn => {
+    btn.addEventListener('click', () => otSetStatus(mn, btn.dataset.setStatus));
+  });
+  /* Expand toggle */
+  const tog = cardEl.querySelector('[data-toggle-expand]');
+  if (tog) tog.addEventListener('click', () => {
+    if (_otState.expanded.has(mn)) _otState.expanded.delete(mn);
+    else _otState.expanded.add(mn);
+    otRenderList();
+    if (_otState.expanded.has(mn)) otFetchLog(mn);
+  });
+  /* Save note */
+  const saveBtn = cardEl.querySelector('[data-note-save]');
+  if (saveBtn) saveBtn.addEventListener('click', () => otSaveNote(mn));
+  const noteInput = cardEl.querySelector('[data-note-input]');
+  if (noteInput) noteInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); otSaveNote(mn); }
+  });
+  /* DNC toggle */
+  const dncBtn = cardEl.querySelector('[data-toggle-dnc]');
+  if (dncBtn) dncBtn.addEventListener('click', () => otToggleDnc(mn));
+  /* Follow-up session edit */
+  const fuBtn = cardEl.querySelector('[data-edit-follow-up]');
+  if (fuBtn) fuBtn.addEventListener('click', () => otEditFollowUp(mn));
+  /* Auto-load log if expanded */
+  if (_otState.expanded.has(mn)) otFetchLog(mn);
+}
+
+async function otSetStatus(memberNumber, status) {
+  const c = _otState.candidates.find(x => x.member_number === memberNumber);
+  if (!c) return;
+  let followUpSession = c._status.follow_up_session;
+  if (status === 'follow_up') {
+    const val = prompt('Follow up for which session? (free text, e.g. "Summer 2026 8-Ball")', followUpSession || '');
+    if (val === null) return; /* user cancelled */
+    followUpSession = val.trim() || null;
+  }
+  await otUpsertStatus(memberNumber, {
+    status,
+    follow_up_session: followUpSession,
+    last_touched_at: new Date().toISOString(),
+    updated_by: 'admin'
+  });
+  await otAppendLog(memberNumber, 'status', 'Set status to: ' + STATUS_LABEL[status] +
+    (status === 'follow_up' && followUpSession ? ' (' + followUpSession + ')' : ''));
+  c._status = { ...c._status, status, follow_up_session: followUpSession };
+  otRenderStats();
+  otRenderList();
+}
+
+async function otEditFollowUp(memberNumber) {
+  const c = _otState.candidates.find(x => x.member_number === memberNumber);
+  if (!c) return;
+  const val = prompt('Follow up for which session?', c._status.follow_up_session || '');
+  if (val === null) return;
+  const followUpSession = val.trim() || null;
+  await otUpsertStatus(memberNumber, {
+    follow_up_session: followUpSession,
+    last_touched_at: new Date().toISOString()
+  });
+  await otAppendLog(memberNumber, 'snooze', 'Follow-up session: ' + (followUpSession || '(cleared)'));
+  c._status = { ...c._status, follow_up_session: followUpSession };
+  otRenderList();
+}
+
+async function otSaveNote(memberNumber) {
+  const card = document.querySelector(`.ot-card[data-mn="${memberNumber}"]`);
+  if (!card) return;
+  const kind = card.querySelector('[data-note-kind]').value;
+  const input = card.querySelector('[data-note-input]');
+  const detail = input.value.trim();
+  if (!detail) { input.focus(); return; }
+  await otAppendLog(memberNumber, kind, detail);
+  /* Denormalize last_note for fast card preview */
+  await otUpsertStatus(memberNumber, {
+    last_note: detail,
+    last_touched_at: new Date().toISOString()
+  });
+  const c = _otState.candidates.find(x => x.member_number === memberNumber);
+  if (c) c._status = { ...c._status, last_note: detail };
+  input.value = '';
+  otRenderList();
+  otFetchLog(memberNumber);
+}
+
+async function otToggleDnc(memberNumber) {
+  const c = _otState.candidates.find(x => x.member_number === memberNumber);
+  if (!c) return;
+  const next = !c._status.do_not_contact;
+  if (next && !confirm('Mark as DO NOT CONTACT? This hides them from outreach unless you specifically filter for DNC.')) return;
+  await otUpsertStatus(memberNumber, {
+    do_not_contact: next,
+    last_touched_at: new Date().toISOString()
+  });
+  await otAppendLog(memberNumber, 'status', next ? 'Marked DO NOT CONTACT' : 'Cleared DO NOT CONTACT');
+  c._status = { ...c._status, do_not_contact: next };
+  otRenderStats();
+  otRenderList();
+}
+
+/* UPSERT the row — INSERT new on first touch, UPDATE thereafter.
+   PostgREST handles via on_conflict + Prefer: resolution=merge-duplicates. */
+async function otUpsertStatus(memberNumber, patch) {
+  const body = { member_number: memberNumber, ...patch, updated_at: new Date().toISOString() };
+  await sb('POST',
+    'outreach_status?on_conflict=member_number',
+    body,
+    {
+      'Accept-Profile': 'slate',
+      'Content-Profile': 'slate',
+      'Prefer': 'resolution=merge-duplicates,return=minimal'
+    }
+  );
+}
+
+async function otAppendLog(memberNumber, kind, detail) {
+  await sb('POST',
+    'outreach_log',
+    { member_number: memberNumber, kind, detail, performed_by: 'admin' },
+    {
+      'Accept-Profile': 'slate',
+      'Content-Profile': 'slate',
+      'Prefer': 'return=minimal'
+    }
+  );
+}
+
+async function otFetchLog(memberNumber) {
+  try {
+    const rows = await sb('GET',
+      'outreach_log?member_number=eq.' + encodeURIComponent(memberNumber) +
+        '&order=performed_at.desc&limit=25',
+      null,
+      { 'Accept-Profile': 'slate' });
+    const logDiv = document.querySelector(`.ot-card[data-mn="${memberNumber}"] [data-log]`);
+    if (!logDiv) return;
+    if (!rows || !rows.length) {
+      logDiv.innerHTML = '<p class="hint" style="margin:6px 0 0; font-style:italic">No activity yet.</p>';
+      return;
+    }
+    logDiv.innerHTML = '<div style="font-size:0.72rem; font-weight:700; color:var(--muted); margin-bottom:4px; text-transform:uppercase">Activity</div>' +
+      rows.map(r => `
+        <div class="ot-log-entry">
+          <span class="ot-log-when">${esc(otFmtDate(r.performed_at))}</span>
+          <span class="ot-log-kind">${esc(r.kind)}</span>
+          ${esc(r.detail || '')}
+        </div>
+      `).join('');
+  } catch (e) {
+    console.error('fetchLog failed', e);
+  }
+}
+
+function otFmtDate(iso) {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
+  } catch (_) { return iso; }
+}
+
+window.otInit = otInit;
+window.otRun  = otRun;
 
 /* ══════════════════════════════════════════════════════════════════════
    REDTAPE ADMIN TAB (3.55+)
