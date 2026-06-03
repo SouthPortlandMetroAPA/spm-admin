@@ -2008,7 +2008,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.86';
+const APP_VERSION = '3.87';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -12038,7 +12038,7 @@ function otCardHtml(c) {
         ${otQuickTouchBtn(s, 'email', 'Emailed', '📧')}
         ${otQuickTouchBtn(s, 'text',  'Texted',  '💬')}
         ${otQuickTouchBtn(s, 'call',  'Called',  '📞')}
-        ${s.last_touched_at ? '<span class="hint" style="align-self:center; font-size:0.74rem">Last touched ' + esc(otFmtDate(s.last_touched_at)) + '</span>' : ''}
+        ${otFmtLastAction(s) ? '<span class="hint" style="align-self:center; font-size:0.74rem">' + esc(otFmtLastAction(s)) + '</span>' : ''}
       </div>
       ${followUpHtml}
       ${notesHtml}
@@ -12083,6 +12083,31 @@ function otFmtDateOnly(iso) {
   if (!iso) return '';
   try { return new Date(iso).toLocaleDateString(undefined, { month:'short', day:'numeric' }); }
   catch (_) { return ''; }
+}
+
+/* 3.87+: pick the MOST RECENT touch action across email/text/call and
+   format as "verb M/D/YY h:MMam" — e.g. "texted 6/3/26 3:26pm". The
+   generic last_touched_at is no longer surfaced on the card; this
+   replaces it with a concrete, actionable label that says WHAT was
+   done and WHEN.  Returns '' when no per-method touch has happened. */
+function otFmtLastAction(s) {
+  if (!s) return '';
+  const candidates = [
+    { ts: s.last_emailed_at, verb: 'emailed' },
+    { ts: s.last_texted_at,  verb: 'texted'  },
+    { ts: s.last_called_at,  verb: 'called'  }
+  ].filter(c => c.ts);
+  if (!candidates.length) return '';
+  candidates.sort((a, b) => String(b.ts).localeCompare(String(a.ts)));
+  const top = candidates[0];
+  const d = new Date(top.ts);
+  if (isNaN(d.getTime())) return '';
+  const date = (d.getMonth() + 1) + '/' + d.getDate() + '/' + String(d.getFullYear() % 100).padStart(2, '0');
+  let h = d.getHours();
+  const ampm = h >= 12 ? 'pm' : 'am';
+  h = h % 12; if (h === 0) h = 12;
+  const m = String(d.getMinutes()).padStart(2, '0');
+  return top.verb + ' ' + date + ' ' + h + ':' + m + ampm;
 }
 
 /* Player preferences (3.84+) — inline pill UI captured under the
@@ -12356,16 +12381,28 @@ function otOpenPhoneMenu(btn) {
     el.addEventListener('mouseleave', () => el.style.background = '');
   });
 
-  /* Wire actions — auto-log call/text, copy → clipboard */
+  /* Wire actions — auto-log call/text + persist per-method timestamp
+     so the quick-touch buttons + last-action display reflect the
+     phone-menu action just like the standalone Quick-touch buttons do. */
   menu.querySelector('[data-act="call"]').addEventListener('click', async () => {
+    otPushUndo(mn, 'Logged: Called (' + label + ')');
+    const now = new Date().toISOString();
     await otAppendLog(mn, 'call', label + ': ' + raw);
-    await otUpsertStatus(mn, { last_touched_at: new Date().toISOString() });
+    await otUpsertStatus(mn, { last_touched_at: now, last_called_at: now });
+    const c = _otState.candidates.find(x => x.member_number === mn);
+    if (c) c._status = { ...c._status, last_touched_at: now, last_called_at: now };
+    otRenderList();
     /* don't close immediately — let the tel: link navigate */
     setTimeout(otClosePhoneMenu, 100);
   });
   menu.querySelector('[data-act="text"]').addEventListener('click', async () => {
+    otPushUndo(mn, 'Logged: Texted (' + label + ')');
+    const now = new Date().toISOString();
     await otAppendLog(mn, 'text', label + ': ' + raw);
-    await otUpsertStatus(mn, { last_touched_at: new Date().toISOString() });
+    await otUpsertStatus(mn, { last_touched_at: now, last_texted_at: now });
+    const c = _otState.candidates.find(x => x.member_number === mn);
+    if (c) c._status = { ...c._status, last_touched_at: now, last_texted_at: now };
+    otRenderList();
     setTimeout(otClosePhoneMenu, 100);
   });
   menu.querySelector('[data-act="copy"]').addEventListener('click', async (e) => {
