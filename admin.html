@@ -1718,8 +1718,13 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             <select id="otSource" style="min-width:300px">
               <option value="lapsed" selected>Lapsed (played, then stopped)</option>
               <option value="new">Never played (new, paid)</option>
-              <option value="both">Both — full outreach pool</option>
+              <option value="both">Both lapsed + never played</option>
+              <option value="playing">Currently playing</option>
             </select>
+          </div>
+          <div class="field-mini" id="otMinTeamsField" style="display:none">
+            <label for="otMinTeams">On at least (teams)</label>
+            <input type="number" id="otMinTeams" min="1" max="20" value="1" style="width:80px">
           </div>
           <div class="field-mini" id="otLastPlayedField" title="Date range for the most recent play of 8- or 9-ball. Both bounds inclusive. Bigger 'to' = more lapsed candidates; bigger 'from' = excludes anyone who played too recently.">
             <label>Last played — range (days ago)</label>
@@ -1737,11 +1742,14 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
               <!-- Populated by otLoadCounties() on first init -->
             </select>
           </div>
-          <div class="field-mini">
-            <label for="otCity">City</label>
-            <select id="otCity" style="min-width:180px">
-              <option value="" selected>All cities</option>
-              <!-- Populated by otLoadCities() on init + on County change -->
+          <div class="field-mini" title="Ctrl/⌘-click to select multiple cities. Leave all unselected to include every city.">
+            <label for="otCity">
+              City <span class="hint" style="font-weight:500;font-size:0.7rem">(multi · Ctrl-click)</span>
+            </label>
+            <select id="otCity" multiple size="4" style="min-width:200px; padding:4px 6px;">
+              <!-- Populated by otLoadCities() on init + on County change.
+                   No "All cities" sentinel in a multi-select — leaving
+                   nothing selected = include all. -->
             </select>
           </div>
           <div class="field-mini" id="otFormatField">
@@ -1974,7 +1982,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.81';
+const APP_VERSION = '3.82';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10889,7 +10897,7 @@ const OT_TAB_STYLE = `
   #tab-outreach .ot-stat.s-new            { background:#f3f4f6; color:#374151; }
   #tab-outreach .ot-stat.s-working        { background:#dbeafe; color:#1e40af; }
   #tab-outreach .ot-stat.s-follow_up      { background:#fef3c7; color:#92400e; }
-  #tab-outreach .ot-stat.s-joined         { background:#d1fae5; color:#065f46; }
+  #tab-outreach .ot-stat.s-returning      { background:#d1fae5; color:#065f46; }
   #tab-outreach .ot-stat.s-not_interested { background:#fee2e2; color:#991b1b; }
   #tab-outreach .ot-stat.s-dnc            { background:#1a1a1a; color:#fff; }
 
@@ -10933,7 +10941,7 @@ const OT_TAB_STYLE = `
   #tab-outreach .ot-pill.active.s-new            { background:#f3f4f6; border-color:#374151; color:#374151; }
   #tab-outreach .ot-pill.active.s-working        { background:#dbeafe; border-color:#1e40af; color:#1e40af; }
   #tab-outreach .ot-pill.active.s-follow_up      { background:#fef3c7; border-color:#92400e; color:#92400e; }
-  #tab-outreach .ot-pill.active.s-joined         { background:#d1fae5; border-color:#065f46; color:#065f46; }
+  #tab-outreach .ot-pill.active.s-returning      { background:#d1fae5; border-color:#065f46; color:#065f46; }
   #tab-outreach .ot-pill.active.s-not_interested { background:#fee2e2; border-color:#991b1b; color:#991b1b; }
 
   /* Expand toggle + body */
@@ -11035,15 +11043,14 @@ const OT_TAB_STYLE = `
   document.head.appendChild(s);
 })();
 
-/* 3.77+: "joined" removed — by definition the outreach list contains
-   people who HAVEN'T joined. If they join, they drop off the candidate
-   list automatically (RPC filters currently_playing=true). DB constraint
-   still allows 'joined' for backward compat; never produced by the UI. */
-const STATUSES = ['new','working','follow_up','not_interested'];
+/* 3.82+: "joined" removed (was nonsense in this list); added "returning"
+   for people who told you they're coming back next session. */
+const STATUSES = ['new','working','follow_up','returning','not_interested'];
 const STATUS_LABEL = {
   new: 'New',
   working: 'Working',
   follow_up: 'Follow up',
+  returning: 'Returning',
   not_interested: 'Not interested'
 };
 
@@ -11141,21 +11148,21 @@ async function otLoadCounties() {
 async function otLoadCities(county) {
   const sel = document.getElementById('otCity');
   if (!sel) return;
-  const prevSelection = sel.value;
+  /* Preserve the prior set of selections (multi-select). */
+  const prevSelections = new Set([...sel.selectedOptions].map(o => o.value));
   const rows = await sb('POST', 'rpc/outreach_cities',
     { p_county: county || null },
     { 'Accept-Profile': 'slate', 'Content-Profile': 'slate' });
-  /* Rebuild options. Keep the "All cities" sentinel as option[0]. */
-  sel.innerHTML = '<option value="">All cities</option>';
+  /* Rebuild options. No sentinel — empty multi-select selection means
+     "all cities" by convention (see otRun). */
+  sel.innerHTML = '';
   for (const r of (rows || [])) {
     const opt = document.createElement('option');
     opt.value = r.city;
     opt.textContent = r.city + ' (' + r.player_count + ')';
+    /* Restore prior selection if it's still in the (possibly narrower) list. */
+    if (prevSelections.has(r.city)) opt.selected = true;
     sel.appendChild(opt);
-  }
-  /* Restore prior selection if it's still in the (possibly narrower) list. */
-  if (prevSelection && [...sel.options].some(o => o.value === prevSelection)) {
-    sel.value = prevSelection;
   }
 }
 
@@ -11250,10 +11257,13 @@ function otRenderReminders() {
       bestPhone ? esc(bestPhone) : null,
       r.last_note ? '“' + esc(r.last_note) + '”' : null
     ].filter(Boolean).join(' · ');
+    const kindBadge = r.status === 'returning'
+      ? '<span style="background:#065f46;color:#fff;padding:1px 8px;border-radius:999px;font-size:0.66rem;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;margin-right:6px">🎯 Returning</span>'
+      : '<span style="background:#92400e;color:#fff;padding:1px 8px;border-radius:999px;font-size:0.66rem;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;margin-right:6px">⏰ Follow up</span>';
     return `
       <div class="ot-rem-row" data-mn="${esc(r.member_number)}">
         <div style="flex:1; min-width:140px">
-          <div class="rem-name">${esc(name)} <span class="hint" style="font-weight:500;font-family:ui-monospace,monospace">#${esc(r.member_number)}</span></div>
+          <div class="rem-name">${kindBadge}${esc(name)} <span class="hint" style="font-weight:500;font-family:ui-monospace,monospace">#${esc(r.member_number)}</span></div>
           ${meta ? '<div class="rem-meta">' + meta + '</div>' : ''}
         </div>
         <div class="ot-rem-actions">
@@ -11368,28 +11378,36 @@ function otMatchesSearch(c, rawQuery) {
   return tokens.every(t => hay.includes(t));
 }
 
-/* Main fetch — combines two data sources:
-     'lapsed' = recruit_lapsed_players RPC (played, then stopped)
-     'new'    = outreach_new_members RPC (paid, never played)
-   Both return the same column shape. Dedupe by member_number when
+/* Main fetch — three data sources:
+     'lapsed'  = recruit_lapsed_players RPC (played, then stopped)
+     'new'     = outreach_new_members RPC (paid, never played)
+     'both'    = lapsed + new
+     'playing' = outreach_currently_playing RPC (already on N+ teams) — NEW 3.82
+   All return the same column shape. Dedupe by member_number when
    source='both'. Each row is tagged with _source for the UI badge. */
 async function otRun() {
-  const source = document.getElementById('otSource').value;   /* 'lapsed' | 'new' | 'both' */
+  const source = document.getElementById('otSource').value;   /* 'lapsed' | 'new' | 'both' | 'playing' */
   /* Last-played range (3.78+): two inputs. Min = lower bound (how recent
      they can be); Max = upper bound (how far back to look). Defaults
      0 / 365 = anyone who played in the last year. */
   const daysMin = Math.max(0, parseInt(document.getElementById('otLastPlayedDaysMin').value, 10) || 0);
   const daysMax = Math.max(daysMin, parseInt(document.getElementById('otLastPlayedDaysMax').value, 10) || 365);
   const county = document.getElementById('otCounty').value.trim() || null;
-  const city   = (document.getElementById('otCity')?.value || '').trim() || null;
+  /* Multi-select cities. Empty selection = "all cities" (NULL → server-
+     side filter no-ops). */
+  const citiesEl = document.getElementById('otCity');
+  const cities = citiesEl ? [...citiesEl.selectedOptions].map(o => o.value) : [];
+  const minTeams = Math.max(1, parseInt(document.getElementById('otMinTeams').value, 10) || 1);
   const fmt = document.getElementById('otFormat').value;
   const activeOnly = document.getElementById('otActiveOnly').value === 'yes';
   const status = document.getElementById('otStatusLine');
   status.textContent = 'Loading candidates…';
 
-  /* Show/hide lapsed-only fields per source choice */
-  document.getElementById('otLastPlayedField').style.display = (source === 'new') ? 'none' : '';
-  document.getElementById('otFormatField').style.display     = (source === 'new') ? 'none' : '';
+  /* Show/hide source-specific fields. */
+  const showLastPlayed = (source === 'lapsed' || source === 'both');
+  document.getElementById('otLastPlayedField').style.display = showLastPlayed ? '' : 'none';
+  document.getElementById('otFormatField').style.display     = showLastPlayed ? '' : 'none';
+  document.getElementById('otMinTeamsField').style.display   = (source === 'playing') ? '' : 'none';
 
   try {
     const tagged = [];
@@ -11402,7 +11420,7 @@ async function otRun() {
       const lapsed = await sb('POST', 'rpc/recruit_lapsed_players', {
         p_sl9_max: 9,
         p_county: county,
-        p_city: city,
+        p_cities: cities.length ? cities : null,
         p_last_played_days: daysMax,
         p_last_played_days_min: daysMin,
         p_exclude_division_number: null,
@@ -11419,9 +11437,19 @@ async function otRun() {
     if (source === 'new' || source === 'both') {
       const fresh = await sb('POST', 'rpc/outreach_new_members', {
         p_county: county,
-        p_city: city
+        p_cities: cities.length ? cities : null
       });
       for (const r of (fresh || [])) tagged.push({ ...r, _source: 'new' });
+    }
+
+    if (source === 'playing') {
+      const playing = await sb('POST', 'rpc/outreach_currently_playing', {
+        p_county: county,
+        p_cities: cities.length ? cities : null,
+        p_min_teams: minTeams
+      });
+      if ((playing || []).length >= 1000) lapsedCappedAt1000 = true;
+      for (const r of (playing || [])) tagged.push({ ...r, _source: 'playing' });
     }
 
     /* Optional Active-only filter (default ON to scope the 1000+ never-played
@@ -11515,21 +11543,31 @@ async function otRun() {
 }
 
 function otRenderStats() {
-  const counts = { all: 0, new: 0, working: 0, follow_up: 0, joined: 0, not_interested: 0, dnc: 0 };
+  /* 3.82: "joined" stat pill removed (it never showed valid data since
+     'joined' isn't producible from this UI). "Returning" pill added. */
+  const counts = { all: 0, new: 0, working: 0, follow_up: 0, returning: 0, not_interested: 0, dnc: 0 };
   for (const c of _otState.candidates) {
     counts.all++;
     if (c._status.do_not_contact) { counts.dnc++; continue; }
-    counts[c._status.status]++;
+    if (counts[c._status.status] !== undefined) counts[c._status.status]++;
   }
   const wrap = document.getElementById('otStatsRow');
   const f = _otState.filter.status;
   const mk = (key, label) => `<span class="ot-stat s-${key} ${f===key?'active':''}" data-filter="${key}">${label}: <strong>${counts[key]}</strong></span>`;
+  /* Hide all status pills when the source is "playing" — those people
+     don't get outreach statuses (per user direction). Show just the
+     total count then. */
+  const source = document.getElementById('otSource').value;
+  if (source === 'playing') {
+    wrap.innerHTML = `<span class="ot-stat">Players: <strong>${counts.all}</strong></span>`;
+    return;
+  }
   wrap.innerHTML =
     `<span class="ot-stat ${f==='all'?'active':''}" data-filter="all">All: <strong>${counts.all - counts.dnc}</strong></span>` +
     mk('new', 'New') +
     mk('working', 'Working') +
     mk('follow_up', 'Follow up') +
-    mk('joined', 'Joined') +
+    mk('returning', 'Returning') +
     mk('not_interested', 'Not interested') +
     (counts.dnc > 0 ? `<span class="ot-stat s-dnc ${f==='dnc'?'active':''}" data-filter="dnc">🚫 DNC: <strong>${counts.dnc}</strong></span>` : '');
   wrap.querySelectorAll('.ot-stat').forEach(el => {
@@ -11608,29 +11646,42 @@ function otCardHtml(c) {
   const last9 = c.last_played_9 || '—';
   const expanded = _otState.expanded.has(c.member_number);
 
-  const pillsHtml = STATUSES.map(st => {
-    const active = (s.status === st) ? 'active s-' + st : '';
-    return `<button type="button" class="ot-pill ${active}" data-set-status="${st}">${esc(STATUS_LABEL[st])}</button>`;
-  }).join('');
+  /* Playing-source cards have NO status pills — those people are
+     already on a team, they're not outreach targets per user direction. */
+  const pillsHtml = (c._source === 'playing')
+    ? ''
+    : STATUSES.map(st => {
+        const active = (s.status === st) ? 'active s-' + st : '';
+        return `<button type="button" class="ot-pill ${active}" data-set-status="${st}">${esc(STATUS_LABEL[st])}</button>`;
+      }).join('');
 
-  const followUpHtml = s.status === 'follow_up'
-    ? `<div class="ot-meta" style="margin-top:6px">⏰ Follow up: <b>${esc(s.follow_up_session || '(no session set)')}</b> <button type="button" class="ot-card-toggle" data-edit-follow-up style="margin:0">Edit</button></div>`
+  /* "Follow up" + "Returning" are both session-anchored deferrals.
+     Show the deferred-session label inline so the operator sees what
+     was set without expanding the card. */
+  const followUpHtml = (s.status === 'follow_up' || s.status === 'returning')
+    ? `<div class="ot-meta" style="margin-top:6px">${s.status === 'returning' ? '🎯' : '⏰'} ${s.status === 'returning' ? 'Returning' : 'Follow up'}: <b>${esc(s.follow_up_session || '(no session set)')}</b> <button type="button" class="ot-card-toggle" data-edit-follow-up style="margin:0">Edit</button></div>`
     : '';
 
   const lastNote = s.last_note
     ? `<div class="ot-last-note">"${esc(s.last_note)}"</div>`
     : '';
 
-  const sourceBadge = c._source === 'new'
-    ? '<span style="margin-left:6px; padding:1px 8px; background:#fef3c7; color:#92400e; border-radius:999px; font-size:0.7rem; font-weight:700; text-transform:uppercase; letter-spacing:0.04em">Never played</span>'
-    : '';
+  let sourceBadge = '';
+  if (c._source === 'new') {
+    sourceBadge = '<span style="margin-left:6px; padding:1px 8px; background:#fef3c7; color:#92400e; border-radius:999px; font-size:0.7rem; font-weight:700; text-transform:uppercase; letter-spacing:0.04em">Never played</span>';
+  } else if (c._source === 'playing') {
+    const n = c.current_session_team_count || 1;
+    sourceBadge = '<span style="margin-left:6px; padding:1px 8px; background:#d1fae5; color:#065f46; border-radius:999px; font-size:0.7rem; font-weight:700; text-transform:uppercase; letter-spacing:0.04em">On ' + n + ' team' + (n === 1 ? '' : 's') + '</span>';
+  }
 
   const joinedLine = c.date_started
     ? '<div class="ot-meta">Joined: <b>' + esc(otFmtDateShort(c.date_started)) + '</b></div>'
     : '';
   const lastPlayedLine = c._source === 'new'
     ? '<div class="ot-meta">No play history — cold-outreach candidate.</div>'
-    : '<div class="ot-meta">Last 8-ball: <b>' + esc(last8) + '</b> · Last 9-ball: <b>' + esc(last9) + '</b></div>';
+    : (c._source === 'playing'
+        ? '<div class="ot-meta">Currently playing in <b>' + (c.current_session_team_count || 1) + '</b> team' + ((c.current_session_team_count || 1) === 1 ? '' : 's') + ' this session.</div>'
+        : '<div class="ot-meta">Last 8-ball: <b>' + esc(last8) + '</b> · Last 9-ball: <b>' + esc(last9) + '</b></div>');
 
   return `
     <div class="ot-card ${s.do_not_contact ? 'dnc' : ''} ${expanded ? 'expanded' : ''}" data-mn="${esc(c.member_number)}">
@@ -11803,6 +11854,15 @@ async function otSetStatus(memberNumber, status) {
        prompt(). User explicitly requested merged "season + year" options. */
     followUpSession = await otPickFollowUpSession(c._status.follow_up_session);
     if (followUpSession === null) return; /* user cancelled */
+  } else if (status === 'returning') {
+    /* 3.82+: Returning auto-defaults to the NEXT session (the user said
+       they're coming back, and "next session" is the most common case).
+       The picker is shown to confirm + allow override, but the first
+       option (next session) is pre-highlighted. */
+    followUpSession = await otPickFollowUpSession(
+      c._status.follow_up_session || (_otSessionState.nextThree[0]?.label || null)
+    );
+    if (followUpSession === null) return;
   }
   await otUpsertStatus(memberNumber, {
     status,
