@@ -1714,6 +1714,14 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 
         <div class="ot-toolbar" style="display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; margin-bottom:14px;">
           <div class="field-mini">
+            <label for="otSource">Source</label>
+            <select id="otSource" style="width:170px">
+              <option value="lapsed" selected>Lapsed players (played, then stopped)</option>
+              <option value="new">Never played (new, paid)</option>
+              <option value="both">Both — full outreach pool</option>
+            </select>
+          </div>
+          <div class="field-mini" id="otLastPlayedField">
             <label for="otLastPlayedDays">Hasn't played in (days)</label>
             <input type="number" id="otLastPlayedDays" min="0" max="3650" value="180" style="width:90px">
           </div>
@@ -1721,13 +1729,20 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             <label for="otCounty">County (optional)</label>
             <input type="text" id="otCounty" placeholder="Multnomah" style="width:160px">
           </div>
-          <div class="field-mini">
+          <div class="field-mini" id="otFormatField">
             <label for="otFormat">Format</label>
             <select id="otFormat" style="width:120px">
               <option value="either" selected>Either 8 or 9</option>
               <option value="8">8-ball only</option>
               <option value="9">9-ball only</option>
               <option value="both">Both 8 and 9</option>
+            </select>
+          </div>
+          <div class="field-mini">
+            <label for="otActiveOnly">Active only</label>
+            <select id="otActiveOnly" style="width:100px">
+              <option value="yes" selected>Yes</option>
+              <option value="no">No</option>
             </select>
           </div>
           <button class="btn btn-primary" id="otRunBtn">🔄 Refresh list</button>
@@ -1925,7 +1940,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.74';
+const APP_VERSION = '3.75';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10971,47 +10986,93 @@ async function otInit() {
   });
 }
 
-/* Main fetch — recruit_lapsed_players RPC + outreach_status JOIN */
+/* Main fetch — combines two data sources:
+     'lapsed' = recruit_lapsed_players RPC (played, then stopped)
+     'new'    = outreach_new_members RPC (paid, never played)
+   Both return the same column shape. Dedupe by member_number when
+   source='both'. Each row is tagged with _source for the UI badge. */
 async function otRun() {
+  const source = document.getElementById('otSource').value;   /* 'lapsed' | 'new' | 'both' */
   const days = parseInt(document.getElementById('otLastPlayedDays').value, 10) || 180;
   const county = document.getElementById('otCounty').value.trim() || null;
   const fmt = document.getElementById('otFormat').value;
+  const activeOnly = document.getElementById('otActiveOnly').value === 'yes';
   const status = document.getElementById('otStatusLine');
   status.textContent = 'Loading candidates…';
 
+  /* Show/hide lapsed-only fields per source choice */
+  document.getElementById('otLastPlayedField').style.display = (source === 'new') ? 'none' : '';
+  document.getElementById('otFormatField').style.display     = (source === 'new') ? 'none' : '';
+
   try {
-    /* Pull everyone the existing RPC surfaces — we'll filter to
-       not-on-team in JS. Setting p_sl9_max=9 so we get all SLs. */
-    const rpcRows = await sb('POST', 'rpc/recruit_lapsed_players', {
-      p_sl9_max: 9,
-      p_county: county,
-      p_last_played_days: days,
-      p_exclude_division_number: null
+    const tagged = [];
+
+    if (source === 'lapsed' || source === 'both') {
+      const lapsed = await sb('POST', 'rpc/recruit_lapsed_players', {
+        p_sl9_max: 9,
+        p_county: county,
+        p_last_played_days: days,
+        p_exclude_division_number: null
+      });
+      let rows = (lapsed || []).filter(r => !r.currently_playing);
+      if (fmt === '8')    rows = rows.filter(r => r.last_played_8);
+      if (fmt === '9')    rows = rows.filter(r => r.last_played_9);
+      if (fmt === 'both') rows = rows.filter(r => r.last_played_8 && r.last_played_9);
+      for (const r of rows) tagged.push({ ...r, _source: 'lapsed' });
+    }
+
+    if (source === 'new' || source === 'both') {
+      const fresh = await sb('POST', 'rpc/outreach_new_members', {
+        p_county: county
+      });
+      for (const r of (fresh || [])) tagged.push({ ...r, _source: 'new' });
+    }
+
+    /* Optional Active-only filter (default ON to scope the 1000+ never-played
+       pool to people who've actually paid membership this year). Comparing
+       case-insensitive against the APA's "Active" status string. */
+    let merged = tagged;
+    if (activeOnly) {
+      merged = merged.filter(r => (r.member_status || '').toLowerCase() === 'active');
+    }
+
+    /* Dedupe (someone with stale data could theoretically appear in both
+       sources). Prefer lapsed-tagged row since it has more accurate dates. */
+    const byMember = new Map();
+    for (const r of merged) {
+      if (!byMember.has(r.member_number) || r._source === 'lapsed') {
+        byMember.set(r.member_number, r);
+      }
+    }
+    const deduped = [...byMember.values()];
+
+    /* Sort: never-played at bottom by default (lapsed first — they're warmer
+       leads, having played at some point). Then by last_any descending. */
+    deduped.sort((a, b) => {
+      if (a._source !== b._source) return a._source === 'lapsed' ? -1 : 1;
+      const da = a.last_any || '1900-01-01';
+      const db = b.last_any || '1900-01-01';
+      return db.localeCompare(da);
     });
 
-    /* Filter to "not currently playing" — that's the outreach target. */
-    let rows = (rpcRows || []).filter(r => !r.currently_playing);
+    /* Join with outreach_status — one batch query */
+    const memberNumbers = deduped.map(r => r.member_number);
+    let statusRows = [];
+    if (memberNumbers.length) {
+      /* Chunk the IN-list to keep URL under typical 8KB limit. 200 at a
+         time is comfortable: 200 × 9 chars/member ≈ 1.8 KB. */
+      const CHUNK = 200;
+      for (let i = 0; i < memberNumbers.length; i += CHUNK) {
+        const slice = memberNumbers.slice(i, i + CHUNK);
+        const r = await sb('GET',
+          'outreach_status?member_number=in.(' + slice.join(',') + ')&select=*',
+          null, { 'Accept-Profile': 'slate' });
+        statusRows = statusRows.concat(r || []);
+      }
+    }
+    const statusByMember = Object.fromEntries(statusRows.map(s => [s.member_number, s]));
 
-    /* Format filter (8 / 9 / either / both) */
-    if (fmt === '8') {
-      rows = rows.filter(r => r.last_played_8);
-    } else if (fmt === '9') {
-      rows = rows.filter(r => r.last_played_9);
-    } else if (fmt === 'both') {
-      rows = rows.filter(r => r.last_played_8 && r.last_played_9);
-    } /* 'either' = no filter */
-
-    /* Pull all status records — cheap, single query, small table */
-    const memberNumbers = rows.map(r => r.member_number);
-    const statusRows = memberNumbers.length
-      ? await sb('GET',
-          'outreach_status?member_number=in.(' + memberNumbers.join(',') + ')&select=*',
-          null, { 'Accept-Profile': 'slate' })
-      : [];
-    const statusByMember = Object.fromEntries((statusRows || []).map(s => [s.member_number, s]));
-
-    /* Hide do-not-contacts from main list (they show in a separate filter) */
-    const candidates = rows.map(r => {
+    const candidates = deduped.map(r => {
       const s = statusByMember[r.member_number] || { status: 'new', do_not_contact: false };
       return { ...r, _status: s };
     });
@@ -11021,7 +11082,10 @@ async function otRun() {
     document.getElementById('otEmptyState').style.display = 'none';
     otRenderStats();
     otRenderList();
-    status.textContent = candidates.length + ' candidate' + (candidates.length === 1 ? '' : 's') + ' loaded.';
+    const lapsedCount = candidates.filter(c => c._source === 'lapsed').length;
+    const newCount = candidates.filter(c => c._source === 'new').length;
+    status.textContent = candidates.length + ' candidates loaded' +
+      (source === 'both' ? ' (' + lapsedCount + ' lapsed · ' + newCount + ' never-played)' : '') + '.';
   } catch (e) {
     status.textContent = 'Failed: ' + e.message;
     console.error(e);
@@ -11106,17 +11170,25 @@ function otCardHtml(c) {
     ? `<div class="ot-last-note">"${esc(s.last_note)}"</div>`
     : '';
 
+  const sourceBadge = c._source === 'new'
+    ? '<span style="margin-left:6px; padding:1px 8px; background:#fef3c7; color:#92400e; border-radius:999px; font-size:0.7rem; font-weight:700; text-transform:uppercase; letter-spacing:0.04em">Never played</span>'
+    : '';
+
+  const lastPlayedLine = c._source === 'new'
+    ? '<div class="ot-meta">No play history — cold-outreach candidate.</div>'
+    : '<div class="ot-meta">Last 8-ball: <b>' + esc(last8) + '</b> · Last 9-ball: <b>' + esc(last9) + '</b></div>';
+
   return `
     <div class="ot-card ${s.do_not_contact ? 'dnc' : ''} ${expanded ? 'expanded' : ''}" data-mn="${esc(c.member_number)}">
       <div class="ot-card-head">
         <div style="flex:1; min-width:0">
-          <div class="ot-name">${esc(fullName)} <span class="hint" style="font-weight:500; font-family:ui-monospace,monospace">#${esc(c.member_number)}</span></div>
+          <div class="ot-name">${esc(fullName)} <span class="hint" style="font-weight:500; font-family:ui-monospace,monospace">#${esc(c.member_number)}</span>${sourceBadge}</div>
           <div class="ot-meta">
             SL8 <b>${c.sl_8ball ?? '—'}</b> · SL9 <b>${c.sl_9ball ?? '—'}</b>
             ${c.city ? ' · ' + esc(c.city) : ''}
             ${c.member_status ? ' · status: <b>' + esc(c.member_status) + '</b>' : ''}
           </div>
-          <div class="ot-meta">Last 8-ball: <b>${esc(last8)}</b> · Last 9-ball: <b>${esc(last9)}</b></div>
+          ${lastPlayedLine}
         </div>
       </div>
       <div class="ot-contact">
