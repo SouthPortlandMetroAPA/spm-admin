@@ -1787,6 +1787,9 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             </select>
           </div>
           <button class="btn btn-primary" id="otRunBtn">🔄 Refresh list</button>
+          <button class="btn btn-outline btn-sm" id="otTemplatesBtn"
+                  title="Edit text + email message templates"
+                  style="align-self:flex-end; padding:6px 12px;">📝 Templates</button>
           <button class="btn btn-outline btn-sm" id="otUndoBtn" disabled
                   title="Undo last action (Ctrl/⌘-Z). Holds up to 10."
                   style="align-self:flex-end; padding:6px 12px;">
@@ -2008,7 +2011,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.88';
+const APP_VERSION = '3.89';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11332,6 +11335,8 @@ async function otInit() {
   otLoadCounties().catch(e => console.error('counties load failed', e));
   otLoadCities(null).catch(e => console.error('cities load failed', e));
   otLoadCurrentSession().catch(e => console.error('session load failed', e));
+  otLoadTemplates().catch(e => console.error('templates load failed', e));
+  document.getElementById('otTemplatesBtn').addEventListener('click', otOpenTemplateEditor);
 
   /* Cascade: when County changes, repopulate the City dropdown to show
      only cities in that county. Preserve the city selection if the
@@ -12115,7 +12120,7 @@ function otCardHtml(c) {
         </div>
       </div>
       <div class="ot-contact">
-        ${c.email ? `<a href="mailto:${esc(c.email)}">✉️ ${esc(c.email)}</a>` : ''}
+        ${c.email ? `<a href="${esc(otBuildMailtoUrl(c.email, otSubstitute(_otTemplates.email.subject, c), otSubstitute(_otTemplates.email.body, c)))}" data-templated-mail>✉️ ${esc(c.email)}</a>` : ''}
         ${otRenderPhones(c)}
       </div>
       <!-- Quick-touch buttons. Persistent highlight when the corresponding
@@ -12195,6 +12200,194 @@ function otFmtLastAction(s) {
   h = h % 12; if (h === 0) h = 12;
   const m = String(d.getMinutes()).padStart(2, '0');
   return top.verb + ' ' + date + ' ' + h + ':' + m + ampm;
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Message templates (3.89+) — per-kind {text, email} templates stored in
+   slate.outreach_templates. UI lets the operator edit; substitution
+   happens at send time when building sms:/mailto: URLs.
+
+   Available variables (used in {var} placeholders):
+     {first_name} {last_name} {nickname} {member_number}
+     {email} {cell_phone} {home_phone} {work_phone} {alt_phone}
+     {city} {county} {state}
+     {sl_8ball} {sl_9ball}
+     {joined_date}            — date_started formatted as "Mon D, YYYY"
+     {member_status}
+     {last_played_8} {last_played_9}
+     {last_played_either}     — most recent of the two (raw MM/DD/YY)
+   Unknown {variables} are left as-is so the operator notices typos.
+   ════════════════════════════════════════════════════════════════════════ */
+const _otTemplates = { text: { body: '' }, email: { subject: '', body: '' } };
+
+const OT_TEMPLATE_VARS = [
+  'first_name','last_name','nickname','member_number',
+  'email','cell_phone','home_phone','work_phone','alt_phone',
+  'city','county','state',
+  'sl_8ball','sl_9ball',
+  'joined_date','member_status',
+  'last_played_8','last_played_9','last_played_either'
+];
+
+async function otLoadTemplates() {
+  try {
+    const rows = await sb('GET', 'outreach_templates?select=*', null, { 'Accept-Profile': 'slate' });
+    for (const r of (rows || [])) {
+      if (r.kind === 'text')  _otTemplates.text  = { body: r.body || '' };
+      if (r.kind === 'email') _otTemplates.email = { subject: r.subject || '', body: r.body || '' };
+    }
+  } catch (e) { console.error('templates load failed', e); }
+}
+
+function otSubstitute(template, c) {
+  if (!template) return '';
+  /* Most-recent of last_played_8/9 (MM/DD/YY strings) */
+  const t8 = otParseDate(c.last_played_8), t9 = otParseDate(c.last_played_9);
+  const lastEither = t8 > t9 ? (c.last_played_8 || '') : (c.last_played_9 || c.last_played_8 || '');
+  const joinedDate = c.date_started ? otFmtDateShort(c.date_started) : '';
+  const map = {
+    first_name:         c.first_name         ?? '',
+    last_name:          c.last_name          ?? '',
+    nickname:           c.nickname           ?? '',
+    member_number:      c.member_number      ?? '',
+    email:              c.email              ?? '',
+    cell_phone:         c.cell_phone         ?? '',
+    home_phone:         c.home_phone         ?? '',
+    work_phone:         c.work_phone         ?? '',
+    alt_phone:          c.alt_phone          ?? '',
+    city:               c.city               ?? '',
+    county:             c.county             ?? '',
+    state:              c.state              ?? '',
+    sl_8ball:           c.sl_8ball           ?? '',
+    sl_9ball:           c.sl_9ball           ?? '',
+    joined_date:        joinedDate,
+    member_status:      c.member_status      ?? '',
+    last_played_8:      c.last_played_8      ?? '',
+    last_played_9:      c.last_played_9      ?? '',
+    last_played_either: lastEither
+  };
+  return String(template).replace(/\{(\w+)\}/g, (m, key) =>
+    Object.prototype.hasOwnProperty.call(map, key) ? String(map[key]) : m
+  );
+}
+
+/* Build a tap-friendly sms: link with optional body. iOS uses ?body=
+   (Apple changed from & to ? in iOS 8); Android accepts either; we use
+   ? as the broadest match. Phone digits-only for the recipient. */
+function otBuildSmsUrl(numberDigits, body) {
+  const base = 'sms:' + numberDigits;
+  return body ? base + '?body=' + encodeURIComponent(body) : base;
+}
+function otBuildMailtoUrl(email, subject, body) {
+  const params = [];
+  if (subject) params.push('subject=' + encodeURIComponent(subject));
+  if (body)    params.push('body='    + encodeURIComponent(body));
+  return 'mailto:' + encodeURIComponent(email) + (params.length ? '?' + params.join('&') : '');
+}
+
+/* Template editor modal — opened by toolbar "Templates" button. Two
+   tabs (Text / Email). Variable-insert pills click → insert {var} at
+   cursor position. Save → UPSERT into outreach_templates. */
+function otOpenTemplateEditor() {
+  /* Close any existing modal first (defensive) */
+  const existing = document.getElementById('otTemplateModal');
+  if (existing) existing.remove();
+  const back = document.createElement('div');
+  back.id = 'otTemplateModal';
+  back.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:2000; display:flex; align-items:center; justify-content:center; padding:20px;';
+  const varsHtml = OT_TEMPLATE_VARS.map(v =>
+    `<button type="button" class="ot-var-pill" data-var="${esc(v)}" style="padding:3px 8px; font-size:0.74rem; font-weight:700; background:#f3f4f6; border:1px solid var(--border); border-radius:6px; color:var(--text); cursor:pointer; font-family:ui-monospace, SFMono-Regular, monospace;">{${esc(v)}}</button>`).join(' ');
+  back.innerHTML = `
+    <div style="background:#fff; border-radius:14px; padding:20px; max-width:680px; width:100%; max-height:90vh; overflow-y:auto; box-shadow:0 10px 30px rgba(0,0,0,0.25);">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px;">
+        <div style="font-weight:800; font-size:1.05rem; color:var(--text)">📝 Message templates</div>
+        <button type="button" id="otTplClose" style="margin-left:auto; background:none; border:0; font-size:1.4rem; line-height:1; cursor:pointer; color:var(--muted)">×</button>
+      </div>
+      <div style="display:flex; gap:4px; border-bottom:2px solid var(--border); margin-bottom:14px;">
+        <button type="button" class="ot-tpl-tab active" data-tab="text"  style="padding:8px 16px; background:none; border:0; border-bottom:3px solid transparent; font-weight:700; cursor:pointer; font-size:0.92rem;">💬 Text</button>
+        <button type="button" class="ot-tpl-tab" data-tab="email" style="padding:8px 16px; background:none; border:0; border-bottom:3px solid transparent; font-weight:700; cursor:pointer; font-size:0.92rem;">📧 Email</button>
+      </div>
+      <div id="otTplTextPane">
+        <label class="ot-prefs-label" style="display:block; margin-bottom:4px">Body</label>
+        <textarea id="otTplTextBody" rows="6" style="width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:6px; font-family:inherit; font-size:0.92rem;">${esc(_otTemplates.text.body || '')}</textarea>
+      </div>
+      <div id="otTplEmailPane" style="display:none">
+        <label class="ot-prefs-label" style="display:block; margin-bottom:4px">Subject</label>
+        <input type="text" id="otTplEmailSubject" style="width:100%; padding:8px 12px; border:1px solid var(--border); border-radius:6px; font-family:inherit; font-size:0.92rem; margin-bottom:10px;" value="${esc(_otTemplates.email.subject || '')}">
+        <label class="ot-prefs-label" style="display:block; margin-bottom:4px">Body</label>
+        <textarea id="otTplEmailBody" rows="10" style="width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:6px; font-family:inherit; font-size:0.92rem;">${esc(_otTemplates.email.body || '')}</textarea>
+      </div>
+      <div style="margin-top:12px; padding:10px; background:#f9fafb; border:1px solid var(--border); border-radius:6px;">
+        <div class="ot-prefs-label" style="display:block; margin-bottom:6px">Available variables — click to insert</div>
+        <div id="otTplVars" style="display:flex; flex-wrap:wrap; gap:4px;">${varsHtml}</div>
+      </div>
+      <div style="display:flex; gap:8px; margin-top:14px;">
+        <button type="button" class="btn btn-primary btn-sm" id="otTplSave">Save templates</button>
+        <button type="button" class="btn btn-outline btn-sm" id="otTplCancel">Cancel</button>
+        <span class="hint" id="otTplStatus" style="align-self:center;font-size:0.78rem"></span>
+      </div>
+    </div>`;
+  document.body.appendChild(back);
+  const close = () => back.remove();
+  document.getElementById('otTplClose').addEventListener('click', close);
+  document.getElementById('otTplCancel').addEventListener('click', close);
+  back.addEventListener('click', (e) => { if (e.target === back) close(); });
+
+  /* Tab switching */
+  back.querySelectorAll('.ot-tpl-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      back.querySelectorAll('.ot-tpl-tab').forEach(b => {
+        b.classList.toggle('active', b === btn);
+        b.style.borderBottomColor = b === btn ? 'var(--spm-accent)' : 'transparent';
+        b.style.color = b === btn ? 'var(--spm-accent)' : 'var(--text)';
+      });
+      document.getElementById('otTplTextPane').style.display  = btn.dataset.tab === 'text'  ? '' : 'none';
+      document.getElementById('otTplEmailPane').style.display = btn.dataset.tab === 'email' ? '' : 'none';
+    });
+  });
+  /* Default-activate first tab */
+  back.querySelector('.ot-tpl-tab.active').click();
+
+  /* Variable pill insertion — drops {var} at the cursor of whichever
+     textarea is currently focused (or the active tab's body). */
+  back.querySelectorAll('[data-var]').forEach(p => {
+    p.addEventListener('click', () => {
+      const activeTab = back.querySelector('.ot-tpl-tab[data-tab]').dataset.tab;
+      const focused = document.activeElement;
+      const target = (focused && focused.tagName === 'TEXTAREA') ? focused
+        : (activeTab === 'text' ? document.getElementById('otTplTextBody') : document.getElementById('otTplEmailBody'));
+      if (!target) return;
+      const insert = '{' + p.dataset.var + '}';
+      const start = target.selectionStart ?? target.value.length;
+      const end   = target.selectionEnd   ?? target.value.length;
+      target.value = target.value.slice(0, start) + insert + target.value.slice(end);
+      target.focus();
+      target.setSelectionRange(start + insert.length, start + insert.length);
+    });
+  });
+
+  /* Save */
+  document.getElementById('otTplSave').addEventListener('click', async () => {
+    const status = document.getElementById('otTplStatus');
+    status.textContent = 'Saving…';
+    const textBody     = document.getElementById('otTplTextBody').value;
+    const emailSubject = document.getElementById('otTplEmailSubject').value;
+    const emailBody    = document.getElementById('otTplEmailBody').value;
+    try {
+      await sb('POST', 'outreach_templates?on_conflict=kind',
+        { kind: 'text', body: textBody, updated_at: new Date().toISOString() },
+        { 'Accept-Profile': 'slate', 'Content-Profile': 'slate', 'Prefer': 'resolution=merge-duplicates,return=minimal' });
+      await sb('POST', 'outreach_templates?on_conflict=kind',
+        { kind: 'email', subject: emailSubject, body: emailBody, updated_at: new Date().toISOString() },
+        { 'Accept-Profile': 'slate', 'Content-Profile': 'slate', 'Prefer': 'resolution=merge-duplicates,return=minimal' });
+      _otTemplates.text = { body: textBody };
+      _otTemplates.email = { subject: emailSubject, body: emailBody };
+      status.textContent = '✓ Saved';
+      setTimeout(close, 600);
+    } catch (e) {
+      status.textContent = 'Save failed: ' + e.message;
+    }
+  });
 }
 
 /* Player preferences (3.84+) — inline pill UI captured under the
@@ -12348,6 +12541,27 @@ async function otQuickTouch(memberNumber, kind, btn) {
   if (kind === 'call')  patch.last_called_at  = now;
   await otUpsertStatus(memberNumber, patch);
   c._status = { ...c._status, ...patch };
+  /* 3.89+: opens the email/sms composer (with templated body) when
+     the operator can actually send. For calls there's no body to
+     pre-fill so we just log. */
+  if (kind === 'email' && c.email) {
+    const url = otBuildMailtoUrl(
+      c.email,
+      otSubstitute(_otTemplates.email.subject, c),
+      otSubstitute(_otTemplates.email.body, c)
+    );
+    window.location.href = url;
+  } else if (kind === 'text') {
+    /* Pick the best phone — cell first, else home, etc. */
+    let bestDigits = '';
+    for (const k of ['cell_phone','home_phone','work_phone','alt_phone']) {
+      if (otIsRealPhone(c[k])) { bestDigits = otPhoneDigits(c[k]); break; }
+    }
+    if (bestDigits) {
+      const url = otBuildSmsUrl(bestDigits, otSubstitute(_otTemplates.text.body, c));
+      window.location.href = url;
+    }
+  }
   /* Re-render the whole card so the persistent highlight + date appear. */
   otRenderList();
 }
@@ -12450,10 +12664,17 @@ function otOpenPhoneMenu(btn) {
 
   const menu = document.createElement('div');
   menu.style.cssText = 'position:absolute; background:#fff; border:1px solid var(--border); border-radius:10px; box-shadow:0 4px 16px rgba(0,0,0,0.16); z-index:1000; padding:6px; min-width:200px; font-size:0.88rem;';
+  /* Build templated sms: URL using the saved Text template + this
+     candidate's data. Falls back to a bare sms: link if template
+     is empty. */
+  const cFull = _otState.candidates.find(x => x.member_number === mn);
+  const smsHref = cFull
+    ? otBuildSmsUrl(digits, otSubstitute(_otTemplates.text.body, cFull))
+    : ('sms:' + digits);
   menu.innerHTML =
     '<div style="padding:6px 10px 8px; color:var(--muted); font-size:0.74rem; font-weight:700; border-bottom:1px solid #f3f4f6; margin-bottom:4px;">' + esc(label) + ': ' + esc(raw) + '</div>' +
     '<a href="tel:' + esc(digits) + '" data-act="call" style="display:block; padding:10px 12px; text-decoration:none; color:var(--text); font-weight:600; border-radius:6px;">📞 Call</a>' +
-    '<a href="sms:' + esc(digits) + '" data-act="text" style="display:block; padding:10px 12px; text-decoration:none; color:var(--text); font-weight:600; border-radius:6px;">💬 Text</a>' +
+    '<a href="' + esc(smsHref) + '" data-act="text" style="display:block; padding:10px 12px; text-decoration:none; color:var(--text); font-weight:600; border-radius:6px;">💬 Text</a>' +
     '<button type="button" data-act="copy" style="display:block; width:100%; text-align:left; padding:10px 12px; background:none; border:0; cursor:pointer; color:var(--text); font-weight:600; border-radius:6px; font-size:0.88rem;">📋 Copy number</button>';
   /* Position menu just below the button */
   const rect = btn.getBoundingClientRect();
