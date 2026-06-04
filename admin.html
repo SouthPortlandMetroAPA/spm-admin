@@ -1897,14 +1897,16 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
                   style="padding:6px 12px; align-self:flex-end;">📝 Templates</button>
         </div>
 
-        <!-- Selection action bar — appears when ≥1 team selected -->
+        <!-- Selection action bar — appears when ≥1 team selected.
+             Three send scopes mirror the per-team buttons exactly. -->
         <div id="sbSelectionBar" style="display:none; padding:10px 14px; margin-bottom:12px;
              background:#eff6ff; border:1.5px solid var(--spm-accent); border-radius:10px;
              color:var(--spm-accent); font-size:0.88rem;">
           <span id="sbSelectionLabel" style="font-weight:700"></span>
           <span style="margin-left:auto; display:inline-flex; gap:6px; flex-wrap:wrap; float:right">
-            <button type="button" class="btn btn-primary btn-sm" id="sbTextSelCaps">📱 Text captains</button>
-            <button type="button" class="btn btn-primary btn-sm" id="sbTextSelTeams">📱 Text whole teams</button>
+            <button type="button" class="btn btn-primary btn-sm" id="sbTextSelCaps">📱 Text Captains</button>
+            <button type="button" class="btn btn-primary btn-sm" id="sbTextSelCapsCocaps">📱 Text Captains + Co-Captains</button>
+            <button type="button" class="btn btn-primary btn-sm" id="sbTextSelTeams">📱 Text Whole Teams</button>
             <button type="button" class="btn btn-outline btn-sm" id="sbClearSel">Clear</button>
           </span>
         </div>
@@ -2084,7 +2086,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.91';
+const APP_VERSION = '3.92';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -13127,8 +13129,9 @@ async function sbInit() {
     _sbState.selectedTeams.clear();
     sbRender();
   });
-  document.getElementById('sbTextSelCaps').addEventListener('click', () => sbTextSelection('captains'));
-  document.getElementById('sbTextSelTeams').addEventListener('click', () => sbTextSelection('teams'));
+  document.getElementById('sbTextSelCaps').addEventListener('click',       () => sbTextSelection('captains'));
+  document.getElementById('sbTextSelCapsCocaps').addEventListener('click', () => sbTextSelection('caps_cocaps'));
+  document.getElementById('sbTextSelTeams').addEventListener('click',      () => sbTextSelection('teams'));
 
   await sbLoad();
 }
@@ -13271,24 +13274,25 @@ function sbRender() {
     selBar.style.display = 'none';
   } else {
     selBar.style.display = '';
-    /* Compute aggregate counts across selected teams. */
-    let caps = 0, cells = 0;
+    /* Aggregate counts across selected teams — three buckets matching
+       the three send buttons so the operator sees what each will hit. */
+    let capCells = 0, capCoCells = 0, allCells = 0;
     for (const d of (_sbState.data || [])) {
       for (const t of (d.teams || [])) {
         if (!_sbState.selectedTeams.has(t.id)) continue;
         for (const m of (t.memberships || [])) {
           const p = m.player || {};
-          if (otIsRealPhone(p.cell_phone)) {
-            cells++;
-            if (m.role === 'Captain' || m.role === 'Co-Captain') caps++;
-          }
+          if (!otIsRealPhone(p.cell_phone)) continue;
+          allCells++;
+          if (m.role === 'Captain' || m.role === 'Co-Captain') capCoCells++;
+          if (m.role === 'Captain') capCells++;
         }
       }
     }
     document.getElementById('sbSelectionLabel').textContent =
       selN + ' team' + (selN === 1 ? '' : 's') + ' selected — ' +
-      caps + ' captain/co-cap cell' + (caps === 1 ? '' : 's') + ', ' +
-      cells + ' total cell' + (cells === 1 ? '' : 's');
+      capCells + ' captain · ' + capCoCells + ' cap+co · ' +
+      allCells + ' total cell' + (allCells === 1 ? '' : 's');
   }
 
   if (!visible.length) {
@@ -13379,9 +13383,19 @@ function sbBuildSmsUrl(recipients, candidateForBody) {
   return otBuildSmsUrl(number, body);
 }
 
-/* Master action: text all selected teams' captains OR everyone. */
+/* Master action — text recipients across all SELECTED teams.
+   Three scopes mirror the per-team buttons exactly:
+     'captains'    → role === 'Captain' only
+     'caps_cocaps' → role IN ('Captain', 'Co-Captain')
+     'teams'       → every member with a real cell phone
+   3.92+ fix: previously 'captains' also included co-captains by
+   mistake — split into two scopes per user direction. */
 function sbTextSelection(scope) {
-  /* Collect recipients across selected teams */
+  const includeRole = role => {
+    if (scope === 'captains')    return role === 'Captain';
+    if (scope === 'caps_cocaps') return role === 'Captain' || role === 'Co-Captain';
+    return true;   /* 'teams' */
+  };
   const recipients = [];
   let firstPlayer = null;
   for (const d of (_sbState.data || [])) {
@@ -13390,14 +13404,16 @@ function sbTextSelection(scope) {
       for (const m of (t.memberships || [])) {
         const p = m.player || {};
         if (!otIsRealPhone(p.cell_phone)) continue;
-        if (scope === 'captains' && !(m.role === 'Captain' || m.role === 'Co-Captain')) continue;
+        if (!includeRole(m.role)) continue;
         recipients.push({ phone_digits: otPhoneDigits(p.cell_phone), player: p });
         if (!firstPlayer) firstPlayer = p;
       }
     }
   }
   if (!recipients.length) {
-    alert('No reachable ' + (scope === 'captains' ? 'captains' : 'players') + ' in the selected teams.');
+    const label = scope === 'captains' ? 'captains'
+                : scope === 'caps_cocaps' ? 'captains or co-captains' : 'players';
+    alert('No reachable ' + label + ' in the selected teams.');
     return;
   }
   const url = sbBuildSmsUrl(recipients, firstPlayer);
