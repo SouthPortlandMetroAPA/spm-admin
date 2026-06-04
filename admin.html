@@ -1233,6 +1233,13 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             <input type="checkbox" id="ehqHideEmpty" onchange="ehqOnHideEmptyToggle()" style="width:16px;height:16px;cursor:pointer">
             Hide divisions with 0 teams
           </label>
+          <!-- 3.93+: union the immediately-prior session into the data set.
+               Default-off; persists in localStorage. Prior-session divisions
+               appear AFTER current-session ones in the list, badged. -->
+          <label style="display:inline-flex;align-items:center;gap:8px;font-size:0.78rem;color:var(--muted);font-weight:600;cursor:pointer">
+            <input type="checkbox" id="ehqIncludePrior" onchange="ehqOnIncludePriorToggle()" style="width:16px;height:16px;cursor:pointer">
+            + prior session
+          </label>
         </div>
       </div>
 
@@ -2086,7 +2093,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.92';
+const APP_VERSION = '3.93';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -4981,6 +4988,36 @@ let _ehqHideEmpty = (() => {
     return true;                   // null / unset / '1' → on
   } catch (e) { return true; }
 })();
+// 3.93+: include the immediately-prior session in the data set so the
+// admin can compose cross-session campaigns ("everyone playing this
+// session OR last session"). Default OFF — preserves the legacy single-
+// session contract for anyone re-opening Email HQ at a session boundary.
+const EHQ_INCLUDE_PRIOR_LS = 'ehq.includePrior.v1';
+let _ehqIncludePrior = (() => { try { return localStorage.getItem(EHQ_INCLUDE_PRIOR_LS) === '1'; } catch (e) { return false; } })();
+
+/* 3.93+: locate the session immediately preceding `current` by (year, season)
+   ordering. Returns null if no prior session exists or sessions aren't loaded
+   yet. Season ordering is hard-coded since the value is a free-text column. */
+function _findPriorSession(current) {
+  if (!current || !Array.isArray(sessions) || sessions.length < 2) return null;
+  const SEASON_RANK = { winter: 4, fall: 3, summer: 2, spring: 1 };
+  const rk = (s) => SEASON_RANK[String(s.season || '').toLowerCase()] || 0;
+  const cmp = (a, b) => (b.year - a.year) || (rk(b) - rk(a));
+  // Newest first. Find current in the sorted list; the next entry is "prior".
+  const sorted = [...sessions].sort(cmp);
+  const idx = sorted.findIndex(s => s.id === current.id);
+  if (idx < 0 || idx >= sorted.length - 1) return null;
+  return sorted[idx + 1];
+}
+
+/* 3.93+: handler for the "+ prior session" checkbox. Persists state and
+   triggers a full reload of Email HQ so the merged data set takes effect. */
+async function ehqOnIncludePriorToggle() {
+  const cb = document.getElementById('ehqIncludePrior');
+  _ehqIncludePrior = !!(cb && cb.checked);
+  try { localStorage.setItem(EHQ_INCLUDE_PRIOR_LS, _ehqIncludePrior ? '1' : '0'); } catch (_) {}
+  await loadEmailHQ();
+}
 
 async function loadEmailHQ() {
   const out = document.getElementById('emailHqOutput');
@@ -5005,21 +5042,54 @@ async function loadEmailHQ() {
   if (_hideCb) _hideCb.checked = _ehqHideCra;
   const _hideEmptyCb = document.getElementById('ehqHideEmpty');
   if (_hideEmptyCb) _hideEmptyCb.checked = _ehqHideEmpty;
+  const _inclPriorCb = document.getElementById('ehqIncludePrior');
+  if (_inclPriorCb) _inclPriorCb.checked = _ehqIncludePrior;
   out.innerHTML = '<p class="hint" style="padding:16px">Loading…</p>';
 
   try {
     // All divisions for the session (including untagged — operator_id may be NULL),
     // with teams, memberships, and joined players.
-    const url =
-      'divisions?select='
-      + 'id,division_number,name,format,night_of_play,operator_id,'
+    const SELECT_COLS =
+      'id,division_number,name,format,night_of_play,operator_id,'
       + 'teams(id,team_number,team_name,'
         + 'memberships:team_memberships(role,name_raw,player:players(member_number,first_name,nickname,last_name,email))'
-      + ')'
+      + ')';
+    const url =
+      'divisions?select=' + SELECT_COLS
       + '&session_id=eq.' + currentSession.id
       + '&order=division_number.asc';
-    _emailData = await sb('GET', url);
-    _emailData.sort((a, b) => parseInt(a.division_number, 10) - parseInt(b.division_number, 10));
+    const currentDivs = await sb('GET', url) || [];
+    // Tag each row with the session it came from so the renderer can
+    // label prior-session divisions and the email collect step stays
+    // dedup-by-email automatically (Set in _ehqCollectEmails).
+    for (const d of currentDivs) {
+      d._sessionId    = currentSession.id;
+      d._sessionLabel = currentSession.name;
+      d._priorSession = false;
+    }
+
+    let priorDivs = [];
+    const priorSession = _ehqIncludePrior ? _findPriorSession(currentSession) : null;
+    if (priorSession) {
+      const priorUrl = 'divisions?select=' + SELECT_COLS
+        + '&session_id=eq.' + priorSession.id
+        + '&order=division_number.asc';
+      priorDivs = await sb('GET', priorUrl) || [];
+      for (const d of priorDivs) {
+        d._sessionId    = priorSession.id;
+        d._sessionLabel = priorSession.name;
+        d._priorSession = true;
+      }
+    }
+
+    // Current first (sorted by division_number), then prior (also sorted).
+    // Don't intermix — admin needs to be able to tell apart "this session's
+    // div 10" from "last session's div 10" at a glance, and identical
+    // division_numbers across sessions would otherwise sit next to each
+    // other indistinguishable.
+    currentDivs.sort((a, b) => parseInt(a.division_number, 10) - parseInt(b.division_number, 10));
+    priorDivs.sort((a, b)   => parseInt(a.division_number, 10) - parseInt(b.division_number, 10));
+    _emailData = [...currentDivs, ...priorDivs];
 
     _renderEhqFilters();
     // Useful default state: SPM operator + Captains role + all formats + all
@@ -5189,11 +5259,17 @@ function renderEmailHQ() {
       ? String(d.division_number) + ' — '
       : '';
     const divState = _ehqDivCheckState(d);
+    // 3.93+: prior-session divisions get a clearly visible amber pill
+    // before the title so admin doesn't mistake them for current.
+    const priorBadge = d._priorSession
+      ? '<span style="display:inline-block;font-size:0.65rem;font-weight:800;letter-spacing:0.04em;background:#fef3c7;color:#92400e;border:1px solid #fcd34d;padding:1px 6px;border-radius:999px;margin-right:8px;vertical-align:middle">'
+        + esc((d._sessionLabel || 'PRIOR').toUpperCase()) + '</span>'
+      : '';
     html += '<div class="ehq-div-card" data-div-id="' + d.id + '">'
       + '<div class="ehq-div-head">'
       +   '<input type="checkbox" class="ehq-div-cb" data-div-id="' + d.id + '"'
       +     (divState === 'checked' ? ' checked' : '') + (divState === 'none' ? ' data-empty="1"' : '') + '>'
-      +   '<div class="ehq-div-title">' + esc(divNumLabel + (d.name || '')) + '</div>'
+      +   '<div class="ehq-div-title">' + priorBadge + esc(divNumLabel + (d.name || '')) + '</div>'
       +   '<div class="ehq-div-meta">' + esc(meta) + '</div>'
       +   '<div class="ehq-div-chev">▶</div>'
       + '</div>'
