@@ -961,6 +961,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="commonplayers">TMS Roster Report</button>
       <button class="tab" data-tab="reports">Reports</button>
       <button class="tab" data-tab="outreach">Outreach</button>
+      <button class="tab" data-tab="switchboard">Switchboard</button>
       <button class="tab" data-tab="redtape">RedTape</button>
       <button class="tab" data-tab="rolodex">Rolodex</button>
       <button class="tab" data-tab="playoffs">Playoffs</button>
@@ -1842,6 +1843,78 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
     </div>
 
     <!-- ══════════════════════════════════════════════════════════════
+         TAB: SWITCHBOARD (3.91+) — texting captains & players.
+         Think Email HQ for SMS. Per-team cards optimized for the
+         common flows: text a whole team, text a captain, text two
+         captains, text using the saved outreach text template.
+
+         Reuses slate.outreach_templates.text — one shared template
+         across Outreach and Switchboard (operator edits in one place,
+         both surfaces honor it).
+         ══════════════════════════════════════════════════════════════ -->
+    <div id="tab-switchboard" class="tab-panel">
+      <div class="card">
+        <h2>Switchboard <span class="hint" style="font-weight:500">— text captains &amp; players</span></h2>
+        <p class="hint" style="margin-bottom:14px">
+          Filter teams by operator / role / format / night. Tap a
+          per-team button to text the captain, the captain + co-cap,
+          or the whole team. Multi-select teams at the top for cross-
+          team blasts. Body is the saved <strong>Text template</strong>
+          (shared with Outreach) — edit via the Templates button.
+        </p>
+
+        <!-- Filter toolbar -->
+        <div class="sb-toolbar" style="display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; margin-bottom:10px;">
+          <div class="field-mini">
+            <label>Operator</label>
+            <div id="sbOperatorBtns" class="ehq-filter-btns"></div>
+          </div>
+          <div class="field-mini">
+            <label>Role</label>
+            <div id="sbRoleBtns" class="ehq-filter-btns">
+              <button type="button" class="ehq-btn" data-facet="role" data-value="Captain">Captains</button>
+              <button type="button" class="ehq-btn" data-facet="role" data-value="Co-Captain">Co-Captains</button>
+              <button type="button" class="ehq-btn" data-facet="role" data-value="Member">Players</button>
+            </div>
+          </div>
+          <div class="field-mini">
+            <label>Format</label>
+            <div id="sbFormatBtns" class="ehq-filter-btns"></div>
+          </div>
+          <div class="field-mini">
+            <label>Night</label>
+            <div id="sbNightBtns" class="ehq-filter-btns"></div>
+          </div>
+          <div class="field-mini" style="flex:1; min-width:160px">
+            <label for="sbSearch">Search</label>
+            <input type="text" id="sbSearch" placeholder="🔍 name, team#, captain…"
+                   style="width:100%; padding:8px 10px; border:1px solid var(--border); border-radius:6px; font-size:0.9rem;">
+          </div>
+          <button type="button" class="btn btn-outline btn-sm" id="sbResetBtn"
+                  style="padding:6px 12px; align-self:flex-end;">Reset</button>
+          <button type="button" class="btn btn-outline btn-sm" id="sbTemplatesBtn"
+                  title="Edit the text template (shared with Outreach)"
+                  style="padding:6px 12px; align-self:flex-end;">📝 Templates</button>
+        </div>
+
+        <!-- Selection action bar — appears when ≥1 team selected -->
+        <div id="sbSelectionBar" style="display:none; padding:10px 14px; margin-bottom:12px;
+             background:#eff6ff; border:1.5px solid var(--spm-accent); border-radius:10px;
+             color:var(--spm-accent); font-size:0.88rem;">
+          <span id="sbSelectionLabel" style="font-weight:700"></span>
+          <span style="margin-left:auto; display:inline-flex; gap:6px; flex-wrap:wrap; float:right">
+            <button type="button" class="btn btn-primary btn-sm" id="sbTextSelCaps">📱 Text captains</button>
+            <button type="button" class="btn btn-primary btn-sm" id="sbTextSelTeams">📱 Text whole teams</button>
+            <button type="button" class="btn btn-outline btn-sm" id="sbClearSel">Clear</button>
+          </span>
+        </div>
+
+        <div id="sbStatusLine" class="hint" style="margin-bottom:8px"></div>
+        <div id="sbTeamList"></div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════════
          TAB: REDTAPE (3.55+) — admin view for the captain-facing
          paperwork-upload app. Lives in the redtape schema; the
          captain UI is at southportlandmetroapa.github.io/redtape/.
@@ -2011,7 +2084,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.90';
+const APP_VERSION = '3.91';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -3582,6 +3655,7 @@ const TAB_LABEL = {
   commonplayers: 'TMS Roster Report',
   reports:       'Reports',
   outreach:      'Outreach',
+  switchboard:   'Switchboard',
   redtape:       'RedTape',
   rolodex:       'Rolodex',
   playoffs:      'Playoffs'
@@ -3600,6 +3674,7 @@ function switchTab(name) {
   if (name === 'commonplayers') cpInit();
   if (name === 'reports')     rptInit();
   if (name === 'outreach')    otInit();
+  if (name === 'switchboard') sbInit();
   if (name === 'redtape')     rtInit();
   if (name === 'rolodex')     rolInit();
   if (name === 'playoffs')    renderPlayoffsTab();
@@ -12926,6 +13001,410 @@ function otFmtDate(iso) {
 
 window.otInit = otInit;
 window.otRun  = otRun;
+
+/* ══════════════════════════════════════════════════════════════════════
+   SWITCHBOARD TAB (3.91+) — texting captains & players
+   ──────────────────────────────────────────────────────────────────
+   Optimized for four flows the user identified:
+     1. Text a whole team (cells only)
+     2. Text an individual captain
+     3. Text multiple captains (multi-select teams → master action)
+     4. Apply the shared outreach text template (variable-substituted
+        per recipient — but SMS is a single message; we substitute
+        using the FIRST recipient's data since SMS group-text has no
+        per-recipient variables. For single-recipient text the
+        substitution is exact.)
+
+   Reuses slate.outreach_templates.text — shared with Outreach so the
+   operator edits one place. Data source: same divisions →teams →
+   memberships →players graph as Email HQ, with cell_phone added.
+   ══════════════════════════════════════════════════════════════════════ */
+const SB_STYLE = `
+  #tab-switchboard .field-mini > label { display:block; font-size:0.72rem; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; color:var(--muted); margin-bottom:4px; }
+  #tab-switchboard .sb-div-head {
+    display:flex; align-items:center; gap:10px; padding:8px 12px;
+    background:linear-gradient(90deg, #eff6ff, transparent);
+    border-radius:8px; margin: 16px 0 8px; font-weight:800; color:var(--spm-accent);
+  }
+  #tab-switchboard .sb-div-meta { font-weight:500; color:var(--muted); font-size:0.82rem; }
+  #tab-switchboard .sb-team {
+    background:var(--card); border:1px solid var(--border); border-radius:10px;
+    padding:14px; margin-bottom:8px; box-shadow:0 1px 2px rgba(0,0,0,0.04);
+  }
+  #tab-switchboard .sb-team-head {
+    display:flex; align-items:flex-start; gap:10px; flex-wrap:wrap;
+  }
+  #tab-switchboard .sb-team-name { font-weight:800; color:var(--text); }
+  #tab-switchboard .sb-team-num  { color:var(--spm-accent); font-family:ui-monospace,monospace; font-weight:700; margin-right:4px; }
+  #tab-switchboard .sb-roster { display:flex; flex-direction:column; gap:4px; margin:10px 0; }
+  #tab-switchboard .sb-roster-row {
+    display:flex; align-items:center; gap:8px; padding:4px 0;
+    font-size:0.86rem; flex-wrap:wrap;
+  }
+  #tab-switchboard .sb-role-tag {
+    background:#fef3c7; color:#92400e; padding:1px 8px; border-radius:999px;
+    font-size:0.66rem; font-weight:800; text-transform:uppercase; letter-spacing:0.04em;
+  }
+  #tab-switchboard .sb-role-tag.captain { background:#fde68a; color:#78350f; }
+  #tab-switchboard .sb-role-tag.cocap   { background:#fef3c7; color:#92400e; }
+  #tab-switchboard .sb-role-tag.player  { background:#f3f4f6; color:#374151; }
+  #tab-switchboard .sb-phone {
+    font-family:ui-monospace,monospace; font-size:0.84rem; color:var(--muted);
+  }
+  #tab-switchboard .sb-phone.real { color:var(--spm-accent); font-weight:600; }
+  #tab-switchboard .sb-no-phone { color:#9ca3af; font-style:italic; font-size:0.82rem; }
+  #tab-switchboard .sb-tap-btn {
+    padding:4px 8px; border:1px solid var(--border); border-radius:6px;
+    background:#fff; color:var(--text); cursor:pointer; font-size:0.78rem;
+    font-weight:700; font-family:inherit; text-decoration:none;
+  }
+  #tab-switchboard .sb-tap-btn:hover { border-color:var(--spm-accent); color:var(--spm-accent); }
+  #tab-switchboard .sb-team-actions {
+    display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;
+    padding-top:8px; border-top:1px dashed var(--border);
+  }
+  #tab-switchboard .sb-action-btn {
+    padding:8px 14px; border-radius:8px; font-weight:700; font-size:0.88rem;
+    background:var(--spm-accent); color:#fff; border:0; cursor:pointer; font-family:inherit;
+    text-decoration:none;
+  }
+  #tab-switchboard .sb-action-btn:hover { background:#00257a; }
+  #tab-switchboard .sb-action-btn.secondary {
+    background:#fff; color:var(--spm-accent); border:1.5px solid var(--spm-accent);
+  }
+  #tab-switchboard .sb-action-btn[disabled],
+  #tab-switchboard .sb-action-btn.disabled {
+    background:#e5e7eb; color:#9ca3af; cursor:not-allowed;
+  }
+  #tab-switchboard .sb-team-check {
+    width:20px; height:20px; flex-shrink:0; cursor:pointer; accent-color:var(--spm-accent);
+  }
+  #tab-switchboard .sb-empty { padding:30px 20px; text-align:center; color:var(--muted); font-style:italic; }
+`;
+(function injectSbStyle(){
+  if (document.getElementById('sb-tab-style')) return;
+  const el = document.createElement('style');
+  el.id = 'sb-tab-style'; el.textContent = SB_STYLE;
+  document.head.appendChild(el);
+})();
+
+const _sbState = {
+  data: null,                                  // divisions[] with teams.memberships.player
+  filters: { operator: new Set(), role: new Set(['Captain']), format: new Set(), night: new Set() },
+  search: '',
+  selectedTeams: new Set()                     // team.id (number)
+};
+
+async function sbInit() {
+  if (sbInit._wired) {
+    /* Already loaded once — let user click Reset to re-fetch; otherwise
+       just re-render in case session changed. */
+    sbRender();
+    return;
+  }
+  sbInit._wired = true;
+  document.getElementById('sbResetBtn').addEventListener('click', () => {
+    _sbState.filters.operator.clear();
+    _sbState.filters.role.clear(); _sbState.filters.role.add('Captain');
+    _sbState.filters.format.clear();
+    _sbState.filters.night.clear();
+    _sbState.search = '';
+    document.getElementById('sbSearch').value = '';
+    _sbState.selectedTeams.clear();
+    sbRenderFilters();
+    sbRender();
+  });
+  document.getElementById('sbSearch').addEventListener('input', (e) => {
+    _sbState.search = e.target.value.toLowerCase().trim();
+    sbRender();
+  });
+  document.getElementById('sbTemplatesBtn').addEventListener('click', () => {
+    /* Same template editor Outreach uses — they share the row. */
+    if (typeof otOpenTemplateEditor === 'function') otOpenTemplateEditor();
+    else alert('Open the Outreach tab first to initialise the template editor, then come back.');
+  });
+  document.getElementById('sbClearSel').addEventListener('click', () => {
+    _sbState.selectedTeams.clear();
+    sbRender();
+  });
+  document.getElementById('sbTextSelCaps').addEventListener('click', () => sbTextSelection('captains'));
+  document.getElementById('sbTextSelTeams').addEventListener('click', () => sbTextSelection('teams'));
+
+  await sbLoad();
+}
+
+async function sbLoad() {
+  const status = document.getElementById('sbStatusLine');
+  status.textContent = 'Loading…';
+  if (!currentSession) {
+    status.textContent = 'No current session.';
+    return;
+  }
+  try {
+    /* Mirror Email HQ's graph fetch + add cell_phone. */
+    const url =
+      'divisions?select=' +
+      'id,division_number,name,format,night_of_play,operator_id,' +
+      'teams(id,team_number,team_name,' +
+        'memberships:team_memberships(role,name_raw,player:players(member_number,first_name,nickname,last_name,email,cell_phone,home_phone,work_phone,alt_phone,city,county,state,sl_8ball,sl_9ball,last_played_8,last_played_9,date_started,member_status))' +
+      ')' +
+      '&session_id=eq.' + currentSession.id +
+      '&order=division_number.asc';
+    _sbState.data = await sb('GET', url);
+    /* Also ensure templates are loaded — Outreach loads them on its
+       init, but Switchboard might be entered first. */
+    if (typeof otLoadTemplates === 'function' &&
+        (!_otTemplates.text.body && !_otTemplates.email.body)) {
+      await otLoadTemplates().catch(() => {});
+    }
+    sbRenderFilters();
+    sbRender();
+    status.textContent = '';
+  } catch (e) {
+    status.textContent = 'Load failed: ' + e.message;
+    console.error(e);
+  }
+}
+
+function sbRenderFilters() {
+  /* Operator buttons */
+  const opBtns = document.getElementById('sbOperatorBtns');
+  opBtns.innerHTML = (typeof operators !== 'undefined' && operators || [])
+    .map(o => {
+      const brand = o.short_code === 'SPM' ? 'spm' : (o.short_code === 'CRA' ? 'cra' : '');
+      const active = _sbState.filters.operator.has(o.id) ? 'active' : '';
+      return `<button type="button" class="ehq-btn ${active}" data-facet="operator" data-brand="${brand}" data-value="${o.id}">${esc(o.name)}</button>`;
+    }).join('');
+
+  /* Format buttons */
+  const fmtSet = new Set();
+  for (const d of (_sbState.data || [])) if (d.format) fmtSet.add(d.format);
+  const fmts = [...fmtSet].sort();
+  document.getElementById('sbFormatBtns').innerHTML = fmts.map(f => {
+    const active = _sbState.filters.format.has(f) ? 'active' : '';
+    return `<button type="button" class="ehq-btn ${active}" data-facet="format" data-value="${esc(f)}">${esc(f)}</button>`;
+  }).join('');
+
+  /* Night buttons */
+  const NIGHTS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+  document.getElementById('sbNightBtns').innerHTML = NIGHTS.map(n => {
+    const active = _sbState.filters.night.has(n) ? 'active' : '';
+    return `<button type="button" class="ehq-btn ${active}" data-facet="night" data-value="${esc(n)}">${esc(n).slice(0,3)}</button>`;
+  }).join('');
+
+  /* Role buttons reflect state */
+  document.querySelectorAll('#sbRoleBtns .ehq-btn').forEach(btn => {
+    btn.classList.toggle('active', _sbState.filters.role.has(btn.dataset.value));
+  });
+
+  /* Wire all filter button clicks */
+  document.querySelectorAll('#tab-switchboard .ehq-btn[data-facet]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const facet = btn.dataset.facet;
+      const value = facet === 'operator' ? parseInt(btn.dataset.value, 10) : btn.dataset.value;
+      const set = _sbState.filters[facet];
+      if (set.has(value)) set.delete(value); else set.add(value);
+      sbRenderFilters();
+      sbRender();
+    });
+  });
+}
+
+/* Returns the filtered divisions → teams list with player rows decorated. */
+function sbVisible() {
+  const f = _sbState.filters;
+  const data = _sbState.data || [];
+  const out = [];
+  for (const d of data) {
+    if (f.operator.size && !f.operator.has(d.operator_id)) continue;
+    if (f.format.size   && !f.format.has(d.format)) continue;
+    if (f.night.size    && !f.night.has(d.night_of_play)) continue;
+    const teams = [];
+    for (const t of (d.teams || [])) {
+      /* Pre-build memberships with phone + matched-by-role-filter flag. */
+      const rows = (t.memberships || []).map(m => {
+        const p = m.player || {};
+        return {
+          role: m.role,
+          name: (p.first_name || p.nickname || '') + (p.last_name ? ' ' + p.last_name : ''),
+          phone_raw: p.cell_phone || '',
+          phone_digits: otPhoneDigits(p.cell_phone || ''),
+          has_cell: otIsRealPhone(p.cell_phone),
+          player: p
+        };
+      });
+      /* Captain + co-cap promoted to top regardless of role filter visibility. */
+      rows.sort((a, b) => {
+        const order = { 'Captain': 0, 'Co-Captain': 1, 'Member': 2 };
+        return (order[a.role] ?? 3) - (order[b.role] ?? 3);
+      });
+      /* Apply role filter to determine which rows appear in the player
+         list view (Captain + Co-Captain always shown as team header).
+         Role filter narrows which "members" surface in the list. */
+      const visibleRows = f.role.size
+        ? rows.filter(r => f.role.has(r.role))
+        : rows;
+      /* Search filter — name match on team name, team number, or any
+         player name. Case-insensitive substring. */
+      if (_sbState.search) {
+        const hay = (
+          (t.team_name || '') + ' ' +
+          (t.team_number || '') + ' ' +
+          rows.map(r => r.name).join(' ')
+        ).toLowerCase();
+        if (!hay.includes(_sbState.search)) continue;
+      }
+      teams.push({ ...t, rows, visibleRows });
+    }
+    if (teams.length) out.push({ ...d, teams });
+  }
+  return out;
+}
+
+function sbRender() {
+  const wrap = document.getElementById('sbTeamList');
+  const visible = sbVisible();
+  /* Selection bar */
+  const selBar = document.getElementById('sbSelectionBar');
+  const selN = _sbState.selectedTeams.size;
+  if (selN === 0) {
+    selBar.style.display = 'none';
+  } else {
+    selBar.style.display = '';
+    /* Compute aggregate counts across selected teams. */
+    let caps = 0, cells = 0;
+    for (const d of (_sbState.data || [])) {
+      for (const t of (d.teams || [])) {
+        if (!_sbState.selectedTeams.has(t.id)) continue;
+        for (const m of (t.memberships || [])) {
+          const p = m.player || {};
+          if (otIsRealPhone(p.cell_phone)) {
+            cells++;
+            if (m.role === 'Captain' || m.role === 'Co-Captain') caps++;
+          }
+        }
+      }
+    }
+    document.getElementById('sbSelectionLabel').textContent =
+      selN + ' team' + (selN === 1 ? '' : 's') + ' selected — ' +
+      caps + ' captain/co-cap cell' + (caps === 1 ? '' : 's') + ', ' +
+      cells + ' total cell' + (cells === 1 ? '' : 's');
+  }
+
+  if (!visible.length) {
+    wrap.innerHTML = '<div class="sb-empty">No teams match this filter.</div>';
+    return;
+  }
+  let html = '';
+  for (const d of visible) {
+    html += `<div class="sb-div-head">
+      <span class="sb-team-num">${esc(d.division_number)}</span>
+      ${esc(d.name)}
+      <span class="sb-div-meta">· ${esc(d.format || '')} · ${esc(d.night_of_play || '')}</span>
+    </div>`;
+    for (const t of d.teams) {
+      html += sbTeamCardHtml(t);
+    }
+  }
+  wrap.innerHTML = html;
+  sbWireTeamCards();
+}
+
+function sbTeamCardHtml(t) {
+  const sel = _sbState.selectedTeams.has(t.id);
+  const rows = t.visibleRows;
+  const rowsHtml = rows.map(r => {
+    const tag = r.role === 'Captain'    ? 'captain'
+              : r.role === 'Co-Captain' ? 'cocap' : 'player';
+    const phoneHtml = r.has_cell
+      ? `<a class="sb-phone real" href="${esc(sbBuildSmsUrl([r], r.player))}">${esc(r.phone_raw)}</a>`
+      : '<span class="sb-no-phone">(no cell)</span>';
+    return `<div class="sb-roster-row">
+      <span class="sb-role-tag ${tag}">${esc(r.role || 'Member')}</span>
+      <span style="font-weight:600">${esc(r.name) || '(unknown)'}</span>
+      ${phoneHtml}
+    </div>`;
+  }).join('');
+  /* Per-team aggregate buttons */
+  const caps  = t.rows.filter(r => r.role === 'Captain'    && r.has_cell);
+  const cocs  = t.rows.filter(r => r.role === 'Co-Captain' && r.has_cell);
+  const all   = t.rows.filter(r => r.has_cell);
+  const noBody = '';
+  const dis = arr => arr.length === 0 ? ' disabled' : '';
+  const capUrl  = caps.length        ? sbBuildSmsUrl(caps, caps[0]?.player)        : '#';
+  const cocUrl  = (caps.length + cocs.length) ? sbBuildSmsUrl(caps.concat(cocs), (caps[0] || cocs[0])?.player) : '#';
+  const teamUrl = all.length         ? sbBuildSmsUrl(all,  all[0]?.player)         : '#';
+  return `<div class="sb-team" data-team-id="${esc(t.id)}">
+    <div class="sb-team-head">
+      <input type="checkbox" class="sb-team-check" data-team-check="${esc(t.id)}" ${sel ? 'checked' : ''}>
+      <div style="flex:1; min-width:140px">
+        <div><span class="sb-team-num">${esc(t.team_number)}</span><span class="sb-team-name">${esc(t.team_name)}</span></div>
+        <div class="hint" style="font-size:0.78rem">${t.rows.length} member${t.rows.length===1?'':'s'} · ${all.length} cell${all.length===1?'':'s'}</div>
+      </div>
+    </div>
+    <div class="sb-roster">${rowsHtml || '<div class="sb-no-phone" style="padding:6px 0">No members match the role filter.</div>'}</div>
+    <div class="sb-team-actions">
+      <a class="sb-action-btn${dis(caps)}" href="${esc(capUrl)}" ${caps.length===0?'aria-disabled="true"':''}>📱 Text Captain (${caps.length})</a>
+      <a class="sb-action-btn secondary${dis(caps.concat(cocs))}" href="${esc(cocUrl)}" ${(caps.length+cocs.length)===0?'aria-disabled="true"':''}>📱 Text Cap + Co-Cap (${caps.length + cocs.length})</a>
+      <a class="sb-action-btn secondary${dis(all)}" href="${esc(teamUrl)}" ${all.length===0?'aria-disabled="true"':''}>📱 Text Whole Team (${all.length})</a>
+    </div>
+  </div>`;
+}
+
+function sbWireTeamCards() {
+  /* Selection checkboxes */
+  document.querySelectorAll('#sbTeamList .sb-team-check').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const id = parseInt(cb.dataset.teamCheck, 10);
+      if (cb.checked) _sbState.selectedTeams.add(id);
+      else             _sbState.selectedTeams.delete(id);
+      /* Only re-render the selection bar — leave cards alone to keep
+         scroll position. */
+      sbRender();
+    });
+  });
+}
+
+/* Build a templated sms: URL for one or more recipients. The body
+   substitutes using FIRST recipient's data (SMS can't per-recipient
+   personalize within one message). Multi-recipient links typically
+   open a group thread on iOS / Android. */
+function sbBuildSmsUrl(recipients, candidateForBody) {
+  if (!recipients.length) return '#';
+  const digits = recipients.map(r => r.phone_digits).filter(Boolean);
+  const number = digits.join(',');
+  /* Template substitution uses the first recipient's player record. */
+  const tplBody = _otTemplates.text.body || '';
+  const body = candidateForBody ? otSubstitute(tplBody, candidateForBody) : tplBody;
+  return otBuildSmsUrl(number, body);
+}
+
+/* Master action: text all selected teams' captains OR everyone. */
+function sbTextSelection(scope) {
+  /* Collect recipients across selected teams */
+  const recipients = [];
+  let firstPlayer = null;
+  for (const d of (_sbState.data || [])) {
+    for (const t of (d.teams || [])) {
+      if (!_sbState.selectedTeams.has(t.id)) continue;
+      for (const m of (t.memberships || [])) {
+        const p = m.player || {};
+        if (!otIsRealPhone(p.cell_phone)) continue;
+        if (scope === 'captains' && !(m.role === 'Captain' || m.role === 'Co-Captain')) continue;
+        recipients.push({ phone_digits: otPhoneDigits(p.cell_phone), player: p });
+        if (!firstPlayer) firstPlayer = p;
+      }
+    }
+  }
+  if (!recipients.length) {
+    alert('No reachable ' + (scope === 'captains' ? 'captains' : 'players') + ' in the selected teams.');
+    return;
+  }
+  const url = sbBuildSmsUrl(recipients, firstPlayer);
+  window.location.href = url;
+}
+
+window.sbInit = sbInit;
 
 /* ══════════════════════════════════════════════════════════════════════
    REDTAPE ADMIN TAB (3.55+)
