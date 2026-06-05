@@ -1356,6 +1356,25 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         <div id="spOptoutList" style="margin-top:10px;"><p class="hint" style="margin:0;">No opt-outs.</p></div>
       </div>
 
+      <!-- Mailing contact blocklist — players who should NEVER be a mailing contact (3.95+) -->
+      <div class="card" style="margin-bottom:14px;">
+        <h2 style="margin:0 0 6px;">Mailing contact blocklist</h2>
+        <p class="hint" style="margin:0 0 10px;">
+          Member numbers (5- or 8-digit, one per line) of players who should NEVER appear as the
+          team mailing contact on the APA labels report. When you upload a labels PDF, any match
+          surfaces in the validation popup so you can have APA reassign the captain.
+        </p>
+        <textarea id="spBlocklistBox" class="ehq-paste-box" style="min-height:64px;"
+          placeholder="e.g.&#10;24779&#10;97223806"></textarea>
+        <input type="text" id="spBlocklistReason" placeholder="Optional reason (e.g. 'deceased', 'moved out of area', 'address bounces')"
+          style="margin-top:8px; padding:8px 10px; border:1px solid #e5e7eb; border-radius:8px; width:100%; max-width:560px;">
+        <div style="display:flex; gap:8px; align-items:center; margin-top:8px;">
+          <button type="button" class="btn btn-primary" onclick="spBlocklistAdd()">Add to list</button>
+          <span class="status-line" id="spBlocklistStatus" style="flex:1;"></span>
+        </div>
+        <div id="spBlocklistList" style="margin-top:10px;"><p class="hint" style="margin:0;">Loading&hellip;</p></div>
+      </div>
+
       <!-- Patches — computation, envelope-grouped list, mail batch, undo -->
       <div class="card" style="margin-bottom:14px;">
         <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
@@ -2093,7 +2112,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.94';
+const APP_VERSION = '3.95';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -6595,15 +6614,38 @@ async function spLabelsSpmValidationPopup(opId, sessId, opShort) {
       }
     }
 
-    if (!missing.length && !mismatches.length) {
+    /* Check C: blocklisted players appearing as contacts. */
+    const blockRows = await sb('GET',
+      'mailing_contact_blocklist?select=member_number,display_name,reason');
+    /* Index by normalized name (case-insensitive, whitespace-collapsed) */
+    const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    const blockedByName = new Map();
+    for (const b of (blockRows || [])) {
+      if (b.display_name) blockedByName.set(norm(b.display_name), b);
+    }
+    const blocked = [];
+    for (const r of (labelRows || [])) {
+      const hit = blockedByName.get(norm(r.contact_name));
+      if (hit) {
+        blocked.push({
+          team_number: r.team_number,
+          contact_name: r.contact_name,
+          member_number: hit.member_number,
+          reason: hit.reason
+        });
+      }
+    }
+    blocked.sort((a, b) => String(a.team_number).localeCompare(String(b.team_number)));
+
+    if (!missing.length && !mismatches.length && !blocked.length) {
       setStatus('spDropStatus',
         'Saved labels &mdash; all ' + active.length + ' active ' + opShort
-        + ' teams covered and 8/9-ball contacts match.',
+        + ' teams covered, 8/9-ball contacts match, no blocklisted players.',
         'ok');
       return;
     }
 
-    const total = missing.length + mismatches.length;
+    const total = missing.length + mismatches.length + blocked.length;
     setStatus('spDropStatus',
       'Saved labels &mdash; ' + total + ' issue' + (total === 1 ? '' : 's')
       + ' found (see popup).', 'warn');
@@ -6631,10 +6673,205 @@ async function spLabelsSpmValidationPopup(opId, sessId, opShort) {
       }).join('\n\n');
       msg += '\n\n';
     }
+    if (blocked.length) {
+      msg += '── ' + blocked.length + ' blocklisted player'
+          + (blocked.length === 1 ? '' : 's')
+          + ' appearing as mailing contact ──\n\n';
+      msg += blocked.map(b =>
+        '  ' + String(b.team_number).padStart(5, '0')
+        + '  ' + b.contact_name
+        + '  (member #' + b.member_number + ')'
+        + (b.reason ? '\n     reason: ' + b.reason : '')
+      ).join('\n');
+      msg += '\n\n';
+    }
     msg += 'Fix the captains in APA, regenerate the labels PDF, and re-upload.';
     alert(msg);
   } catch (e) {
     console.warn('[SP] SPM validation popup failed:', e);
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   Mailing contact blocklist + per-label overrides (3.95+)
+   ──────────────────────────────────────────────────────────────────
+   Blocklist:  members who should NEVER be a mailing contact. UI in the
+               SP Reports tab; warning fires on upload from
+               spLabelsSpmValidationPopup. Stored at
+               slate.mailing_contact_blocklist (PK = member_number).
+   Overrides:  per-label c/o prefix or replacement name. UI is an
+               "Edit" button on each label row. Applied at envelope
+               render time. Stored at slate.sp_label_overrides
+               (UNIQUE on operator_id + session_id + team_number).
+   ════════════════════════════════════════════════════════════════════ */
+let _spBlocklist = [];
+
+async function spBlocklistLoad() {
+  try {
+    _spBlocklist = await sb('GET',
+      'mailing_contact_blocklist?select=*&order=display_name.asc') || [];
+  } catch (e) {
+    console.warn('[blocklist] load failed:', e);
+    _spBlocklist = [];
+  }
+  spBlocklistRender();
+}
+
+function spBlocklistRender() {
+  const el = document.getElementById('spBlocklistList');
+  if (!el) return;
+  if (!_spBlocklist.length) {
+    el.innerHTML = '<p class="hint" style="margin:0;">Nobody blocklisted.</p>';
+    return;
+  }
+  el.innerHTML = '<div style="display:grid; gap:4px;">' +
+    _spBlocklist.map(b =>
+      '<div style="display:flex; gap:10px; align-items:center; padding:6px 10px; background:#f7f8fa; border-radius:6px;">'
+      + '<code style="font-family:ui-monospace,Menlo,monospace; font-size:0.85rem; color:#374151;">'
+      +   esc(b.member_number) + '</code>'
+      + '<span style="font-weight:600;">' + esc(b.display_name || '(unknown)') + '</span>'
+      + (b.reason
+          ? '<span class="hint" style="font-size:0.82rem;">&middot; ' + esc(b.reason) + '</span>'
+          : '')
+      + '<button class="btn btn-outline btn-sm" style="margin-left:auto;" '
+      +   "onclick=\"spBlocklistRemove('" + esc(b.member_number) + "')\">Remove</button>"
+      + '</div>'
+    ).join('') + '</div>';
+}
+
+async function spBlocklistAdd() {
+  const box = document.getElementById('spBlocklistBox');
+  const reasonEl = document.getElementById('spBlocklistReason');
+  const status = document.getElementById('spBlocklistStatus');
+  const raw = (box.value || '').trim();
+  const reason = (reasonEl.value || '').trim() || null;
+  const lines = raw.split(/\s+/).filter(Boolean);
+  if (!lines.length) {
+    status.className = 'status-line warn shown';
+    status.textContent = 'Paste at least one member number.';
+    return;
+  }
+  status.className = 'status-line progress shown';
+  status.textContent = 'Looking up players + adding…';
+  try {
+    /* For each member number, look up the display name from slate.players
+       so the blocklist match (against contact_name in sp_labels) works. */
+    const nums = [...new Set(lines.map(s => String(parseInt(s, 10))).filter(s => s && s !== 'NaN'))];
+    const players = await sb('GET',
+      'players?member_number=in.(' + nums.map(encodeURIComponent).join(',')
+      + ')&select=member_number,first_name,nickname,last_name');
+    const byNum = new Map((players || []).map(p => [String(p.member_number), p]));
+    const rows = nums.map(num => {
+      const p = byNum.get(num);
+      const display = p
+        ? [p.first_name, p.nickname ? '"' + p.nickname + '"' : null, p.last_name].filter(Boolean).join(' ')
+        : null;
+      return {
+        member_number: num,
+        display_name:  display,
+        reason:        reason,
+        added_by:      getDeviceId()
+      };
+    });
+    /* Upsert — replace any existing entries for these numbers */
+    await sb('POST',
+      'mailing_contact_blocklist?on_conflict=member_number',
+      rows,
+      { Prefer: 'resolution=merge-duplicates,return=minimal' });
+    box.value = ''; reasonEl.value = '';
+    status.className = 'status-line ok shown';
+    status.textContent = 'Added ' + rows.length + ' entr' + (rows.length === 1 ? 'y' : 'ies') + '.';
+    await spBlocklistLoad();
+  } catch (e) {
+    status.className = 'status-line err shown';
+    status.textContent = 'Add failed: ' + e.message;
+  }
+}
+
+async function spBlocklistRemove(memberNum) {
+  if (!confirm('Remove ' + memberNum + ' from the blocklist?')) return;
+  try {
+    await sb('DELETE',
+      'mailing_contact_blocklist?member_number=eq.' + encodeURIComponent(memberNum));
+    await spBlocklistLoad();
+  } catch (e) {
+    alert('Remove failed: ' + e.message);
+  }
+}
+window.spBlocklistAdd = spBlocklistAdd;
+window.spBlocklistRemove = spBlocklistRemove;
+
+/* ── Per-label override (c/o prefix + replacement name) ─────────── */
+let _spLabelOverrides = [];
+
+async function spOverridesLoad() {
+  if (!currentSession || !currentSession.id) {
+    _spLabelOverrides = [];
+    return;
+  }
+  try {
+    _spLabelOverrides = await sb('GET',
+      'sp_label_overrides?session_id=eq.' + currentSession.id +
+      '&select=operator_id,session_id,team_number,prefix,contact_name_override,notes') || [];
+  } catch (e) {
+    console.warn('[overrides] load failed:', e);
+    _spLabelOverrides = [];
+  }
+}
+
+/* Helper: index overrides by team_number for render-time lookup */
+function spOverridesByTeam() {
+  const m = new Map();
+  for (const o of _spLabelOverrides) m.set(String(o.team_number), o);
+  return m;
+}
+
+function spOverrideOpen(opId, teamNumber, currentName) {
+  const existing = _spLabelOverrides.find(o =>
+    String(o.team_number) === String(teamNumber) && o.operator_id === opId);
+  const prefix = prompt(
+    'Mailing override for team #' + teamNumber + '\n\n'
+    + 'PREFIX line (printed ABOVE the recipient name, e.g. "c/o").\n'
+    + 'Leave blank for no prefix.',
+    existing ? (existing.prefix || '') : ''
+  );
+  if (prefix === null) return; /* cancelled */
+  const nameOverride = prompt(
+    'REPLACEMENT recipient name (printed INSTEAD of "' + currentName + '").\n'
+    + 'Leave blank to keep the original name.',
+    existing ? (existing.contact_name_override || '') : ''
+  );
+  if (nameOverride === null) return;
+  spOverrideSave(opId, teamNumber, prefix.trim() || null, nameOverride.trim() || null);
+}
+window.spOverrideOpen = spOverrideOpen;
+
+async function spOverrideSave(opId, teamNumber, prefix, contactOverride) {
+  if (!currentSession || !currentSession.id) return;
+  try {
+    if (!prefix && !contactOverride) {
+      /* Both cleared → delete */
+      await sb('DELETE',
+        'sp_label_overrides?operator_id=eq.' + opId
+        + '&session_id=eq.' + currentSession.id
+        + '&team_number=eq.' + encodeURIComponent(teamNumber));
+    } else {
+      await sb('POST',
+        'sp_label_overrides?on_conflict=operator_id,session_id,team_number',
+        [{
+          operator_id: opId,
+          session_id: currentSession.id,
+          team_number: teamNumber,
+          prefix: prefix,
+          contact_name_override: contactOverride,
+          updated_at: new Date().toISOString()
+        }],
+        { Prefer: 'resolution=merge-duplicates,return=minimal' });
+    }
+    await spOverridesLoad();
+    spRenderLabels();
+  } catch (e) {
+    alert('Save failed: ' + e.message);
   }
 }
 
@@ -6714,7 +6951,16 @@ function spRenderLabels() {
       + '<details><summary style="cursor:pointer; font-size:0.9rem; color:#374151;">View team numbers</summary>'
       + '<div style="margin-top:6px; font-size:0.82rem; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; '
       +    'line-height:1.6; color:#374151; max-height:200px; overflow:auto;">'
-      +   rows.map(r => esc(r.team_number) + ' &nbsp;' + esc(r.contact_name)).join('<br>')
+      +   rows.map(r => {
+            const ov = spOverridesByTeam().get(String(r.team_number));
+            const ovTag = ov
+              ? '<span style="color:#a8132e; font-weight:700;"> [override]</span>'
+              : '';
+            const ovBtn = '<button class="btn btn-outline btn-sm" style="padding:1px 6px; font-size:0.72rem; margin-left:6px;" '
+                       +   'onclick="spOverrideOpen(' + opId + ',\'' + esc(r.team_number) + '\',\'' + esc((r.contact_name||'').replace(/[\'\"\\]/g,'')) + '\')">'
+                       +   (ov ? 'Edit override' : 'Override') + '</button>';
+            return esc(r.team_number) + ' &nbsp;' + esc(r.contact_name) + ovTag + ovBtn;
+          }).join('<br>')
       + '</div></details>'
       + '</div>'
     );
@@ -7323,6 +7569,8 @@ function spSetOperator(op) {
   spLoadLabels();
   spLoadPatches();
   spLoadOpProfileForm();
+  spOverridesLoad();
+  spBlocklistLoad();
 }
 
 function spOnEnterTab() {
@@ -8196,9 +8444,10 @@ function spBuildSlipsHTML(pages, op, summary) {
       +   '<div class="slip-seal"><div class="slip-seal-ring"></div>'
       +     '<div class="slip-seal-in">&#9733;</div></div>'
       +   '<div class="slip-body">'
-      +     '<div class="slip-head">&#10022; Special Performance'
-      +       (sessionLabel ? ' &middot; ' + esc(sessionLabel) : '')
-      +       ' &#10022;</div>'
+      +     '<div class="slip-head">'
+      +       '<div class="slip-head-banner">&#10022; Special Performance &#10022;</div>'
+      +       (sessionLabel ? '<div class="slip-head-session">' + esc(sessionLabel) + '</div>' : '')
+      +     '</div>'
       +     '<div class="slip-pre">this certifies that</div>'
       +     '<div class="slip-name">'
       +       (slip.member_name
@@ -8280,6 +8529,11 @@ function spBuildSlipsHTML(pages, op, summary) {
     '.slip-body { flex: 1 1 auto; text-align: center; padding: 0 0.18in; }',
     '.slip-head { font-size: 8pt; font-weight: 700; letter-spacing: 0.2em;',
     '        text-transform: uppercase; color: #9a7b1e; }',
+    /* 3.95: session is always on its own line under the banner — used to
+       inline with "·" separator and word-wrapped mid-text for long sessions. */
+    '.slip-head-banner { display: block; }',
+    '.slip-head-session { display: block; margin-top: 2pt; font-size: 7.5pt;',
+    '        letter-spacing: 0.14em; color: #b08d2a; }',
     '.slip-pre { font-size: 7.5pt; font-style: italic; color: #7c6f4e; margin-top: 3pt; }',
     '.slip-name { margin: 2pt 0 0; }',
     '.slip-name-first, .slip-name-last { font-size: 15pt; font-weight: 700;',
@@ -8374,13 +8628,29 @@ function spBuildEnvelopesHTML(envs, op) {
      at a glance), recipient address between them with a narrow
      max-width so it ends BESIDE the logo, not behind it. The cat sits
      bottom-left as a small accent above the USPS barcode zone. */
-  const envHtml = e =>
-    '<div class="env">'
+  /* 3.95+: apply per-label override. An envelope may serve multiple
+     teams (joint envelopes for captains running >1 team); we apply
+     the first override that matches any of the envelope's teams.
+     Prefix prints as its own line above the recipient name;
+     contact_name_override replaces the name entirely. */
+  const ovIndex = spOverridesByTeam();
+  const envHtml = e => {
+    let ov = null;
+    if (e.teams && e.teams.length) {
+      for (const tn of e.teams) {
+        const candidate = ovIndex.get(String(tn));
+        if (candidate) { ov = candidate; break; }
+      }
+    }
+    const renderedName = (ov && ov.contact_name_override) ? ov.contact_name_override : e.contact_name;
+    const prefixLine = (ov && ov.prefix) ? '<div>' + esc(ov.prefix) + '</div>' : '';
+    return '<div class="env">'
     + '<div class="return-address">' + ret + '</div>'
     + '<img class="env-logo" src="' + SP_ENV_PATCHES_LOGO + '" alt="">'
     + '<img class="env-cat" src="' + SP_ENV_CAT_LOGO + '" alt="">'
     + '<div class="recipient">'
-    +   '<div>' + esc(e.contact_name) + '</div>'
+    +   prefixLine
+    +   '<div>' + esc(renderedName) + '</div>'
     +   '<div>' + esc(e.address_line1) + '</div>'
     +   (e.address_line2 ? '<div>' + esc(e.address_line2) + '</div>' : '')
     +   '<div>' + esc(e.city) + ', ' + esc(e.state) + ' ' + esc(e.zip) + '</div>'
@@ -8397,6 +8667,7 @@ function spBuildEnvelopesHTML(envs, op) {
         return bits.length ? '<div class="meta">' + bits.join(' · ') + '</div>' : '';
       })()
     + '</div>';
+  };
   return [
     '<!doctype html><html><head><meta charset="utf-8"><title>Envelopes</title>',
     '<style>',
