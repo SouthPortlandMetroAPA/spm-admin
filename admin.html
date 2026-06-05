@@ -2093,7 +2093,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.93';
+const APP_VERSION = '3.94';
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -6422,11 +6422,18 @@ async function spSaveLabels(labels, filename) {
       'Saved ' + labels.length + ' labels for ' + opShort
       + (previousCount ? ' (replaced ' + previousCount + ')' : ''), 'ok');
     await spLoadLabels();
-    /* Cross-check against the Team Screen: every active team for this
-       (session, operator) needs a mailing contact, or its players have
-       no envelope to land in. Inactive teams (team-within-division > 16)
-       are skipped — they were pulled mid-session. */
-    await spLabelsCoverageCheck(opId, sessId, opShort);
+    /* SPM-only validation popup (3.94+):
+       - Section A: SPM teams in the Team Screen that have NO mailing contact
+         (these don't appear in the labels PDF, but the team exists).
+       - Section B: SPM division pairs (8-Ball ↔ 9-Ball / Doubles) where the
+         SAME team_within_division has a DIFFERENT contact between the two
+         halves of the pair. Indicates a stale captain change.
+       Bye/TBA/empty-name teams are excluded from both checks. */
+    if (opId === 1) {
+      await spLabelsSpmValidationPopup(opId, sessId, opShort);
+    } else {
+      await spLabelsCoverageCheck(opId, sessId, opShort);
+    }
   } catch (e) {
     console.error('[SP] labels save failed:', e);
     setStatus('spDropStatus', 'Save failed: ' + e.message, 'err');
@@ -6479,6 +6486,155 @@ async function spLabelsCoverageCheck(opId, sessId, opShort) {
   } catch (e) {
     console.warn('[SP] labels coverage check failed:', e);
     /* Non-fatal — the save itself succeeded. */
+  }
+}
+
+/* SPM-only labels validation (3.94+).
+   Runs after an SPM mailing-list PDF upload. Two checks in one popup:
+
+   A) MISSING MAILING CONTACT — every active SPM team in the Team Screen
+      should appear in the labels PDF.
+   B) 8-BALL vs 9-BALL MISMATCH — SPM's 8 and 9 ball divisions on the
+      same night share the same teams. Pair detected by stripping
+      "8 Ball" / "9 Ball" / "9-Ball" / "8 Doubles" / "9 Doubles" from
+      the division name. For each team_within_division shared between
+      the pair, contact_name must match.
+
+   EXCLUSIONS (both checks):
+   - Inactive teams (team-within-division > 16)
+   - Empty / null team_name
+   - Names matching /^(bye|tba|tbd|to be announced|no team|forfeit|open)$/i
+*/
+async function spLabelsSpmValidationPopup(opId, sessId, opShort) {
+  try {
+    const divs = await sb('GET',
+      'divisions?session_id=eq.' + sessId + '&operator_id=eq.' + opId +
+      '&select=id,division_number,name');
+    if (!divs.length) return;
+
+    const divIds = divs.map(d => d.id).join(',');
+    const teamRows = await sb('GET',
+      'teams?division_id=in.(' + divIds + ')&select=team_number,team_name,division_id');
+    const PLACEHOLDER = /^(bye|tba|tbd|to be announced|no team|forfeit|open)$/i;
+    const active = (teamRows || []).filter(t => {
+      if (spIsInactiveTeam(t.team_number)) return false;
+      const name = String(t.team_name || '').trim();
+      if (!name) return false;
+      if (PLACEHOLDER.test(name)) return false;
+      return true;
+    });
+    if (!active.length) return;
+
+    const labelRows = await sb('GET',
+      'sp_labels?operator_id=eq.' + opId + '&session_id=eq.' + sessId +
+      '&select=team_number,contact_name');
+    const contactByNum = new Map();
+    for (const r of (labelRows || [])) {
+      contactByNum.set(String(parseInt(r.team_number, 10)),
+                       String(r.contact_name || '').trim());
+    }
+
+    /* Check A: missing mailing contacts */
+    const missing = active
+      .filter(t => !contactByNum.has(String(parseInt(t.team_number, 10))))
+      .sort((a, b) => parseInt(a.team_number, 10) - parseInt(b.team_number, 10));
+
+    /* Check B: 8-ball vs 9-ball pair mismatches */
+    const stripFormat = (name) => String(name || '')
+      .toLowerCase()
+      .replace(/\s*\b[89]\s*[-\s]?(ball|doubles)\b\s*/gi, ' ')
+      .replace(/\s+/g, ' ').trim();
+    const formatTag = (name) => {
+      const m = String(name || '').match(/\b([89])\s*[-\s]?(ball|doubles)\b/i);
+      if (!m) return null;
+      const ball = m[1];
+      const kind = m[2].toLowerCase() === 'doubles' ? 'D' : 'B';
+      return ball + kind;
+    };
+
+    const groupByRoot = new Map();
+    for (const d of divs) {
+      const tag = formatTag(d.name);
+      if (!tag) continue;
+      const root = stripFormat(d.name);
+      if (!groupByRoot.has(root)) groupByRoot.set(root, {});
+      groupByRoot.get(root)[tag] = d;
+    }
+
+    const teamsByDiv = new Map();
+    for (const t of active) {
+      if (!teamsByDiv.has(t.division_id)) teamsByDiv.set(t.division_id, []);
+      teamsByDiv.get(t.division_id).push(t);
+    }
+    const withinDigits = (num) => String(num || '').padStart(5, '0').slice(-2);
+
+    const mismatches = [];
+    for (const [root, byTag] of groupByRoot) {
+      const pairs = [['8B','9B'], ['8D','9D']];
+      for (const [tagA, tagB] of pairs) {
+        const dA = byTag[tagA], dB = byTag[tagB];
+        if (!dA || !dB) continue;
+        const teamsA = teamsByDiv.get(dA.id) || [];
+        const teamsB = teamsByDiv.get(dB.id) || [];
+        const aByW = new Map(teamsA.map(t => [withinDigits(t.team_number), t]));
+        const bByW = new Map(teamsB.map(t => [withinDigits(t.team_number), t]));
+        const shared = new Set([...aByW.keys()].filter(k => bByW.has(k)));
+        for (const w of shared) {
+          const tA = aByW.get(w), tB = bByW.get(w);
+          const cA = (contactByNum.get(String(parseInt(tA.team_number, 10))) || '').toLowerCase();
+          const cB = (contactByNum.get(String(parseInt(tB.team_number, 10))) || '').toLowerCase();
+          if (!cA || !cB) continue;
+          if (cA !== cB) {
+            mismatches.push({
+              root, within: w,
+              divA: dA, teamA: tA, contactA: contactByNum.get(String(parseInt(tA.team_number, 10))),
+              divB: dB, teamB: tB, contactB: contactByNum.get(String(parseInt(tB.team_number, 10)))
+            });
+          }
+        }
+      }
+    }
+
+    if (!missing.length && !mismatches.length) {
+      setStatus('spDropStatus',
+        'Saved labels &mdash; all ' + active.length + ' active ' + opShort
+        + ' teams covered and 8/9-ball contacts match.',
+        'ok');
+      return;
+    }
+
+    const total = missing.length + mismatches.length;
+    setStatus('spDropStatus',
+      'Saved labels &mdash; ' + total + ' issue' + (total === 1 ? '' : 's')
+      + ' found (see popup).', 'warn');
+
+    let msg = '';
+    if (missing.length) {
+      msg += '── ' + missing.length + ' ' + opShort + ' team'
+          + (missing.length === 1 ? '' : 's')
+          + ' on the Team Screen have NO mailing contact ──\n\n';
+      msg += missing.map(t =>
+        '  ' + String(t.team_number || '?').padStart(5, '0')
+        + '  ' + (t.team_name || '(no name)')).join('\n');
+      msg += '\n\n';
+    }
+    if (mismatches.length) {
+      msg += '── ' + mismatches.length + ' 8-ball / 9-ball contact mismatch'
+          + (mismatches.length === 1 ? '' : 'es') + ' ──\n\n';
+      msg += mismatches.map(m => {
+        const rootTitle = m.root.replace(/\b\w/g, c => c.toUpperCase());
+        return '  ' + rootTitle + ' — team within #' + m.within + '\n'
+             + '     ' + m.divA.division_number + ' (' + m.divA.name + ')'
+             + ' #' + m.teamA.team_number + ' — ' + m.contactA + '\n'
+             + '     ' + m.divB.division_number + ' (' + m.divB.name + ')'
+             + ' #' + m.teamB.team_number + ' — ' + m.contactB;
+      }).join('\n\n');
+      msg += '\n\n';
+    }
+    msg += 'Fix the captains in APA, regenerate the labels PDF, and re-upload.';
+    alert(msg);
+  } catch (e) {
+    console.warn('[SP] SPM validation popup failed:', e);
   }
 }
 
