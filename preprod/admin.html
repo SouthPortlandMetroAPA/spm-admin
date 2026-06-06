@@ -3776,6 +3776,7 @@ function switchTab(name) {
   if (name === 'redtape')     rtInit();
   if (name === 'rolodex')     rolInit();
   if (name === 'playoffs')    renderPlayoffsTab();
+  if (name === 'certs')       certsAdminInit();
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -15713,34 +15714,36 @@ function certsAdminGetServiceKey() {
   return p.get('key') || '';
 }
 
-async function certsAdminLoadSessions() {
+let _certsSessionsLoaded = false;
+
+/* Called by switchTab('certs'). Loads the session dropdown via the shared
+   sb() helper (which carries the anon key + slate Accept-Profile — the
+   earlier hand-rolled fetch used window.SB_ANON, which is undefined because
+   SB_URL/SB_ANON are top-level consts, not window props → 401 → empty list). */
+async function certsAdminInit() {
   const sel = document.getElementById('certsSessionSelect');
-  if (!sel) return;
+  if (!sel || _certsSessionsLoaded) return;
   sel.innerHTML = '<option>Loading…</option>';
   try {
-    // Reuse the existing sb helper if present; otherwise inline-fetch.
-    const url = (window.SB_URL || 'https://dqzbekoaysgaiqljueac.supabase.co') +
-      '/rest/v1/sessions?select=id,name,start_date,is_current&order=start_date.desc&limit=20';
-    const r = await fetch(url, {
-      headers: {
-        apikey: (window.SB_ANON || ''),
-        Authorization: 'Bearer ' + (window.SB_ANON || ''),
-        'Accept-Profile': 'slate',
-      },
-    });
-    const sessions = await r.json();
+    const sessions = await sb('GET',
+      'sessions?select=id,name,start_date,is_current&order=start_date.desc.nullslast');
+    if (!sessions || !sessions.length) {
+      sel.innerHTML = '<option value="">No sessions found</option>';
+      return;
+    }
     sel.innerHTML = sessions.map(s =>
-      `<option value="${s.id}" data-name="${s.name}" data-start="${s.start_date}" ${s.is_current ? 'data-current="1"' : ''}>
-         ${s.name}${s.is_current ? ' (current)' : ''}
-       </option>`).join('');
-    // Default selection: the first non-current (most recent past) session
+      `<option value="${s.id}" data-name="${esc(s.name)}" data-start="${s.start_date || ''}"${s.is_current ? ' data-current="1"' : ''}>` +
+      `${esc(s.name)}${s.is_current ? ' (current)' : ''}</option>`
+    ).join('');
+    // Default to the most-recent NON-current (past) session.
     const past = sessions.find(s => !s.is_current);
-    if (past) sel.value = past.id;
-    // Auto-fill seal label from session name (e.g., "2026 Spring Session" → "SPRING 2026")
-    sel.addEventListener('change', certsAdminAutoFill);
+    if (past) sel.value = String(past.id);
+    sel.onchange = certsAdminAutoFill;
     certsAdminAutoFill();
+    _certsSessionsLoaded = true;
   } catch (e) {
-    sel.innerHTML = '<option>Failed to load sessions</option>';
+    sel.innerHTML = '<option value="">Failed to load sessions</option>';
+    certsAdminSetStatus('Could not load sessions: ' + (e.message || e), 'error');
   }
 }
 
@@ -15838,21 +15841,11 @@ async function certsAdminGenerate() {
 
 window.certsAdminPreview  = certsAdminPreview;
 window.certsAdminGenerate = certsAdminGenerate;
+window.certsAdminInit     = certsAdminInit;
 
-// Auto-load sessions when the Certs tab is first activated.
-document.addEventListener('click', function (e) {
-  const btn = e.target.closest && e.target.closest('button[data-tab="certs"]');
-  if (!btn) return;
-  // Only load once
-  const sel = document.getElementById('certsSessionSelect');
-  if (sel && sel.options.length <= 1 && sel.options[0].textContent === 'Loading…') return;
-  if (sel && (!sel.options.length || sel.options[0].textContent === '')) certsAdminLoadSessions();
-}, true);
-
-// First-load: if Certs tab is the initial active tab (e.g. via URL hash), load sessions now.
-document.addEventListener('DOMContentLoaded', function () {
-  if (location.hash === '#certs') certsAdminLoadSessions();
-});
+// (Session loading is triggered by switchTab('certs') → certsAdminInit(),
+//  matching how every other Slate tab lazy-loads its data. The earlier
+//  document-level click listener threw on an empty <select> and is removed.)
 
 </script>
 </body>
