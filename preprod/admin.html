@@ -2179,7 +2179,10 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
 const APP_NAME    = 'Slate';
-const APP_VERSION = '3.93';
+const APP_VERSION = '3.96';   // matches apa_core.apps DB version so the
+                              // auto-updater doesn't loop on "Updating" in
+                              // preprod. Bump to next (3.97) only at promote
+                              // time, in lockstep with the DB version row.
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
