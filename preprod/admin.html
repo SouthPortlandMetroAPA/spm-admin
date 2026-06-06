@@ -965,6 +965,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="redtape">RedTape</button>
       <button class="tab" data-tab="rolodex">Rolodex</button>
       <button class="tab" data-tab="playoffs">Playoffs</button>
+      <button class="tab" data-tab="certs">Certs</button>
     </div>
 
     <div id="globalStatus" class="status-line"></div>
@@ -2121,7 +2122,47 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       </div>
     </div>
     <!-- ════════════════ /Playoffs ════════════════ -->
-    <!-- ════════════════ /Scoresheets ════════════════ -->
+
+    <!-- ══════════════════════════════════════════════════════════════
+         TAB: CERTS — Trigger PatchCheck cert generation for a session
+         ══════════════════════════════════════════════════════════════ -->
+    <div id="tab-certs" class="tab-panel">
+      <div class="card">
+        <h2>Session certificates</h2>
+        <p class="hint" style="margin-bottom:10px">
+          Generate all earned certificates (Outstanding Achievement, The Most,
+          Exceptional Achievement) for a session. Each click performs a full
+          clear + regenerate — no artifacts from previous runs. Players see
+          their certs in PatchCheck under "View My Certificates".
+        </p>
+        <div class="row" style="margin-bottom:10px">
+          <div>
+            <label for="certsSessionSelect">Session</label>
+            <select id="certsSessionSelect"></select>
+          </div>
+          <div>
+            <label for="certsSeasonLabel">Seal label (UPPERCASE)</label>
+            <input id="certsSeasonLabel" type="text" placeholder="SPRING 2026" style="width:160px">
+          </div>
+          <div>
+            <label for="certsDate">Issue date</label>
+            <input id="certsDate" type="date">
+          </div>
+          <div style="display:flex;align-items:flex-end;justify-content:flex-end;gap:8px">
+            <button class="btn btn-outline btn-sm" onclick="certsAdminPreview()">Preview count</button>
+            <button class="btn btn-primary btn-sm" onclick="certsAdminGenerate()">Generate certs</button>
+          </div>
+        </div>
+        <div id="certsAdminStatus" class="status-line"></div>
+        <pre id="certsAdminResult" style="background:#f6f6f4;border:1px solid #e2e0d8;border-radius:6px;padding:10px;font-size:11px;max-height:280px;overflow:auto;display:none"></pre>
+        <p class="hint" style="margin-top:10px;font-size:11px;color:#888">
+          Worker: <code>spmapa.workers.dev/certs/{generate,count,list,sessions}</code> ·
+          Bucket: <code>apa-photos/certs/{session-slug}/{member}/{tier}-{type}.png</code> ·
+          Manifest: <code>slate.certs</code>
+        </p>
+      </div>
+    </div>
+    <!-- ════════════════ /Certs ════════════════ -->
 
   </div>
 
@@ -15652,6 +15693,163 @@ function rolLogLoadMore() {
 
 window.rolLogRender = rolLogRender;
 window.rolLogLoadMore = rolLogLoadMore;
+
+/* ══════════════════════════════════════════════════════════════════════
+   CERTS TAB — PatchCheck certificate generation trigger
+   ══════════════════════════════════════════════════════════════════════
+   Reads sessions, lets admin pick one + season label + issue date, calls
+   the spmapa.workers.dev/certs/generate worker endpoint with service-role
+   auth (sourced from the URL ?key= param, matching SpmAdminV2 convention).
+   ══════════════════════════════════════════════════════════════════════ */
+
+const CERTS_WORKER_BASE = 'https://spmapa.workers.dev';
+
+function certsAdminGetServiceKey() {
+  // Slate admin convention: service-role JWT comes from URL `?key=`
+  const p = new URLSearchParams(location.search);
+  return p.get('key') || '';
+}
+
+async function certsAdminLoadSessions() {
+  const sel = document.getElementById('certsSessionSelect');
+  if (!sel) return;
+  sel.innerHTML = '<option>Loading…</option>';
+  try {
+    // Reuse the existing sb helper if present; otherwise inline-fetch.
+    const url = (window.SB_URL || 'https://dqzbekoaysgaiqljueac.supabase.co') +
+      '/rest/v1/sessions?select=id,name,start_date,is_current&order=start_date.desc&limit=20';
+    const r = await fetch(url, {
+      headers: {
+        apikey: (window.SB_ANON || ''),
+        Authorization: 'Bearer ' + (window.SB_ANON || ''),
+        'Accept-Profile': 'slate',
+      },
+    });
+    const sessions = await r.json();
+    sel.innerHTML = sessions.map(s =>
+      `<option value="${s.id}" data-name="${s.name}" data-start="${s.start_date}" ${s.is_current ? 'data-current="1"' : ''}>
+         ${s.name}${s.is_current ? ' (current)' : ''}
+       </option>`).join('');
+    // Default selection: the first non-current (most recent past) session
+    const past = sessions.find(s => !s.is_current);
+    if (past) sel.value = past.id;
+    // Auto-fill seal label from session name (e.g., "2026 Spring Session" → "SPRING 2026")
+    sel.addEventListener('change', certsAdminAutoFill);
+    certsAdminAutoFill();
+  } catch (e) {
+    sel.innerHTML = '<option>Failed to load sessions</option>';
+  }
+}
+
+function certsAdminAutoFill() {
+  const sel = document.getElementById('certsSessionSelect');
+  const opt = sel.options[sel.selectedIndex];
+  if (!opt) return;
+  const name = opt.dataset.name || '';
+  // Convert "2026 Spring Session" → "SPRING 2026"
+  const m = name.match(/(\d{4})\s+(Spring|Summer|Fall|Winter)/i);
+  if (m) {
+    document.getElementById('certsSeasonLabel').value = m[2].toUpperCase() + ' ' + m[1];
+  }
+  // Default issue date to today (or session start + a sensible offset)
+  const dEl = document.getElementById('certsDate');
+  if (!dEl.value) dEl.value = new Date().toISOString().slice(0, 10);
+}
+
+function certsAdminSetStatus(text, kind) {
+  const el = document.getElementById('certsAdminStatus');
+  if (!el) return;
+  el.textContent = text || '';
+  el.style.color = kind === 'error' ? '#a02030' : (kind === 'ok' ? '#1a6a30' : '#444');
+}
+
+async function certsAdminPreview() {
+  const sel = document.getElementById('certsSessionSelect');
+  if (!sel.value) return;
+  certsAdminSetStatus('Counting…');
+  try {
+    const r = await fetch(CERTS_WORKER_BASE + '/certs/count?session_id=' + encodeURIComponent(sel.value));
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'count failed');
+    certsAdminSetStatus(`${d.count} certs eligible for ${sel.options[sel.selectedIndex].text.trim()}`, 'ok');
+  } catch (e) {
+    certsAdminSetStatus('Preview failed: ' + (e.message || e), 'error');
+  }
+}
+
+async function certsAdminGenerate() {
+  const sel = document.getElementById('certsSessionSelect');
+  const seasonLabel = document.getElementById('certsSeasonLabel').value.trim();
+  const date = document.getElementById('certsDate').value;
+  if (!sel.value) { certsAdminSetStatus('Pick a session first.', 'error'); return; }
+  if (!seasonLabel) { certsAdminSetStatus('Seal label required (e.g. SPRING 2026).', 'error'); return; }
+  if (!date)      { certsAdminSetStatus('Issue date required.', 'error'); return; }
+
+  const sessionName = sel.options[sel.selectedIndex].dataset.name || sel.options[sel.selectedIndex].text.trim();
+  const slug = sessionName.toLowerCase()
+    .normalize('NFKD').replace(/[̀-ͯ]/g, '')
+    .replace(/session$/i, '').trim()
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+
+  const ok = confirm(
+    `This will DELETE all existing certs for "${sessionName}" and regenerate them.\n\n` +
+    `Slug: ${slug}\nSeal: ${seasonLabel}\nDate: ${date}\n\nContinue?`
+  );
+  if (!ok) return;
+
+  const svcKey = certsAdminGetServiceKey();
+  if (!svcKey) { certsAdminSetStatus('Service-role key missing (?key= in URL).', 'error'); return; }
+
+  certsAdminSetStatus('Generating… (this may take several minutes)');
+  const result = document.getElementById('certsAdminResult');
+  result.style.display = 'block';
+  result.textContent = '⏳ Starting…';
+
+  try {
+    const r = await fetch(CERTS_WORKER_BASE + '/certs/generate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + svcKey,
+      },
+      body: JSON.stringify({
+        session_id:    parseInt(sel.value, 10),
+        session_slug:  slug,
+        season_label:  seasonLabel,
+        session_label: sessionName,
+        date_iso:      date,
+      }),
+    });
+    const d = await r.json();
+    result.textContent = JSON.stringify(d, null, 2);
+    if (d.ok) {
+      certsAdminSetStatus(`Generated ${d.generated}/${d.total} certs for ${sessionName}.`, 'ok');
+    } else {
+      certsAdminSetStatus(`Generation finished with errors: ${(d.errors || []).length} failed.`, 'error');
+    }
+  } catch (e) {
+    certsAdminSetStatus('Request failed: ' + (e.message || e), 'error');
+    result.textContent = 'Network/runtime error: ' + (e.message || e);
+  }
+}
+
+window.certsAdminPreview  = certsAdminPreview;
+window.certsAdminGenerate = certsAdminGenerate;
+
+// Auto-load sessions when the Certs tab is first activated.
+document.addEventListener('click', function (e) {
+  const btn = e.target.closest && e.target.closest('button[data-tab="certs"]');
+  if (!btn) return;
+  // Only load once
+  const sel = document.getElementById('certsSessionSelect');
+  if (sel && sel.options.length <= 1 && sel.options[0].textContent === 'Loading…') return;
+  if (sel && (!sel.options.length || sel.options[0].textContent === '')) certsAdminLoadSessions();
+}, true);
+
+// First-load: if Certs tab is the initial active tab (e.g. via URL hash), load sessions now.
+document.addEventListener('DOMContentLoaded', function () {
+  if (location.hash === '#certs') certsAdminLoadSessions();
+});
 
 </script>
 </body>
