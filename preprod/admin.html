@@ -15774,10 +15774,13 @@ async function certsAdminPreview() {
   if (!sel.value) return;
   certsAdminSetStatus('Counting…');
   try {
-    const r = await fetch(CERTS_WORKER_BASE + '/certs/count?session_id=' + encodeURIComponent(sel.value));
-    const d = await r.json();
-    if (!d.ok) throw new Error(d.error || 'count failed');
-    certsAdminSetStatus(`${d.count} certs eligible for ${sel.options[sel.selectedIndex].text.trim()}`, 'ok');
+    // Call the eligibility-count RPC directly (granted to anon) so Preview
+    // works without the worker. Generate still routes through the worker.
+    const rows = await sb('POST', 'rpc/count_session_cert_eligibility',
+      { p_session_id: parseInt(sel.value, 10) });
+    const count = Array.isArray(rows) ? rows[0] : rows;   // scalar RPC
+    certsAdminSetStatus(
+      `${count} certs eligible for ${sel.options[sel.selectedIndex].text.trim()}`, 'ok');
   } catch (e) {
     certsAdminSetStatus('Preview failed: ' + (e.message || e), 'error');
   }
