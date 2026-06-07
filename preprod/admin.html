@@ -2178,11 +2178,15 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    strings (document title, header H1, footer version line) are
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
-const APP_NAME    = 'Slate';
-const APP_VERSION = '3.96';   // matches apa_core.apps DB version so the
-                              // auto-updater doesn't loop on "Updating" in
-                              // preprod. Bump to next (3.97) only at promote
-                              // time, in lockstep with the DB version row.
+/* APP_NAME is env-aware. Preprod (served at /preprod/) polls a separate DB
+   row from prod, so version bumps in one environment don't affect tabs
+   open in the other. Convention: `<AppName>` for prod, `<AppName>-preprod`
+   for preprod. promote.sh bumps the prod DB row to match preprod's
+   APP_VERSION at promote time. */
+const APP_NAME_BASE = 'Slate';
+const IS_PREPROD    = /\/preprod\//.test(location.pathname);
+const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
+const APP_VERSION   = '3.96';   // matches apa_core.apps.Slate-preprod
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
