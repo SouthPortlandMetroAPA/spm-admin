@@ -2186,7 +2186,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION   = '3.96';   // matches apa_core.apps.Slate-preprod
+const APP_VERSION   = '3.97';   // matches apa_core.apps.Slate-preprod
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -2749,6 +2749,54 @@ function ensurePdfJs() {
     });
   }
   return _pdfJsPromise;
+}
+
+/* ── HEIC → JPEG conversion (mirrors PaperTrail 2.10) ──────────────────
+   Slate's PaperTrail-uploader path (admin pushes a scoresheet on behalf
+   of a captain) accepted raw HEIC files and PUT them to R2 under a .jpg
+   path. The worker served the bytes back as image/jpeg, so browsers got
+   an HEIC-payload-mislabeled-JPEG and rendered nothing.
+
+   Same lazy-loaded libheif-WASM (heic2any 0.0.4) PaperTrail uses, with
+   sniff (MIME + filename + ftyp-box magic bytes) so we catch iOS uploads
+   that arrive as image/heic, image/heif, or application/octet-stream. */
+const HEIC2ANY_URL          = 'https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js';
+const HEIC2ANY_LOAD_TIMEOUT = 30_000;
+const HEIC_MAX_BYTES        = 30 * 1024 * 1024;
+let _heic2anyPromise = null;
+function ensureHeic2Any() {
+  if (!_heic2anyPromise) {
+    _heic2anyPromise = new Promise((res, rej) => {
+      if (window.heic2any) return res(window.heic2any);
+      const s = document.createElement('script');
+      s.src = HEIC2ANY_URL;
+      const timer = setTimeout(() =>
+        rej(new Error('HEIC decoder took >30s to load. Check your connection.')),
+        HEIC2ANY_LOAD_TIMEOUT);
+      s.onload  = () => { clearTimeout(timer); res(window.heic2any); };
+      s.onerror = () => { clearTimeout(timer); rej(new Error('Could not load heic2any from CDN')); };
+      document.head.appendChild(s);
+    });
+  }
+  return _heic2anyPromise;
+}
+async function sniffIsHeic(file) {
+  const t = (file.type || '').toLowerCase();
+  if (t === 'image/heic' || t === 'image/heif') return true;
+  if (/\.(heic|heif)$/i.test(file.name || '')) return true;
+  if (file.size < 12) return false;
+  const head = new Uint8Array(await file.slice(0, 12).arrayBuffer());
+  if (head[4] !== 0x66 || head[5] !== 0x74 ||
+      head[6] !== 0x79 || head[7] !== 0x70) return false;
+  const brand = String.fromCharCode(head[8], head[9], head[10], head[11]).toLowerCase();
+  return brand === 'heic' || brand === 'heix' || brand === 'heim' ||
+         brand === 'heis' || brand === 'mif1' || brand === 'msf1' ||
+         brand === 'hevc' || brand === 'hevx';
+}
+async function heicToJpegBlob(file) {
+  const heic2any = await ensureHeic2Any();
+  const out = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.92 });
+  return Array.isArray(out) ? out[0] : out;
 }
 
 /**
@@ -9480,6 +9528,22 @@ async function ssgUploadOnBehalf(matchId, teamId, inputId, missingSidesEscaped) 
           const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.92));
           pages.push({ blob, width: canvas.width, height: canvas.height, contentType: 'image/jpeg' });
         }
+      } else if (await sniffIsHeic(file)) {
+        // HEIC (iPhone Photos default) — convert via libheif WASM before
+        // pushing. Without this, the raw HEIC bytes get PUT to R2 under a
+        // .jpg path and browsers can't render them.
+        if (file.size > HEIC_MAX_BYTES) {
+          throw new Error('HEIC photo too large (' + Math.round(file.size / 1024 / 1024)
+            + ' MB). Max 30 MB.');
+        }
+        status.textContent = 'Converting HEIC photo ' + (i + 1) + '/' + files.length + '…';
+        let jpegBlob;
+        try {
+          jpegBlob = await heicToJpegBlob(file);
+        } catch (e) {
+          throw new Error('Could not read HEIC photo "' + (file.name || '') + '": ' + (e && e.message || e));
+        }
+        pages.push({ blob: jpegBlob, width: null, height: null, contentType: 'image/jpeg' });
       } else {
         // Image — push as-is. Width/height are best-effort below.
         pages.push({ blob: file, width: null, height: null,
