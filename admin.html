@@ -965,6 +965,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="redtape">RedTape</button>
       <button class="tab" data-tab="rolodex">Rolodex</button>
       <button class="tab" data-tab="playoffs">Playoffs</button>
+      <button class="tab" data-tab="certs">Certs</button>
     </div>
 
     <div id="globalStatus" class="status-line"></div>
@@ -1354,25 +1355,6 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <span class="status-line" id="spOptoutStatus" style="flex:1;"></span>
         </div>
         <div id="spOptoutList" style="margin-top:10px;"><p class="hint" style="margin:0;">No opt-outs.</p></div>
-      </div>
-
-      <!-- Mailing contact blocklist — players who should NEVER be a mailing contact (3.95+) -->
-      <div class="card" style="margin-bottom:14px;">
-        <h2 style="margin:0 0 6px;">Mailing contact blocklist</h2>
-        <p class="hint" style="margin:0 0 10px;">
-          Member numbers (5- or 8-digit, one per line) of players who should NEVER appear as the
-          team mailing contact on the APA labels report. When you upload a labels PDF, any match
-          surfaces in the validation popup so you can have APA reassign the captain.
-        </p>
-        <textarea id="spBlocklistBox" class="ehq-paste-box" style="min-height:64px;"
-          placeholder="e.g.&#10;24779&#10;97223806"></textarea>
-        <input type="text" id="spBlocklistReason" placeholder="Optional reason (e.g. 'deceased', 'moved out of area', 'address bounces')"
-          style="margin-top:8px; padding:8px 10px; border:1px solid #e5e7eb; border-radius:8px; width:100%; max-width:560px;">
-        <div style="display:flex; gap:8px; align-items:center; margin-top:8px;">
-          <button type="button" class="btn btn-primary" onclick="spBlocklistAdd()">Add to list</button>
-          <span class="status-line" id="spBlocklistStatus" style="flex:1;"></span>
-        </div>
-        <div id="spBlocklistList" style="margin-top:10px;"><p class="hint" style="margin:0;">Loading&hellip;</p></div>
       </div>
 
       <!-- Patches — computation, envelope-grouped list, mail batch, undo -->
@@ -1951,6 +1933,51 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
          approve / delete the uploaded paperwork.
          ══════════════════════════════════════════════════════════════ -->
     <div id="tab-redtape" class="tab-panel">
+
+      <!-- ─── Signature documents (v0.1 preprod) ──────────────────────
+           Upload a PDF, generate a shareable captain link, members open
+           the link and add their name + SL + signature. All sigs stack
+           on a Signatures page appended to the PDF. Captain page at
+           /spm-admin/preprod/sign.html?d=<slug>. -->
+      <div class="card" id="rtSignDocsCard">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
+          <h2 style="margin:0">Signature documents</h2>
+          <span class="hint" id="rtSignListStatus"></span>
+          <div style="margin-left:auto" class="actions">
+            <button class="btn btn-primary btn-sm" onclick="rtSignOpenCreate()">+ New document</button>
+          </div>
+        </div>
+        <p class="hint" style="margin-top:0">Upload a PDF, share the captain link, members sign in their browser. Each signature appends to a Signatures page on the PDF — one shared document, everyone&rsquo;s sigs visible.</p>
+        <div id="rtSignDocsList"><p class="hint">Loading…</p></div>
+      </div>
+
+      <!-- ─── Create / upload modal ─────────────────────────────────── -->
+      <div id="rtSignCreateModal" class="modal-overlay" style="display:none">
+        <div class="modal-card" style="max-width:560px">
+          <h2 style="margin:0 0 8px">New signature document</h2>
+          <p class="hint" style="margin:0 0 14px">Upload a PDF and give it a short title. You&rsquo;ll get a captain link to share via SMS or email.</p>
+          <div class="form-row" style="display:grid;grid-template-columns:1fr;gap:10px">
+            <label style="display:flex;flex-direction:column;gap:4px">
+              <span style="font-size:0.78rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em">Title</span>
+              <input type="text" id="rtSignNewTitle" placeholder="e.g. Summer 26 Team Roster Sign-off" style="padding:9px 12px;border:1px solid #d6dbe2;border-radius:8px;font:inherit">
+            </label>
+            <label style="display:flex;flex-direction:column;gap:4px">
+              <span style="font-size:0.78rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em">Slug (auto)</span>
+              <input type="text" id="rtSignNewSlug" placeholder="auto-filled from title" style="padding:9px 12px;border:1px solid #d6dbe2;border-radius:8px;font:inherit;font-family:'SF Mono',Consolas,monospace">
+            </label>
+            <label style="display:flex;flex-direction:column;gap:4px">
+              <span style="font-size:0.78rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em">PDF file</span>
+              <input type="file" id="rtSignNewFile" accept="application/pdf" style="padding:9px 0;font:inherit">
+            </label>
+          </div>
+          <div id="rtSignCreateStatus" class="status-line" style="margin-top:10px"></div>
+          <div class="actions" style="margin-top:14px;justify-content:flex-end;gap:8px">
+            <button class="btn btn-outline" onclick="rtSignCloseCreate()">Cancel</button>
+            <button class="btn btn-primary" id="rtSignCreateBtn" onclick="rtSignCreate()">Upload &amp; share</button>
+          </div>
+        </div>
+      </div>
+
       <div id="rtEventsView">
         <div class="card">
           <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
@@ -2095,7 +2122,47 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       </div>
     </div>
     <!-- ════════════════ /Playoffs ════════════════ -->
-    <!-- ════════════════ /Scoresheets ════════════════ -->
+
+    <!-- ══════════════════════════════════════════════════════════════
+         TAB: CERTS — Trigger PatchCheck cert generation for a session
+         ══════════════════════════════════════════════════════════════ -->
+    <div id="tab-certs" class="tab-panel">
+      <div class="card">
+        <h2>Session certificates</h2>
+        <p class="hint" style="margin-bottom:10px">
+          Generate all earned certificates (Outstanding Achievement, The Most,
+          Exceptional Achievement) for a session. Each click performs a full
+          clear + regenerate — no artifacts from previous runs. Players see
+          their certs in PatchCheck under "View My Certificates".
+        </p>
+        <div class="row" style="margin-bottom:10px">
+          <div>
+            <label for="certsSessionSelect">Session</label>
+            <select id="certsSessionSelect"></select>
+          </div>
+          <div>
+            <label for="certsSeasonLabel">Seal label (UPPERCASE)</label>
+            <input id="certsSeasonLabel" type="text" placeholder="SPRING 2026" style="width:160px">
+          </div>
+          <div>
+            <label for="certsDate">Issue date</label>
+            <input id="certsDate" type="date">
+          </div>
+          <div style="display:flex;align-items:flex-end;justify-content:flex-end;gap:8px">
+            <button class="btn btn-outline btn-sm" onclick="certsAdminPreview()">Preview count</button>
+            <button class="btn btn-primary btn-sm" onclick="certsAdminGenerate()">Generate certs</button>
+          </div>
+        </div>
+        <div id="certsAdminStatus" class="status-line"></div>
+        <pre id="certsAdminResult" style="background:#f6f6f4;border:1px solid #e2e0d8;border-radius:6px;padding:10px;font-size:11px;max-height:280px;overflow:auto;display:none"></pre>
+        <p class="hint" style="margin-top:10px;font-size:11px;color:#888">
+          Worker: <code>spmapa.workers.dev/certs/{generate,count,list,sessions}</code> ·
+          Bucket: <code>apa-photos/certs/{session-slug}/{member}/{tier}-{type}.png</code> ·
+          Manifest: <code>slate.certs</code>
+        </p>
+      </div>
+    </div>
+    <!-- ════════════════ /Certs ════════════════ -->
 
   </div>
 
@@ -2111,8 +2178,15 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
    strings (document title, header H1, footer version line) are
    hydrated from these constants at init time.
    ══════════════════════════════════════════════════════════════════════ */
-const APP_NAME    = 'Slate';
-const APP_VERSION = '3.96';
+/* APP_NAME is env-aware. Preprod (served at /preprod/) polls a separate DB
+   row from prod, so version bumps in one environment don't affect tabs
+   open in the other. Convention: `<AppName>` for prod, `<AppName>-preprod`
+   for preprod. promote.sh bumps the prod DB row to match preprod's
+   APP_VERSION at promote time. */
+const APP_NAME_BASE = 'Slate';
+const IS_PREPROD    = /\/preprod\//.test(location.pathname);
+const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
+const APP_VERSION   = '3.97';   // matches apa_core.apps.Slate-preprod
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -2675,6 +2749,54 @@ function ensurePdfJs() {
     });
   }
   return _pdfJsPromise;
+}
+
+/* ── HEIC → JPEG conversion (mirrors PaperTrail 2.10) ──────────────────
+   Slate's PaperTrail-uploader path (admin pushes a scoresheet on behalf
+   of a captain) accepted raw HEIC files and PUT them to R2 under a .jpg
+   path. The worker served the bytes back as image/jpeg, so browsers got
+   an HEIC-payload-mislabeled-JPEG and rendered nothing.
+
+   Same lazy-loaded libheif-WASM (heic2any 0.0.4) PaperTrail uses, with
+   sniff (MIME + filename + ftyp-box magic bytes) so we catch iOS uploads
+   that arrive as image/heic, image/heif, or application/octet-stream. */
+const HEIC2ANY_URL          = 'https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js';
+const HEIC2ANY_LOAD_TIMEOUT = 30_000;
+const HEIC_MAX_BYTES        = 30 * 1024 * 1024;
+let _heic2anyPromise = null;
+function ensureHeic2Any() {
+  if (!_heic2anyPromise) {
+    _heic2anyPromise = new Promise((res, rej) => {
+      if (window.heic2any) return res(window.heic2any);
+      const s = document.createElement('script');
+      s.src = HEIC2ANY_URL;
+      const timer = setTimeout(() =>
+        rej(new Error('HEIC decoder took >30s to load. Check your connection.')),
+        HEIC2ANY_LOAD_TIMEOUT);
+      s.onload  = () => { clearTimeout(timer); res(window.heic2any); };
+      s.onerror = () => { clearTimeout(timer); rej(new Error('Could not load heic2any from CDN')); };
+      document.head.appendChild(s);
+    });
+  }
+  return _heic2anyPromise;
+}
+async function sniffIsHeic(file) {
+  const t = (file.type || '').toLowerCase();
+  if (t === 'image/heic' || t === 'image/heif') return true;
+  if (/\.(heic|heif)$/i.test(file.name || '')) return true;
+  if (file.size < 12) return false;
+  const head = new Uint8Array(await file.slice(0, 12).arrayBuffer());
+  if (head[4] !== 0x66 || head[5] !== 0x74 ||
+      head[6] !== 0x79 || head[7] !== 0x70) return false;
+  const brand = String.fromCharCode(head[8], head[9], head[10], head[11]).toLowerCase();
+  return brand === 'heic' || brand === 'heix' || brand === 'heim' ||
+         brand === 'heis' || brand === 'mif1' || brand === 'msf1' ||
+         brand === 'hevc' || brand === 'hevx';
+}
+async function heicToJpegBlob(file) {
+  const heic2any = await ensureHeic2Any();
+  const out = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.92 });
+  return Array.isArray(out) ? out[0] : out;
 }
 
 /**
@@ -3706,6 +3828,7 @@ function switchTab(name) {
   if (name === 'redtape')     rtInit();
   if (name === 'rolodex')     rolInit();
   if (name === 'playoffs')    renderPlayoffsTab();
+  if (name === 'certs')       certsAdminInit();
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -6511,26 +6634,32 @@ async function spLabelsCoverageCheck(opId, sessId, opShort) {
 /* SPM-only labels validation (3.94+).
    Runs after an SPM mailing-list PDF upload. Two checks in one popup:
 
-   A) MISSING MAILING CONTACT — every active SPM team in the Team Screen
-      should appear in the labels PDF.
-   B) 8-BALL vs 9-BALL MISMATCH — SPM's 8 and 9 ball divisions on the
-      same night share the same teams. Pair detected by stripping
-      "8 Ball" / "9 Ball" / "9-Ball" / "8 Doubles" / "9 Doubles" from
-      the division name. For each team_within_division shared between
-      the pair, contact_name must match.
+   A) MISSING MAILING CONTACT
+      Every SPM team on the Team Screen should have a label row. If the
+      label PDF skipped a team, its players have no envelope to land in.
+
+   B) 8-BALL vs 9-BALL MISMATCH
+      SPM convention: 8-ball and 9-ball divisions on the same night share
+      the same teams. The pair is detected by stripping "8 Ball" / "9 Ball"
+      from the division name (same algorithm RackTime uses). For each
+      team_within_division that exists in BOTH halves of the pair, the
+      contact_name should be identical. A mismatch means a captain change
+      that didn't propagate to one of the two divisions.
 
    EXCLUSIONS (both checks):
-   - Inactive teams (team-within-division > 16)
+   - Inactive teams (team-within > 16; pulled mid-session)
    - Empty / null team_name
-   - Names matching /^(bye|tba|tbd|to be announced|no team|forfeit|open)$/i
+   - Names matching /^(bye|tba|tbd|to be announced|no team|forfeit)$/i
 */
 async function spLabelsSpmValidationPopup(opId, sessId, opShort) {
   try {
+    /* 1. Divisions for this (session, operator) */
     const divs = await sb('GET',
       'divisions?session_id=eq.' + sessId + '&operator_id=eq.' + opId +
       '&select=id,division_number,name');
     if (!divs.length) return;
 
+    /* 2. Teams for these divisions, filtered for active + real */
     const divIds = divs.map(d => d.id).join(',');
     const teamRows = await sb('GET',
       'teams?division_id=in.(' + divIds + ')&select=team_number,team_name,division_id');
@@ -6544,21 +6673,27 @@ async function spLabelsSpmValidationPopup(opId, sessId, opShort) {
     });
     if (!active.length) return;
 
+    /* 3. Mailing labels for this (session, operator) */
     const labelRows = await sb('GET',
       'sp_labels?operator_id=eq.' + opId + '&session_id=eq.' + sessId +
       '&select=team_number,contact_name');
+    /* Index by parseInt(team_number) so 4-digit + 5-digit team numbers match */
     const contactByNum = new Map();
     for (const r of (labelRows || [])) {
       contactByNum.set(String(parseInt(r.team_number, 10)),
                        String(r.contact_name || '').trim());
     }
 
-    /* Check A: missing mailing contacts */
+    /* ── CHECK A: missing mailing contacts ─────────────────────────── */
     const missing = active
       .filter(t => !contactByNum.has(String(parseInt(t.team_number, 10))))
       .sort((a, b) => parseInt(a.team_number, 10) - parseInt(b.team_number, 10));
 
-    /* Check B: 8-ball vs 9-ball pair mismatches */
+    /* ── CHECK B: 8-ball vs 9-ball pair mismatches ─────────────────── */
+    /* Pairing algorithm — strip the format token (8 Ball / 9 Ball / 9-Ball
+       / 8 Doubles / 9 Doubles) and key by the stripped root + night.
+       Doubles ARE paired with each other (8 Doubles ↔ 9 Doubles); ball
+       isn't paired with doubles. */
     const stripFormat = (name) => String(name || '')
       .toLowerCase()
       .replace(/\s*\b[89]\s*[-\s]?(ball|doubles)\b\s*/gi, ' ')
@@ -6566,20 +6701,21 @@ async function spLabelsSpmValidationPopup(opId, sessId, opShort) {
     const formatTag = (name) => {
       const m = String(name || '').match(/\b([89])\s*[-\s]?(ball|doubles)\b/i);
       if (!m) return null;
-      const ball = m[1];
+      const ball = m[1];                      /* '8' or '9' */
       const kind = m[2].toLowerCase() === 'doubles' ? 'D' : 'B';
-      return ball + kind;
+      return ball + kind;                     /* '8B', '9B', '8D', '9D' */
     };
 
     const groupByRoot = new Map();
     for (const d of divs) {
       const tag = formatTag(d.name);
-      if (!tag) continue;
+      if (!tag) continue;                     /* singletons (Masters, etc.) */
       const root = stripFormat(d.name);
       if (!groupByRoot.has(root)) groupByRoot.set(root, {});
       groupByRoot.get(root)[tag] = d;
     }
 
+    /* Active teams indexed by (div_id, team_within_division) */
     const teamsByDiv = new Map();
     for (const t of active) {
       if (!teamsByDiv.has(t.division_id)) teamsByDiv.set(t.division_id, []);
@@ -6589,10 +6725,11 @@ async function spLabelsSpmValidationPopup(opId, sessId, opShort) {
 
     const mismatches = [];
     for (const [root, byTag] of groupByRoot) {
+      /* Pair Ball with Ball, Doubles with Doubles */
       const pairs = [['8B','9B'], ['8D','9D']];
       for (const [tagA, tagB] of pairs) {
         const dA = byTag[tagA], dB = byTag[tagB];
-        if (!dA || !dB) continue;
+        if (!dA || !dB) continue;             /* incomplete pair */
         const teamsA = teamsByDiv.get(dA.id) || [];
         const teamsB = teamsByDiv.get(dB.id) || [];
         const aByW = new Map(teamsA.map(t => [withinDigits(t.team_number), t]));
@@ -6602,7 +6739,7 @@ async function spLabelsSpmValidationPopup(opId, sessId, opShort) {
           const tA = aByW.get(w), tB = bByW.get(w);
           const cA = (contactByNum.get(String(parseInt(tA.team_number, 10))) || '').toLowerCase();
           const cB = (contactByNum.get(String(parseInt(tB.team_number, 10))) || '').toLowerCase();
-          if (!cA || !cB) continue;
+          if (!cA || !cB) continue;           /* missing — reported in Check A */
           if (cA !== cB) {
             mismatches.push({
               root, within: w,
@@ -6614,46 +6751,16 @@ async function spLabelsSpmValidationPopup(opId, sessId, opShort) {
       }
     }
 
-    /* Check C: blocklisted players appearing as contacts. */
-    const blockRows = await sb('GET',
-      'mailing_contact_blocklist?select=member_number,display_name,reason');
-    /* Normalize aggressively: lowercase, strip quoted nicknames
-       ("Paul \"Glitch\" Soldan" → "paul soldan"), collapse whitespace,
-       strip standalone middle initials (case-insensitive). Match labels
-       PDF contact_name to blocklist display_name through this funnel. */
-    const norm = (s) => String(s || '')
-      .toLowerCase()
-      .replace(/"[^"]*"/g, ' ')          /* drop "Nick" segments       */
-      .replace(/\b[a-z]\.?\b/g, ' ')      /* drop single-letter middle initials */
-      .replace(/\s+/g, ' ')
-      .trim();
-    const blockedByName = new Map();
-    for (const b of (blockRows || [])) {
-      if (b.display_name) blockedByName.set(norm(b.display_name), b);
-    }
-    const blocked = [];
-    for (const r of (labelRows || [])) {
-      const hit = blockedByName.get(norm(r.contact_name));
-      if (hit) {
-        blocked.push({
-          team_number: r.team_number,
-          contact_name: r.contact_name,
-          member_number: hit.member_number,
-          reason: hit.reason
-        });
-      }
-    }
-    blocked.sort((a, b) => String(a.team_number).localeCompare(String(b.team_number)));
-
-    if (!missing.length && !mismatches.length && !blocked.length) {
+    /* ── Render the popup (or success message) ─────────────────────── */
+    if (!missing.length && !mismatches.length) {
       setStatus('spDropStatus',
         'Saved labels &mdash; all ' + active.length + ' active ' + opShort
-        + ' teams covered, 8/9-ball contacts match, no blocklisted players.',
+        + ' teams covered and 8/9-ball contacts match.',
         'ok');
       return;
     }
 
-    const total = missing.length + mismatches.length + blocked.length;
+    const total = missing.length + mismatches.length;
     setStatus('spDropStatus',
       'Saved labels &mdash; ' + total + ' issue' + (total === 1 ? '' : 's')
       + ' found (see popup).', 'warn');
@@ -6681,210 +6788,11 @@ async function spLabelsSpmValidationPopup(opId, sessId, opShort) {
       }).join('\n\n');
       msg += '\n\n';
     }
-    if (blocked.length) {
-      msg += '── ' + blocked.length + ' blocklisted player'
-          + (blocked.length === 1 ? '' : 's')
-          + ' appearing as mailing contact ──\n\n';
-      msg += blocked.map(b =>
-        '  ' + String(b.team_number).padStart(5, '0')
-        + '  ' + b.contact_name
-        + '  (member #' + b.member_number + ')'
-        + (b.reason ? '\n     reason: ' + b.reason : '')
-      ).join('\n');
-      msg += '\n\n';
-    }
     msg += 'Fix the captains in APA, regenerate the labels PDF, and re-upload.';
     alert(msg);
   } catch (e) {
     console.warn('[SP] SPM validation popup failed:', e);
-  }
-}
-
-/* ════════════════════════════════════════════════════════════════════
-   Mailing contact blocklist + per-label overrides (3.95+)
-   ──────────────────────────────────────────────────────────────────
-   Blocklist:  members who should NEVER be a mailing contact. UI in the
-               SP Reports tab; warning fires on upload from
-               spLabelsSpmValidationPopup. Stored at
-               slate.mailing_contact_blocklist (PK = member_number).
-   Overrides:  per-label c/o prefix or replacement name. UI is an
-               "Edit" button on each label row. Applied at envelope
-               render time. Stored at slate.sp_label_overrides
-               (UNIQUE on operator_id + session_id + team_number).
-   ════════════════════════════════════════════════════════════════════ */
-let _spBlocklist = [];
-
-async function spBlocklistLoad() {
-  try {
-    _spBlocklist = await sb('GET',
-      'mailing_contact_blocklist?select=*&order=display_name.asc') || [];
-  } catch (e) {
-    console.warn('[blocklist] load failed:', e);
-    _spBlocklist = [];
-  }
-  spBlocklistRender();
-}
-
-function spBlocklistRender() {
-  const el = document.getElementById('spBlocklistList');
-  if (!el) return;
-  if (!_spBlocklist.length) {
-    el.innerHTML = '<p class="hint" style="margin:0;">Nobody blocklisted.</p>';
-    return;
-  }
-  el.innerHTML = '<div style="display:grid; gap:4px;">' +
-    _spBlocklist.map(b =>
-      '<div style="display:flex; gap:10px; align-items:center; padding:6px 10px; background:#f7f8fa; border-radius:6px;">'
-      + '<code style="font-family:ui-monospace,Menlo,monospace; font-size:0.85rem; color:#374151;">'
-      +   esc(b.member_number) + '</code>'
-      + '<span style="font-weight:600;">' + esc(b.display_name || '(unknown)') + '</span>'
-      + (b.reason
-          ? '<span class="hint" style="font-size:0.82rem;">&middot; ' + esc(b.reason) + '</span>'
-          : '')
-      + '<button class="btn btn-outline btn-sm" style="margin-left:auto;" '
-      +   "onclick=\"spBlocklistRemove('" + esc(b.member_number) + "')\">Remove</button>"
-      + '</div>'
-    ).join('') + '</div>';
-}
-
-async function spBlocklistAdd() {
-  const box = document.getElementById('spBlocklistBox');
-  const reasonEl = document.getElementById('spBlocklistReason');
-  const status = document.getElementById('spBlocklistStatus');
-  const raw = (box.value || '').trim();
-  const reason = (reasonEl.value || '').trim() || null;
-  const lines = raw.split(/\s+/).filter(Boolean);
-  if (!lines.length) {
-    status.className = 'status-line warn shown';
-    status.textContent = 'Paste at least one member number.';
-    return;
-  }
-  status.className = 'status-line progress shown';
-  status.textContent = 'Looking up players + adding…';
-  try {
-    /* For each member number, look up the display name from slate.players
-       so the blocklist match (against contact_name in sp_labels) works. */
-    const nums = [...new Set(lines.map(s => String(parseInt(s, 10))).filter(s => s && s !== 'NaN'))];
-    const players = await sb('GET',
-      'players?member_number=in.(' + nums.map(encodeURIComponent).join(',')
-      + ')&select=member_number,first_name,nickname,last_name');
-    const byNum = new Map((players || []).map(p => [String(p.member_number), p]));
-    const rows = nums.map(num => {
-      const p = byNum.get(num);
-      /* 3.96+: store first + last only (no nickname). The labels PDF
-         carries "Paul Soldan", not "Paul \"Glitch\" Soldan", so we
-         match cleanly without an aggressive nickname-stripper at
-         match time. Existing rows with nicknames are still tolerated
-         by norm() in spLabelsSpmValidationPopup. */
-      const display = p
-        ? [p.first_name, p.last_name].filter(Boolean).join(' ')
-        : null;
-      return {
-        member_number: num,
-        display_name:  display,
-        reason:        reason,
-        added_by:      getDeviceId()
-      };
-    });
-    /* Upsert — replace any existing entries for these numbers */
-    await sb('POST',
-      'mailing_contact_blocklist?on_conflict=member_number',
-      rows,
-      { Prefer: 'resolution=merge-duplicates,return=minimal' });
-    box.value = ''; reasonEl.value = '';
-    status.className = 'status-line ok shown';
-    status.textContent = 'Added ' + rows.length + ' entr' + (rows.length === 1 ? 'y' : 'ies') + '.';
-    await spBlocklistLoad();
-  } catch (e) {
-    status.className = 'status-line err shown';
-    status.textContent = 'Add failed: ' + e.message;
-  }
-}
-
-async function spBlocklistRemove(memberNum) {
-  if (!confirm('Remove ' + memberNum + ' from the blocklist?')) return;
-  try {
-    await sb('DELETE',
-      'mailing_contact_blocklist?member_number=eq.' + encodeURIComponent(memberNum));
-    await spBlocklistLoad();
-  } catch (e) {
-    alert('Remove failed: ' + e.message);
-  }
-}
-window.spBlocklistAdd = spBlocklistAdd;
-window.spBlocklistRemove = spBlocklistRemove;
-
-/* ── Per-label override (c/o prefix + replacement name) ─────────── */
-let _spLabelOverrides = [];
-
-async function spOverridesLoad() {
-  if (!currentSession || !currentSession.id) {
-    _spLabelOverrides = [];
-    return;
-  }
-  try {
-    _spLabelOverrides = await sb('GET',
-      'sp_label_overrides?session_id=eq.' + currentSession.id +
-      '&select=operator_id,session_id,team_number,prefix,contact_name_override,notes') || [];
-  } catch (e) {
-    console.warn('[overrides] load failed:', e);
-    _spLabelOverrides = [];
-  }
-}
-
-/* Helper: index overrides by team_number for render-time lookup */
-function spOverridesByTeam() {
-  const m = new Map();
-  for (const o of _spLabelOverrides) m.set(String(o.team_number), o);
-  return m;
-}
-
-function spOverrideOpen(opId, teamNumber, currentName) {
-  const existing = _spLabelOverrides.find(o =>
-    String(o.team_number) === String(teamNumber) && o.operator_id === opId);
-  const prefix = prompt(
-    'Mailing override for team #' + teamNumber + '\n\n'
-    + 'PREFIX line (printed ABOVE the recipient name, e.g. "c/o").\n'
-    + 'Leave blank for no prefix.',
-    existing ? (existing.prefix || '') : ''
-  );
-  if (prefix === null) return; /* cancelled */
-  const nameOverride = prompt(
-    'REPLACEMENT recipient name (printed INSTEAD of "' + currentName + '").\n'
-    + 'Leave blank to keep the original name.',
-    existing ? (existing.contact_name_override || '') : ''
-  );
-  if (nameOverride === null) return;
-  spOverrideSave(opId, teamNumber, prefix.trim() || null, nameOverride.trim() || null);
-}
-window.spOverrideOpen = spOverrideOpen;
-
-async function spOverrideSave(opId, teamNumber, prefix, contactOverride) {
-  if (!currentSession || !currentSession.id) return;
-  try {
-    if (!prefix && !contactOverride) {
-      /* Both cleared → delete */
-      await sb('DELETE',
-        'sp_label_overrides?operator_id=eq.' + opId
-        + '&session_id=eq.' + currentSession.id
-        + '&team_number=eq.' + encodeURIComponent(teamNumber));
-    } else {
-      await sb('POST',
-        'sp_label_overrides?on_conflict=operator_id,session_id,team_number',
-        [{
-          operator_id: opId,
-          session_id: currentSession.id,
-          team_number: teamNumber,
-          prefix: prefix,
-          contact_name_override: contactOverride,
-          updated_at: new Date().toISOString()
-        }],
-        { Prefer: 'resolution=merge-duplicates,return=minimal' });
-    }
-    await spOverridesLoad();
-    spRenderLabels();
-  } catch (e) {
-    alert('Save failed: ' + e.message);
+    /* Non-fatal — the save itself succeeded. */
   }
 }
 
@@ -6964,16 +6872,7 @@ function spRenderLabels() {
       + '<details><summary style="cursor:pointer; font-size:0.9rem; color:#374151;">View team numbers</summary>'
       + '<div style="margin-top:6px; font-size:0.82rem; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; '
       +    'line-height:1.6; color:#374151; max-height:200px; overflow:auto;">'
-      +   rows.map(r => {
-            const ov = spOverridesByTeam().get(String(r.team_number));
-            const ovTag = ov
-              ? '<span style="color:#a8132e; font-weight:700;"> [override]</span>'
-              : '';
-            const ovBtn = '<button class="btn btn-outline btn-sm" style="padding:1px 6px; font-size:0.72rem; margin-left:6px;" '
-                       +   'onclick="spOverrideOpen(' + opId + ',\'' + esc(r.team_number) + '\',\'' + esc((r.contact_name||'').replace(/[\'\"\\]/g,'')) + '\')">'
-                       +   (ov ? 'Edit override' : 'Override') + '</button>';
-            return esc(r.team_number) + ' &nbsp;' + esc(r.contact_name) + ovTag + ovBtn;
-          }).join('<br>')
+      +   rows.map(r => esc(r.team_number) + ' &nbsp;' + esc(r.contact_name)).join('<br>')
       + '</div></details>'
       + '</div>'
     );
@@ -7582,8 +7481,6 @@ function spSetOperator(op) {
   spLoadLabels();
   spLoadPatches();
   spLoadOpProfileForm();
-  spOverridesLoad();
-  spBlocklistLoad();
 }
 
 function spOnEnterTab() {
@@ -8457,10 +8354,9 @@ function spBuildSlipsHTML(pages, op, summary) {
       +   '<div class="slip-seal"><div class="slip-seal-ring"></div>'
       +     '<div class="slip-seal-in">&#9733;</div></div>'
       +   '<div class="slip-body">'
-      +     '<div class="slip-head">'
-      +       '<div class="slip-head-banner">&#10022; Special Performance &#10022;</div>'
-      +       (sessionLabel ? '<div class="slip-head-session">' + esc(sessionLabel) + '</div>' : '')
-      +     '</div>'
+      +     '<div class="slip-head">&#10022; Special Performance'
+      +       (sessionLabel ? ' &middot; ' + esc(sessionLabel) : '')
+      +       ' &#10022;</div>'
       +     '<div class="slip-pre">this certifies that</div>'
       +     '<div class="slip-name">'
       +       (slip.member_name
@@ -8542,11 +8438,6 @@ function spBuildSlipsHTML(pages, op, summary) {
     '.slip-body { flex: 1 1 auto; text-align: center; padding: 0 0.18in; }',
     '.slip-head { font-size: 8pt; font-weight: 700; letter-spacing: 0.2em;',
     '        text-transform: uppercase; color: #9a7b1e; }',
-    /* 3.95: session is always on its own line under the banner — used to
-       inline with "·" separator and word-wrapped mid-text for long sessions. */
-    '.slip-head-banner { display: block; }',
-    '.slip-head-session { display: block; margin-top: 2pt; font-size: 7.5pt;',
-    '        letter-spacing: 0.14em; color: #b08d2a; }',
     '.slip-pre { font-size: 7.5pt; font-style: italic; color: #7c6f4e; margin-top: 3pt; }',
     '.slip-name { margin: 2pt 0 0; }',
     '.slip-name-first, .slip-name-last { font-size: 15pt; font-weight: 700;',
@@ -8641,29 +8532,13 @@ function spBuildEnvelopesHTML(envs, op) {
      at a glance), recipient address between them with a narrow
      max-width so it ends BESIDE the logo, not behind it. The cat sits
      bottom-left as a small accent above the USPS barcode zone. */
-  /* 3.95+: apply per-label override. An envelope may serve multiple
-     teams (joint envelopes for captains running >1 team); we apply
-     the first override that matches any of the envelope's teams.
-     Prefix prints as its own line above the recipient name;
-     contact_name_override replaces the name entirely. */
-  const ovIndex = spOverridesByTeam();
-  const envHtml = e => {
-    let ov = null;
-    if (e.teams && e.teams.length) {
-      for (const tn of e.teams) {
-        const candidate = ovIndex.get(String(tn));
-        if (candidate) { ov = candidate; break; }
-      }
-    }
-    const renderedName = (ov && ov.contact_name_override) ? ov.contact_name_override : e.contact_name;
-    const prefixLine = (ov && ov.prefix) ? '<div>' + esc(ov.prefix) + '</div>' : '';
-    return '<div class="env">'
+  const envHtml = e =>
+    '<div class="env">'
     + '<div class="return-address">' + ret + '</div>'
     + '<img class="env-logo" src="' + SP_ENV_PATCHES_LOGO + '" alt="">'
     + '<img class="env-cat" src="' + SP_ENV_CAT_LOGO + '" alt="">'
     + '<div class="recipient">'
-    +   prefixLine
-    +   '<div>' + esc(renderedName) + '</div>'
+    +   '<div>' + esc(e.contact_name) + '</div>'
     +   '<div>' + esc(e.address_line1) + '</div>'
     +   (e.address_line2 ? '<div>' + esc(e.address_line2) + '</div>' : '')
     +   '<div>' + esc(e.city) + ', ' + esc(e.state) + ' ' + esc(e.zip) + '</div>'
@@ -8680,7 +8555,6 @@ function spBuildEnvelopesHTML(envs, op) {
         return bits.length ? '<div class="meta">' + bits.join(' · ') + '</div>' : '';
       })()
     + '</div>';
-  };
   return [
     '<!doctype html><html><head><meta charset="utf-8"><title>Envelopes</title>',
     '<style>',
@@ -9654,6 +9528,22 @@ async function ssgUploadOnBehalf(matchId, teamId, inputId, missingSidesEscaped) 
           const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.92));
           pages.push({ blob, width: canvas.width, height: canvas.height, contentType: 'image/jpeg' });
         }
+      } else if (await sniffIsHeic(file)) {
+        // HEIC (iPhone Photos default) — convert via libheif WASM before
+        // pushing. Without this, the raw HEIC bytes get PUT to R2 under a
+        // .jpg path and browsers can't render them.
+        if (file.size > HEIC_MAX_BYTES) {
+          throw new Error('HEIC photo too large (' + Math.round(file.size / 1024 / 1024)
+            + ' MB). Max 30 MB.');
+        }
+        status.textContent = 'Converting HEIC photo ' + (i + 1) + '/' + files.length + '…';
+        let jpegBlob;
+        try {
+          jpegBlob = await heicToJpegBlob(file);
+        } catch (e) {
+          throw new Error('Could not read HEIC photo "' + (file.name || '') + '": ' + (e && e.message || e));
+        }
+        pages.push({ blob: jpegBlob, width: null, height: null, contentType: 'image/jpeg' });
       } else {
         // Image — push as-is. Width/height are best-effort below.
         pages.push({ blob: file, width: null, height: null,
@@ -13959,6 +13849,200 @@ let _rtTeamsCache = null;   // all teams in current session, both operators
 
 function rtInit() {
   rtRenderEventList();
+  rtSignLoadDocs();   /* v0.1 preprod: signature documents */
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   SIGNATURE DOCUMENTS (preprod v0.1, lives in redtape schema)
+   ──────────────────────────────────────────────────────────────────────
+   Distinct from the existing paperwork-events feature above. Each row in
+   redtape.documents is a PDF that's been uploaded and shared with a
+   captain link. Each signer adds a row to the doc's redtape.signatures.
+   ════════════════════════════════════════════════════════════════════════ */
+
+let _rtSignDocs = [];
+
+async function rtSignLoadDocs() {
+  const wrap = document.getElementById('rtSignDocsList');
+  const status = document.getElementById('rtSignListStatus');
+  if (!wrap) return;
+  try {
+    const docs = await rtFetch('GET', 'documents?select=*,signatures(count)&order=created_at.desc');
+    _rtSignDocs = docs || [];
+    if (status) status.textContent = _rtSignDocs.length + ' document' + (_rtSignDocs.length === 1 ? '' : 's');
+    rtSignRenderDocs();
+  } catch (e) {
+    wrap.innerHTML = '<p class="hint" style="color:var(--danger)">Load failed: ' + esc(e.message) + '</p>';
+  }
+}
+
+function rtSignRenderDocs() {
+  const wrap = document.getElementById('rtSignDocsList');
+  if (!_rtSignDocs.length) {
+    wrap.innerHTML = '<p class="hint">No signature documents yet. Click <strong>+ New document</strong> above to upload one.</p>';
+    return;
+  }
+  wrap.innerHTML = '<table class="table" style="margin-top:6px"><thead><tr>'
+    + '<th>Title</th><th>Slug</th><th>Signers</th><th>Created</th><th>Actions</th>'
+    + '</tr></thead><tbody>'
+    + _rtSignDocs.map(d => {
+        const cnt = (d.signatures && d.signatures[0] && d.signatures[0].count) || 0;
+        const captainUrl = location.origin + location.pathname.replace(/admin\.html$/, '') + 'sign.html?d=' + encodeURIComponent(d.slug);
+        const pdfUrl = SB_URL + '/storage/v1/object/public/redtape/' + d.current_pdf_path.split('/').map(encodeURIComponent).join('/');
+        return '<tr>'
+          + '<td><strong>' + esc(d.title) + '</strong></td>'
+          + '<td><code style="font-size:0.82rem">' + esc(d.slug) + '</code></td>'
+          + '<td>' + cnt + '</td>'
+          + '<td class="hint">' + new Date(d.created_at).toLocaleDateString() + '</td>'
+          + '<td><div class="actions" style="flex-wrap:wrap;gap:6px">'
+          +   '<button class="btn btn-outline btn-sm" onclick="rtSignCopyLink(this, \'' + esc(captainUrl) + '\')">Copy link</button>'
+          +   '<a class="btn btn-outline btn-sm" target="_blank" rel="noopener" href="' + esc(captainUrl) + '">Open</a>'
+          +   '<a class="btn btn-outline btn-sm" target="_blank" rel="noopener" href="' + esc(pdfUrl) + '">PDF</a>'
+          +   '<button class="btn btn-outline btn-sm" onclick="rtSignViewSigners(' + d.id + ')">Signers</button>'
+          +   '<button class="btn btn-danger btn-sm" onclick="rtSignArchive(' + d.id + ')">Archive</button>'
+          + '</div></td>'
+          + '</tr>';
+      }).join('')
+    + '</tbody></table>';
+}
+
+function rtSignOpenCreate() {
+  document.getElementById('rtSignNewTitle').value = '';
+  document.getElementById('rtSignNewSlug').value = '';
+  document.getElementById('rtSignNewFile').value = '';
+  document.getElementById('rtSignCreateStatus').textContent = '';
+  document.getElementById('rtSignCreateModal').style.display = 'flex';
+  setTimeout(() => document.getElementById('rtSignNewTitle').focus(), 30);
+
+  /* Auto-slug from title (immutable per MEMORY rule). */
+  const titleEl = document.getElementById('rtSignNewTitle');
+  const slugEl  = document.getElementById('rtSignNewSlug');
+  titleEl.oninput = () => {
+    if (!slugEl.dataset.touched) {
+      slugEl.value = rtSignAutoSlug(titleEl.value);
+    }
+  };
+  slugEl.oninput = () => { slugEl.dataset.touched = '1'; };
+}
+function rtSignCloseCreate() {
+  document.getElementById('rtSignCreateModal').style.display = 'none';
+}
+function rtSignAutoSlug(s) {
+  return String(s || '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64);
+}
+
+async function rtSignCreate() {
+  const title = document.getElementById('rtSignNewTitle').value.trim();
+  let   slug  = document.getElementById('rtSignNewSlug').value.trim() || rtSignAutoSlug(title);
+  const file  = document.getElementById('rtSignNewFile').files[0];
+  const btn   = document.getElementById('rtSignCreateBtn');
+  const status = document.getElementById('rtSignCreateStatus');
+
+  if (!title) { status.textContent = 'Title required.'; status.className = 'status-line err shown'; return; }
+  if (!slug)  { status.textContent = 'Slug required (title was empty after normalization).'; status.className = 'status-line err shown'; return; }
+  if (!file)  { status.textContent = 'PDF file required.'; status.className = 'status-line err shown'; return; }
+  if (file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name)) {
+    status.textContent = 'File must be a PDF.'; status.className = 'status-line err shown'; return;
+  }
+
+  btn.disabled = true;
+  status.textContent = 'Creating row…';
+  status.className = 'status-line progress shown';
+
+  try {
+    /* Step 1: INSERT the documents row with placeholder paths so we
+       get an ID. Then upload to /docs/<id>/original.pdf + current.pdf.
+       Then PATCH the row with the real paths.
+
+       Two-step is needed because the storage path includes the row id. */
+    const placeholderPath = 'pending/' + slug + '.pdf';
+    const created = await rtFetch('POST', 'documents?select=id,slug', {
+      slug,
+      title,
+      original_pdf_path: placeholderPath,
+      current_pdf_path:  placeholderPath,
+      uploaded_by:       'admin',
+    });
+    const row = Array.isArray(created) ? created[0] : created;
+    if (!row || !row.id) throw new Error('Insert did not return id');
+
+    /* Step 2: upload original + current */
+    status.textContent = 'Uploading PDF…';
+    const originalPath = 'docs/' + row.id + '/original.pdf';
+    const currentPath  = 'docs/' + row.id + '/current.pdf';
+    await rtSignStorageUpload(originalPath, file, 'application/pdf');
+    await rtSignStorageUpload(currentPath,  file, 'application/pdf', { upsert: true });
+
+    /* Step 3: PATCH real paths */
+    await rtFetch('PATCH', 'documents?id=eq.' + row.id, {
+      original_pdf_path: originalPath,
+      current_pdf_path:  currentPath,
+      updated_at: new Date().toISOString(),
+    });
+
+    status.textContent = '✓ Created.';
+    status.className = 'status-line ok shown';
+    rtSignCloseCreate();
+    await rtSignLoadDocs();
+  } catch (e) {
+    status.textContent = 'Failed: ' + e.message;
+    status.className = 'status-line err shown';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function rtSignStorageUpload(path, blob, contentType, opts) {
+  const upsert = opts && opts.upsert;
+  const url = SB_URL + '/storage/v1/object/redtape/' + path.split('/').map(encodeURIComponent).join('/');
+  const r = await fetch(url, {
+    method: upsert ? 'PUT' : 'POST',
+    headers: {
+      apikey: SB_KEY,
+      Authorization: 'Bearer ' + SB_KEY,
+      'Content-Type': contentType || 'application/octet-stream',
+      'x-upsert': upsert ? 'true' : 'false',
+    },
+    body: blob,
+  });
+  if (!r.ok) throw new Error('Storage ' + r.status + ': ' + (await r.text()).slice(0, 200));
+}
+
+function rtSignCopyLink(btn, url) {
+  navigator.clipboard.writeText(url).then(() => {
+    const old = btn.textContent;
+    btn.textContent = '✓ Copied';
+    setTimeout(() => { btn.textContent = old; }, 1400);
+  }).catch(() => alert('Copy failed:\n\n' + url));
+}
+
+async function rtSignViewSigners(docId) {
+  try {
+    const sigs = await rtFetch('GET', 'signatures?document_id=eq.' + docId + '&order=signed_at.asc&select=id,signer_name,skill_level,signed_at,signature_path');
+    if (!sigs || !sigs.length) {
+      alert('No signatures yet on this document.');
+      return;
+    }
+    const lines = sigs.map((s, i) => (i+1) + '. ' + s.signer_name + (s.skill_level ? ' · SL ' + s.skill_level : '') + ' · ' + new Date(s.signed_at).toLocaleString());
+    alert('Signed by:\n\n' + lines.join('\n'));
+  } catch (e) {
+    alert('Load failed: ' + e.message);
+  }
+}
+
+async function rtSignArchive(docId) {
+  if (!confirm('Archive this document? The captain link will stop working. Existing signatures stay in the DB.')) return;
+  try {
+    await rtFetch('PATCH', 'documents?id=eq.' + docId, { archived_at: new Date().toISOString() });
+    await rtSignLoadDocs();
+  } catch (e) {
+    alert('Archive failed: ' + e.message);
+  }
 }
 
 async function rtFetch(method, path, body) {
@@ -15681,6 +15765,158 @@ function rolLogLoadMore() {
 
 window.rolLogRender = rolLogRender;
 window.rolLogLoadMore = rolLogLoadMore;
+
+/* ══════════════════════════════════════════════════════════════════════
+   CERTS TAB — PatchCheck certificate generation trigger
+   ══════════════════════════════════════════════════════════════════════
+   Reads sessions, lets admin pick one + season label + issue date, calls
+   the spmapa.workers.dev/certs/generate worker endpoint with service-role
+   auth (sourced from the URL ?key= param, matching SpmAdminV2 convention).
+   ══════════════════════════════════════════════════════════════════════ */
+
+const CERTS_WORKER_BASE = 'https://spmapa.workers.dev';
+
+function certsAdminGetServiceKey() {
+  // Slate admin convention: service-role JWT comes from URL `?key=`
+  const p = new URLSearchParams(location.search);
+  return p.get('key') || '';
+}
+
+let _certsSessionsLoaded = false;
+
+/* Called by switchTab('certs'). Loads the session dropdown via the shared
+   sb() helper (which carries the anon key + slate Accept-Profile — the
+   earlier hand-rolled fetch used window.SB_ANON, which is undefined because
+   SB_URL/SB_ANON are top-level consts, not window props → 401 → empty list). */
+async function certsAdminInit() {
+  const sel = document.getElementById('certsSessionSelect');
+  if (!sel || _certsSessionsLoaded) return;
+  sel.innerHTML = '<option>Loading…</option>';
+  try {
+    const sessions = await sb('GET',
+      'sessions?select=id,name,start_date,is_current&order=start_date.desc.nullslast');
+    if (!sessions || !sessions.length) {
+      sel.innerHTML = '<option value="">No sessions found</option>';
+      return;
+    }
+    sel.innerHTML = sessions.map(s =>
+      `<option value="${s.id}" data-name="${esc(s.name)}" data-start="${s.start_date || ''}"${s.is_current ? ' data-current="1"' : ''}>` +
+      `${esc(s.name)}${s.is_current ? ' (current)' : ''}</option>`
+    ).join('');
+    // Default to the most-recent NON-current (past) session.
+    const past = sessions.find(s => !s.is_current);
+    if (past) sel.value = String(past.id);
+    sel.onchange = certsAdminAutoFill;
+    certsAdminAutoFill();
+    _certsSessionsLoaded = true;
+  } catch (e) {
+    sel.innerHTML = '<option value="">Failed to load sessions</option>';
+    certsAdminSetStatus('Could not load sessions: ' + (e.message || e), 'error');
+  }
+}
+
+function certsAdminAutoFill() {
+  const sel = document.getElementById('certsSessionSelect');
+  const opt = sel.options[sel.selectedIndex];
+  if (!opt) return;
+  const name = opt.dataset.name || '';
+  // Convert "2026 Spring Session" → "SPRING 2026"
+  const m = name.match(/(\d{4})\s+(Spring|Summer|Fall|Winter)/i);
+  if (m) {
+    document.getElementById('certsSeasonLabel').value = m[2].toUpperCase() + ' ' + m[1];
+  }
+  // Default issue date to today (or session start + a sensible offset)
+  const dEl = document.getElementById('certsDate');
+  if (!dEl.value) dEl.value = new Date().toISOString().slice(0, 10);
+}
+
+function certsAdminSetStatus(text, kind) {
+  const el = document.getElementById('certsAdminStatus');
+  if (!el) return;
+  el.textContent = text || '';
+  el.style.color = kind === 'error' ? '#a02030' : (kind === 'ok' ? '#1a6a30' : '#444');
+}
+
+async function certsAdminPreview() {
+  const sel = document.getElementById('certsSessionSelect');
+  if (!sel.value) return;
+  certsAdminSetStatus('Counting…');
+  try {
+    // Call the eligibility-count RPC directly (granted to anon) so Preview
+    // works without the worker. Generate still routes through the worker.
+    const rows = await sb('POST', 'rpc/count_session_cert_eligibility',
+      { p_session_id: parseInt(sel.value, 10) });
+    const count = Array.isArray(rows) ? rows[0] : rows;   // scalar RPC
+    certsAdminSetStatus(
+      `${count} certs eligible for ${sel.options[sel.selectedIndex].text.trim()}`, 'ok');
+  } catch (e) {
+    certsAdminSetStatus('Preview failed: ' + (e.message || e), 'error');
+  }
+}
+
+async function certsAdminGenerate() {
+  const sel = document.getElementById('certsSessionSelect');
+  const seasonLabel = document.getElementById('certsSeasonLabel').value.trim();
+  const date = document.getElementById('certsDate').value;
+  if (!sel.value) { certsAdminSetStatus('Pick a session first.', 'error'); return; }
+  if (!seasonLabel) { certsAdminSetStatus('Seal label required (e.g. SPRING 2026).', 'error'); return; }
+  if (!date)      { certsAdminSetStatus('Issue date required.', 'error'); return; }
+
+  const sessionName = sel.options[sel.selectedIndex].dataset.name || sel.options[sel.selectedIndex].text.trim();
+  const slug = sessionName.toLowerCase()
+    .normalize('NFKD').replace(/[̀-ͯ]/g, '')
+    .replace(/session$/i, '').trim()
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+
+  const ok = confirm(
+    `This will DELETE all existing certs for "${sessionName}" and regenerate them.\n\n` +
+    `Slug: ${slug}\nSeal: ${seasonLabel}\nDate: ${date}\n\nContinue?`
+  );
+  if (!ok) return;
+
+  const svcKey = certsAdminGetServiceKey();
+  if (!svcKey) { certsAdminSetStatus('Service-role key missing (?key= in URL).', 'error'); return; }
+
+  certsAdminSetStatus('Generating… (this may take several minutes)');
+  const result = document.getElementById('certsAdminResult');
+  result.style.display = 'block';
+  result.textContent = '⏳ Starting…';
+
+  try {
+    const r = await fetch(CERTS_WORKER_BASE + '/certs/generate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + svcKey,
+      },
+      body: JSON.stringify({
+        session_id:    parseInt(sel.value, 10),
+        session_slug:  slug,
+        season_label:  seasonLabel,
+        session_label: sessionName,
+        date_iso:      date,
+      }),
+    });
+    const d = await r.json();
+    result.textContent = JSON.stringify(d, null, 2);
+    if (d.ok) {
+      certsAdminSetStatus(`Generated ${d.generated}/${d.total} certs for ${sessionName}.`, 'ok');
+    } else {
+      certsAdminSetStatus(`Generation finished with errors: ${(d.errors || []).length} failed.`, 'error');
+    }
+  } catch (e) {
+    certsAdminSetStatus('Request failed: ' + (e.message || e), 'error');
+    result.textContent = 'Network/runtime error: ' + (e.message || e);
+  }
+}
+
+window.certsAdminPreview  = certsAdminPreview;
+window.certsAdminGenerate = certsAdminGenerate;
+window.certsAdminInit     = certsAdminInit;
+
+// (Session loading is triggered by switchTab('certs') → certsAdminInit(),
+//  matching how every other Slate tab lazy-loads its data. The earlier
+//  document-level click listener threw on an empty <select> and is removed.)
 
 </script>
 </body>
