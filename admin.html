@@ -2186,7 +2186,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION   = '3.97';   // matches apa_core.apps.Slate-preprod
+const APP_VERSION   = '3.98';   // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -12863,6 +12863,14 @@ function otOpenTemplateEditor() {
         { 'Accept-Profile': 'slate', 'Content-Profile': 'slate', 'Prefer': 'resolution=merge-duplicates,return=minimal' });
       _otTemplates.text = { body: textBody };
       _otTemplates.email = { subject: emailSubject, body: emailBody };
+      /* 3.98: Switchboard pre-bakes sms: URLs into <a href> tags at
+         render time (per-team Text Captains / Co-Caps / Team buttons).
+         Without re-rendering, the old template body stays baked into
+         those hrefs even after Save updates _otTemplates. Same applies
+         to Outreach's per-card phone tap-to-text link. Call whichever
+         render functions exist so the new template propagates. */
+      try { if (typeof sbRender === 'function') sbRender(); } catch (_) {}
+      try { if (typeof otRenderList === 'function') otRenderList(); } catch (_) {}
       status.textContent = '✓ Saved';
       setTimeout(close, 600);
     } catch (e) {
