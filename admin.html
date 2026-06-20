@@ -2186,7 +2186,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION   = '3.99';   // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION   = '3.100';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -15408,6 +15408,142 @@ async function rolPdfPageLines(file) {
   return await spPdfPageLines(file);   /* reuses SP Reports' helper */
 }
 
+/* 3.100: extract captain names from a single page's text lines.
+   Heuristic — APA TMS captain reports list the captain under a "Captain"
+   header (column or label). We scan for any line that says "Captain"
+   (NOT "Co-Captain"), then look at the next few lines for a name-shaped
+   token. Returns an array of { first_name, last_name, team_number? }.
+   Best-effort: returns [] if parsing fails. Multiple captains per page
+   possible (some PDFs list whole division on one page). */
+function rolParseCaptainsFromPageLines(lines) {
+  const out = [];
+  // Match a name-shaped line: starts with a Capitalized word, has at least
+  // one more Capitalized word, contains no digits, no @, no street-ish words.
+  const isName = (s) => {
+    if (!s) return false;
+    if (/\d/.test(s)) return false;
+    if (/[@]/.test(s)) return false;
+    if (/\b(phone|email|address|cell|home|street|st\.|ave|blvd|rd\.|drive|po\s*box|apt\.|unit)\b/i.test(s)) return false;
+    const words = s.trim().split(/\s+/).filter(Boolean);
+    if (words.length < 2) return false;
+    // Each word should start with a capital letter (allow middle initial like "M.")
+    return words.every(w => /^[A-Z][A-Za-z'\-.]*\.?$/.test(w));
+  };
+  const splitName = (s) => {
+    const words = s.trim().replace(/\s+/g, ' ').split(' ');
+    // Drop middle initial(s) — single letter ± period
+    const useful = words.filter(w => !/^[A-Z]\.?$/.test(w) || w.length > 2);
+    if (useful.length < 2) return null;
+    return { first_name: useful[0], last_name: useful[useful.length - 1] };
+  };
+  // Track the most-recent team_number seen (so we can attribute captains).
+  let recentTeam = null;
+  const teamRe = /\b(?:team\s*(?:number|#)?\s*[:=]?\s*)?(\d{5})\b/i;
+
+  for (let i = 0; i < lines.length; i++) {
+    const raw = String(lines[i] || '').trim();
+    if (!raw) continue;
+
+    // Track team number context (best-effort).
+    const tm = raw.match(teamRe);
+    if (tm) recentTeam = tm[1];
+
+    // Strict label header path: "Captain" alone or as start of column row.
+    if (/^captain\b/i.test(raw) && !/^co[\s-]*captain/i.test(raw)) {
+      for (let j = i + 1; j < Math.min(i + 6, lines.length); j++) {
+        const cand = String(lines[j] || '').trim();
+        if (!cand) continue;
+        if (/^(phone|email|address|cell|home|name|co[\s-]*captain)\b/i.test(cand)) continue;
+        if (isName(cand)) {
+          const n = splitName(cand);
+          if (n) out.push({ ...n, team_number: recentTeam });
+          break;
+        }
+        // Inline pattern: "Captain Name <Tab> Phone..." — try first 2-3 words.
+        const inline = cand.split(/\s{2,}|\t/)[0];
+        if (isName(inline)) {
+          const n = splitName(inline);
+          if (n) { out.push({ ...n, team_number: recentTeam }); break; }
+        }
+      }
+      continue;
+    }
+
+    // Inline label path: "Captain: First Last" or "Captain - First Last"
+    const inlineMatch = raw.match(/^captain\s*[:\-]\s*(.+)$/i);
+    if (inlineMatch && !/^co/i.test(raw)) {
+      const cand = inlineMatch[1].trim();
+      if (isName(cand)) {
+        const n = splitName(cand);
+        if (n) out.push({ ...n, team_number: recentTeam });
+      }
+    }
+  }
+  // Dedup within page (first+last+team).
+  const seen = new Set();
+  return out.filter(c => {
+    const k = c.first_name.toLowerCase() + '|' + c.last_name.toLowerCase() + '|' + (c.team_number || '');
+    if (seen.has(k)) return false;
+    seen.add(k); return true;
+  });
+}
+
+/* 3.100: replace this division's captain set with the freshly parsed one.
+   - DELETE existing rolodex_captains for (session, division)
+   - INSERT the new ones (or nothing, if parser found none)
+   Service-role write — same auth as the captain_pdfs upsert. */
+async function rolSyncCaptains(sessionId, divisionNumber, capPdfId, captains) {
+  /* Always clear the prior set so a re-upload doesn't accumulate stale rows. */
+  const delR = await fetch(
+    SB_URL + '/rest/v1/rolodex_captains?session_id=eq.' + sessionId
+    + '&division_number=eq.' + encodeURIComponent(divisionNumber),
+    {
+      method: 'DELETE',
+      headers: {
+        apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY,
+        'Accept-Profile': 'slate', 'Content-Profile': 'slate',
+        Prefer: 'return=minimal'
+      }
+    }
+  );
+  if (!delR.ok) {
+    /* If the table doesn't exist yet (404), bail quietly so the captain
+       PDF upload still succeeds. Caller wraps in try/catch. */
+    if (delR.status === 404) return;
+    throw new Error('rolodex_captains DELETE ' + delR.status);
+  }
+  if (!captains.length) return;
+  // Dedup across pages by (first, last) — same captain on multiple pages.
+  const seen = new Set();
+  const rows = [];
+  for (const c of captains) {
+    const k = (c.first_name + '|' + c.last_name).toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    rows.push({
+      session_id: sessionId,
+      source_captain_pdf_id: capPdfId || null,
+      division_number: divisionNumber,
+      team_number: c.team_number || null,
+      first_name: c.first_name,
+      last_name: c.last_name
+    });
+  }
+  if (!rows.length) return;
+  const insR = await fetch(SB_URL + '/rest/v1/rolodex_captains', {
+    method: 'POST',
+    headers: {
+      apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY,
+      'Accept-Profile': 'slate', 'Content-Profile': 'slate',
+      'Content-Type': 'application/json',
+      Prefer: 'return=minimal'
+    },
+    body: JSON.stringify(rows)
+  });
+  if (!insR.ok) throw new Error('rolodex_captains INSERT ' + insR.status + ': ' + (await insR.text()).slice(0,160));
+  console.log('[rolodex] synced ' + rows.length + ' captain(s) for division ' + divisionNumber);
+}
+
 async function rolHandleFile(file) {
   const status = document.getElementById('rolUploadStatus');
   status.textContent = 'Reading PDF…';
@@ -15446,10 +15582,16 @@ async function rolHandleFile(file) {
         groups[p.division_number] = {
           division_number: p.division_number,
           division_name: p.division_name,
-          pageIndexes: []
+          pageIndexes: [],
+          captains: []   // 3.100: extracted captain names for this division
         };
       }
       groups[p.division_number].pageIndexes.push(p.pageIndex);
+      /* 3.100: scan each page's text for captain names (best-effort). */
+      try {
+        const caps = rolParseCaptainsFromPageLines(pages[p.pageIndex] || []);
+        if (caps.length) groups[p.division_number].captains.push(...caps);
+      } catch (_) { /* parsing failure on one page is non-fatal */ }
     }
     let divisionList = Object.values(groups);
 
@@ -15565,11 +15707,27 @@ async function rolHandleFile(file) {
           apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY,
           'Accept-Profile': 'slate', 'Content-Profile': 'slate',
           'Content-Type': 'application/json',
-          Prefer: 'resolution=merge-duplicates,return=minimal'
+          /* 3.100: return=representation so we get the row id back for the
+             rolodex_captains FK. merge-duplicates remains the resolution. */
+          Prefer: 'resolution=merge-duplicates,return=representation'
         },
         body: JSON.stringify(dbBody)
       });
       if (!dbR.ok) throw new Error('DB ' + dbR.status + ': ' + (await dbR.text()).slice(0,160));
+
+      /* 3.100: Sync rolodex_captains for this division.
+         - Delete the prior captain set for (session, division)
+         - Insert the freshly-parsed captains, linked to the new captain_pdfs row
+         Non-fatal: if the slate.rolodex_captains table is missing or the
+         parser found nothing, we log and continue. The captain PDF upload
+         itself is the user-visible outcome. */
+      try {
+        const dbRows = await dbR.json();
+        const capPdfId = dbRows && dbRows[0] && dbRows[0].id;
+        await rolSyncCaptains(currentSession.id, s.division_number, capPdfId, s.captains || []);
+      } catch (e) {
+        console.warn('[rolodex] captain sync failed for ' + s.division_number, e);
+      }
 
       /* Orphan cleanup — only after DB row points at the new path. */
       if (oldR2Path) {
@@ -15658,15 +15816,37 @@ async function rolDelete(id, r2Path) {
   }
 }
 
-/* Drop-zone wiring: click + drag-and-drop both feed rolHandleFile. */
+/* Drop-zone wiring: click + drag-and-drop both feed rolHandleFile.
+   3.100: every entry point goes through rolSafeHandle() so any silent
+   throw inside rolHandleFile (e.g. null status element, async rejection)
+   surfaces as a visible error AND a console.error — never silent. */
+function rolSafeHandle(f) {
+  console.log('[rolodex] file selected', f && f.name, f && f.size);
+  Promise.resolve()
+    .then(() => rolHandleFile(f))
+    .catch(e => {
+      console.error('[rolodex] upload failed', e);
+      const status = document.getElementById('rolUploadStatus');
+      const msg = 'Upload error: ' + (e && e.message ? e.message : String(e));
+      if (status) {
+        status.textContent = msg;
+        status.style.color = 'var(--danger)';
+      } else {
+        alert(msg);
+      }
+    });
+}
 function rolInit() {
   const zone = document.getElementById('rolDropZone');
   const input = document.getElementById('rolFileInput');
-  if (!zone || !input) return;
+  if (!zone || !input) {
+    console.warn('[rolodex] init skipped: zone=' + !!zone + ' input=' + !!input);
+    return;
+  }
   zone.onclick = () => input.click();
   input.onchange = (ev) => {
     const f = ev.target.files && ev.target.files[0];
-    if (f) rolHandleFile(f);
+    if (f) rolSafeHandle(f);
     input.value = '';
   };
   ['dragenter','dragover'].forEach(evt => zone.addEventListener(evt, e => {
@@ -15679,7 +15859,7 @@ function rolInit() {
   }));
   zone.addEventListener('drop', e => {
     const f = e.dataTransfer.files && e.dataTransfer.files[0];
-    if (f) rolHandleFile(f);
+    if (f) rolSafeHandle(f);
   });
   /* Filter change re-renders the log without paging reset. */
   const filterEl = document.getElementById('rolLogFilter');
