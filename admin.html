@@ -2411,7 +2411,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION   = '3.118';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION   = '3.119';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -17037,15 +17037,15 @@ function tcqOrRowHtml(r) {
        in tcqOrRedraw. The attribute approach via string concat was
        inconsistent across renders; the JS property assignment is the
        reliable form. */
-    +     '<label class="tcqor-flag" style="display:flex;align-items:center;gap:4px;font-size:0.82rem;cursor:pointer">'
+    +     '<label class="tcqor-flag" style="display:flex;align-items:center;gap:4px;font-size:0.82rem;cursor:pointer;white-space:nowrap">'
     +       '<input type="checkbox" data-tcqor-member="' + esc(r.member_number) + '" data-tcqor-field="looking"'
     +         + ' onchange="tcqOrSetFlag(this.dataset.tcqorMember, this.dataset.tcqorField, this.checked)">'
-    +       'Looking'
+    +       '<span>Looking</span>'
     +     '</label>'
-    +     '<label class="tcqor-flag" style="display:flex;align-items:center;gap:4px;font-size:0.82rem;cursor:pointer">'
+    +     '<label class="tcqor-flag" style="display:flex;align-items:center;gap:4px;font-size:0.82rem;cursor:pointer;white-space:nowrap">'
     +       '<input type="checkbox" data-tcqor-member="' + esc(r.member_number) + '" data-tcqor-field="recruiting"'
     +         + ' onchange="tcqOrSetFlag(this.dataset.tcqorMember, this.dataset.tcqorField, this.checked)">'
-    +       'Recruiting'
+    +       '<span>Recruiting</span>'
     +     '</label>'
     +     '<button class="btn btn-primary btn-sm" onclick="tcqOrTextOne(\'' + esc(r.member_number) + '\')"'
     +       (phone ? '' : ' disabled title="No cell phone on file"') + '>Text</button>'
