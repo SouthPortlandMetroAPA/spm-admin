@@ -2415,7 +2415,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION   = '3.124';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION   = '3.125';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -17061,22 +17061,22 @@ function tcqOrRowHtml(r) {
        reliable form. */
     +     '<label class="tcqor-flag" style="display:flex;align-items:center;gap:4px;font-size:0.82rem;cursor:pointer;white-space:nowrap">'
     +       '<input type="checkbox" data-tcqor-member="' + esc(r.member_number) + '" data-tcqor-field="looking"'
-    +         + ' onchange="tcqOrSetFlag(this.dataset.tcqorMember, this.dataset.tcqorField, this.checked)">'
+    +         ' onchange="tcqOrSetFlag(this.dataset.tcqorMember, this.dataset.tcqorField, this.checked)">'
     +       '<span>Looking</span>'
     +     '</label>'
     +     '<label class="tcqor-flag" style="display:flex;align-items:center;gap:4px;font-size:0.82rem;cursor:pointer;white-space:nowrap">'
     +       '<input type="checkbox" data-tcqor-member="' + esc(r.member_number) + '" data-tcqor-field="recruiting"'
-    +         + ' onchange="tcqOrSetFlag(this.dataset.tcqorMember, this.dataset.tcqorField, this.checked)">'
+    +         ' onchange="tcqOrSetFlag(this.dataset.tcqorMember, this.dataset.tcqorField, this.checked)">'
     +       '<span>Recruiting</span>'
     +     '</label>'
     +     '<label class="tcqor-flag" style="display:flex;align-items:center;gap:4px;font-size:0.82rem;cursor:pointer;white-space:nowrap">'
     +       '<input type="checkbox" data-tcqor-member="' + esc(r.member_number) + '" data-tcqor-field="declined"'
-    +         + ' onchange="tcqOrSetFlag(this.dataset.tcqorMember, this.dataset.tcqorField, this.checked)">'
+    +         ' onchange="tcqOrSetFlag(this.dataset.tcqorMember, this.dataset.tcqorField, this.checked)">'
     +       '<span>Declined</span>'
     +     '</label>'
     +     '<label class="tcqor-flag" style="display:flex;align-items:center;gap:4px;font-size:0.82rem;cursor:pointer;white-space:nowrap">'
     +       '<input type="checkbox" data-tcqor-member="' + esc(r.member_number) + '" data-tcqor-field="confirmed"'
-    +         + ' onchange="tcqOrSetFlag(this.dataset.tcqorMember, this.dataset.tcqorField, this.checked)">'
+    +         ' onchange="tcqOrSetFlag(this.dataset.tcqorMember, this.dataset.tcqorField, this.checked)">'
     +       '<span>Confirmed</span>'
     +     '</label>'
     +     '<button class="btn btn-primary btn-sm" onclick="tcqOrTextOne(\'' + esc(r.member_number) + '\')"'
