@@ -2172,6 +2172,14 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             </div>
           </div>
           <div>
+            <strong style="font-size:0.78rem;color:var(--muted);text-transform:uppercase">TCQ team</strong>
+            <div style="display:inline-flex;gap:4px;margin-left:6px">
+              <button class="btn btn-primary btn-sm tcqor-team" data-team="all"  style="font-size:0.78rem">All</button>
+              <button class="btn btn-outline btn-sm tcqor-team" data-team="has"  style="font-size:0.78rem">Has team</button>
+              <button class="btn btn-outline btn-sm tcqor-team" data-team="none" style="font-size:0.78rem">No team</button>
+            </div>
+          </div>
+          <div>
             <strong style="font-size:0.78rem;color:var(--muted);text-transform:uppercase">SL</strong>
             <div id="tcqOrSlChips" style="display:inline-flex;gap:4px;margin-left:6px">
               <button class="btn btn-outline btn-sm tcqor-sl" data-sl="all" style="font-size:0.78rem">All</button>
@@ -2403,7 +2411,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION   = '3.115';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION   = '3.116';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -16900,8 +16908,9 @@ window.tcqOpenTemplateEditor = tcqOpenTemplateEditor;
    Reads via tcq.outreach_candidates view which joins eligibility + slate
    players + looking_for_team. Service-role only. */
 let _tcqOrAll = [];                       // every candidate row from the view
-/* status: 'all' | 'looking' | 'recruiting' | 'none' */
-let _tcqOrFilter = { status: 'looking', sl: 'all', q: '', sort: 'name' };
+/* status: 'all' | 'looking' | 'recruiting' | 'none'
+   team:   'all' | 'has' (already on a TCQ team) | 'none' (no TCQ team) */
+let _tcqOrFilter = { status: 'looking', team: 'all', sl: 'all', q: '', sort: 'name' };
 const TCQ_OR_VARS = ['first_name', 'last_name', 'nickname', 'member_number',
   'sl', 'sl_8ball', 'sl_9ball', 'sessions_as_capt', 'spring_mp',
   'scores_8b', 'scores_9b'];
@@ -16915,6 +16924,9 @@ async function tcqOrInit() {
   });
   document.querySelectorAll('.tcqor-sl').forEach(b => {
     b.onclick = () => { _tcqOrFilter.sl = b.dataset.sl; tcqOrRefreshChipStyles(); tcqOrRedraw(); };
+  });
+  document.querySelectorAll('.tcqor-team').forEach(b => {
+    b.onclick = () => { _tcqOrFilter.team = b.dataset.team; tcqOrRefreshChipStyles(); tcqOrRedraw(); };
   });
   document.getElementById('tcqOrSort').onchange = (ev) => {
     _tcqOrFilter.sort = ev.target.value; tcqOrRedraw();
@@ -16933,6 +16945,11 @@ function tcqOrRefreshChipStyles() {
   });
   document.querySelectorAll('.tcqor-sl').forEach(b => {
     const active = b.dataset.sl === _tcqOrFilter.sl;
+    b.classList.toggle('btn-primary',  active);
+    b.classList.toggle('btn-outline', !active);
+  });
+  document.querySelectorAll('.tcqor-team').forEach(b => {
+    const active = b.dataset.team === _tcqOrFilter.team;
     b.classList.toggle('btn-primary',  active);
     b.classList.toggle('btn-outline', !active);
   });
@@ -16960,6 +16977,8 @@ function tcqOrRedraw() {
     if (f.status === 'looking'    && !r.looking_for_team) return false;
     if (f.status === 'recruiting' && !r.recruiting)       return false;
     if (f.status === 'none'       && (r.looking_for_team || r.recruiting)) return false;
+    if (f.team   === 'has'        && !r.has_tcq_team) return false;
+    if (f.team   === 'none'       &&  r.has_tcq_team) return false;
     if (f.sl !== 'all' && Number(r.sl) !== Number(f.sl)) return false;
     if (f.q) {
       const hay = (r.name + ' ' + r.member_number).toLowerCase();
@@ -16996,7 +17015,7 @@ function tcqOrRowHtml(r) {
   const badges = [];
   if (r.looking_for_team) badges.push('<span style="background:#0a6b3a;color:#fff;padding:2px 8px;border-radius:999px;font-weight:700;font-size:0.72rem">LOOKING</span>');
   if (r.recruiting)       badges.push('<span style="background:#0031a8;color:#fff;padding:2px 8px;border-radius:999px;font-weight:700;font-size:0.72rem">RECRUITING</span>');
-  if (r.is_tcq_captain)   badges.push('<span style="background:#666;color:#fff;padding:2px 8px;border-radius:999px;font-weight:700;font-size:0.72rem">HAS TCQ TEAM</span>');
+  if (r.has_tcq_team)     badges.push('<span style="background:#666;color:#fff;padding:2px 8px;border-radius:999px;font-weight:700;font-size:0.72rem">' + (r.is_tcq_captain ? 'CAPTAINS TCQ TEAM' : 'ON TCQ TEAM') + '</span>');
   return ''
     + '<div class="card" style="padding:10px 12px;margin:0">'
     +   '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
@@ -17300,13 +17319,13 @@ function tcqAgFindBestRoster(captain, pool) {
 
 function tcqAutoGroupCompute() {
   const recruiters = _tcqOrAll
-    .filter(r => r.recruiting && !r.is_tcq_captain && r.sl != null)
+    .filter(r => r.recruiting && !r.has_tcq_team && r.sl != null)
     .sort((a, b) => (b.sl || 0) - (a.sl || 0));
   if (!recruiters.length) {
-    return { error: 'No recruiters who lack a TCQ team. Mark some people as recruiting first.' };
+    return { error: 'No recruiters without a TCQ team. Mark some people as recruiting first.' };
   }
   let pool = _tcqOrAll
-    .filter(r => r.looking_for_team && !r.recruiting && !r.is_tcq_captain && r.sl != null)
+    .filter(r => r.looking_for_team && !r.recruiting && !r.has_tcq_team && r.sl != null)
     .map(r => ({ member_number: r.member_number, name: r.name, sl: r.sl }));
   if (!pool.length) {
     return { error: 'No looking players available to draft. Mark some people as looking first.' };
