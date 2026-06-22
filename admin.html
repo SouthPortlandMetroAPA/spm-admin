@@ -2101,6 +2101,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <span class="hint" id="tcqStatus"></span>
           <div style="margin-left:auto;display:flex;gap:6px">
             <button class="btn btn-primary btn-sm" id="tcqNewTeamBtn">+ New team</button>
+            <button class="btn btn-outline btn-sm" onclick="tcqOpenTemplateEditor()">📝 Text template</button>
             <button class="btn btn-outline btn-sm" onclick="tcqRender()">↻ Refresh</button>
             <a class="btn btn-outline btn-sm" target="_blank" rel="noopener"
                href="https://southportlandmetroapa.github.io/captainsqualifier/">Open public roster ↗</a>
@@ -2269,7 +2270,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION   = '3.106';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION   = '3.107';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -16239,7 +16240,67 @@ function tcqNormalizePhone(raw) {
   if (digits.length === 11 && digits[0] === '1') return '+' + digits;
   return null;   // not a normal US number — bail
 }
-function tcqTextCaptain(teamId) {
+/* Cached editable template. Loaded lazily on first text-captain click
+   AND when the template editor opens — keeps the latest body always
+   in memory after any edit. */
+let _tcqTemplate = null;
+const TCQ_TEMPLATE_VARS = [
+  'captain_first', 'captain_full', 'team_index', 'roster',
+  'min_sl', 'cap', 'over_by', 'needed', 'status_notice'
+];
+const TCQ_CAP = 15;
+
+async function tcqLoadTemplate() {
+  if (_tcqTemplate) return _tcqTemplate;
+  try {
+    const rows = await tcqGet('templates?kind=eq.captain_confirm&select=body');
+    _tcqTemplate = (rows && rows[0] && rows[0].body) || '';
+  } catch (e) {
+    console.error('[tcq] template load failed', e);
+    _tcqTemplate = '';
+  }
+  return _tcqTemplate;
+}
+
+/* Substitute {var} placeholders. Unknown vars left as-is so typos
+   show up in the SMS preview (same posture as the Outreach editor). */
+function tcqSubstitute(template, vars) {
+  return String(template || '').replace(/\{(\w+)\}/g, (m, key) =>
+    Object.prototype.hasOwnProperty.call(vars, key) ? String(vars[key]) : m
+  );
+}
+
+function tcqBuildVars(team, players, captain, lineup) {
+  const roster = players.map(p => {
+    const sl = (p.effective_skill_level != null) ? ' (SL' + p.effective_skill_level + ')' : '';
+    return p.position + '. ' + p.name + sl + (p.is_captain ? ' — captain' : '');
+  }).join('\n');
+  const overBy = lineup.state === 'invalid' ? (lineup.minSum - TCQ_CAP) : 0;
+  const needed = lineup.state === 'incomplete' ? (3 - players.length) : 0;
+  let statusNotice = '';
+  if (lineup.state === 'invalid') {
+    statusNotice = '⚠ Heads up — your lowest possible 3-player lineup totals SL'
+      + lineup.minSum + ', which is ' + overBy + ' over the SL ' + TCQ_CAP
+      + ' cap. The team can\'t compete as-is — you\'ll need to swap or add a player whose SL is at least '
+      + overBy + ' lower than the player they replace.\n\n';
+  } else if (lineup.state === 'incomplete') {
+    statusNotice = 'Note: you need at least 3 players on the roster to compete. Add '
+      + needed + ' more before the event.\n\n';
+  }
+  return {
+    captain_first: captain.live_first_name || captain.name.split(' ')[0],
+    captain_full:  captain.name,
+    team_index:    team && team.team_index != null ? team.team_index : '',
+    roster:        roster,
+    min_sl:        lineup.minSum != null ? lineup.minSum : '',
+    cap:           TCQ_CAP,
+    over_by:       overBy,
+    needed:        needed,
+    status_notice: statusNotice
+  };
+}
+
+async function tcqTextCaptain(teamId) {
   const team = _tcqTeams.find(t => t.id === teamId);
   const players = (_tcqPlayersByTeam.get(teamId) || []).slice().sort((a, b) => a.position - b.position);
   const captain = players.find(p => p.is_captain);
@@ -16247,36 +16308,92 @@ function tcqTextCaptain(teamId) {
   const phone = tcqNormalizePhone(captain.cell_phone);
   if (!phone) { alert('No usable cell phone on file for ' + captain.name + '.'); return; }
   const lineup = tcqLineupCheck(players);
-
-  /* Build the body — keep it short. SMS bodies > ~160 chars split
-     into multiple parts on carriers; tournament rosters can easily
-     exceed that, so we accept the split as a cost of completeness. */
-  const lines = [];
-  lines.push('Hi ' + (captain.live_first_name || captain.name.split(' ')[0]) + '! Confirming your Captain\'s Qualifier roster:');
-  lines.push('');
-  for (const p of players) {
-    const sl = (p.effective_skill_level != null) ? ' (SL' + p.effective_skill_level + ')' : '';
-    lines.push(p.position + '. ' + p.name + sl + (p.is_captain ? ' — captain' : ''));
-  }
-  lines.push('');
-  if (lineup.state === 'invalid') {
-    const over = lineup.minSum - 15;
-    lines.push('⚠ Heads up — your lowest possible 3-player lineup totals SL'
-      + lineup.minSum + ', which is ' + over + ' over the SL 15 cap. The team can\'t compete as-is — you\'ll need to swap or add a player whose SL is at least ' + over + ' lower than the player they replace.');
-    lines.push('');
-  } else if (lineup.state === 'incomplete') {
-    lines.push('Note: you need at least 3 players on the roster to compete. Add ' + (3 - players.length) + ' more before the event.');
-    lines.push('');
-  }
-  lines.push('Reply YES to confirm or tell me what needs to change. Thanks!');
-  lines.push('— SPM APA');
-
-  const body = lines.join('\n');
-  /* iOS uses ?&body=..., Android uses ?body=... — the double form
-     works in both (the leading & is harmless to iOS). */
+  const template = await tcqLoadTemplate();
+  const body = tcqSubstitute(template, tcqBuildVars(team, players, captain, lineup));
   const url = 'sms:' + phone + '?&body=' + encodeURIComponent(body);
   window.location.href = url;
 }
+
+/* Template editor modal — single text body with {var} placeholders.
+   Click a variable pill to insert {name} at the textarea's cursor. */
+async function tcqOpenTemplateEditor() {
+  const existing = document.getElementById('tcqTplModal');
+  if (existing) existing.remove();
+  await tcqLoadTemplate();
+  const back = document.createElement('div');
+  back.id = 'tcqTplModal';
+  back.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:2000;display:flex;align-items:center;justify-content:center;padding:20px';
+  const pills = TCQ_TEMPLATE_VARS.map(v =>
+    '<button type="button" data-tcqvar="' + esc(v) + '" '
+    + 'style="padding:3px 8px;font-size:0.74rem;font-weight:700;background:#f3f4f6;'
+    + 'border:1px solid var(--border);border-radius:6px;color:var(--text);cursor:pointer;'
+    + 'font-family:ui-monospace,SFMono-Regular,monospace">{' + esc(v) + '}</button>'
+  ).join(' ');
+  back.innerHTML = ''
+    + '<div style="background:#fff;border-radius:14px;padding:20px;max-width:680px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 10px 30px rgba(0,0,0,0.25)">'
+    +   '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">'
+    +     '<div style="font-weight:800;font-size:1.05rem">📝 Captain confirmation text</div>'
+    +     '<button type="button" id="tcqTplClose" style="margin-left:auto;background:none;border:0;font-size:1.4rem;line-height:1;cursor:pointer;color:var(--muted)">×</button>'
+    +   '</div>'
+    +   '<p class="hint" style="margin-top:0">Tap a variable to insert at cursor. Unknown <code>{vars}</code> are left in the SMS so typos are visible.</p>'
+    +   '<div style="margin-bottom:8px;display:flex;gap:4px;flex-wrap:wrap">' + pills + '</div>'
+    +   '<textarea id="tcqTplBody" rows="12" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:0.92rem">'
+    +     esc(_tcqTemplate || '') + '</textarea>'
+    +   '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">'
+    +     '<button class="btn btn-outline" id="tcqTplCancel">Cancel</button>'
+    +     '<button class="btn btn-outline" id="tcqTplReset">Restore default</button>'
+    +     '<button class="btn btn-primary" id="tcqTplSave">Save</button>'
+    +   '</div>'
+    + '</div>';
+  document.body.appendChild(back);
+  const ta = document.getElementById('tcqTplBody');
+  back.querySelectorAll('[data-tcqvar]').forEach(btn => {
+    btn.onclick = () => {
+      const v = '{' + btn.dataset.tcqvar + '}';
+      const s = ta.selectionStart, e = ta.selectionEnd;
+      ta.value = ta.value.slice(0, s) + v + ta.value.slice(e);
+      ta.focus();
+      ta.setSelectionRange(s + v.length, s + v.length);
+    };
+  });
+  const close = () => back.remove();
+  document.getElementById('tcqTplClose').onclick = close;
+  document.getElementById('tcqTplCancel').onclick = close;
+  document.getElementById('tcqTplReset').onclick = () => {
+    if (!confirm('Restore the default template? Your current edits will be discarded.')) return;
+    ta.value = TCQ_DEFAULT_TEMPLATE;
+  };
+  document.getElementById('tcqTplSave').onclick = async () => {
+    const body = ta.value;
+    try {
+      /* UPSERT by kind. Prefer: resolution=merge-duplicates is REQUIRED
+         to actually merge — without it PostgREST plain-INSERTs and hits
+         the PK constraint. */
+      const r = await fetch(SB_URL + '/rest/v1/templates?on_conflict=kind', {
+        method: 'POST',
+        headers: {
+          apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY,
+          'Accept-Profile': TCQ_PROFILE, 'Content-Profile': TCQ_PROFILE,
+          'Content-Type': 'application/json',
+          Prefer: 'resolution=merge-duplicates,return=minimal'
+        },
+        body: JSON.stringify([{ kind: 'captain_confirm', body: body, updated_at: new Date().toISOString() }])
+      });
+      if (!r.ok) throw new Error('Save ' + r.status + ': ' + (await r.text()).slice(0, 160));
+      _tcqTemplate = body;
+      close();
+    } catch (e) {
+      alert('Save failed: ' + e.message);
+    }
+  };
+}
+
+const TCQ_DEFAULT_TEMPLATE = `Hi {captain_first}! Confirming your Captain's Qualifier roster:
+
+{roster}
+
+{status_notice}Reply YES to confirm or tell me what needs to change. Thanks!
+— SPM APA`;
 
 /* ── REST helpers (service-role JWT via SB_KEY, profile=tcq) ───── */
 async function tcqGet(path) {
@@ -16334,6 +16451,7 @@ window.tcqSavePlayer = tcqSavePlayer;
 window.tcqEditPlayer = tcqEditPlayer;
 window.tcqDeletePlayer = tcqDeletePlayer;
 window.tcqTextCaptain = tcqTextCaptain;
+window.tcqOpenTemplateEditor = tcqOpenTemplateEditor;
 
 /* ────── Activity log viewer (3.69+) ──────
    Reads slate.rolodex_log via service-role JWT (the same SB_KEY the
