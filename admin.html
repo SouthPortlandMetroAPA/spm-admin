@@ -2148,6 +2148,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <div style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">
             <button class="btn btn-primary btn-sm" onclick="tcqOrOpenBulkModal('looking')">+ Bulk: looking</button>
             <button class="btn btn-primary btn-sm" onclick="tcqOrOpenBulkModal('recruiting')">+ Bulk: recruiting</button>
+            <button class="btn btn-outline btn-sm" onclick="tcqOrOpenBulkModal('declined')">+ Bulk: declined</button>
             <button class="btn btn-outline btn-sm" onclick="tcqAutoGroupOpen()">🧩 Auto-group</button>
             <button class="btn btn-outline btn-sm" onclick="tcqOrOpenTemplateEditor()">📝 Text template</button>
             <button class="btn btn-outline btn-sm" onclick="tcqOrRender()">↻ Refresh</button>
@@ -2168,7 +2169,8 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
               <button class="btn btn-outline btn-sm tcqor-chip" data-status="all"        style="font-size:0.78rem">All</button>
               <button class="btn btn-primary btn-sm tcqor-chip" data-status="looking"    style="font-size:0.78rem">Looking</button>
               <button class="btn btn-outline btn-sm tcqor-chip" data-status="recruiting" style="font-size:0.78rem">Recruiting</button>
-              <button class="btn btn-outline btn-sm tcqor-chip" data-status="none"       style="font-size:0.78rem">Neither</button>
+              <button class="btn btn-outline btn-sm tcqor-chip" data-status="declined"   style="font-size:0.78rem">Declined</button>
+              <button class="btn btn-outline btn-sm tcqor-chip" data-status="none"       style="font-size:0.78rem">None</button>
             </div>
           </div>
           <div>
@@ -2411,7 +2413,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION   = '3.121';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION   = '3.122';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -16986,7 +16988,8 @@ function tcqOrRedraw() {
   let rows = _tcqOrAll.filter(r => {
     if (f.status === 'looking'    && !r.looking_for_team) return false;
     if (f.status === 'recruiting' && !r.recruiting)       return false;
-    if (f.status === 'none'       && (r.looking_for_team || r.recruiting)) return false;
+    if (f.status === 'declined'   && !r.declined)         return false;
+    if (f.status === 'none'       && (r.looking_for_team || r.recruiting || r.declined)) return false;
     if (f.team   === 'has'        && !r.has_tcq_team) return false;
     if (f.team   === 'none'       &&  r.has_tcq_team) return false;
     if (f.sl !== 'all' && Number(r.sl) !== Number(f.sl)) return false;
@@ -17017,7 +17020,10 @@ function tcqOrRedraw() {
   list.querySelectorAll('input[type="checkbox"][data-tcqor-member]').forEach(cb => {
     const r = byMember.get(cb.dataset.tcqorMember);
     if (!r) return;
-    cb.checked = !!(cb.dataset.tcqorField === 'recruiting' ? r.recruiting : r.looking_for_team);
+    const field = cb.dataset.tcqorField;
+    cb.checked = !!(field === 'recruiting' ? r.recruiting
+                  : field === 'declined'   ? r.declined
+                  : r.looking_for_team);
   });
 }
 
@@ -17035,6 +17041,7 @@ function tcqOrRowHtml(r) {
   const badges = [];
   if (r.looking_for_team) badges.push('<span style="background:#0a6b3a;color:#fff;padding:2px 8px;border-radius:999px;font-weight:700;font-size:0.72rem">LOOKING</span>');
   if (r.recruiting)       badges.push('<span style="background:#0031a8;color:#fff;padding:2px 8px;border-radius:999px;font-weight:700;font-size:0.72rem">RECRUITING</span>');
+  if (r.declined)         badges.push('<span style="background:#ea002a;color:#fff;padding:2px 8px;border-radius:999px;font-weight:700;font-size:0.72rem">DECLINED</span>');
   if (r.has_tcq_team)     badges.push('<span style="background:#666;color:#fff;padding:2px 8px;border-radius:999px;font-weight:700;font-size:0.72rem">' + (r.is_tcq_captain ? 'CAPTAINS TCQ TEAM' : 'ON TCQ TEAM') + '</span>');
   return ''
     + '<div class="card" style="padding:10px 12px;margin:0">'
@@ -17057,6 +17064,11 @@ function tcqOrRowHtml(r) {
     +         + ' onchange="tcqOrSetFlag(this.dataset.tcqorMember, this.dataset.tcqorField, this.checked)">'
     +       '<span>Recruiting</span>'
     +     '</label>'
+    +     '<label class="tcqor-flag" style="display:flex;align-items:center;gap:4px;font-size:0.82rem;cursor:pointer;white-space:nowrap">'
+    +       '<input type="checkbox" data-tcqor-member="' + esc(r.member_number) + '" data-tcqor-field="declined"'
+    +         + ' onchange="tcqOrSetFlag(this.dataset.tcqorMember, this.dataset.tcqorField, this.checked)">'
+    +       '<span>Declined</span>'
+    +     '</label>'
     +     '<button class="btn btn-primary btn-sm" onclick="tcqOrTextOne(\'' + esc(r.member_number) + '\')"'
     +       (phone ? '' : ' disabled title="No cell phone on file"') + '>Text</button>'
     +   '</div>'
@@ -17064,9 +17076,9 @@ function tcqOrRowHtml(r) {
 }
 
 /* ── Status toggles ──────────────────────────────────────────── */
-/* field: 'looking' (maps to column `looking`) | 'recruiting' (column `recruiting`) */
+/* field: 'looking' (maps to column `looking`) | 'recruiting' | 'declined' */
 async function tcqOrSetFlag(memberNumber, field, value) {
-  const col = field === 'recruiting' ? 'recruiting' : 'looking';
+  const col = (field === 'recruiting' || field === 'declined') ? field : 'looking';
   const body = { member_number: memberNumber, updated_at: new Date().toISOString() };
   body[col] = !!value;
   try {
@@ -17098,12 +17110,12 @@ function tcqOrOpenBulkModal(field) {
   field = field || 'looking';
   document.getElementById('tcqOrBulkField').value = field;
   document.getElementById('tcqOrBulkText').value = '';
-  document.getElementById('tcqOrBulkTitle').textContent =
-    field === 'recruiting' ? 'Bulk mark as recruiting' : 'Bulk mark as looking for a team';
-  document.getElementById('tcqOrBulkLblOn').textContent  =
-    field === 'recruiting' ? 'Mark RECRUITING' : 'Mark LOOKING';
-  document.getElementById('tcqOrBulkLblOff').textContent =
-    field === 'recruiting' ? 'Mark NOT recruiting' : 'Mark NOT looking';
+  const titleMap = { looking: 'Bulk mark as looking for a team', recruiting: 'Bulk mark as recruiting', declined: 'Bulk mark as declined' };
+  const onMap    = { looking: 'Mark LOOKING',                     recruiting: 'Mark RECRUITING',         declined: 'Mark DECLINED' };
+  const offMap   = { looking: 'Mark NOT looking',                 recruiting: 'Mark NOT recruiting',     declined: 'Mark NOT declined' };
+  document.getElementById('tcqOrBulkTitle').textContent = titleMap[field] || titleMap.looking;
+  document.getElementById('tcqOrBulkLblOn').textContent  = onMap[field]   || onMap.looking;
+  document.getElementById('tcqOrBulkLblOff').textContent = offMap[field]  || offMap.looking;
   document.getElementById('tcqOrBulkModal').style.display = 'flex';
 }
 function tcqOrCloseBulkModal() {
@@ -17113,7 +17125,7 @@ async function tcqOrApplyBulk() {
   const text = document.getElementById('tcqOrBulkText').value;
   const field = document.getElementById('tcqOrBulkField').value;
   const val   = document.querySelector('input[name="tcqOrBulkVal"]:checked').value === 'true';
-  const col = field === 'recruiting' ? 'recruiting' : 'looking';
+  const col = (field === 'recruiting' || field === 'declined') ? field : 'looking';
   const nums = [...new Set(   // dedupe — PostgREST UPSERT 21000s on dup keys in one batch
     (text.match(/\b\d{5,8}\b/g) || [])
       .map(n => n.length === 5 ? '972' + n : n)
@@ -17367,13 +17379,13 @@ function tcqAgFindBestRoster(captain, pool) {
 
 function tcqAutoGroupCompute() {
   const recruiters = _tcqOrAll
-    .filter(r => r.recruiting && !r.has_tcq_team && r.sl != null)
+    .filter(r => r.recruiting && !r.declined && !r.has_tcq_team && r.sl != null)
     .sort((a, b) => (b.sl || 0) - (a.sl || 0));
   if (!recruiters.length) {
     return { error: 'No recruiters without a TCQ team. Mark some people as recruiting first.' };
   }
   let pool = _tcqOrAll
-    .filter(r => r.looking_for_team && !r.recruiting && !r.has_tcq_team && r.sl != null)
+    .filter(r => r.looking_for_team && !r.declined && !r.recruiting && !r.has_tcq_team && r.sl != null)
     .map(r => ({ member_number: r.member_number, name: r.name, sl: r.sl }));
   if (!pool.length) {
     return { error: 'No looking players available to draft. Mark some people as looking first.' };
