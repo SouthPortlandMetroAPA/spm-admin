@@ -2411,7 +2411,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION   = '3.116';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION   = '3.117';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -17125,6 +17125,15 @@ async function tcqOrApplyBulk() {
     });
     if (!r.ok) throw new Error('Save ' + r.status + ': ' + (await r.text()).slice(0, 160));
     tcqOrCloseBulkModal();
+    /* Switch the status filter to whatever was just marked so the user
+       can see/edit the affected rows immediately. Without this, marking
+       people as recruiting while the filter is "Looking" makes them
+       disappear from view, which feels like the bulk button silently
+       lost the data. */
+    if (val) {
+      _tcqOrFilter.status = field;   // 'looking' or 'recruiting'
+      tcqOrRefreshChipStyles();
+    }
     await tcqOrRender();
     alert('Marked ' + known.length + ' as ' + (val ? field.toUpperCase() : 'NOT ' + field.toUpperCase())
       + (unknown.length ? '. ' + unknown.length + ' APA #s not in the eligibility report were skipped.' : '.'));
