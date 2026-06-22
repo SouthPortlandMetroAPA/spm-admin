@@ -2411,7 +2411,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION   = '3.119';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION   = '3.120';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -17299,16 +17299,26 @@ function tcqAgCombinations(arr, k) {
 }
 
 function tcqAgEvaluateRoster(captain, others) {
-  /* Returns { ok, legalLineups } given a captain + others. */
+  /* Returns { ok, legalLineups }. The "max 2 players SL≥6" rule is a
+     PER-LINEUP constraint (any 3-player lineup must satisfy it),
+     NOT a roster-level constraint. A roster of e.g. [3,6,6,6] is fine
+     as long as at least 3 of its C(roster,3) lineups have sum ≤ 15
+     AND at most 2 high players. (3+6+6 satisfies both; 6+6+6 fails
+     either way.) */
   const roster = [captain, ...others];
-  const highCount = roster.filter(p => (p.sl || 0) >= TCQ_AG.HIGH_SL).length;
-  if (highCount > TCQ_AG.MAX_HIGH) return { ok: false };
   const sls = roster.map(p => p.sl || 0);
   let legalLineups = 0;
   for (let i = 0; i < sls.length; i++)
     for (let j = i + 1; j < sls.length; j++)
-      for (let k = j + 1; k < sls.length; k++)
-        if (sls[i] + sls[j] + sls[k] <= TCQ_AG.CAP) legalLineups++;
+      for (let k = j + 1; k < sls.length; k++) {
+        if (sls[i] + sls[j] + sls[k] > TCQ_AG.CAP) continue;
+        const high =
+          (sls[i] >= TCQ_AG.HIGH_SL ? 1 : 0) +
+          (sls[j] >= TCQ_AG.HIGH_SL ? 1 : 0) +
+          (sls[k] >= TCQ_AG.HIGH_SL ? 1 : 0);
+        if (high > TCQ_AG.MAX_HIGH) continue;
+        legalLineups++;
+      }
   return { ok: legalLineups >= 3, legalLineups };
 }
 
