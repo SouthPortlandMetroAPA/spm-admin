@@ -964,6 +964,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="switchboard">Switchboard</button>
       <button class="tab" data-tab="redtape">RedTape</button>
       <button class="tab" data-tab="rolodex">Rolodex</button>
+      <button class="tab" data-tab="tcq">Captain's Qualifier</button>
       <button class="tab" data-tab="playoffs">Playoffs</button>
       <button class="tab" data-tab="certs">Certs</button>
     </div>
@@ -2091,6 +2092,89 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
     </div>
 
     <!-- ══════════════════════════════════════════════════════════════
+         TAB: CAPTAIN'S QUALIFIER — team & player CRUD for tcq.*
+         ══════════════════════════════════════════════════════════════ -->
+    <div id="tab-tcq" class="tab-panel">
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
+          <h2 style="margin:0">Team Captain's Qualifier</h2>
+          <span class="hint" id="tcqStatus"></span>
+          <div style="margin-left:auto;display:flex;gap:6px">
+            <button class="btn btn-primary btn-sm" id="tcqNewTeamBtn">+ New team</button>
+            <button class="btn btn-outline btn-sm" onclick="tcqRender()">↻ Refresh</button>
+            <a class="btn btn-outline btn-sm" target="_blank" rel="noopener"
+               href="https://southportlandmetroapa.github.io/captainsqualifier/">Open public roster ↗</a>
+          </div>
+        </div>
+        <p class="hint" style="margin-top:0">
+          Source of truth for the public roster at
+          <a href="https://southportlandmetroapa.github.io/captainsqualifier/" target="_blank" rel="noopener"><code>captainsqualifier</code></a>.
+          Anon reads <code>tcq.players_public</code> (no emails). Service-role JWT
+          (loaded via <code>?key=</code>) writes here.
+        </p>
+        <div id="tcqList"><p class="hint">Loading…</p></div>
+      </div>
+
+      <!-- Add/edit team modal -->
+      <div class="modal-backdrop" id="tcqTeamModal" style="display:none">
+        <div class="modal" id="tcqTeamModalBody" style="max-width:520px">
+          <h3 id="tcqTeamModalTitle" style="margin:0 0 10px">New team</h3>
+          <input type="hidden" id="tcqTeamId" value="">
+          <div class="form-row">
+            <label>Payment method</label>
+            <select id="tcqTeamPayment" class="form-input">
+              <option value="">— Select —</option>
+              <option>Venmo</option>
+              <option>Zelle</option>
+              <option>Paypal</option>
+              <option>Cash</option>
+              <option>Other</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label>Notes (optional)</label>
+            <input type="text" id="tcqTeamNotes" class="form-input" maxlength="200">
+          </div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+            <button class="btn btn-outline" onclick="tcqCloseTeamModal()">Cancel</button>
+            <button class="btn btn-primary" onclick="tcqSaveTeam()">Save</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Add player modal -->
+      <div class="modal-backdrop" id="tcqPlayerModal" style="display:none">
+        <div class="modal" id="tcqPlayerModalBody" style="max-width:520px">
+          <h3 id="tcqPlayerModalTitle" style="margin:0 0 10px">Add player</h3>
+          <input type="hidden" id="tcqPlayerTeamId" value="">
+          <input type="hidden" id="tcqPlayerPosition" value="">
+          <div class="form-row">
+            <label>Name</label>
+            <input type="text" id="tcqPlayerName" class="form-input" maxlength="100" autocomplete="off">
+          </div>
+          <div class="form-row" id="tcqPlayerEmailRow">
+            <label>Email (captain only)</label>
+            <input type="email" id="tcqPlayerEmail" class="form-input" maxlength="200">
+          </div>
+          <div style="display:flex;gap:8px">
+            <div class="form-row" style="flex:1">
+              <label>Member #</label>
+              <input type="text" id="tcqPlayerNum" class="form-input" maxlength="20" inputmode="numeric">
+            </div>
+            <div class="form-row" style="width:100px">
+              <label>Skill Lvl</label>
+              <input type="number" id="tcqPlayerSL" class="form-input" min="1" max="9">
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+            <button class="btn btn-outline" onclick="tcqClosePlayerModal()">Cancel</button>
+            <button class="btn btn-primary" onclick="tcqSavePlayer()">Save</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════════
          TAB: PLAYOFFS — "show your work" breakdown of advancement math
          ══════════════════════════════════════════════════════════════ -->
     <div id="tab-playoffs" class="tab-panel">
@@ -2186,7 +2270,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION   = '3.100';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION   = '3.101';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -3827,6 +3911,7 @@ function switchTab(name) {
   if (name === 'switchboard') sbInit();
   if (name === 'redtape')     rtInit();
   if (name === 'rolodex')     rolInit();
+  if (name === 'tcq')         tcqInit();
   if (name === 'playoffs')    renderPlayoffsTab();
   if (name === 'certs')       certsAdminInit();
 }
@@ -15870,6 +15955,285 @@ function rolInit() {
 
 window.rolDelete = rolDelete;
 window.rolInit = rolInit;
+
+/* ══════════════════════════════════════════════════════════════════════
+   TCQ — Team Captain's Qualifier admin (3.101+)
+   ══════════════════════════════════════════════════════════════════════
+   CRUD over tcq.events / tcq.teams / tcq.players, backing the public
+   roster at southportlandmetroapa.github.io/captainsqualifier/. Writes
+   go through PostgREST under the service-role JWT loaded via ?key=.
+
+   Single in-memory state object holds the current event + teams +
+   players; every mutation calls tcqRender() to redraw from that state
+   so the UI stays in sync with the DB after each save/delete.
+*/
+const TCQ_PROFILE = 'tcq';
+let _tcqEvent = null;
+let _tcqTeams = [];
+let _tcqPlayersByTeam = new Map();
+
+async function tcqInit() {
+  await tcqRender();
+  document.getElementById('tcqNewTeamBtn').onclick = () => tcqOpenTeamModal(null);
+}
+
+async function tcqRender() {
+  const list = document.getElementById('tcqList');
+  const stat = document.getElementById('tcqStatus');
+  stat.textContent = 'Loading…';
+  try {
+    const events = await tcqGet('events?is_current=eq.true&select=*');
+    if (!events.length) {
+      list.innerHTML = '<p class="hint">No current Captain\'s Qualifier event. Insert a row in <code>tcq.events</code> first.</p>';
+      stat.textContent = '';
+      return;
+    }
+    _tcqEvent = events[0];
+    _tcqTeams = await tcqGet('teams?event_id=eq.' + _tcqEvent.id + '&select=*&order=team_index.asc,created_at.asc');
+    _tcqPlayersByTeam = new Map();
+    if (_tcqTeams.length) {
+      const ids = _tcqTeams.map(t => t.id).join(',');
+      const players = await tcqGet('players?team_id=in.(' + ids + ')&select=*&order=team_id.asc,position.asc');
+      for (const p of players) {
+        if (!_tcqPlayersByTeam.has(p.team_id)) _tcqPlayersByTeam.set(p.team_id, []);
+        _tcqPlayersByTeam.get(p.team_id).push(p);
+      }
+    }
+    stat.textContent = _tcqEvent.name + ' · ' + _tcqTeams.length + ' team(s)';
+    list.innerHTML = _tcqTeams.length
+      ? _tcqTeams.map(tcqRenderTeamCard).join('')
+      : '<p class="hint">No teams yet. Click <strong>+ New team</strong> to add the first one.</p>';
+  } catch (e) {
+    list.innerHTML = '<p class="hint err">Load failed: ' + esc(e.message) + '</p>';
+    stat.textContent = '';
+  }
+}
+
+function tcqRenderTeamCard(team) {
+  const players = _tcqPlayersByTeam.get(team.id) || [];
+  const captain = players.find(p => p.is_captain);
+  const total = players.reduce((s, p) => s + (p.skill_level || 0), 0);
+  const slotsUsed = players.length;
+  const maxSlots = 5;
+  const positionsTaken = new Set(players.map(p => p.position));
+  const nextOpenPos = [1, 2, 3, 4, 5].find(p => !positionsTaken.has(p));
+
+  const playerRow = (p) => {
+    const tag = p.is_captain ? ' <span class="hint" style="color:#c9a64a;font-weight:700">CAPT</span>' : '';
+    return '<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px dashed #e0e4e9">'
+      + '<div style="flex:1">'
+      +   '<strong>' + esc(p.name) + '</strong>' + tag
+      +   (p.email ? ' <span class="hint" style="font-size:0.78rem">' + esc(p.email) + '</span>' : '')
+      +   '<div class="hint" style="font-size:0.78rem">#' + esc(p.member_number || '?') + ' &middot; SL' + esc(p.skill_level || '?') + '</div>'
+      + '</div>'
+      + '<button class="btn btn-outline btn-sm" onclick="tcqEditPlayer(' + p.id + ')">Edit</button>'
+      + '<button class="btn btn-outline btn-sm" onclick="tcqDeletePlayer(' + p.id + ', \'' + esc(p.name).replace(/'/g, "\\'") + '\')">Delete</button>'
+      + '</div>';
+  };
+
+  return '<div class="card" style="margin-top:10px">'
+    + '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">'
+    +   '<div><strong style="font-size:1.05rem">Team #' + esc(team.team_index || team.id) + '</strong>'
+    +     (captain ? ' &middot; ' + esc(captain.name) : ' <span class="hint">(no captain yet)</span>')
+    +   '</div>'
+    +   '<div class="hint" style="font-size:0.82rem">'
+    +     'Payment: ' + esc(team.payment_method || '—')
+    +     ' &middot; ' + slotsUsed + ' / ' + maxSlots + ' players'
+    +     ' &middot; Total SL ' + total
+    +   '</div>'
+    +   '<div style="margin-left:auto;display:flex;gap:6px">'
+    +     '<button class="btn btn-outline btn-sm" onclick="tcqOpenTeamModal(' + team.id + ')">Edit team</button>'
+    +     '<button class="btn btn-outline btn-sm" onclick="tcqDeleteTeam(' + team.id + ')">Delete team</button>'
+    +   '</div>'
+    + '</div>'
+    + players.map(playerRow).join('')
+    + (nextOpenPos
+        ? '<div style="margin-top:8px"><button class="btn btn-primary btn-sm" '
+          + 'onclick="tcqOpenPlayerModal(' + team.id + ', ' + nextOpenPos + ')">'
+          + '+ Add player (slot ' + nextOpenPos + (nextOpenPos === 1 ? ' — captain' : '') + ')</button></div>'
+        : '<div class="hint" style="margin-top:8px">Team is full (5 / 5).</div>')
+    + '</div>';
+}
+
+/* ── Team CRUD ───────────────────────────────────────────────── */
+function tcqOpenTeamModal(teamId) {
+  const modal = document.getElementById('tcqTeamModal');
+  document.getElementById('tcqTeamId').value = teamId || '';
+  document.getElementById('tcqTeamModalTitle').textContent = teamId ? 'Edit team' : 'New team';
+  if (teamId) {
+    const t = _tcqTeams.find(x => x.id === teamId);
+    document.getElementById('tcqTeamPayment').value = t ? (t.payment_method || '') : '';
+    document.getElementById('tcqTeamNotes').value   = t ? (t.notes || '') : '';
+  } else {
+    document.getElementById('tcqTeamPayment').value = '';
+    document.getElementById('tcqTeamNotes').value = '';
+  }
+  modal.style.display = 'flex';
+}
+function tcqCloseTeamModal() {
+  document.getElementById('tcqTeamModal').style.display = 'none';
+}
+async function tcqSaveTeam() {
+  if (!_tcqEvent) return;
+  const id = document.getElementById('tcqTeamId').value;
+  const body = {
+    payment_method: document.getElementById('tcqTeamPayment').value || null,
+    notes: document.getElementById('tcqTeamNotes').value || null
+  };
+  try {
+    if (id) {
+      await tcqPatch('teams?id=eq.' + id, body);
+    } else {
+      body.event_id = _tcqEvent.id;
+      body.team_index = (_tcqTeams.reduce((m, t) => Math.max(m, t.team_index || 0), 0) + 1);
+      await tcqPost('teams', body);
+    }
+    tcqCloseTeamModal();
+    await tcqRender();
+  } catch (e) {
+    alert('Save failed: ' + e.message);
+  }
+}
+async function tcqDeleteTeam(teamId) {
+  const t = _tcqTeams.find(x => x.id === teamId);
+  const cap = (_tcqPlayersByTeam.get(teamId) || []).find(p => p.is_captain);
+  if (!confirm('Delete team #' + (t && t.team_index || teamId) + (cap ? ' (' + cap.name + ')' : '') + '? This also deletes all its players.')) return;
+  try {
+    await tcqDelete('teams?id=eq.' + teamId);
+    await tcqRender();
+  } catch (e) {
+    alert('Delete failed: ' + e.message);
+  }
+}
+
+/* ── Player CRUD ─────────────────────────────────────────────── */
+function tcqOpenPlayerModal(teamId, position, playerId) {
+  const modal = document.getElementById('tcqPlayerModal');
+  document.getElementById('tcqPlayerTeamId').value = teamId;
+  document.getElementById('tcqPlayerPosition').value = position;
+  /* hidden _tcqEditingPlayerId stored on the modal element so we know
+     INSERT vs UPDATE on save. */
+  modal.dataset.playerId = playerId || '';
+  const isEdit = !!playerId;
+  document.getElementById('tcqPlayerModalTitle').textContent =
+    isEdit ? 'Edit player' : ('Add player — slot ' + position + (position === 1 ? ' (captain)' : ''));
+  if (isEdit) {
+    const p = (_tcqPlayersByTeam.get(teamId) || []).find(x => x.id === playerId);
+    document.getElementById('tcqPlayerName').value = p ? p.name : '';
+    document.getElementById('tcqPlayerEmail').value = p ? (p.email || '') : '';
+    document.getElementById('tcqPlayerNum').value = p ? (p.member_number || '') : '';
+    document.getElementById('tcqPlayerSL').value = p ? (p.skill_level || '') : '';
+  } else {
+    document.getElementById('tcqPlayerName').value = '';
+    document.getElementById('tcqPlayerEmail').value = '';
+    document.getElementById('tcqPlayerNum').value = '';
+    document.getElementById('tcqPlayerSL').value = '';
+  }
+  /* Email row only relevant for captain slot. */
+  document.getElementById('tcqPlayerEmailRow').style.display = (Number(position) === 1) ? '' : 'none';
+  modal.style.display = 'flex';
+}
+function tcqEditPlayer(playerId) {
+  for (const [tid, plist] of _tcqPlayersByTeam.entries()) {
+    const p = plist.find(x => x.id === playerId);
+    if (p) { tcqOpenPlayerModal(tid, p.position, playerId); return; }
+  }
+}
+function tcqClosePlayerModal() {
+  document.getElementById('tcqPlayerModal').style.display = 'none';
+}
+async function tcqSavePlayer() {
+  const modal = document.getElementById('tcqPlayerModal');
+  const teamId = Number(document.getElementById('tcqPlayerTeamId').value);
+  const position = Number(document.getElementById('tcqPlayerPosition').value);
+  const playerId = modal.dataset.playerId ? Number(modal.dataset.playerId) : null;
+  const name = document.getElementById('tcqPlayerName').value.trim();
+  if (!name) { alert('Name is required'); return; }
+  const body = {
+    name: name,
+    email: (position === 1) ? (document.getElementById('tcqPlayerEmail').value.trim() || null) : null,
+    member_number: document.getElementById('tcqPlayerNum').value.trim() || null,
+    skill_level: document.getElementById('tcqPlayerSL').value ? Number(document.getElementById('tcqPlayerSL').value) : null
+  };
+  try {
+    if (playerId) {
+      await tcqPatch('players?id=eq.' + playerId, body);
+    } else {
+      body.team_id = teamId;
+      body.position = position;
+      await tcqPost('players', body);
+    }
+    tcqClosePlayerModal();
+    await tcqRender();
+  } catch (e) {
+    alert('Save failed: ' + e.message);
+  }
+}
+async function tcqDeletePlayer(playerId, name) {
+  if (!confirm('Remove ' + name + ' from the team?')) return;
+  try {
+    await tcqDelete('players?id=eq.' + playerId);
+    await tcqRender();
+  } catch (e) {
+    alert('Delete failed: ' + e.message);
+  }
+}
+
+/* ── REST helpers (service-role JWT via SB_KEY, profile=tcq) ───── */
+async function tcqGet(path) {
+  const r = await fetch(SB_URL + '/rest/v1/' + path, {
+    headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Accept-Profile': TCQ_PROFILE }
+  });
+  if (!r.ok) throw new Error('GET ' + r.status + ': ' + (await r.text()).slice(0,160));
+  return r.json();
+}
+async function tcqPost(path, body) {
+  const r = await fetch(SB_URL + '/rest/v1/' + path, {
+    method: 'POST',
+    headers: {
+      apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY,
+      'Accept-Profile': TCQ_PROFILE, 'Content-Profile': TCQ_PROFILE,
+      'Content-Type': 'application/json', Prefer: 'return=minimal'
+    },
+    body: JSON.stringify(body)
+  });
+  if (!r.ok) throw new Error('POST ' + r.status + ': ' + (await r.text()).slice(0,160));
+}
+async function tcqPatch(path, body) {
+  const r = await fetch(SB_URL + '/rest/v1/' + path, {
+    method: 'PATCH',
+    headers: {
+      apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY,
+      'Accept-Profile': TCQ_PROFILE, 'Content-Profile': TCQ_PROFILE,
+      'Content-Type': 'application/json', Prefer: 'return=minimal'
+    },
+    body: JSON.stringify(body)
+  });
+  if (!r.ok) throw new Error('PATCH ' + r.status + ': ' + (await r.text()).slice(0,160));
+}
+async function tcqDelete(path) {
+  const r = await fetch(SB_URL + '/rest/v1/' + path, {
+    method: 'DELETE',
+    headers: {
+      apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY,
+      'Accept-Profile': TCQ_PROFILE, 'Content-Profile': TCQ_PROFILE,
+      Prefer: 'return=minimal'
+    }
+  });
+  if (!r.ok) throw new Error('DELETE ' + r.status + ': ' + (await r.text()).slice(0,160));
+}
+
+window.tcqInit = tcqInit;
+window.tcqRender = tcqRender;
+window.tcqOpenTeamModal = tcqOpenTeamModal;
+window.tcqCloseTeamModal = tcqCloseTeamModal;
+window.tcqSaveTeam = tcqSaveTeam;
+window.tcqDeleteTeam = tcqDeleteTeam;
+window.tcqOpenPlayerModal = tcqOpenPlayerModal;
+window.tcqClosePlayerModal = tcqClosePlayerModal;
+window.tcqSavePlayer = tcqSavePlayer;
+window.tcqEditPlayer = tcqEditPlayer;
+window.tcqDeletePlayer = tcqDeletePlayer;
 
 /* ────── Activity log viewer (3.69+) ──────
    Reads slate.rolodex_log via service-role JWT (the same SB_KEY the
