@@ -2269,7 +2269,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION   = '3.104';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION   = '3.105';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -16076,6 +16076,9 @@ function tcqRenderTeamCard(team) {
           : '')
     +   '</div>'
     +   '<div style="margin-left:auto;display:flex;gap:6px">'
+    +     '<button class="btn btn-primary btn-sm" onclick="tcqTextCaptain(' + team.id + ')"'
+    +       (captain && captain.cell_phone ? '' : ' disabled title="No captain cell phone on file"')
+    +       '>Text captain</button>'
     +     '<button class="btn btn-outline btn-sm" onclick="tcqOpenTeamModal(' + team.id + ')">Edit team</button>'
     +     '<button class="btn btn-outline btn-sm" onclick="tcqDeleteTeam(' + team.id + ')">Delete team</button>'
     +   '</div>'
@@ -16212,6 +16215,57 @@ async function tcqDeletePlayer(playerId, name) {
   }
 }
 
+/* ── Text captain ────────────────────────────────────────────────
+   Builds an sms: link with a roster-confirmation body. Adds an
+   "over cap" notice if no 3-player combination totals <= 15.
+   Captain's cell_phone comes through tcq.players_admin (joins to
+   slate.players). Opens the device's SMS app — admin reviews +
+   sends. We don't auto-send; the link populates the recipient and
+   body so the admin still has the final tap. */
+function tcqNormalizePhone(raw) {
+  if (!raw) return null;
+  const digits = String(raw).replace(/[^0-9]/g, '');
+  if (digits.length === 10) return '+1' + digits;
+  if (digits.length === 11 && digits[0] === '1') return '+' + digits;
+  return null;   // not a normal US number — bail
+}
+function tcqTextCaptain(teamId) {
+  const team = _tcqTeams.find(t => t.id === teamId);
+  const players = (_tcqPlayersByTeam.get(teamId) || []).slice().sort((a, b) => a.position - b.position);
+  const captain = players.find(p => p.is_captain);
+  if (!captain) { alert('No captain on this team yet.'); return; }
+  const phone = tcqNormalizePhone(captain.cell_phone);
+  if (!phone) { alert('No usable cell phone on file for ' + captain.name + '.'); return; }
+  const lineup = tcqLineupCheck(players);
+
+  /* Build the body — keep it short. SMS bodies > ~160 chars split
+     into multiple parts on carriers; tournament rosters can easily
+     exceed that, so we accept the split as a cost of completeness. */
+  const lines = [];
+  lines.push('Hi ' + (captain.live_first_name || captain.name.split(' ')[0]) + '! Confirming your Captain\'s Qualifier roster:');
+  lines.push('');
+  for (const p of players) {
+    const sl = (p.effective_skill_level != null) ? ' (SL' + p.effective_skill_level + ')' : '';
+    lines.push(p.position + '. ' + p.name + sl + (p.is_captain ? ' — captain' : ''));
+  }
+  lines.push('');
+  if (lineup === 'invalid') {
+    lines.push('⚠ Heads up — your current 3-player lineup options all total over the SL 15 cap. The team can\'t compete as-is. You\'ll need to swap or add a lower-SL player before the event.');
+    lines.push('');
+  } else if (lineup === 'incomplete') {
+    lines.push('Note: you need at least 3 players on the roster to compete. Add ' + (3 - players.length) + ' more before the event.');
+    lines.push('');
+  }
+  lines.push('Reply YES to confirm or tell me what needs to change. Thanks!');
+  lines.push('— SPM APA');
+
+  const body = lines.join('\n');
+  /* iOS uses ?&body=..., Android uses ?body=... — the double form
+     works in both (the leading & is harmless to iOS). */
+  const url = 'sms:' + phone + '?&body=' + encodeURIComponent(body);
+  window.location.href = url;
+}
+
 /* ── REST helpers (service-role JWT via SB_KEY, profile=tcq) ───── */
 async function tcqGet(path) {
   const r = await fetch(SB_URL + '/rest/v1/' + path, {
@@ -16267,6 +16321,7 @@ window.tcqClosePlayerModal = tcqClosePlayerModal;
 window.tcqSavePlayer = tcqSavePlayer;
 window.tcqEditPlayer = tcqEditPlayer;
 window.tcqDeletePlayer = tcqDeletePlayer;
+window.tcqTextCaptain = tcqTextCaptain;
 
 /* ────── Activity log viewer (3.69+) ──────
    Reads slate.rolodex_log via service-role JWT (the same SB_KEY the
