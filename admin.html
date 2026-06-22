@@ -2156,14 +2156,13 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             <label>Email (captain only)</label>
             <input type="email" id="tcqPlayerEmail" class="form-input" maxlength="200">
           </div>
-          <div style="display:flex;gap:8px">
-            <div class="form-row" style="flex:1">
-              <label>Member #</label>
-              <input type="text" id="tcqPlayerNum" class="form-input" maxlength="20" inputmode="numeric">
-            </div>
-            <div class="form-row" style="width:100px">
-              <label>Skill Lvl</label>
-              <input type="number" id="tcqPlayerSL" class="form-input" min="1" max="9">
+          <div class="form-row">
+            <label>Member # (8-digit APA number)</label>
+            <input type="text" id="tcqPlayerNum" class="form-input" maxlength="20" inputmode="numeric"
+                   placeholder="97212345">
+            <div class="hint" style="font-size:0.78rem;margin-top:4px">
+              Skill level is sourced live from <code>slate.players</code>
+              (highest of 8-ball / 9-ball, capped at 7) — no manual entry.
             </div>
           </div>
           <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
@@ -2270,7 +2269,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION   = '3.101';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION   = '3.102';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -15993,7 +15992,11 @@ async function tcqRender() {
     _tcqPlayersByTeam = new Map();
     if (_tcqTeams.length) {
       const ids = _tcqTeams.map(t => t.id).join(',');
-      const players = await tcqGet('players?team_id=in.(' + ids + ')&select=*&order=team_id.asc,position.asc');
+      /* 3.102: use players_admin (joins to slate.players) so SLs come from
+         the live DB. live_skill_level = max(sl_8, sl_9) capped at 7;
+         effective_skill_level falls back to stored value when no slate
+         match exists (guest players). */
+      const players = await tcqGet('players_admin?team_id=in.(' + ids + ')&select=*&order=team_id.asc,position.asc');
       for (const p of players) {
         if (!_tcqPlayersByTeam.has(p.team_id)) _tcqPlayersByTeam.set(p.team_id, []);
         _tcqPlayersByTeam.get(p.team_id).push(p);
@@ -16012,7 +16015,7 @@ async function tcqRender() {
 function tcqRenderTeamCard(team) {
   const players = _tcqPlayersByTeam.get(team.id) || [];
   const captain = players.find(p => p.is_captain);
-  const total = players.reduce((s, p) => s + (p.skill_level || 0), 0);
+  const total = players.reduce((s, p) => s + (p.effective_skill_level || 0), 0);
   const slotsUsed = players.length;
   const maxSlots = 5;
   const positionsTaken = new Set(players.map(p => p.position));
@@ -16020,11 +16023,25 @@ function tcqRenderTeamCard(team) {
 
   const playerRow = (p) => {
     const tag = p.is_captain ? ' <span class="hint" style="color:#c9a64a;font-weight:700">CAPT</span>' : '';
+    /* SL breakdown: prefer live (8/9 → max → cap@7). Tag mismatch with
+       stored value so admin can spot discrepancies. */
+    const liveSL = p.live_skill_level;
+    const eff = p.effective_skill_level;
+    let slLabel;
+    if (liveSL != null) {
+      slLabel = 'SL' + liveSL + ' <span class="hint" style="font-size:0.7rem">live (8:'
+        + (p.sl_8ball ?? '?') + ' 9:' + (p.sl_9ball ?? '?') + ')</span>';
+    } else if (p.stored_skill_level != null) {
+      slLabel = 'SL' + p.stored_skill_level
+        + ' <span class="hint" style="font-size:0.7rem;color:#c0392b">stored fallback — no slate.players match</span>';
+    } else {
+      slLabel = '<span class="hint" style="font-size:0.78rem;color:#c0392b">no SL — member # not found</span>';
+    }
     return '<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px dashed #e0e4e9">'
       + '<div style="flex:1">'
       +   '<strong>' + esc(p.name) + '</strong>' + tag
       +   (p.email ? ' <span class="hint" style="font-size:0.78rem">' + esc(p.email) + '</span>' : '')
-      +   '<div class="hint" style="font-size:0.78rem">#' + esc(p.member_number || '?') + ' &middot; SL' + esc(p.skill_level || '?') + '</div>'
+      +   '<div class="hint" style="font-size:0.78rem">#' + esc(p.member_number || '?') + ' &middot; ' + slLabel + '</div>'
       + '</div>'
       + '<button class="btn btn-outline btn-sm" onclick="tcqEditPlayer(' + p.id + ')">Edit</button>'
       + '<button class="btn btn-outline btn-sm" onclick="tcqDeletePlayer(' + p.id + ', \'' + esc(p.name).replace(/'/g, "\\'") + '\')">Delete</button>'
@@ -16122,12 +16139,10 @@ function tcqOpenPlayerModal(teamId, position, playerId) {
     document.getElementById('tcqPlayerName').value = p ? p.name : '';
     document.getElementById('tcqPlayerEmail').value = p ? (p.email || '') : '';
     document.getElementById('tcqPlayerNum').value = p ? (p.member_number || '') : '';
-    document.getElementById('tcqPlayerSL').value = p ? (p.skill_level || '') : '';
   } else {
     document.getElementById('tcqPlayerName').value = '';
     document.getElementById('tcqPlayerEmail').value = '';
     document.getElementById('tcqPlayerNum').value = '';
-    document.getElementById('tcqPlayerSL').value = '';
   }
   /* Email row only relevant for captain slot. */
   document.getElementById('tcqPlayerEmailRow').style.display = (Number(position) === 1) ? '' : 'none';
@@ -16152,8 +16167,9 @@ async function tcqSavePlayer() {
   const body = {
     name: name,
     email: (position === 1) ? (document.getElementById('tcqPlayerEmail').value.trim() || null) : null,
-    member_number: document.getElementById('tcqPlayerNum').value.trim() || null,
-    skill_level: document.getElementById('tcqPlayerSL').value ? Number(document.getElementById('tcqPlayerSL').value) : null
+    member_number: document.getElementById('tcqPlayerNum').value.trim() || null
+    /* skill_level intentionally omitted — derived live from slate.players
+       via the players_admin view (max of sl_8ball/sl_9ball, capped at 7). */
   };
   try {
     if (playerId) {
