@@ -2270,7 +2270,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION   = '3.107';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION   = '3.108';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -16240,26 +16240,32 @@ function tcqNormalizePhone(raw) {
   if (digits.length === 11 && digits[0] === '1') return '+' + digits;
   return null;   // not a normal US number — bail
 }
-/* Cached editable template. Loaded lazily on first text-captain click
-   AND when the template editor opens — keeps the latest body always
-   in memory after any edit. */
-let _tcqTemplate = null;
+/* Cached editable templates. Three kinds in tcq.templates:
+     body              — the wrapping SMS body (uses {status_notice})
+     status_invalid    — block injected when the roster has no
+                         3-player lineup at or under SL{cap}
+     status_incomplete — block injected when the roster has <3 players
+   Loaded lazily on first text-captain click AND refreshed when the
+   editor saves so subsequent SMS bodies pick up the new values. */
+let _tcqTpl = null;   // { body, status_invalid, status_incomplete }
 const TCQ_TEMPLATE_VARS = [
   'captain_first', 'captain_full', 'team_index', 'roster',
   'min_sl', 'cap', 'over_by', 'needed', 'status_notice'
 ];
 const TCQ_CAP = 15;
 
-async function tcqLoadTemplate() {
-  if (_tcqTemplate) return _tcqTemplate;
+async function tcqLoadTemplates() {
+  if (_tcqTpl) return _tcqTpl;
   try {
-    const rows = await tcqGet('templates?kind=eq.captain_confirm&select=body');
-    _tcqTemplate = (rows && rows[0] && rows[0].body) || '';
+    const rows = await tcqGet('templates?kind=in.(body,status_invalid,status_incomplete)&select=kind,body');
+    const map = { body: '', status_invalid: '', status_incomplete: '' };
+    for (const r of (rows || [])) map[r.kind] = r.body || '';
+    _tcqTpl = map;
   } catch (e) {
-    console.error('[tcq] template load failed', e);
-    _tcqTemplate = '';
+    console.error('[tcq] templates load failed', e);
+    _tcqTpl = { body: '', status_invalid: '', status_incomplete: '' };
   }
-  return _tcqTemplate;
+  return _tcqTpl;
 }
 
 /* Substitute {var} placeholders. Unknown vars left as-is so typos
@@ -16270,24 +16276,17 @@ function tcqSubstitute(template, vars) {
   );
 }
 
-function tcqBuildVars(team, players, captain, lineup) {
+function tcqBuildVars(team, players, captain, lineup, tpl) {
   const roster = players.map(p => {
     const sl = (p.effective_skill_level != null) ? ' (SL' + p.effective_skill_level + ')' : '';
     return p.position + '. ' + p.name + sl + (p.is_captain ? ' — captain' : '');
   }).join('\n');
   const overBy = lineup.state === 'invalid' ? (lineup.minSum - TCQ_CAP) : 0;
   const needed = lineup.state === 'incomplete' ? (3 - players.length) : 0;
-  let statusNotice = '';
-  if (lineup.state === 'invalid') {
-    statusNotice = '⚠ Heads up — your lowest possible 3-player lineup totals SL'
-      + lineup.minSum + ', which is ' + overBy + ' over the SL ' + TCQ_CAP
-      + ' cap. The team can\'t compete as-is — you\'ll need to swap or add a player whose SL is at least '
-      + overBy + ' lower than the player they replace.\n\n';
-  } else if (lineup.state === 'incomplete') {
-    statusNotice = 'Note: you need at least 3 players on the roster to compete. Add '
-      + needed + ' more before the event.\n\n';
-  }
-  return {
+  /* Base var map first — used to render the status template, then
+     re-used for the body. Order matters: status template renders
+     using THIS map, then its output becomes the body's status_notice. */
+  const baseVars = {
     captain_first: captain.live_first_name || captain.name.split(' ')[0],
     captain_full:  captain.name,
     team_index:    team && team.team_index != null ? team.team_index : '',
@@ -16295,9 +16294,13 @@ function tcqBuildVars(team, players, captain, lineup) {
     min_sl:        lineup.minSum != null ? lineup.minSum : '',
     cap:           TCQ_CAP,
     over_by:       overBy,
-    needed:        needed,
-    status_notice: statusNotice
+    needed:        needed
   };
+  let statusTemplate = '';
+  if (lineup.state === 'invalid')          statusTemplate = (tpl && tpl.status_invalid)    || '';
+  else if (lineup.state === 'incomplete')  statusTemplate = (tpl && tpl.status_incomplete) || '';
+  const statusNotice = tcqSubstitute(statusTemplate, baseVars);
+  return { ...baseVars, status_notice: statusNotice };
 }
 
 async function tcqTextCaptain(teamId) {
@@ -16308,67 +16311,97 @@ async function tcqTextCaptain(teamId) {
   const phone = tcqNormalizePhone(captain.cell_phone);
   if (!phone) { alert('No usable cell phone on file for ' + captain.name + '.'); return; }
   const lineup = tcqLineupCheck(players);
-  const template = await tcqLoadTemplate();
-  const body = tcqSubstitute(template, tcqBuildVars(team, players, captain, lineup));
+  const tpl = await tcqLoadTemplates();
+  const body = tcqSubstitute(tpl.body, tcqBuildVars(team, players, captain, lineup, tpl));
   const url = 'sms:' + phone + '?&body=' + encodeURIComponent(body);
   window.location.href = url;
 }
 
-/* Template editor modal — single text body with {var} placeholders.
-   Click a variable pill to insert {name} at the textarea's cursor. */
+/* Template editor — three textareas (body / over-cap notice /
+   incomplete notice). Each has its own variable-pill bar. Save UPSERTs
+   all three in one batch so partial-save errors can't leave the kinds
+   out of sync. */
 async function tcqOpenTemplateEditor() {
   const existing = document.getElementById('tcqTplModal');
   if (existing) existing.remove();
-  await tcqLoadTemplate();
+  const tpl = await tcqLoadTemplates();
   const back = document.createElement('div');
   back.id = 'tcqTplModal';
   back.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:2000;display:flex;align-items:center;justify-content:center;padding:20px';
-  const pills = TCQ_TEMPLATE_VARS.map(v =>
-    '<button type="button" data-tcqvar="' + esc(v) + '" '
+
+  /* Per-block variable lists. The over-cap notice doesn't usually need
+     {roster}/{captain_first}/{status_notice}; show only the relevant
+     pills to reduce noise (but substitution accepts any var). */
+  const ALL_VARS = TCQ_TEMPLATE_VARS;
+  const STATUS_INVALID_VARS    = ['min_sl', 'cap', 'over_by'];
+  const STATUS_INCOMPLETE_VARS = ['needed'];
+  const pillsHtml = (vars) => vars.map(v =>
+    '<button type="button" data-tcqvar="' + esc(v) + '" data-tcqfield="" '
     + 'style="padding:3px 8px;font-size:0.74rem;font-weight:700;background:#f3f4f6;'
     + 'border:1px solid var(--border);border-radius:6px;color:var(--text);cursor:pointer;'
     + 'font-family:ui-monospace,SFMono-Regular,monospace">{' + esc(v) + '}</button>'
   ).join(' ');
+
+  const section = (label, hint, fieldId, vars, value) => ''
+    + '<div style="margin-top:14px">'
+    +   '<div style="font-weight:700;font-size:0.92rem;margin-bottom:2px">' + label + '</div>'
+    +   '<div class="hint" style="font-size:0.78rem;margin-bottom:6px">' + hint + '</div>'
+    +   '<div class="tcqvar-bar" data-for="' + fieldId + '" style="margin-bottom:6px;display:flex;gap:4px;flex-wrap:wrap">' + pillsHtml(vars) + '</div>'
+    +   '<textarea id="' + fieldId + '" rows="' + (fieldId === 'tcqTplBody' ? 8 : 4)
+    +     '" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:0.92rem">'
+    +     esc(value || '') + '</textarea>'
+    + '</div>';
+
   back.innerHTML = ''
-    + '<div style="background:#fff;border-radius:14px;padding:20px;max-width:680px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 10px 30px rgba(0,0,0,0.25)">'
-    +   '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">'
+    + '<div style="background:#fff;border-radius:14px;padding:20px;max-width:760px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 10px 30px rgba(0,0,0,0.25)">'
+    +   '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'
     +     '<div style="font-weight:800;font-size:1.05rem">📝 Captain confirmation text</div>'
     +     '<button type="button" id="tcqTplClose" style="margin-left:auto;background:none;border:0;font-size:1.4rem;line-height:1;cursor:pointer;color:var(--muted)">×</button>'
     +   '</div>'
-    +   '<p class="hint" style="margin-top:0">Tap a variable to insert at cursor. Unknown <code>{vars}</code> are left in the SMS so typos are visible.</p>'
-    +   '<div style="margin-bottom:8px;display:flex;gap:4px;flex-wrap:wrap">' + pills + '</div>'
-    +   '<textarea id="tcqTplBody" rows="12" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:0.92rem">'
-    +     esc(_tcqTemplate || '') + '</textarea>'
-    +   '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">'
+    +   '<p class="hint" style="margin-top:0">Tap a variable pill to insert at cursor in the textarea beneath it. Unknown <code>{vars}</code> stay verbatim in the SMS so typos are visible.</p>'
+    +   section('Body', 'The wrapping SMS. Use <code>{status_notice}</code> wherever you want the over-cap or incomplete block to appear (empty for healthy teams).', 'tcqTplBody', ALL_VARS, tpl.body)
+    +   section('Over-cap notice', 'Injected at <code>{status_notice}</code> when no 3-player lineup totals ≤ ' + TCQ_CAP + '.', 'tcqTplInvalid', STATUS_INVALID_VARS, tpl.status_invalid)
+    +   section('Incomplete notice', 'Injected at <code>{status_notice}</code> when fewer than 3 players are on the roster.', 'tcqTplIncomplete', STATUS_INCOMPLETE_VARS, tpl.status_incomplete)
+    +   '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px">'
     +     '<button class="btn btn-outline" id="tcqTplCancel">Cancel</button>'
-    +     '<button class="btn btn-outline" id="tcqTplReset">Restore default</button>'
-    +     '<button class="btn btn-primary" id="tcqTplSave">Save</button>'
+    +     '<button class="btn btn-outline" id="tcqTplReset">Restore defaults</button>'
+    +     '<button class="btn btn-primary" id="tcqTplSave">Save all</button>'
     +   '</div>'
     + '</div>';
   document.body.appendChild(back);
-  const ta = document.getElementById('tcqTplBody');
-  back.querySelectorAll('[data-tcqvar]').forEach(btn => {
-    btn.onclick = () => {
-      const v = '{' + btn.dataset.tcqvar + '}';
-      const s = ta.selectionStart, e = ta.selectionEnd;
-      ta.value = ta.value.slice(0, s) + v + ta.value.slice(e);
-      ta.focus();
-      ta.setSelectionRange(s + v.length, s + v.length);
-    };
+
+  /* Wire variable pills — each bar inserts into the textarea whose id
+     matches data-for (set on the bar's wrapper). */
+  back.querySelectorAll('.tcqvar-bar').forEach(bar => {
+    const taId = bar.dataset.for;
+    const ta = document.getElementById(taId);
+    bar.querySelectorAll('[data-tcqvar]').forEach(btn => {
+      btn.onclick = () => {
+        const v = '{' + btn.dataset.tcqvar + '}';
+        const s = ta.selectionStart, e = ta.selectionEnd;
+        ta.value = ta.value.slice(0, s) + v + ta.value.slice(e);
+        ta.focus();
+        ta.setSelectionRange(s + v.length, s + v.length);
+      };
+    });
   });
+
   const close = () => back.remove();
   document.getElementById('tcqTplClose').onclick = close;
   document.getElementById('tcqTplCancel').onclick = close;
   document.getElementById('tcqTplReset').onclick = () => {
-    if (!confirm('Restore the default template? Your current edits will be discarded.')) return;
-    ta.value = TCQ_DEFAULT_TEMPLATE;
+    if (!confirm('Restore all three default templates? Your current edits will be discarded.')) return;
+    document.getElementById('tcqTplBody').value       = TCQ_DEFAULTS.body;
+    document.getElementById('tcqTplInvalid').value    = TCQ_DEFAULTS.status_invalid;
+    document.getElementById('tcqTplIncomplete').value = TCQ_DEFAULTS.status_incomplete;
   };
   document.getElementById('tcqTplSave').onclick = async () => {
-    const body = ta.value;
+    const rows = [
+      { kind: 'body',              body: document.getElementById('tcqTplBody').value,       updated_at: new Date().toISOString() },
+      { kind: 'status_invalid',    body: document.getElementById('tcqTplInvalid').value,    updated_at: new Date().toISOString() },
+      { kind: 'status_incomplete', body: document.getElementById('tcqTplIncomplete').value, updated_at: new Date().toISOString() }
+    ];
     try {
-      /* UPSERT by kind. Prefer: resolution=merge-duplicates is REQUIRED
-         to actually merge — without it PostgREST plain-INSERTs and hits
-         the PK constraint. */
       const r = await fetch(SB_URL + '/rest/v1/templates?on_conflict=kind', {
         method: 'POST',
         headers: {
@@ -16377,10 +16410,10 @@ async function tcqOpenTemplateEditor() {
           'Content-Type': 'application/json',
           Prefer: 'resolution=merge-duplicates,return=minimal'
         },
-        body: JSON.stringify([{ kind: 'captain_confirm', body: body, updated_at: new Date().toISOString() }])
+        body: JSON.stringify(rows)
       });
       if (!r.ok) throw new Error('Save ' + r.status + ': ' + (await r.text()).slice(0, 160));
-      _tcqTemplate = body;
+      _tcqTpl = { body: rows[0].body, status_invalid: rows[1].body, status_incomplete: rows[2].body };
       close();
     } catch (e) {
       alert('Save failed: ' + e.message);
@@ -16388,12 +16421,20 @@ async function tcqOpenTemplateEditor() {
   };
 }
 
-const TCQ_DEFAULT_TEMPLATE = `Hi {captain_first}! Confirming your Captain's Qualifier roster:
+const TCQ_DEFAULTS = {
+  body: `Hi {captain_first}! Confirming your Captain's Qualifier roster:
 
 {roster}
 
 {status_notice}Reply YES to confirm or tell me what needs to change. Thanks!
-— SPM APA`;
+— SPM APA`,
+  status_invalid: `⚠ Heads up — your lowest possible 3-player lineup totals SL{min_sl}, which is {over_by} over the SL {cap} cap. The team can't compete as-is — you'll need to swap or add a player whose SL is at least {over_by} lower than the player they replace.
+
+`,
+  status_incomplete: `Note: you need at least 3 players on the roster to compete. Add {needed} more before the event.
+
+`
+};
 
 /* ── REST helpers (service-role JWT via SB_KEY, profile=tcq) ───── */
 async function tcqGet(path) {
