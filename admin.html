@@ -2286,7 +2286,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION   = '3.109';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION   = '3.110';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -15989,7 +15989,7 @@ let _tcqTeams = [];
 let _tcqPlayersByTeam = new Map();
 
 async function tcqInit() {
-  await tcqLoadEligibility();
+  await Promise.all([tcqLoadEligibility(), tcqLoadSu26Roster()]);
   await tcqRender();
   document.getElementById('tcqNewTeamBtn').onclick = () => tcqOpenTeamModal(null);
   /* Eligibility report drop-zone wiring */
@@ -16030,6 +16030,36 @@ async function tcqLoadEligibility() {
   } catch (e) {
     console.warn('[tcq] eligibility load failed', e);
     _tcqEligibility = new Map();
+  }
+}
+
+/* Live Su26 active-roster set, from slate.team_memberships. More
+   authoritative than the Nexus report's Summer Team column — the
+   report freezes at print time, slate reflects today's rosters. */
+let _tcqSu26Roster = new Set();
+async function tcqLoadSu26Roster() {
+  try {
+    /* Service-role read against slate. The TMS Roster Report upload
+       writes here; this query is paged so any session size is fine. */
+    const all = [];
+    let offset = 0, page = 1000;
+    for (;;) {
+      const r = await fetch(SB_URL + '/rest/v1/team_memberships'
+        + '?select=member_number,team:teams!inner(division:divisions!inner(session_id))'
+        + '&team.division.session_id=eq.1'
+        + '&limit=' + page + '&offset=' + offset, {
+        headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Accept-Profile': 'slate' }
+      });
+      if (!r.ok) throw new Error('su26 roster ' + r.status);
+      const rows = await r.json();
+      all.push(...rows);
+      if (rows.length < page) break;
+      offset += page;
+    }
+    _tcqSu26Roster = new Set(all.map(r => r.member_number).filter(Boolean));
+  } catch (e) {
+    console.warn('[tcq] su26 roster load failed', e);
+    _tcqSu26Roster = new Set();
   }
 }
 
@@ -16216,20 +16246,38 @@ const TCQ_RULES = { CAPT_SESSIONS: 2, SPRING_MP: 4, FORMAT_SCORES: 20 };
 function tcqCaptainEligibility(captain) {
   if (!captain || !captain.member_number) return { state: 'no_data', reasons: ['no captain'] };
   const e = _tcqEligibility.get(captain.member_number);
-  if (!e) return { state: 'no_data', reasons: ['not on eligibility report'] };
+  /* Su26 roster status sourced from slate (live), not the report. The
+     report's Summer Team column freezes at print time; slate reflects
+     roster swaps made after. */
+  const onSu26 = _tcqSu26Roster.has(captain.member_number);
+  if (!e) {
+    /* No report row, but we can still check the Su26 rule. */
+    const reasons = [];
+    if (!onSu26) reasons.push('not on Summer 26 roster');
+    reasons.push('not on eligibility report');
+    return { state: reasons.length ? 'fail' : 'no_data', reasons };
+  }
   const reasons = [];
   const sess = e.sessions_as_capt || 0;
   const smp  = e.spring_mp || 0;
   const s8   = e.scores_8b  || 0;
   const s9   = e.scores_9b  || 0;
-  const summer = e.summer_team === true;
   if (sess < TCQ_RULES.CAPT_SESSIONS) reasons.push(sess + '/' + TCQ_RULES.CAPT_SESSIONS + ' captain sessions');
   if (smp  < TCQ_RULES.SPRING_MP)     reasons.push(smp  + '/' + TCQ_RULES.SPRING_MP + ' Spring matches played');
   if (s8 < TCQ_RULES.FORMAT_SCORES && s9 < TCQ_RULES.FORMAT_SCORES) {
     reasons.push('8B ' + s8 + ' and 9B ' + s9 + ' both below ' + TCQ_RULES.FORMAT_SCORES);
   }
-  if (!summer) reasons.push('not on Summer 26 roster');
+  if (!onSu26) reasons.push('not on Summer 26 roster');
   return { state: reasons.length ? 'fail' : 'ok', reasons };
+}
+
+/* Team-wide roster check: returns the list of players (not just the
+   captain) who are NOT on any active Summer 2026 league roster per
+   slate. Returns [{ name, member_number }] (empty if everyone's in). */
+function tcqRosterCheck(players) {
+  return players
+    .filter(p => p.member_number && !_tcqSu26Roster.has(p.member_number))
+    .map(p => ({ name: p.name, member_number: p.member_number }));
 }
 
 function tcqRenderTeamCard(team) {
@@ -16238,6 +16286,7 @@ function tcqRenderTeamCard(team) {
   const slotsUsed = players.length;
   const lineup = tcqLineupCheck(players);
   const elig = tcqCaptainEligibility(captain);
+  const offRoster = tcqRosterCheck(players);
   const maxSlots = 5;
   const positionsTaken = new Set(players.map(p => p.position));
   const nextOpenPos = [1, 2, 3, 4, 5].find(p => !positionsTaken.has(p));
@@ -16287,6 +16336,9 @@ function tcqRenderTeamCard(team) {
         : elig.state === 'no_data'
           ? ' &middot; <span class="hint" style="font-size:0.75rem;color:#c9a64a" title="' + esc(elig.reasons.join('; ')) + '">? Captain not in eligibility report</span>'
           : '')
+    +     (offRoster.length
+        ? ' &middot; <span style="background:#ea002a;color:#fff;padding:2px 8px;border-radius:999px;font-weight:700;font-size:0.75rem" title="' + esc(offRoster.map(p => p.name).join(', ')) + ' not on a Su26 league roster">&#9888; ' + offRoster.length + ' off-roster</span>'
+        : '')
     +   '</div>'
     +   '<div style="margin-left:auto;display:flex;gap:6px">'
     +     '<button class="btn btn-primary btn-sm" onclick="tcqTextCaptain(' + team.id + ')"'
@@ -16449,23 +16501,25 @@ function tcqNormalizePhone(raw) {
      status_incomplete — block injected when the roster has <3 players
    Loaded lazily on first text-captain click AND refreshed when the
    editor saves so subsequent SMS bodies pick up the new values. */
-let _tcqTpl = null;   // { body, status_invalid, status_incomplete, status_captain_ineligible }
+let _tcqTpl = null;
 const TCQ_TEMPLATE_VARS = [
   'captain_first', 'captain_full', 'team_index', 'roster',
-  'min_sl', 'cap', 'over_by', 'needed', 'eligibility_reasons', 'status_notice'
+  'min_sl', 'cap', 'over_by', 'needed',
+  'eligibility_reasons', 'off_roster_players', 'status_notice'
 ];
 const TCQ_CAP = 15;
 
 async function tcqLoadTemplates() {
   if (_tcqTpl) return _tcqTpl;
+  const empty = { body: '', status_invalid: '', status_incomplete: '', status_captain_ineligible: '', status_roster_off_session: '' };
   try {
-    const rows = await tcqGet('templates?kind=in.(body,status_invalid,status_incomplete,status_captain_ineligible)&select=kind,body');
-    const map = { body: '', status_invalid: '', status_incomplete: '', status_captain_ineligible: '' };
+    const rows = await tcqGet('templates?kind=in.(body,status_invalid,status_incomplete,status_captain_ineligible,status_roster_off_session)&select=kind,body');
+    const map = { ...empty };
     for (const r of (rows || [])) map[r.kind] = r.body || '';
     _tcqTpl = map;
   } catch (e) {
     console.error('[tcq] templates load failed', e);
-    _tcqTpl = { body: '', status_invalid: '', status_incomplete: '', status_captain_ineligible: '' };
+    _tcqTpl = { ...empty };
   }
   return _tcqTpl;
 }
@@ -16487,6 +16541,8 @@ function tcqBuildVars(team, players, captain, lineup, tpl) {
   const needed = lineup.state === 'incomplete' ? (3 - players.length) : 0;
   const elig = tcqCaptainEligibility(captain);
   const eligReasons = elig.reasons.join('; ');
+  const offRoster = tcqRosterCheck(players);
+  const offRosterNames = offRoster.map(p => p.name).join(', ');
   /* Base var map — used to render the status sub-templates, then
      re-used for the body. The status sub-templates render using THIS
      map, then their concatenated output becomes the body's status_notice. */
@@ -16499,14 +16555,16 @@ function tcqBuildVars(team, players, captain, lineup, tpl) {
     cap:                 TCQ_CAP,
     over_by:             overBy,
     needed:              needed,
-    eligibility_reasons: eligReasons
+    eligibility_reasons: eligReasons,
+    off_roster_players:  offRosterNames
   };
   /* Concatenate all applicable status sub-templates. A team can fail
-     multiple rules at once (e.g. over-cap AND captain ineligible). */
+     multiple rules at once (over cap + captain ineligible + off-roster). */
   const parts = [];
-  if (lineup.state === 'invalid')         parts.push(tcqSubstitute((tpl && tpl.status_invalid)    || '', baseVars));
-  if (lineup.state === 'incomplete')      parts.push(tcqSubstitute((tpl && tpl.status_incomplete) || '', baseVars));
-  if (elig.state === 'fail')              parts.push(tcqSubstitute((tpl && tpl.status_captain_ineligible) || '', baseVars));
+  if (lineup.state === 'invalid')         parts.push(tcqSubstitute((tpl && tpl.status_invalid)             || '', baseVars));
+  if (lineup.state === 'incomplete')      parts.push(tcqSubstitute((tpl && tpl.status_incomplete)          || '', baseVars));
+  if (elig.state === 'fail')              parts.push(tcqSubstitute((tpl && tpl.status_captain_ineligible)  || '', baseVars));
+  if (offRoster.length)                   parts.push(tcqSubstitute((tpl && tpl.status_roster_off_session)  || '', baseVars));
   return { ...baseVars, status_notice: parts.join('') };
 }
 
@@ -16543,6 +16601,7 @@ async function tcqOpenTemplateEditor() {
   const STATUS_INVALID_VARS         = ['min_sl', 'cap', 'over_by'];
   const STATUS_INCOMPLETE_VARS      = ['needed'];
   const STATUS_INELIGIBLE_VARS      = ['captain_first', 'captain_full', 'eligibility_reasons'];
+  const STATUS_OFF_ROSTER_VARS      = ['off_roster_players'];
   const pillsHtml = (vars) => vars.map(v =>
     '<button type="button" data-tcqvar="' + esc(v) + '" data-tcqfield="" '
     + 'style="padding:3px 8px;font-size:0.74rem;font-weight:700;background:#f3f4f6;'
@@ -16571,6 +16630,7 @@ async function tcqOpenTemplateEditor() {
     +   section('Over-cap notice', 'Injected at <code>{status_notice}</code> when no 3-player lineup totals ≤ ' + TCQ_CAP + '.', 'tcqTplInvalid', STATUS_INVALID_VARS, tpl.status_invalid)
     +   section('Incomplete notice', 'Injected at <code>{status_notice}</code> when fewer than 3 players are on the roster.', 'tcqTplIncomplete', STATUS_INCOMPLETE_VARS, tpl.status_incomplete)
     +   section('Captain-ineligible notice', 'Injected at <code>{status_notice}</code> when the captain fails Captains Tournament rules per the uploaded eligibility report.', 'tcqTplIneligible', STATUS_INELIGIBLE_VARS, tpl.status_captain_ineligible)
+    +   section('Off-roster notice', 'Injected at <code>{status_notice}</code> when one or more players are NOT on an active Summer 2026 league team per slate.', 'tcqTplOffRoster', STATUS_OFF_ROSTER_VARS, tpl.status_roster_off_session)
     +   '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px">'
     +     '<button class="btn btn-outline" id="tcqTplCancel">Cancel</button>'
     +     '<button class="btn btn-outline" id="tcqTplReset">Restore defaults</button>'
@@ -16604,13 +16664,16 @@ async function tcqOpenTemplateEditor() {
     document.getElementById('tcqTplInvalid').value    = TCQ_DEFAULTS.status_invalid;
     document.getElementById('tcqTplIncomplete').value = TCQ_DEFAULTS.status_incomplete;
     document.getElementById('tcqTplIneligible').value = TCQ_DEFAULTS.status_captain_ineligible;
+    document.getElementById('tcqTplOffRoster').value  = TCQ_DEFAULTS.status_roster_off_session;
   };
   document.getElementById('tcqTplSave').onclick = async () => {
+    const now = new Date().toISOString();
     const rows = [
-      { kind: 'body',                       body: document.getElementById('tcqTplBody').value,        updated_at: new Date().toISOString() },
-      { kind: 'status_invalid',             body: document.getElementById('tcqTplInvalid').value,     updated_at: new Date().toISOString() },
-      { kind: 'status_incomplete',          body: document.getElementById('tcqTplIncomplete').value,  updated_at: new Date().toISOString() },
-      { kind: 'status_captain_ineligible',  body: document.getElementById('tcqTplIneligible').value,  updated_at: new Date().toISOString() }
+      { kind: 'body',                       body: document.getElementById('tcqTplBody').value,        updated_at: now },
+      { kind: 'status_invalid',             body: document.getElementById('tcqTplInvalid').value,     updated_at: now },
+      { kind: 'status_incomplete',          body: document.getElementById('tcqTplIncomplete').value,  updated_at: now },
+      { kind: 'status_captain_ineligible',  body: document.getElementById('tcqTplIneligible').value,  updated_at: now },
+      { kind: 'status_roster_off_session',  body: document.getElementById('tcqTplOffRoster').value,   updated_at: now }
     ];
     try {
       const r = await fetch(SB_URL + '/rest/v1/templates?on_conflict=kind', {
@@ -16628,7 +16691,8 @@ async function tcqOpenTemplateEditor() {
         body:                       rows[0].body,
         status_invalid:             rows[1].body,
         status_incomplete:          rows[2].body,
-        status_captain_ineligible:  rows[3].body
+        status_captain_ineligible:  rows[3].body,
+        status_roster_off_session:  rows[4].body
       };
       close();
     } catch (e) {
@@ -16651,6 +16715,9 @@ const TCQ_DEFAULTS = {
 
 `,
   status_captain_ineligible: `⚠ Captain eligibility issue: {captain_full} does not currently meet the Captains Tournament rules ({eligibility_reasons}). Please verify or swap the captain.
+
+`,
+  status_roster_off_session: `⚠ Roster issue: {off_roster_players} are not on an active Summer 26 league team. Captains Tournament rule requires every player on the roster to be on an active Summer session team.
 
 `
 };
