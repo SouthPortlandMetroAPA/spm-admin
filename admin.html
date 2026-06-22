@@ -2263,7 +2263,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 
       <!-- Add/edit team modal -->
       <div class="modal-backdrop" id="tcqTeamModal" style="display:none">
-        <div class="modal" id="tcqTeamModalBody" style="max-width:520px">
+        <div class="modal" id="tcqTeamModalBody" style="max-width:560px">
           <h3 id="tcqTeamModalTitle" style="margin:0 0 10px">New team</h3>
           <input type="hidden" id="tcqTeamId" value="">
           <div class="form-row">
@@ -2280,6 +2280,15 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <div class="form-row">
             <label>Notes (optional)</label>
             <input type="text" id="tcqTeamNotes" class="form-input" maxlength="200">
+          </div>
+          <div class="form-row" id="tcqTeamPasteRow">
+            <label>Paste roster (optional)</label>
+            <textarea id="tcqTeamPaste" class="form-input" rows="7" style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:0.85rem" placeholder="1 - Ruby Vandel - 97224863 - SL3&#10;2 - Jeffrey Kempter - 97291571 - SL6&#10;3 - Jacob Stern - 97219982 - SL7&#10;&#10;Optional:&#10;4 - Patrick Barney - 97218828 - SL4&#10;5 - [Not asked] - [Not asked] - SL[Not asked]"></textarea>
+            <div class="hint" id="tcqTeamPasteHint" style="margin-top:4px;font-size:0.78rem">
+              Format: <code>&lt;slot&gt; - &lt;name&gt; - &lt;member#&gt; - SL&lt;n&gt;</code>.
+              Lines with <code>[Not asked]</code> and the <code>Optional:</code> header are skipped.
+              Slot 1 is captain. SL is informational only (live SL is derived).
+            </div>
           </div>
           <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
             <button class="btn btn-outline" onclick="tcqCloseTeamModal()">Cancel</button>
@@ -2415,7 +2424,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION   = '3.125';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION   = '3.126';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -16503,7 +16512,58 @@ function tcqOpenTeamModal(teamId) {
     document.getElementById('tcqTeamPayment').value = '';
     document.getElementById('tcqTeamNotes').value = '';
   }
+  /* Roster paste is only meaningful when creating a new team. For an
+     existing team the roster is managed via the per-slot Add/Edit
+     buttons on the team card. */
+  const pasteRow = document.getElementById('tcqTeamPasteRow');
+  document.getElementById('tcqTeamPaste').value = '';
+  if (pasteRow) pasteRow.style.display = teamId ? 'none' : '';
   modal.style.display = 'flex';
+}
+
+/* Parse a pasted roster block. Tolerant of:
+     "1 - Name - 97224863 - SL3"   (the canonical format)
+     extra whitespace, blank lines, "Optional:" headers, and
+     "[Not asked]" placeholders on any field.
+   Returns { players, errors } where players is an array of
+   { position, name, member_number } (no sl — derived live). */
+function tcqParseRosterPaste(text) {
+  const players = [];
+  const errors = [];
+  const seenPos = new Set();
+  const lines = String(text || '').split(/\r?\n/);
+  /* Match: <pos> - <name> - <member#> - SL<sl>
+     Name and member can contain non-dash text; SL is anything after "SL". */
+  const re = /^\s*(\d+)\s*[-–]\s*(.+?)\s*[-–]\s*(\S.*?)\s*[-–]\s*SL\s*(\S+)\s*$/i;
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (/^optional\s*:?$/i.test(line)) continue;
+    const m = line.match(re);
+    if (!m) {
+      errors.push('Skipped (unrecognized format): ' + line);
+      continue;
+    }
+    const pos  = parseInt(m[1], 10);
+    const name = m[2].trim();
+    const mem  = m[3].trim();
+    const sl   = m[4].trim();
+    /* A slot is "not asked yet" if ANY required field is the placeholder. */
+    const naRe = /\[?not\s*asked\]?/i;
+    if (naRe.test(name) || naRe.test(mem) || naRe.test(sl)) continue;
+    if (!Number.isFinite(pos) || pos < 1 || pos > 5) {
+      errors.push('Skipped (invalid slot ' + m[1] + '): ' + line);
+      continue;
+    }
+    if (seenPos.has(pos)) {
+      errors.push('Skipped (duplicate slot ' + pos + '): ' + line);
+      continue;
+    }
+    seenPos.add(pos);
+    players.push({ position: pos, name, member_number: mem });
+  }
+  players.sort((a, b) => a.position - b.position);
+  return { players, errors };
 }
 function tcqCloseTeamModal() {
   document.getElementById('tcqTeamModal').style.display = 'none';
@@ -16515,13 +16575,46 @@ async function tcqSaveTeam() {
     payment_method: document.getElementById('tcqTeamPayment').value || null,
     notes: document.getElementById('tcqTeamNotes').value || null
   };
+  /* Parse pasted roster (only used on new-team creation). */
+  let paste = { players: [], errors: [] };
+  if (!id) {
+    const pasteText = (document.getElementById('tcqTeamPaste').value || '').trim();
+    if (pasteText) {
+      paste = tcqParseRosterPaste(pasteText);
+      if (paste.errors.length) {
+        if (!confirm(paste.errors.length + ' line(s) were skipped:\n\n' + paste.errors.slice(0, 6).join('\n') + '\n\nContinue with ' + paste.players.length + ' valid player(s)?')) return;
+      }
+    }
+  }
   try {
     if (id) {
       await tcqPatch('teams?id=eq.' + id, body);
     } else {
       body.event_id = _tcqEvent.id;
       body.team_index = (_tcqTeams.reduce((m, t) => Math.max(m, t.team_index || 0), 0) + 1);
-      await tcqPost('teams', body);
+      /* Need the new team's id to attach players — use return=representation
+         instead of tcqPost (which sends return=minimal). */
+      const r = await fetch(SB_URL + '/rest/v1/teams', {
+        method: 'POST',
+        headers: {
+          apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY,
+          'Accept-Profile': TCQ_PROFILE, 'Content-Profile': TCQ_PROFILE,
+          'Content-Type': 'application/json', Prefer: 'return=representation'
+        },
+        body: JSON.stringify(body)
+      });
+      if (!r.ok) throw new Error('Team POST ' + r.status + ': ' + (await r.text()).slice(0, 160));
+      const rows = await r.json();
+      const newTeam = Array.isArray(rows) ? rows[0] : rows;
+      if (paste.players.length && newTeam && newTeam.id) {
+        const playerRows = paste.players.map(p => ({
+          team_id: newTeam.id,
+          position: p.position,
+          name: p.name,
+          member_number: p.member_number || null
+        }));
+        await tcqPost('players', playerRows);
+      }
     }
     tcqCloseTeamModal();
     await tcqRender();
