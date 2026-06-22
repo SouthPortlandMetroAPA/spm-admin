@@ -2411,7 +2411,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION   = '3.117';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION   = '3.118';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -16999,6 +16999,16 @@ function tcqOrRedraw() {
     return;
   }
   list.innerHTML = '<div style="display:grid;gap:8px">' + rows.map(tcqOrRowHtml).join('') + '</div>';
+  /* Sync checkbox.checked from data — driving via JS property is more
+     reliable than the HTML "checked" attribute when innerHTML rebuilds
+     in quick succession (browsers can ignore the attribute in some
+     cases). */
+  const byMember = new Map(_tcqOrAll.map(r => [r.member_number, r]));
+  list.querySelectorAll('input[type="checkbox"][data-tcqor-member]').forEach(cb => {
+    const r = byMember.get(cb.dataset.tcqorMember);
+    if (!r) return;
+    cb.checked = !!(cb.dataset.tcqorField === 'recruiting' ? r.recruiting : r.looking_for_team);
+  });
 }
 
 function tcqOrRowHtml(r) {
@@ -17023,14 +17033,18 @@ function tcqOrRowHtml(r) {
     +       '<div style="font-weight:700">' + esc(r.name) + ' ' + badges.join(' ') + ' ' + capt + '</div>'
     +       '<div class="hint" style="font-size:0.78rem">#' + esc(r.member_number) + ' &middot; ' + slLine + summer + '</div>'
     +     '</div>'
-    +     '<label style="display:flex;align-items:center;gap:4px;font-size:0.82rem;cursor:pointer">'
-    +       '<input type="checkbox" ' + (r.looking_for_team ? 'checked' : '')
-    +         + ' onchange="tcqOrSetFlag(\'' + esc(r.member_number) + '\',\'looking\',this.checked)">'
+    /* Data attributes drive the checked state — see tcqOrApplyCheckboxes()
+       in tcqOrRedraw. The attribute approach via string concat was
+       inconsistent across renders; the JS property assignment is the
+       reliable form. */
+    +     '<label class="tcqor-flag" style="display:flex;align-items:center;gap:4px;font-size:0.82rem;cursor:pointer">'
+    +       '<input type="checkbox" data-tcqor-member="' + esc(r.member_number) + '" data-tcqor-field="looking"'
+    +         + ' onchange="tcqOrSetFlag(this.dataset.tcqorMember, this.dataset.tcqorField, this.checked)">'
     +       'Looking'
     +     '</label>'
-    +     '<label style="display:flex;align-items:center;gap:4px;font-size:0.82rem;cursor:pointer">'
-    +       '<input type="checkbox" ' + (r.recruiting ? 'checked' : '')
-    +         + ' onchange="tcqOrSetFlag(\'' + esc(r.member_number) + '\',\'recruiting\',this.checked)">'
+    +     '<label class="tcqor-flag" style="display:flex;align-items:center;gap:4px;font-size:0.82rem;cursor:pointer">'
+    +       '<input type="checkbox" data-tcqor-member="' + esc(r.member_number) + '" data-tcqor-field="recruiting"'
+    +         + ' onchange="tcqOrSetFlag(this.dataset.tcqorMember, this.dataset.tcqorField, this.checked)">'
     +       'Recruiting'
     +     '</label>'
     +     '<button class="btn btn-primary btn-sm" onclick="tcqOrTextOne(\'' + esc(r.member_number) + '\')"'
