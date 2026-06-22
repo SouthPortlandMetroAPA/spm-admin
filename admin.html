@@ -2411,7 +2411,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION   = '3.120';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION   = '3.121';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -16349,19 +16349,29 @@ function tcqPlayerIsEligible(p) {
 }
 
 function tcqLineupCheck(players) {
+  /* A legal lineup needs sum ≤ 15 AND at most 1 player SL ≥ 6 (Masters
+     rule: only one high-SL allowed on the table). Team is valid if at
+     least one such lineup is possible. minSum tracks the smallest
+     sum-of-3 from any lineup that already meets the high cap, so when
+     a team is over-cap the SMS body can quote the realistic shortfall. */
   const eligible = players.filter(tcqPlayerIsEligible);
   const sls = eligible.map(p => p.effective_skill_level).filter(v => v != null);
   if (sls.length < 3) return { state: 'incomplete', minSum: null };
-  let minSum = Infinity;
+  const HIGH = 6;
+  let bestSum = Infinity;          // best sum among ≤1-high lineups
+  let fallbackMinSum = Infinity;   // smallest sum-of-3 ignoring high cap
   for (let i = 0; i < sls.length; i++)
     for (let j = i + 1; j < sls.length; j++)
       for (let k = j + 1; k < sls.length; k++) {
         const s = sls[i] + sls[j] + sls[k];
-        if (s < minSum) minSum = s;
+        if (s < fallbackMinSum) fallbackMinSum = s;
+        const high = (sls[i] >= HIGH ? 1 : 0) + (sls[j] >= HIGH ? 1 : 0) + (sls[k] >= HIGH ? 1 : 0);
+        if (high <= 1 && s < bestSum) bestSum = s;
       }
+  const usableSum = bestSum < Infinity ? bestSum : fallbackMinSum;
   return {
-    state: minSum <= 15 ? 'valid' : 'invalid',
-    minSum: minSum
+    state: (bestSum <= 15) ? 'valid' : 'invalid',
+    minSum: usableSum
   };
 }
 
@@ -17071,13 +17081,11 @@ async function tcqOrSetFlag(memberNumber, field, value) {
       body: JSON.stringify([body])
     });
     if (!r.ok) throw new Error('Save ' + r.status);
-    const row = _tcqOrAll.find(x => x.member_number === memberNumber);
-    if (row) {
-      if (field === 'recruiting') row.recruiting = !!value;
-      else                        row.looking_for_team = !!value;
-      row.looking_updated_at = new Date().toISOString();
-    }
-    tcqOrRedraw();
+    /* Authoritative refetch — guarantees the UI (badges + checkboxes)
+       matches the DB. The prior optimistic-cache mutation occasionally
+       missed when the cached row reference fell out of sync, leaving
+       the badge stale after an uncheck. */
+    await tcqOrRender();
   } catch (e) {
     alert('Failed to update: ' + e.message);
     tcqOrRender();
@@ -17281,7 +17289,12 @@ window.tcqOrRender = tcqOrRender;
    roster (size first, then # legal combos). Pool size after filtering
    to plausible candidates is small enough that the brute force runs
    in milliseconds. */
-const TCQ_AG = { CAP: 15, MAX_HIGH: 2, HIGH_SL: 6 };
+const TCQ_AG = {
+  CAP: 15,
+  HIGH_SL: 6,
+  MAX_HIGH_ROSTER: 2,   // at most 2 SL≥6 on the roster
+  MAX_HIGH_LINEUP: 1    // at most 1 SL≥6 can play in any one 3-player lineup
+};
 let _tcqAgGroups = null;   // last computed groupings, kept for "Create teams"
 
 function tcqAgCombinations(arr, k) {
@@ -17299,14 +17312,16 @@ function tcqAgCombinations(arr, k) {
 }
 
 function tcqAgEvaluateRoster(captain, others) {
-  /* Returns { ok, legalLineups }. The "max 2 players SL≥6" rule is a
-     PER-LINEUP constraint (any 3-player lineup must satisfy it),
-     NOT a roster-level constraint. A roster of e.g. [3,6,6,6] is fine
-     as long as at least 3 of its C(roster,3) lineups have sum ≤ 15
-     AND at most 2 high players. (3+6+6 satisfies both; 6+6+6 fails
-     either way.) */
+  /* Two layers of "high" constraint:
+       ROSTER: at most TCQ_AG.MAX_HIGH_ROSTER (= 2) players with SL ≥ 6
+       LINEUP: each legal 3-player lineup at most TCQ_AG.MAX_HIGH_LINEUP
+               (= 1) player with SL ≥ 6, AND sum ≤ TCQ_AG.CAP
+     Require >= 3 legal lineups.
+     Roster-level check is stricter, so we test it first to short-circuit. */
   const roster = [captain, ...others];
   const sls = roster.map(p => p.sl || 0);
+  const rosterHigh = sls.filter(s => s >= TCQ_AG.HIGH_SL).length;
+  if (rosterHigh > TCQ_AG.MAX_HIGH_ROSTER) return { ok: false };
   let legalLineups = 0;
   for (let i = 0; i < sls.length; i++)
     for (let j = i + 1; j < sls.length; j++)
@@ -17316,7 +17331,7 @@ function tcqAgEvaluateRoster(captain, others) {
           (sls[i] >= TCQ_AG.HIGH_SL ? 1 : 0) +
           (sls[j] >= TCQ_AG.HIGH_SL ? 1 : 0) +
           (sls[k] >= TCQ_AG.HIGH_SL ? 1 : 0);
-        if (high > TCQ_AG.MAX_HIGH) continue;
+        if (high > TCQ_AG.MAX_HIGH_LINEUP) continue;
         legalLineups++;
       }
   return { ok: legalLineups >= 3, legalLineups };
