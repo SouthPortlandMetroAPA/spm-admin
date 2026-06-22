@@ -2114,20 +2114,28 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           (loaded via <code>?key=</code>) writes here.
         </p>
 
-        <!-- Eligibility report drop-zone (3.109+) -->
-        <div class="upload-zone" id="tcqEligDropZone"
-             style="border:2px dashed var(--border);border-radius:12px;padding:14px;text-align:center;cursor:pointer;background:#fafafa;margin-bottom:10px">
-          <div style="font-weight:700;color:var(--spm-accent)">
-            Drop the Captains Tournament Eligibility report PDF here
+        <!-- Eligibility report paste (3.112+): switched from PDF drop to
+             TSV paste because the Nexus PDF strips columns the Excel
+             export keeps (e.g. score counts split correctly across
+             pages). The Excel report has a fixed header row this parser
+             keys off, so it tolerates column re-ordering. -->
+        <details style="border:1px solid var(--border);border-radius:12px;padding:10px 14px;margin-bottom:10px;background:#fafafa">
+          <summary style="cursor:pointer;font-weight:700;color:var(--spm-accent)">
+            📋 Paste Captains Tournament Eligibility report (from Excel)
+          </summary>
+          <p class="hint" style="margin-top:8px;font-size:0.82rem">
+            From the Nexus DB - Captain Tournament Eligibility report:
+            select all rows (header + data) in Excel, copy, paste below, then click <strong>Process</strong>.
+            Sources sessions-as-captain, Spring matches played, and 8B/9B score counts per player.
+          </p>
+          <textarea id="tcqEligPaste" rows="6" placeholder="Paste tab-separated data with the first row as headers…&#10;Name&#9;Member #&#9;8B SL&#9;…&#9;Sessions As Capt*&#9;Spring MP&#9;8 Ball Scores**&#9;9 Ball Scores**&#9;Paid&#9;Summer Team"
+            style="width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;font-family:ui-monospace,SFMono-Regular,monospace;font-size:0.82rem;resize:vertical"></textarea>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+            <button class="btn btn-primary btn-sm" id="tcqEligProcessBtn">Process</button>
+            <button class="btn btn-outline btn-sm" id="tcqEligClearBtn">Clear</button>
+            <span class="hint" id="tcqEligStatus" style="font-size:0.82rem;margin-left:6px"></span>
           </div>
-          <div class="hint" style="margin-top:4px;font-size:0.82rem">
-            …or tap to choose a file. Sources sessions-as-captain, Spring matches played,
-            8-Ball / 9-Ball score counts, and Summer Team status per player.
-            Captains failing any rule get flagged below + in the captain SMS body.
-          </div>
-          <input type="file" id="tcqEligFileInput" accept="application/pdf" style="display:none">
-        </div>
-        <div id="tcqEligStatus" class="status-line" style="margin-bottom:8px"></div>
+        </details>
 
         <div id="tcqList"><p class="hint">Loading…</p></div>
       </div>
@@ -2286,7 +2294,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION   = '3.111';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION   = '3.112';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -15992,32 +16000,24 @@ async function tcqInit() {
   await Promise.all([tcqLoadEligibility(), tcqLoadSu26Roster()]);
   await tcqRender();
   document.getElementById('tcqNewTeamBtn').onclick = () => tcqOpenTeamModal(null);
-  /* Eligibility report drop-zone wiring */
-  const zone = document.getElementById('tcqEligDropZone');
-  const input = document.getElementById('tcqEligFileInput');
-  if (zone && input) {
-    zone.onclick = () => input.click();
-    input.onchange = (ev) => {
-      const f = ev.target.files && ev.target.files[0];
-      if (f) tcqEligibilityHandleFile(f).catch(e => {
-        console.error('[tcq] eligibility upload', e);
-        document.getElementById('tcqEligStatus').textContent = 'Upload failed: ' + e.message;
-        document.getElementById('tcqEligStatus').style.color = 'var(--danger)';
+  /* Eligibility paste box wiring (3.112+) */
+  const processBtn = document.getElementById('tcqEligProcessBtn');
+  const clearBtn   = document.getElementById('tcqEligClearBtn');
+  if (processBtn) {
+    processBtn.onclick = () => {
+      const text = document.getElementById('tcqEligPaste').value;
+      tcqEligibilityHandlePaste(text).catch(e => {
+        console.error('[tcq] eligibility paste', e);
+        const stat = document.getElementById('tcqEligStatus');
+        stat.textContent = 'Failed: ' + e.message;
+        stat.style.color = 'var(--danger)';
       });
-      input.value = '';
     };
-    ['dragenter','dragover'].forEach(evt => zone.addEventListener(evt, e => {
-      e.preventDefault(); e.stopPropagation(); zone.style.background = '#eef4ff';
-    }));
-    ['dragleave','drop'].forEach(evt => zone.addEventListener(evt, e => {
-      e.preventDefault(); e.stopPropagation(); zone.style.background = '#fafafa';
-    }));
-    zone.addEventListener('drop', e => {
-      const f = e.dataTransfer.files && e.dataTransfer.files[0];
-      if (f) tcqEligibilityHandleFile(f).catch(err =>
-        document.getElementById('tcqEligStatus').textContent = 'Upload failed: ' + err.message);
-    });
   }
+  if (clearBtn) clearBtn.onclick = () => {
+    document.getElementById('tcqEligPaste').value = '';
+    document.getElementById('tcqEligStatus').textContent = '';
+  };
 }
 
 /* Cached eligibility data, keyed by member_number. Loaded from
@@ -16063,88 +16063,83 @@ async function tcqLoadSu26Roster() {
   }
 }
 
-/* Parse the Captains Tournament Eligibility PDF (12 pages — odd pages
-   have name+sessions+SLs+Spring MP, even pages continue the SAME row
-   with scores+paid+summer-team+phones+email at matching y-coords). */
-async function tcqEligibilityParsePdf(file) {
-  const pdfjs = await ensurePdfJs();
-  const buf = new Uint8Array(await file.arrayBuffer());
-  const pdf = await pdfjs.getDocument({ data: buf }).promise;
-  /* Per-page collect text items with x,y. */
-  const pages = [];
-  for (let p = 1; p <= pdf.numPages; p++) {
-    const page = await pdf.getPage(p);
-    const tc = await page.getTextContent();
-    const items = tc.items.map(i => ({
-      x: Math.round(i.transform[4]),
-      y: Math.round(i.transform[5]),
-      s: String(i.str).trim()
-    })).filter(i => i.s);
-    /* Bucket by y so each row's items are together. */
-    const byY = new Map();
-    for (const it of items) {
-      if (!byY.has(it.y)) byY.set(it.y, []);
-      byY.get(it.y).push(it);
+/* Parse the Captains Tournament Eligibility data as pasted from
+   Excel (tab-separated). First line = headers. Map by header NAME so
+   columns can be reordered or extras can be present without breaking.
+   Number columns are coerced via parseInt; Yes/No → boolean.
+
+   Recognized headers (case-insensitive, trailing * / ** ignored):
+     name | member # | member number
+     sessions as capt | spring mp
+     8 ball scores | 9 ball scores
+     paid | summer team
+*/
+function tcqEligibilityParseTsv(text) {
+  const norm = s => String(s || '').replace(/[*]+$/, '').trim().toLowerCase();
+  const lines = String(text || '').split(/\r?\n/).filter(l => l.trim().length);
+  if (lines.length < 2) return [];
+  const headers = lines[0].split('\t').map(norm);
+  const idx = (...names) => {
+    for (const n of names) {
+      const i = headers.indexOf(n);
+      if (i >= 0) return i;
     }
-    for (const arr of byY.values()) arr.sort((a, b) => a.x - b.x);
-    pages.push(byY);
+    return -1;
+  };
+  const ixName    = idx('name');
+  const ixMember  = idx('member #', 'member number');
+  const ixSess    = idx('sessions as capt', 'sessions as captain');
+  const ixSpring  = idx('spring mp', 'spring matches played');
+  const ix8       = idx('8 ball scores', '8b scores');
+  const ix9       = idx('9 ball scores', '9b scores');
+  const ixPaid    = idx('paid');
+  const ixSummer  = idx('summer team');
+  if (ixName < 0 || ixMember < 0) {
+    throw new Error('Header row must include "Name" and "Member #"');
   }
-  /* Walk odd pages; pair with the next page's items by y. */
+  const intOrNull = v => {
+    if (v == null) return null;
+    const m = String(v).trim().match(/^-?\d+$/);
+    return m ? Number(m[0]) : null;
+  };
+  const yesNo = v => {
+    const s = String(v || '').trim().toLowerCase();
+    if (s === 'yes' || s === 'y') return true;
+    if (s === 'no'  || s === 'n') return false;
+    return null;
+  };
   const out = [];
-  for (let p = 0; p < pages.length; p += 2) {
-    const lefts  = pages[p];
-    const rights = pages[p + 1] || new Map();
-    for (const [y, leftItems] of lefts.entries()) {
-      const memberItem = leftItems.find(it => it.x >= 155 && it.x <= 175 && /^\d{8}$/.test(it.s));
-      if (!memberItem) continue;
-      const name = leftItems.filter(it => it.x < 155).map(it => it.s).join(' ').trim();
-      const intInRange = (xLo, xHi, items) => {
-        const m = items.filter(it => it.x >= xLo && it.x <= xHi && /^\d+$/.test(it.s));
-        return m.length ? Number(m[m.length - 1].s) : null;
-      };
-      /* Left-page columns */
-      const sessions = intInRange(465, 510, leftItems);     /* Sessions As Capt */
-      const springMp = intInRange(540, 580, leftItems);     /* Spring MP */
-      const scores8b = intInRange(590, 630, leftItems);     /* 8 Ball Scores */
-      const rightItems = rights.get(y) || [];
-      const scores9b = intInRange(80, 120, rightItems);     /* 9 Ball Scores */
-      const yesNoIn = (xLo, xHi, items) => {
-        const m = items.filter(it => it.x >= xLo && it.x <= xHi && /^(Yes|No)$/.test(it.s));
-        return m.length ? m[0].s : null;
-      };
-      const paid       = yesNoIn(125, 155, rightItems);
-      const summerTeam = yesNoIn(175, 215, rightItems);
-      out.push({
-        member_number: memberItem.s,
-        name: name,
-        sessions_as_capt: sessions,
-        spring_mp: springMp,
-        scores_8b: scores8b,
-        scores_9b: scores9b,
-        paid: paid === 'Yes' ? true : paid === 'No' ? false : null,
-        summer_team: summerTeam === 'Yes' ? true : summerTeam === 'No' ? false : null
-      });
-    }
+  for (let i = 1; i < lines.length; i++) {
+    const cells = lines[i].split('\t');
+    const member = (cells[ixMember] || '').trim();
+    if (!/^\d{5,8}$/.test(member)) continue;   // skip header-repeats / footnotes / empty rows
+    out.push({
+      member_number:    member,
+      name:             (cells[ixName] || '').trim(),
+      sessions_as_capt: ixSess   >= 0 ? intOrNull(cells[ixSess])   : null,
+      spring_mp:        ixSpring >= 0 ? intOrNull(cells[ixSpring]) : null,
+      scores_8b:        ix8      >= 0 ? intOrNull(cells[ix8])      : null,
+      scores_9b:        ix9      >= 0 ? intOrNull(cells[ix9])      : null,
+      paid:             ixPaid   >= 0 ? yesNo(cells[ixPaid])       : null,
+      summer_team:      ixSummer >= 0 ? yesNo(cells[ixSummer])     : null
+    });
   }
   return out;
 }
 
-async function tcqEligibilityHandleFile(file) {
+async function tcqEligibilityHandlePaste(text) {
   const stat = document.getElementById('tcqEligStatus');
   stat.style.color = 'var(--muted)';
-  stat.textContent = 'Parsing ' + file.name + '…';
-  const rows = await tcqEligibilityParsePdf(file);
+  stat.textContent = 'Parsing…';
+  const rows = tcqEligibilityParseTsv(text);
   if (!rows.length) {
     stat.style.color = 'var(--danger)';
-    stat.textContent = 'No rows parsed. Check the PDF format.';
+    stat.textContent = 'No data rows recognized — paste should start with the header row.';
     return;
   }
   stat.textContent = 'Parsed ' + rows.length + ' rows. Saving…';
-  /* Replace strategy: DELETE all + INSERT new in a single transaction is
-     ideal but PostgREST can't transact arbitrary multi-statement writes.
-     Compromise: UPSERT by member_number. Stale rows for members dropped
-     from the report are NOT cleared — acceptable since the report is
-     additive in practice. Future-fix: a server-side RPC for atomic replace. */
+  /* UPSERT by member_number. Stale rows for members dropped from the
+     report stay — re-paste with the full sheet to refresh. */
   const body = rows.map(r => ({
     member_number: r.member_number,
     name: r.name,
@@ -16154,7 +16149,7 @@ async function tcqEligibilityHandleFile(file) {
     scores_9b: r.scores_9b,
     summer_team: r.summer_team,
     paid: r.paid,
-    source_filename: file.name,
+    source_filename: 'pasted',
     uploaded_at: new Date().toISOString()
   }));
   const r = await fetch(SB_URL + '/rest/v1/eligibility?on_conflict=member_number', {
@@ -16171,8 +16166,8 @@ async function tcqEligibilityHandleFile(file) {
   await tcqLoadEligibility();
   await tcqRender();
   stat.style.color = 'var(--success)';
-  stat.textContent = '✓ Saved ' + rows.length + ' eligibility rows from ' + file.name;
-  setTimeout(() => { stat.textContent = ''; }, 4000);
+  stat.textContent = '✓ Saved ' + rows.length + ' eligibility rows';
+  setTimeout(() => { stat.textContent = ''; }, 5000);
 }
 
 async function tcqRender() {
@@ -16218,16 +16213,15 @@ async function tcqRender() {
      { state: 'valid' | 'invalid' | 'incomplete',
        minSum: number | null }    // smallest 3-combo sum, null if incomplete
 */
-/* Only count players who would actually be allowed to play (meet
-   tournament eligibility rules). An ineligible player can't form
-   part of a real lineup, so they don't contribute SLs and don't
-   count toward the 3-player minimum. */
+/* Lineup-eligibility (hard rules only). Su26 status is a soft warning,
+   not a hard fail, so it does NOT exclude a player from lineup math.
+   Only the captain's tournament-rule checks (sessions/Spring MP/scores)
+   can exclude. Non-captain players are always lineup-eligible. */
 function tcqPlayerIsEligible(p) {
   if (!p) return false;
-  if (!_tcqSu26Roster.has(p.member_number)) return false;
   if (p.is_captain) {
     const e = tcqCaptainEligibility(p);
-    return e.state === 'ok';   // 'fail' or 'no_data' both exclude
+    return e.state === 'ok' || e.state === 'no_data';  // missing report data ≠ disqualified
   }
   return true;
 }
@@ -16259,19 +16253,9 @@ function tcqLineupCheck(players) {
    'no_data' = captain not on the eligibility report (unknown player). */
 const TCQ_RULES = { CAPT_SESSIONS: 2, SPRING_MP: 4, FORMAT_SCORES: 20 };
 function tcqCaptainEligibility(captain) {
-  if (!captain || !captain.member_number) return { state: 'no_data', reasons: ['no captain'] };
+  if (!captain || !captain.member_number) return { state: 'no_data', reasons: [] };
   const e = _tcqEligibility.get(captain.member_number);
-  /* Su26 roster status sourced from slate (live), not the report. The
-     report's Summer Team column freezes at print time; slate reflects
-     roster swaps made after. */
-  const onSu26 = _tcqSu26Roster.has(captain.member_number);
-  if (!e) {
-    /* No report row, but we can still check the Su26 rule. */
-    const reasons = [];
-    if (!onSu26) reasons.push('not on Summer 26 roster');
-    reasons.push('not on eligibility report');
-    return { state: reasons.length ? 'fail' : 'no_data', reasons };
-  }
+  if (!e) return { state: 'no_data', reasons: ['not in eligibility report'] };
   const reasons = [];
   const sess = e.sessions_as_capt || 0;
   const smp  = e.spring_mp || 0;
@@ -16282,13 +16266,11 @@ function tcqCaptainEligibility(captain) {
   if (s8 < TCQ_RULES.FORMAT_SCORES && s9 < TCQ_RULES.FORMAT_SCORES) {
     reasons.push('8B ' + s8 + ' and 9B ' + s9 + ' both below ' + TCQ_RULES.FORMAT_SCORES);
   }
-  if (!onSu26) reasons.push('not on Summer 26 roster');
   return { state: reasons.length ? 'fail' : 'ok', reasons };
 }
 
-/* Team-wide roster check: returns the list of players (not just the
-   captain) who are NOT on any active Summer 2026 league roster per
-   slate. Returns [{ name, member_number }] (empty if everyone's in). */
+/* Soft warnings only — don't affect eligibility/lineup math.
+   Currently: any player not on a Su26 roster per slate. */
 function tcqRosterCheck(players) {
   return players
     .filter(p => p.member_number && !_tcqSu26Roster.has(p.member_number))
@@ -16352,7 +16334,7 @@ function tcqRenderTeamCard(team) {
           ? ' &middot; <span class="hint" style="font-size:0.75rem;color:#c9a64a" title="' + esc(elig.reasons.join('; ')) + '">? Captain not in eligibility report</span>'
           : '')
     +     (offRoster.length
-        ? ' &middot; <span style="background:#ea002a;color:#fff;padding:2px 8px;border-radius:999px;font-weight:700;font-size:0.75rem" title="' + esc(offRoster.map(p => p.name).join(', ')) + ' not on a Su26 league roster">&#9888; ' + offRoster.length + ' off-roster</span>'
+        ? ' &middot; <span style="background:#c9a64a;color:#fff;padding:2px 8px;border-radius:999px;font-weight:700;font-size:0.75rem" title="' + esc(offRoster.map(p => p.name).join(', ')) + ' not on a Su26 league roster. This is a warning, not a disqualifier.">&#9888; ' + offRoster.length + ' off-roster</span>'
         : '')
     +   '</div>'
     +   '<div style="margin-left:auto;display:flex;gap:6px">'
