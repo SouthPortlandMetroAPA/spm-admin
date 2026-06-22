@@ -2415,7 +2415,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION   = '3.123';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION   = '3.124';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -17086,12 +17086,30 @@ function tcqOrRowHtml(r) {
 }
 
 /* ── Status toggles ──────────────────────────────────────────── */
-/* field: 'looking' (column `looking`) | 'recruiting' | 'declined' | 'confirmed' */
+/* field: 'looking' (column `looking`) | 'recruiting' | 'declined' | 'confirmed'
+   Defensive flow:
+     1. Optimistic cache mutation → tcqOrRedraw() (badge changes instantly)
+     2. UPSERT to DB
+     3. Authoritative tcqOrRender() refetch + redraw (corrects any drift)
+   If the UPSERT fails, the optimistic mutation rolls back automatically
+   on the next render. */
 async function tcqOrSetFlag(memberNumber, field, value) {
   const col = (field === 'recruiting' || field === 'declined' || field === 'confirmed') ? field : 'looking';
-  const body = { member_number: memberNumber, updated_at: new Date().toISOString() };
-  body[col] = !!value;
+  const viewField = (col === 'looking') ? 'looking_for_team' : col;
+  console.log('[tcqOrSetFlag]', memberNumber, field, '→', !!value, '(col=' + col + ', viewField=' + viewField + ')');
+  /* (1) Optimistic local cache update + immediate redraw. */
+  const row = _tcqOrAll.find(x => String(x.member_number) === String(memberNumber));
+  if (row) {
+    row[viewField] = !!value;
+    console.log('[tcqOrSetFlag] cache mutated, redrawing…');
+    tcqOrRedraw();
+  } else {
+    console.warn('[tcqOrSetFlag] no cached row for member', memberNumber, '— full refetch will populate');
+  }
+  /* (2) Persist + (3) refetch authoritative. */
   try {
+    const body = { member_number: memberNumber, updated_at: new Date().toISOString() };
+    body[col] = !!value;
     const r = await fetch(SB_URL + '/rest/v1/looking_for_team?on_conflict=member_number', {
       method: 'POST',
       headers: {
@@ -17102,13 +17120,11 @@ async function tcqOrSetFlag(memberNumber, field, value) {
       },
       body: JSON.stringify([body])
     });
-    if (!r.ok) throw new Error('Save ' + r.status);
-    /* Authoritative refetch — guarantees the UI (badges + checkboxes)
-       matches the DB. The prior optimistic-cache mutation occasionally
-       missed when the cached row reference fell out of sync, leaving
-       the badge stale after an uncheck. */
+    console.log('[tcqOrSetFlag] UPSERT', r.status, r.ok ? 'ok' : 'FAILED');
+    if (!r.ok) throw new Error('Save ' + r.status + ': ' + (await r.text()).slice(0, 160));
     await tcqOrRender();
   } catch (e) {
+    console.error('[tcqOrSetFlag] error', e);
     alert('Failed to update: ' + e.message);
     tcqOrRender();
   }
