@@ -2286,7 +2286,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION   = '3.110';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION   = '3.111';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -16218,8 +16218,23 @@ async function tcqRender() {
      { state: 'valid' | 'invalid' | 'incomplete',
        minSum: number | null }    // smallest 3-combo sum, null if incomplete
 */
+/* Only count players who would actually be allowed to play (meet
+   tournament eligibility rules). An ineligible player can't form
+   part of a real lineup, so they don't contribute SLs and don't
+   count toward the 3-player minimum. */
+function tcqPlayerIsEligible(p) {
+  if (!p) return false;
+  if (!_tcqSu26Roster.has(p.member_number)) return false;
+  if (p.is_captain) {
+    const e = tcqCaptainEligibility(p);
+    return e.state === 'ok';   // 'fail' or 'no_data' both exclude
+  }
+  return true;
+}
+
 function tcqLineupCheck(players) {
-  const sls = players.map(p => p.effective_skill_level).filter(v => v != null);
+  const eligible = players.filter(tcqPlayerIsEligible);
+  const sls = eligible.map(p => p.effective_skill_level).filter(v => v != null);
   if (sls.length < 3) return { state: 'incomplete', minSum: null };
   let minSum = Infinity;
   for (let i = 0; i < sls.length; i++)
