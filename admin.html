@@ -2146,7 +2146,9 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <h2 style="margin:0">Outreach</h2>
           <span class="hint" id="tcqOrStatus"></span>
           <div style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">
-            <button class="btn btn-primary btn-sm" onclick="tcqOrOpenBulkModal()">+ Bulk mark looking</button>
+            <button class="btn btn-primary btn-sm" onclick="tcqOrOpenBulkModal('looking')">+ Bulk: looking</button>
+            <button class="btn btn-primary btn-sm" onclick="tcqOrOpenBulkModal('recruiting')">+ Bulk: recruiting</button>
+            <button class="btn btn-outline btn-sm" onclick="tcqAutoGroupOpen()">🧩 Auto-group</button>
             <button class="btn btn-outline btn-sm" onclick="tcqOrOpenTemplateEditor()">📝 Text template</button>
             <button class="btn btn-outline btn-sm" onclick="tcqOrRender()">↻ Refresh</button>
           </div>
@@ -2161,11 +2163,12 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         <!-- Filter bar -->
         <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:10px;font-size:0.85rem">
           <div>
-            <strong style="font-size:0.78rem;color:var(--muted);text-transform:uppercase">Looking</strong>
-            <div id="tcqOrLookingChips" style="display:inline-flex;gap:4px;margin-left:6px">
-              <button class="btn btn-outline btn-sm tcqor-chip" data-looking="all"      style="font-size:0.78rem">All</button>
-              <button class="btn btn-primary btn-sm tcqor-chip" data-looking="yes"      style="font-size:0.78rem">Looking</button>
-              <button class="btn btn-outline btn-sm tcqor-chip" data-looking="no"       style="font-size:0.78rem">Not looking</button>
+            <strong style="font-size:0.78rem;color:var(--muted);text-transform:uppercase">Status</strong>
+            <div style="display:inline-flex;gap:4px;margin-left:6px">
+              <button class="btn btn-outline btn-sm tcqor-chip" data-status="all"        style="font-size:0.78rem">All</button>
+              <button class="btn btn-primary btn-sm tcqor-chip" data-status="looking"    style="font-size:0.78rem">Looking</button>
+              <button class="btn btn-outline btn-sm tcqor-chip" data-status="recruiting" style="font-size:0.78rem">Recruiting</button>
+              <button class="btn btn-outline btn-sm tcqor-chip" data-status="none"       style="font-size:0.78rem">Neither</button>
             </div>
           </div>
           <div>
@@ -2200,24 +2203,48 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <!-- Bulk-mark modal -->
       <div class="modal-backdrop" id="tcqOrBulkModal" style="display:none">
         <div class="modal" style="max-width:520px">
-          <h3 style="margin:0 0 10px">Bulk mark as looking for a team</h3>
+          <h3 id="tcqOrBulkTitle" style="margin:0 0 10px">Bulk mark</h3>
+          <input type="hidden" id="tcqOrBulkField" value="looking">
           <p class="hint" style="margin-top:0">
-            Paste APA numbers (5 or 8 digit, one per line — commas/spaces also fine).
-            Each member found in the eligibility report will be marked looking.
+            Paste APA numbers (5 or 8 digit, any separator).
+            Each member found in the eligibility report will be flagged.
           </p>
           <textarea id="tcqOrBulkText" rows="10" placeholder="97212345&#10;97223456&#10;…"
                     style="width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;font-family:ui-monospace,SFMono-Regular,monospace;font-size:0.85rem;resize:vertical"></textarea>
           <div style="display:flex;align-items:center;gap:10px;margin-top:10px">
             <label style="font-size:0.85rem">
-              <input type="radio" name="tcqOrBulkMode" value="looking" checked> Mark looking
+              <input type="radio" name="tcqOrBulkVal" value="true" checked>
+              <span id="tcqOrBulkLblOn">Mark ON</span>
             </label>
             <label style="font-size:0.85rem">
-              <input type="radio" name="tcqOrBulkMode" value="not-looking"> Mark NOT looking
+              <input type="radio" name="tcqOrBulkVal" value="false">
+              <span id="tcqOrBulkLblOff">Mark OFF</span>
             </label>
           </div>
           <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
             <button class="btn btn-outline" onclick="tcqOrCloseBulkModal()">Cancel</button>
             <button class="btn btn-primary" onclick="tcqOrApplyBulk()">Apply</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Auto-group results modal -->
+      <div class="modal-backdrop" id="tcqAgModal" style="display:none">
+        <div class="modal" style="max-width:760px;max-height:88vh;overflow-y:auto">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+            <h3 style="margin:0">🧩 Auto-grouped teams</h3>
+            <button type="button" onclick="tcqAutoGroupClose()" style="margin-left:auto;background:none;border:0;font-size:1.4rem;line-height:1;cursor:pointer;color:var(--muted)">×</button>
+          </div>
+          <p class="hint" style="margin-top:0">
+            Each recruiter (not already a TCQ captain) gets a 4- or 5-player roster
+            from the looking pool. Rules: max 2 players SL ≥ 6, ≥ 3 legal 3-player
+            combos summing to ≤ 15. Players are not assigned to more than one team.
+          </p>
+          <div id="tcqAgSummary" class="hint" style="margin-bottom:8px"></div>
+          <div id="tcqAgList"></div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+            <button class="btn btn-outline" onclick="tcqAutoGroupClose()">Cancel</button>
+            <button class="btn btn-primary" id="tcqAgAcceptBtn" onclick="tcqAutoGroupAccept()">Create teams in DB</button>
           </div>
         </div>
       </div>
@@ -2376,7 +2403,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION   = '3.113';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION   = '3.114';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -16870,7 +16897,8 @@ window.tcqOpenTemplateEditor = tcqOpenTemplateEditor;
    Reads via tcq.outreach_candidates view which joins eligibility + slate
    players + looking_for_team. Service-role only. */
 let _tcqOrAll = [];                       // every candidate row from the view
-let _tcqOrFilter = { looking: 'yes', sl: 'all', q: '', sort: 'name' };
+/* status: 'all' | 'looking' | 'recruiting' | 'none' */
+let _tcqOrFilter = { status: 'looking', sl: 'all', q: '', sort: 'name' };
 const TCQ_OR_VARS = ['first_name', 'last_name', 'nickname', 'member_number',
   'sl', 'sl_8ball', 'sl_9ball', 'sessions_as_capt', 'spring_mp',
   'scores_8b', 'scores_9b'];
@@ -16880,7 +16908,7 @@ async function tcqOrInit() {
   await tcqOrRender();
   /* Wire filter UI */
   document.querySelectorAll('.tcqor-chip').forEach(b => {
-    b.onclick = () => { _tcqOrFilter.looking = b.dataset.looking; tcqOrRefreshChipStyles(); tcqOrRedraw(); };
+    b.onclick = () => { _tcqOrFilter.status = b.dataset.status; tcqOrRefreshChipStyles(); tcqOrRedraw(); };
   });
   document.querySelectorAll('.tcqor-sl').forEach(b => {
     b.onclick = () => { _tcqOrFilter.sl = b.dataset.sl; tcqOrRefreshChipStyles(); tcqOrRedraw(); };
@@ -16896,7 +16924,7 @@ async function tcqOrInit() {
 
 function tcqOrRefreshChipStyles() {
   document.querySelectorAll('.tcqor-chip').forEach(b => {
-    const active = b.dataset.looking === _tcqOrFilter.looking;
+    const active = b.dataset.status === _tcqOrFilter.status;
     b.classList.toggle('btn-primary',  active);
     b.classList.toggle('btn-outline', !active);
   });
@@ -16926,8 +16954,9 @@ function tcqOrRedraw() {
   const list = document.getElementById('tcqOrList');
   const f = _tcqOrFilter;
   let rows = _tcqOrAll.filter(r => {
-    if (f.looking === 'yes' && !r.looking_for_team) return false;
-    if (f.looking === 'no'  &&  r.looking_for_team) return false;
+    if (f.status === 'looking'    && !r.looking_for_team) return false;
+    if (f.status === 'recruiting' && !r.recruiting)       return false;
+    if (f.status === 'none'       && (r.looking_for_team || r.recruiting)) return false;
     if (f.sl !== 'all' && Number(r.sl) !== Number(f.sl)) return false;
     if (f.q) {
       const hay = (r.name + ' ' + r.member_number).toLowerCase();
@@ -16961,20 +16990,26 @@ function tcqOrRowHtml(r) {
     ? '<span class="hint" style="font-size:0.74rem;color:#c9a64a"> · ⚠ off Su26 roster</span>'
     : '';
   const phone = r.cell_phone || '';
-  const lookingBadge = r.looking_for_team
-    ? '<span style="background:#0a6b3a;color:#fff;padding:2px 8px;border-radius:999px;font-weight:700;font-size:0.72rem">LOOKING</span>'
-    : '';
+  const badges = [];
+  if (r.looking_for_team) badges.push('<span style="background:#0a6b3a;color:#fff;padding:2px 8px;border-radius:999px;font-weight:700;font-size:0.72rem">LOOKING</span>');
+  if (r.recruiting)       badges.push('<span style="background:#0031a8;color:#fff;padding:2px 8px;border-radius:999px;font-weight:700;font-size:0.72rem">RECRUITING</span>');
+  if (r.is_tcq_captain)   badges.push('<span style="background:#666;color:#fff;padding:2px 8px;border-radius:999px;font-weight:700;font-size:0.72rem">HAS TCQ TEAM</span>');
   return ''
     + '<div class="card" style="padding:10px 12px;margin:0">'
     +   '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
     +     '<div style="flex:1;min-width:200px">'
-    +       '<div style="font-weight:700">' + esc(r.name) + ' ' + lookingBadge + capt + '</div>'
+    +       '<div style="font-weight:700">' + esc(r.name) + ' ' + badges.join(' ') + ' ' + capt + '</div>'
     +       '<div class="hint" style="font-size:0.78rem">#' + esc(r.member_number) + ' &middot; ' + slLine + summer + '</div>'
     +     '</div>'
     +     '<label style="display:flex;align-items:center;gap:4px;font-size:0.82rem;cursor:pointer">'
     +       '<input type="checkbox" ' + (r.looking_for_team ? 'checked' : '')
-    +         + ' onchange="tcqOrSetLooking(\'' + esc(r.member_number) + '\', this.checked)">'
+    +         + ' onchange="tcqOrSetFlag(\'' + esc(r.member_number) + '\',\'looking\',this.checked)">'
     +       'Looking'
+    +     '</label>'
+    +     '<label style="display:flex;align-items:center;gap:4px;font-size:0.82rem;cursor:pointer">'
+    +       '<input type="checkbox" ' + (r.recruiting ? 'checked' : '')
+    +         + ' onchange="tcqOrSetFlag(\'' + esc(r.member_number) + '\',\'recruiting\',this.checked)">'
+    +       'Recruiting'
     +     '</label>'
     +     '<button class="btn btn-primary btn-sm" onclick="tcqOrTextOne(\'' + esc(r.member_number) + '\')"'
     +       (phone ? '' : ' disabled title="No cell phone on file"') + '>Text</button>'
@@ -16982,10 +17017,13 @@ function tcqOrRowHtml(r) {
     + '</div>';
 }
 
-/* ── Looking toggles ─────────────────────────────────────────── */
-async function tcqOrSetLooking(memberNumber, looking) {
+/* ── Status toggles ──────────────────────────────────────────── */
+/* field: 'looking' (maps to column `looking`) | 'recruiting' (column `recruiting`) */
+async function tcqOrSetFlag(memberNumber, field, value) {
+  const col = field === 'recruiting' ? 'recruiting' : 'looking';
+  const body = { member_number: memberNumber, updated_at: new Date().toISOString() };
+  body[col] = !!value;
   try {
-    /* UPSERT by member_number. Sets looking + updated_at. */
     const r = await fetch(SB_URL + '/rest/v1/looking_for_team?on_conflict=member_number', {
       method: 'POST',
       headers: {
@@ -16994,13 +17032,13 @@ async function tcqOrSetLooking(memberNumber, looking) {
         'Content-Type': 'application/json',
         Prefer: 'resolution=merge-duplicates,return=minimal'
       },
-      body: JSON.stringify([{ member_number: memberNumber, looking: !!looking, updated_at: new Date().toISOString() }])
+      body: JSON.stringify([body])
     });
     if (!r.ok) throw new Error('Save ' + r.status);
-    /* Patch local cache + redraw without a full reload. */
     const row = _tcqOrAll.find(x => x.member_number === memberNumber);
     if (row) {
-      row.looking_for_team = !!looking;
+      if (field === 'recruiting') row.recruiting = !!value;
+      else                        row.looking_for_team = !!value;
       row.looking_updated_at = new Date().toISOString();
     }
     tcqOrRedraw();
@@ -17011,8 +17049,17 @@ async function tcqOrSetLooking(memberNumber, looking) {
 }
 
 /* ── Bulk mark ───────────────────────────────────────────────── */
-function tcqOrOpenBulkModal() {
+/* field: 'looking' | 'recruiting' */
+function tcqOrOpenBulkModal(field) {
+  field = field || 'looking';
+  document.getElementById('tcqOrBulkField').value = field;
   document.getElementById('tcqOrBulkText').value = '';
+  document.getElementById('tcqOrBulkTitle').textContent =
+    field === 'recruiting' ? 'Bulk mark as recruiting' : 'Bulk mark as looking for a team';
+  document.getElementById('tcqOrBulkLblOn').textContent  =
+    field === 'recruiting' ? 'Mark RECRUITING' : 'Mark LOOKING';
+  document.getElementById('tcqOrBulkLblOff').textContent =
+    field === 'recruiting' ? 'Mark NOT recruiting' : 'Mark NOT looking';
   document.getElementById('tcqOrBulkModal').style.display = 'flex';
 }
 function tcqOrCloseBulkModal() {
@@ -17020,27 +17067,27 @@ function tcqOrCloseBulkModal() {
 }
 async function tcqOrApplyBulk() {
   const text = document.getElementById('tcqOrBulkText').value;
-  const mode = document.querySelector('input[name="tcqOrBulkMode"]:checked').value;
-  const looking = mode === 'looking';
-  /* Extract 5- or 8-digit numbers. Tolerant of any separator. */
+  const field = document.getElementById('tcqOrBulkField').value;
+  const val   = document.querySelector('input[name="tcqOrBulkVal"]:checked').value === 'true';
+  const col = field === 'recruiting' ? 'recruiting' : 'looking';
   const nums = (text.match(/\b\d{5,8}\b/g) || [])
-    .map(n => n.length === 5 ? '972' + n : n)   // normalize to 8-digit short→full
+    .map(n => n.length === 5 ? '972' + n : n)
     .filter(n => n.length === 8);
-  if (!nums.length) {
-    alert('No APA numbers found in the paste.');
-    return;
-  }
-  /* Intersect with eligibility-report cohort to keep noise out. */
+  if (!nums.length) { alert('No APA numbers found in the paste.'); return; }
   const cohort = new Set(_tcqOrAll.map(r => r.member_number));
   const known   = nums.filter(n => cohort.has(n));
   const unknown = nums.filter(n => !cohort.has(n));
   if (!known.length) {
     alert('None of those APA numbers are in the current eligibility report.\n\n'
-      + (unknown.length + ' unmatched.'));
+      + unknown.length + ' unmatched.');
     return;
   }
   const now = new Date().toISOString();
-  const body = known.map(m => ({ member_number: m, looking: looking, updated_at: now }));
+  const body = known.map(m => {
+    const row = { member_number: m, updated_at: now };
+    row[col] = val;
+    return row;
+  });
   try {
     const r = await fetch(SB_URL + '/rest/v1/looking_for_team?on_conflict=member_number', {
       method: 'POST',
@@ -17055,7 +17102,7 @@ async function tcqOrApplyBulk() {
     if (!r.ok) throw new Error('Save ' + r.status + ': ' + (await r.text()).slice(0, 160));
     tcqOrCloseBulkModal();
     await tcqOrRender();
-    alert('Marked ' + known.length + ' as ' + (looking ? 'looking' : 'NOT looking')
+    alert('Marked ' + known.length + ' as ' + (val ? field.toUpperCase() : 'NOT ' + field.toUpperCase())
       + (unknown.length ? '. ' + unknown.length + ' APA #s not in the eligibility report were skipped.' : '.'));
   } catch (e) {
     alert('Save failed: ' + e.message);
@@ -17164,13 +17211,226 @@ async function tcqOrOpenTemplateEditor() {
   };
 }
 
-window.tcqOrSetLooking = tcqOrSetLooking;
+window.tcqOrSetFlag = tcqOrSetFlag;
 window.tcqOrTextOne = tcqOrTextOne;
 window.tcqOrOpenBulkModal = tcqOrOpenBulkModal;
 window.tcqOrCloseBulkModal = tcqOrCloseBulkModal;
 window.tcqOrApplyBulk = tcqOrApplyBulk;
 window.tcqOrOpenTemplateEditor = tcqOrOpenTemplateEditor;
 window.tcqOrRender = tcqOrRender;
+
+/* ══════════════════════════════════════════════════════════════════════
+   TCQ — Auto-group (3.114+)
+   ══════════════════════════════════════════════════════════════════════
+   Build candidate rosters for every recruiter who doesn't yet captain
+   a TCQ team. Rules:
+     - 4 or 5 players per team (captain + 3 or 4 looking players)
+     - Max 2 players with SL ≥ 6 (counting captain)
+     - At least 3 legal 3-player combos summing to ≤ 15
+     - Each looking player assigned to at most one team
+   Greedy by-recruiter, sorted descending by SL (high-SL captains have
+   the tightest pool, so they go first). Within each recruiter we
+   exhaustively search the remaining pool for the highest-scoring
+   roster (size first, then # legal combos). Pool size after filtering
+   to plausible candidates is small enough that the brute force runs
+   in milliseconds. */
+const TCQ_AG = { CAP: 15, MAX_HIGH: 2, HIGH_SL: 6 };
+let _tcqAgGroups = null;   // last computed groupings, kept for "Create teams"
+
+function tcqAgCombinations(arr, k) {
+  const result = [];
+  const combo = (start, chosen) => {
+    if (chosen.length === k) { result.push(chosen.slice()); return; }
+    for (let i = start; i <= arr.length - (k - chosen.length); i++) {
+      chosen.push(arr[i]);
+      combo(i + 1, chosen);
+      chosen.pop();
+    }
+  };
+  combo(0, []);
+  return result;
+}
+
+function tcqAgEvaluateRoster(captain, others) {
+  /* Returns { ok, legalLineups } given a captain + others. */
+  const roster = [captain, ...others];
+  const highCount = roster.filter(p => (p.sl || 0) >= TCQ_AG.HIGH_SL).length;
+  if (highCount > TCQ_AG.MAX_HIGH) return { ok: false };
+  const sls = roster.map(p => p.sl || 0);
+  let legalLineups = 0;
+  for (let i = 0; i < sls.length; i++)
+    for (let j = i + 1; j < sls.length; j++)
+      for (let k = j + 1; k < sls.length; k++)
+        if (sls[i] + sls[j] + sls[k] <= TCQ_AG.CAP) legalLineups++;
+  return { ok: legalLineups >= 3, legalLineups };
+}
+
+function tcqAgFindBestRoster(captain, pool) {
+  /* Prefer size-5 rosters when possible; fall back to size-4. */
+  let best = null;
+  /* Trim the pool to plausible candidates first: anyone whose SL paired
+     with the captain's SL could still leave room for a 3rd at <= cap.
+     With captain SL c, max other SL we can use ALONE is 15-c-1 (need at
+     least one more <= cap-other-c). Keep a generous filter — just toss
+     players whose SL would never fit (>15-c). */
+  const c = captain.sl || 0;
+  const trimmed = pool.filter(p => (p.sl || 0) + c <= TCQ_AG.CAP + 5);
+  for (const size of [5, 4]) {
+    const needed = size - 1;
+    if (trimmed.length < needed) continue;
+    const combos = tcqAgCombinations(trimmed, needed);
+    for (const combo of combos) {
+      const ev = tcqAgEvaluateRoster(captain, combo);
+      if (!ev.ok) continue;
+      const score = size * 1000 + ev.legalLineups;
+      if (!best || score > best.score) {
+        best = { captain, players: [captain, ...combo], legalLineups: ev.legalLineups, score, size };
+      }
+    }
+    /* Prefer size-5 if we found a valid one; don't bother with size-4. */
+    if (best && best.size === 5) break;
+  }
+  return best;
+}
+
+function tcqAutoGroupCompute() {
+  const recruiters = _tcqOrAll
+    .filter(r => r.recruiting && !r.is_tcq_captain && r.sl != null)
+    .sort((a, b) => (b.sl || 0) - (a.sl || 0));
+  if (!recruiters.length) {
+    return { error: 'No recruiters who lack a TCQ team. Mark some people as recruiting first.' };
+  }
+  let pool = _tcqOrAll
+    .filter(r => r.looking_for_team && !r.recruiting && !r.is_tcq_captain && r.sl != null)
+    .map(r => ({ member_number: r.member_number, name: r.name, sl: r.sl }));
+  if (!pool.length) {
+    return { error: 'No looking players available to draft. Mark some people as looking first.' };
+  }
+  const teams = [];
+  for (const cap of recruiters) {
+    const best = tcqAgFindBestRoster({ member_number: cap.member_number, name: cap.name, sl: cap.sl }, pool);
+    if (!best) {
+      teams.push({ captain: cap, players: [cap], legalLineups: 0, note: 'no valid roster from remaining pool' });
+      continue;
+    }
+    teams.push(best);
+    const taken = new Set(best.players.slice(1).map(p => p.member_number));
+    pool = pool.filter(p => !taken.has(p.member_number));
+  }
+  return { teams, leftover: pool };
+}
+
+function tcqAutoGroupOpen() {
+  const result = tcqAutoGroupCompute();
+  const summaryEl = document.getElementById('tcqAgSummary');
+  const listEl    = document.getElementById('tcqAgList');
+  const acceptBtn = document.getElementById('tcqAgAcceptBtn');
+  document.getElementById('tcqAgModal').style.display = 'flex';
+  if (result.error) {
+    summaryEl.textContent = '';
+    listEl.innerHTML = '<p class="hint err">' + esc(result.error) + '</p>';
+    acceptBtn.disabled = true;
+    _tcqAgGroups = null;
+    return;
+  }
+  const validTeams = result.teams.filter(t => t.players.length >= 4);
+  const skipped    = result.teams.filter(t => t.players.length < 4);
+  const used = validTeams.reduce((n, t) => n + (t.players.length - 1), 0);
+  summaryEl.innerHTML =
+    '<strong>' + validTeams.length + ' team(s) formed</strong>'
+    + ' &middot; ' + used + ' players placed'
+    + ' &middot; ' + result.leftover.length + ' looking players left over'
+    + (skipped.length ? ' &middot; <span style="color:#c0392b">' + skipped.length + ' recruiter(s) without a valid roster</span>' : '');
+  _tcqAgGroups = validTeams;
+  listEl.innerHTML = result.teams.map((t, i) => {
+    const sls = t.players.map(p => p.sl || 0);
+    const slList = t.players.map(p => esc(p.name) + ' <span class="hint">SL' + (p.sl ?? '?') + '</span>').join(' &middot; ');
+    const ok = t.players.length >= 4;
+    const headStyle = ok
+      ? 'background:#eef9f1;border-left:4px solid #0a6b3a'
+      : 'background:#fff5f5;border-left:4px solid #ea002a';
+    return ''
+      + '<div style="' + headStyle + ';padding:8px 12px;border-radius:6px;margin-bottom:8px">'
+      +   '<div style="font-weight:700">' + esc(t.captain.name) + ' <span class="hint">SL' + (t.captain.sl ?? '?') + '</span>'
+      +     (ok ? ' &middot; ' + t.players.length + '-player team &middot; ' + t.legalLineups + ' legal lineups'
+                : ' &middot; <span style="color:#c0392b">' + esc(t.note || 'skipped') + '</span>')
+      +   '</div>'
+      +   '<div style="font-size:0.85rem;margin-top:4px">' + slList + '</div>'
+      + '</div>';
+  }).join('');
+  acceptBtn.disabled = validTeams.length === 0;
+}
+
+function tcqAutoGroupClose() {
+  document.getElementById('tcqAgModal').style.display = 'none';
+}
+
+async function tcqAutoGroupAccept() {
+  if (!_tcqAgGroups || !_tcqAgGroups.length) return;
+  if (!confirm('Create ' + _tcqAgGroups.length + ' new teams in the DB? This adds rows to tcq.teams and tcq.players for the current event. Cannot be undone in one click.')) return;
+  if (!_tcqEvent) { alert('No current TCQ event loaded.'); return; }
+  const acceptBtn = document.getElementById('tcqAgAcceptBtn');
+  acceptBtn.disabled = true;
+  acceptBtn.textContent = 'Creating…';
+  try {
+    /* For each suggested team: insert a teams row (returning id), then
+       insert N players rows. Done sequentially so the player rows can
+       reference the team_id. PostgREST can do this in two requests per
+       team — acceptable for the ~handful of teams we expect. */
+    let created = 0;
+    const baseIdx = _tcqTeams.reduce((m, t) => Math.max(m, t.team_index || 0), 0);
+    for (let i = 0; i < _tcqAgGroups.length; i++) {
+      const g = _tcqAgGroups[i];
+      const teamRow = [{
+        event_id: _tcqEvent.id,
+        team_index: baseIdx + i + 1,
+        notes: 'Auto-grouped ' + new Date().toISOString().slice(0, 10)
+      }];
+      const tr = await fetch(SB_URL + '/rest/v1/teams', {
+        method: 'POST',
+        headers: {
+          apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY,
+          'Accept-Profile': TCQ_PROFILE, 'Content-Profile': TCQ_PROFILE,
+          'Content-Type': 'application/json', Prefer: 'return=representation'
+        },
+        body: JSON.stringify(teamRow)
+      });
+      if (!tr.ok) throw new Error('Team insert ' + tr.status + ': ' + (await tr.text()).slice(0, 160));
+      const teamId = (await tr.json())[0].id;
+      const playerRows = g.players.map((p, idx) => ({
+        team_id: teamId,
+        position: idx + 1,
+        name: p.name,
+        member_number: p.member_number
+        /* SL omitted — derived live via the view. */
+      }));
+      const pr = await fetch(SB_URL + '/rest/v1/players', {
+        method: 'POST',
+        headers: {
+          apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY,
+          'Accept-Profile': TCQ_PROFILE, 'Content-Profile': TCQ_PROFILE,
+          'Content-Type': 'application/json', Prefer: 'return=minimal'
+        },
+        body: JSON.stringify(playerRows)
+      });
+      if (!pr.ok) throw new Error('Players insert (team ' + teamId + ') ' + pr.status + ': ' + (await pr.text()).slice(0, 160));
+      created++;
+    }
+    tcqAutoGroupClose();
+    await tcqRender();
+    await tcqOrRender();
+    alert('Created ' + created + ' team(s). Captains and their rosters are now in the TCQ team list above.');
+  } catch (e) {
+    alert('Failed mid-create: ' + e.message + '\nSome teams may have been partially created.');
+  } finally {
+    acceptBtn.disabled = false;
+    acceptBtn.textContent = 'Create teams in DB';
+  }
+}
+
+window.tcqAutoGroupOpen = tcqAutoGroupOpen;
+window.tcqAutoGroupClose = tcqAutoGroupClose;
+window.tcqAutoGroupAccept = tcqAutoGroupAccept;
 
 /* ────── Activity log viewer (3.69+) ──────
    Reads slate.rolodex_log via service-role JWT (the same SB_KEY the
