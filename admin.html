@@ -2140,6 +2140,88 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         <div id="tcqList"><p class="hint">Loading…</p></div>
       </div>
 
+      <!-- ── Outreach — find & text qualified candidates (3.113+) ── -->
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
+          <h2 style="margin:0">Outreach</h2>
+          <span class="hint" id="tcqOrStatus"></span>
+          <div style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn btn-primary btn-sm" onclick="tcqOrOpenBulkModal()">+ Bulk mark looking</button>
+            <button class="btn btn-outline btn-sm" onclick="tcqOrOpenTemplateEditor()">📝 Text template</button>
+            <button class="btn btn-outline btn-sm" onclick="tcqOrRender()">↻ Refresh</button>
+          </div>
+        </div>
+        <p class="hint" style="margin-top:0">
+          Candidates pulled from the most recent eligibility report. Mark people as
+          <strong>looking for a team</strong>, filter / sort by skill level, and text
+          them with a saved template. Looking-for-team state lives in
+          <code>tcq.looking_for_team</code> (separate from the qualifier teams).
+        </p>
+
+        <!-- Filter bar -->
+        <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:10px;font-size:0.85rem">
+          <div>
+            <strong style="font-size:0.78rem;color:var(--muted);text-transform:uppercase">Looking</strong>
+            <div id="tcqOrLookingChips" style="display:inline-flex;gap:4px;margin-left:6px">
+              <button class="btn btn-outline btn-sm tcqor-chip" data-looking="all"      style="font-size:0.78rem">All</button>
+              <button class="btn btn-primary btn-sm tcqor-chip" data-looking="yes"      style="font-size:0.78rem">Looking</button>
+              <button class="btn btn-outline btn-sm tcqor-chip" data-looking="no"       style="font-size:0.78rem">Not looking</button>
+            </div>
+          </div>
+          <div>
+            <strong style="font-size:0.78rem;color:var(--muted);text-transform:uppercase">SL</strong>
+            <div id="tcqOrSlChips" style="display:inline-flex;gap:4px;margin-left:6px">
+              <button class="btn btn-outline btn-sm tcqor-sl" data-sl="all" style="font-size:0.78rem">All</button>
+              <button class="btn btn-outline btn-sm tcqor-sl" data-sl="3"   style="font-size:0.78rem">3</button>
+              <button class="btn btn-outline btn-sm tcqor-sl" data-sl="4"   style="font-size:0.78rem">4</button>
+              <button class="btn btn-outline btn-sm tcqor-sl" data-sl="5"   style="font-size:0.78rem">5</button>
+              <button class="btn btn-outline btn-sm tcqor-sl" data-sl="6"   style="font-size:0.78rem">6</button>
+              <button class="btn btn-outline btn-sm tcqor-sl" data-sl="7"   style="font-size:0.78rem">7</button>
+            </div>
+          </div>
+          <div>
+            <strong style="font-size:0.78rem;color:var(--muted);text-transform:uppercase">Sort</strong>
+            <select id="tcqOrSort" class="form-input" style="display:inline-block;width:auto;margin-left:6px;font-size:0.85rem;padding:4px 8px">
+              <option value="name">Name (A→Z)</option>
+              <option value="sl-asc">SL (low→high)</option>
+              <option value="sl-desc">SL (high→low)</option>
+              <option value="updated">Recently marked</option>
+            </select>
+          </div>
+          <div style="flex:1;min-width:200px">
+            <input type="text" id="tcqOrSearch" class="form-input" placeholder="Search name or APA #…"
+                   style="font-size:0.85rem;padding:6px 10px">
+          </div>
+        </div>
+
+        <div id="tcqOrList"><p class="hint">Upload an eligibility report first.</p></div>
+      </div>
+
+      <!-- Bulk-mark modal -->
+      <div class="modal-backdrop" id="tcqOrBulkModal" style="display:none">
+        <div class="modal" style="max-width:520px">
+          <h3 style="margin:0 0 10px">Bulk mark as looking for a team</h3>
+          <p class="hint" style="margin-top:0">
+            Paste APA numbers (5 or 8 digit, one per line — commas/spaces also fine).
+            Each member found in the eligibility report will be marked looking.
+          </p>
+          <textarea id="tcqOrBulkText" rows="10" placeholder="97212345&#10;97223456&#10;…"
+                    style="width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;font-family:ui-monospace,SFMono-Regular,monospace;font-size:0.85rem;resize:vertical"></textarea>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:10px">
+            <label style="font-size:0.85rem">
+              <input type="radio" name="tcqOrBulkMode" value="looking" checked> Mark looking
+            </label>
+            <label style="font-size:0.85rem">
+              <input type="radio" name="tcqOrBulkMode" value="not-looking"> Mark NOT looking
+            </label>
+          </div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+            <button class="btn btn-outline" onclick="tcqOrCloseBulkModal()">Cancel</button>
+            <button class="btn btn-primary" onclick="tcqOrApplyBulk()">Apply</button>
+          </div>
+        </div>
+      </div>
+
       <!-- Add/edit team modal -->
       <div class="modal-backdrop" id="tcqTeamModal" style="display:none">
         <div class="modal" id="tcqTeamModalBody" style="max-width:520px">
@@ -2294,7 +2376,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION   = '3.112';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION   = '3.113';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -15999,6 +16081,8 @@ let _tcqPlayersByTeam = new Map();
 async function tcqInit() {
   await Promise.all([tcqLoadEligibility(), tcqLoadSu26Roster()]);
   await tcqRender();
+  /* Outreach section — runs in parallel, doesn't block team render. */
+  tcqOrInit().catch(e => console.warn('[tcq] outreach init', e));
   document.getElementById('tcqNewTeamBtn').onclick = () => tcqOpenTeamModal(null);
   /* Eligibility paste box wiring (3.112+) */
   const processBtn = document.getElementById('tcqEligProcessBtn');
@@ -16776,6 +16860,317 @@ window.tcqEditPlayer = tcqEditPlayer;
 window.tcqDeletePlayer = tcqDeletePlayer;
 window.tcqTextCaptain = tcqTextCaptain;
 window.tcqOpenTemplateEditor = tcqOpenTemplateEditor;
+
+/* ══════════════════════════════════════════════════════════════════════
+   TCQ — Outreach (3.113+)
+   ══════════════════════════════════════════════════════════════════════
+   Find qualified candidates from the eligibility report, mark people as
+   "looking for a team", filter by SL, text them with a saved template.
+   State stored in tcq.looking_for_team (member_number → boolean + notes).
+   Reads via tcq.outreach_candidates view which joins eligibility + slate
+   players + looking_for_team. Service-role only. */
+let _tcqOrAll = [];                       // every candidate row from the view
+let _tcqOrFilter = { looking: 'yes', sl: 'all', q: '', sort: 'name' };
+const TCQ_OR_VARS = ['first_name', 'last_name', 'nickname', 'member_number',
+  'sl', 'sl_8ball', 'sl_9ball', 'sessions_as_capt', 'spring_mp',
+  'scores_8b', 'scores_9b'];
+let _tcqOrTemplateBody = null;            // cached SMS template
+
+async function tcqOrInit() {
+  await tcqOrRender();
+  /* Wire filter UI */
+  document.querySelectorAll('.tcqor-chip').forEach(b => {
+    b.onclick = () => { _tcqOrFilter.looking = b.dataset.looking; tcqOrRefreshChipStyles(); tcqOrRedraw(); };
+  });
+  document.querySelectorAll('.tcqor-sl').forEach(b => {
+    b.onclick = () => { _tcqOrFilter.sl = b.dataset.sl; tcqOrRefreshChipStyles(); tcqOrRedraw(); };
+  });
+  document.getElementById('tcqOrSort').onchange = (ev) => {
+    _tcqOrFilter.sort = ev.target.value; tcqOrRedraw();
+  };
+  document.getElementById('tcqOrSearch').oninput = (ev) => {
+    _tcqOrFilter.q = ev.target.value.trim().toLowerCase(); tcqOrRedraw();
+  };
+  tcqOrRefreshChipStyles();
+}
+
+function tcqOrRefreshChipStyles() {
+  document.querySelectorAll('.tcqor-chip').forEach(b => {
+    const active = b.dataset.looking === _tcqOrFilter.looking;
+    b.classList.toggle('btn-primary',  active);
+    b.classList.toggle('btn-outline', !active);
+  });
+  document.querySelectorAll('.tcqor-sl').forEach(b => {
+    const active = b.dataset.sl === _tcqOrFilter.sl;
+    b.classList.toggle('btn-primary',  active);
+    b.classList.toggle('btn-outline', !active);
+  });
+}
+
+async function tcqOrRender() {
+  const stat = document.getElementById('tcqOrStatus');
+  stat.textContent = 'Loading…';
+  try {
+    _tcqOrAll = await tcqGet('outreach_candidates?select=*&limit=2000');
+  } catch (e) {
+    console.error('[tcq] outreach load', e);
+    document.getElementById('tcqOrList').innerHTML = '<p class="hint err">Load failed: ' + esc(e.message) + '</p>';
+    stat.textContent = '';
+    return;
+  }
+  stat.textContent = _tcqOrAll.length + ' candidate(s) in eligibility report';
+  tcqOrRedraw();
+}
+
+function tcqOrRedraw() {
+  const list = document.getElementById('tcqOrList');
+  const f = _tcqOrFilter;
+  let rows = _tcqOrAll.filter(r => {
+    if (f.looking === 'yes' && !r.looking_for_team) return false;
+    if (f.looking === 'no'  &&  r.looking_for_team) return false;
+    if (f.sl !== 'all' && Number(r.sl) !== Number(f.sl)) return false;
+    if (f.q) {
+      const hay = (r.name + ' ' + r.member_number).toLowerCase();
+      if (!hay.includes(f.q)) return false;
+    }
+    return true;
+  });
+  rows.sort((a, b) => {
+    switch (f.sort) {
+      case 'sl-asc':  return (a.sl ?? 99) - (b.sl ?? 99) || a.name.localeCompare(b.name);
+      case 'sl-desc': return (b.sl ?? -1) - (a.sl ?? -1) || a.name.localeCompare(b.name);
+      case 'updated': return new Date(b.looking_updated_at || 0) - new Date(a.looking_updated_at || 0);
+      default:        return a.name.localeCompare(b.name);
+    }
+  });
+  if (!rows.length) {
+    list.innerHTML = '<p class="hint">No candidates match the current filters.</p>';
+    return;
+  }
+  list.innerHTML = '<div style="display:grid;gap:8px">' + rows.map(tcqOrRowHtml).join('') + '</div>';
+}
+
+function tcqOrRowHtml(r) {
+  const slLine = (r.sl != null)
+    ? 'SL' + r.sl + ' <span class="hint" style="font-size:0.74rem">(8:' + (r.sl_8ball ?? '?') + ' 9:' + (r.sl_9ball ?? '?') + ')</span>'
+    : '<span class="hint" style="font-size:0.74rem;color:#c0392b">no SL</span>';
+  const capt = r.captain_eligible
+    ? '<span style="background:#c9a64a;color:#fff;padding:2px 6px;border-radius:999px;font-weight:700;font-size:0.7rem;margin-left:6px">CAPT-OK</span>'
+    : '';
+  const summer = r.summer_team === false
+    ? '<span class="hint" style="font-size:0.74rem;color:#c9a64a"> · ⚠ off Su26 roster</span>'
+    : '';
+  const phone = r.cell_phone || '';
+  const lookingBadge = r.looking_for_team
+    ? '<span style="background:#0a6b3a;color:#fff;padding:2px 8px;border-radius:999px;font-weight:700;font-size:0.72rem">LOOKING</span>'
+    : '';
+  return ''
+    + '<div class="card" style="padding:10px 12px;margin:0">'
+    +   '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+    +     '<div style="flex:1;min-width:200px">'
+    +       '<div style="font-weight:700">' + esc(r.name) + ' ' + lookingBadge + capt + '</div>'
+    +       '<div class="hint" style="font-size:0.78rem">#' + esc(r.member_number) + ' &middot; ' + slLine + summer + '</div>'
+    +     '</div>'
+    +     '<label style="display:flex;align-items:center;gap:4px;font-size:0.82rem;cursor:pointer">'
+    +       '<input type="checkbox" ' + (r.looking_for_team ? 'checked' : '')
+    +         + ' onchange="tcqOrSetLooking(\'' + esc(r.member_number) + '\', this.checked)">'
+    +       'Looking'
+    +     '</label>'
+    +     '<button class="btn btn-primary btn-sm" onclick="tcqOrTextOne(\'' + esc(r.member_number) + '\')"'
+    +       (phone ? '' : ' disabled title="No cell phone on file"') + '>Text</button>'
+    +   '</div>'
+    + '</div>';
+}
+
+/* ── Looking toggles ─────────────────────────────────────────── */
+async function tcqOrSetLooking(memberNumber, looking) {
+  try {
+    /* UPSERT by member_number. Sets looking + updated_at. */
+    const r = await fetch(SB_URL + '/rest/v1/looking_for_team?on_conflict=member_number', {
+      method: 'POST',
+      headers: {
+        apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY,
+        'Accept-Profile': TCQ_PROFILE, 'Content-Profile': TCQ_PROFILE,
+        'Content-Type': 'application/json',
+        Prefer: 'resolution=merge-duplicates,return=minimal'
+      },
+      body: JSON.stringify([{ member_number: memberNumber, looking: !!looking, updated_at: new Date().toISOString() }])
+    });
+    if (!r.ok) throw new Error('Save ' + r.status);
+    /* Patch local cache + redraw without a full reload. */
+    const row = _tcqOrAll.find(x => x.member_number === memberNumber);
+    if (row) {
+      row.looking_for_team = !!looking;
+      row.looking_updated_at = new Date().toISOString();
+    }
+    tcqOrRedraw();
+  } catch (e) {
+    alert('Failed to update: ' + e.message);
+    tcqOrRender();
+  }
+}
+
+/* ── Bulk mark ───────────────────────────────────────────────── */
+function tcqOrOpenBulkModal() {
+  document.getElementById('tcqOrBulkText').value = '';
+  document.getElementById('tcqOrBulkModal').style.display = 'flex';
+}
+function tcqOrCloseBulkModal() {
+  document.getElementById('tcqOrBulkModal').style.display = 'none';
+}
+async function tcqOrApplyBulk() {
+  const text = document.getElementById('tcqOrBulkText').value;
+  const mode = document.querySelector('input[name="tcqOrBulkMode"]:checked').value;
+  const looking = mode === 'looking';
+  /* Extract 5- or 8-digit numbers. Tolerant of any separator. */
+  const nums = (text.match(/\b\d{5,8}\b/g) || [])
+    .map(n => n.length === 5 ? '972' + n : n)   // normalize to 8-digit short→full
+    .filter(n => n.length === 8);
+  if (!nums.length) {
+    alert('No APA numbers found in the paste.');
+    return;
+  }
+  /* Intersect with eligibility-report cohort to keep noise out. */
+  const cohort = new Set(_tcqOrAll.map(r => r.member_number));
+  const known   = nums.filter(n => cohort.has(n));
+  const unknown = nums.filter(n => !cohort.has(n));
+  if (!known.length) {
+    alert('None of those APA numbers are in the current eligibility report.\n\n'
+      + (unknown.length + ' unmatched.'));
+    return;
+  }
+  const now = new Date().toISOString();
+  const body = known.map(m => ({ member_number: m, looking: looking, updated_at: now }));
+  try {
+    const r = await fetch(SB_URL + '/rest/v1/looking_for_team?on_conflict=member_number', {
+      method: 'POST',
+      headers: {
+        apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY,
+        'Accept-Profile': TCQ_PROFILE, 'Content-Profile': TCQ_PROFILE,
+        'Content-Type': 'application/json',
+        Prefer: 'resolution=merge-duplicates,return=minimal'
+      },
+      body: JSON.stringify(body)
+    });
+    if (!r.ok) throw new Error('Save ' + r.status + ': ' + (await r.text()).slice(0, 160));
+    tcqOrCloseBulkModal();
+    await tcqOrRender();
+    alert('Marked ' + known.length + ' as ' + (looking ? 'looking' : 'NOT looking')
+      + (unknown.length ? '. ' + unknown.length + ' APA #s not in the eligibility report were skipped.' : '.'));
+  } catch (e) {
+    alert('Save failed: ' + e.message);
+  }
+}
+
+/* ── Text one candidate ──────────────────────────────────────── */
+async function tcqOrLoadTemplate() {
+  if (_tcqOrTemplateBody != null) return _tcqOrTemplateBody;
+  try {
+    const rows = await tcqGet('templates?kind=eq.outreach_body&select=body');
+    _tcqOrTemplateBody = (rows && rows[0] && rows[0].body) || '';
+  } catch (e) {
+    console.warn('[tcq] outreach template load', e);
+    _tcqOrTemplateBody = '';
+  }
+  return _tcqOrTemplateBody;
+}
+function tcqOrBuildVars(r) {
+  return {
+    first_name:       r.first_name || (r.name || '').split(' ')[0],
+    last_name:        r.last_name || (r.name || '').split(' ').slice(1).join(' '),
+    nickname:         r.nickname || '',
+    member_number:    r.member_number || '',
+    sl:               r.sl != null ? r.sl : '',
+    sl_8ball:         r.sl_8ball != null ? r.sl_8ball : '',
+    sl_9ball:         r.sl_9ball != null ? r.sl_9ball : '',
+    sessions_as_capt: r.sessions_as_capt != null ? r.sessions_as_capt : '',
+    spring_mp:        r.spring_mp != null ? r.spring_mp : '',
+    scores_8b:        r.scores_8b != null ? r.scores_8b : '',
+    scores_9b:        r.scores_9b != null ? r.scores_9b : ''
+  };
+}
+async function tcqOrTextOne(memberNumber) {
+  const r = _tcqOrAll.find(x => x.member_number === memberNumber);
+  if (!r) { alert('Candidate not loaded.'); return; }
+  const phone = tcqNormalizePhone(r.cell_phone);
+  if (!phone) { alert('No usable cell phone on file for ' + r.name + '.'); return; }
+  const tpl = await tcqOrLoadTemplate();
+  const body = tcqSubstitute(tpl, tcqOrBuildVars(r));
+  window.location.href = 'sms:' + phone + '?&body=' + encodeURIComponent(body);
+}
+
+/* ── Outreach template editor ─────────────────────────────────── */
+async function tcqOrOpenTemplateEditor() {
+  await tcqOrLoadTemplate();
+  const existing = document.getElementById('tcqOrTplModal');
+  if (existing) existing.remove();
+  const pills = TCQ_OR_VARS.map(v =>
+    '<button type="button" data-tcqorvar="' + esc(v) + '" '
+    + 'style="padding:3px 8px;font-size:0.74rem;font-weight:700;background:#f3f4f6;'
+    + 'border:1px solid var(--border);border-radius:6px;color:var(--text);cursor:pointer;'
+    + 'font-family:ui-monospace,SFMono-Regular,monospace">{' + esc(v) + '}</button>'
+  ).join(' ');
+  const back = document.createElement('div');
+  back.id = 'tcqOrTplModal';
+  back.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:2000;display:flex;align-items:center;justify-content:center;padding:20px';
+  back.innerHTML = ''
+    + '<div style="background:#fff;border-radius:14px;padding:20px;max-width:640px;width:100%;max-height:90vh;overflow-y:auto">'
+    +   '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'
+    +     '<div style="font-weight:800;font-size:1.05rem">📝 Outreach text template</div>'
+    +     '<button type="button" id="tcqOrTplClose" style="margin-left:auto;background:none;border:0;font-size:1.4rem;line-height:1;cursor:pointer;color:var(--muted)">×</button>'
+    +   '</div>'
+    +   '<p class="hint" style="margin-top:0">Tap a variable to insert at the cursor. Unknown <code>{vars}</code> are left in the SMS so typos are visible.</p>'
+    +   '<div style="margin-bottom:8px;display:flex;gap:4px;flex-wrap:wrap">' + pills + '</div>'
+    +   '<textarea id="tcqOrTplBody" rows="10" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:0.92rem">'
+    +     esc(_tcqOrTemplateBody || '') + '</textarea>'
+    +   '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">'
+    +     '<button class="btn btn-outline" id="tcqOrTplCancel">Cancel</button>'
+    +     '<button class="btn btn-primary" id="tcqOrTplSave">Save</button>'
+    +   '</div>'
+    + '</div>';
+  document.body.appendChild(back);
+  const ta = document.getElementById('tcqOrTplBody');
+  back.querySelectorAll('[data-tcqorvar]').forEach(btn => {
+    btn.onclick = () => {
+      const v = '{' + btn.dataset.tcqorvar + '}';
+      const s = ta.selectionStart, e = ta.selectionEnd;
+      ta.value = ta.value.slice(0, s) + v + ta.value.slice(e);
+      ta.focus();
+      ta.setSelectionRange(s + v.length, s + v.length);
+    };
+  });
+  const close = () => back.remove();
+  document.getElementById('tcqOrTplClose').onclick = close;
+  document.getElementById('tcqOrTplCancel').onclick = close;
+  document.getElementById('tcqOrTplSave').onclick = async () => {
+    const body = document.getElementById('tcqOrTplBody').value;
+    try {
+      const r = await fetch(SB_URL + '/rest/v1/templates?on_conflict=kind', {
+        method: 'POST',
+        headers: {
+          apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY,
+          'Accept-Profile': TCQ_PROFILE, 'Content-Profile': TCQ_PROFILE,
+          'Content-Type': 'application/json',
+          Prefer: 'resolution=merge-duplicates,return=minimal'
+        },
+        body: JSON.stringify([{ kind: 'outreach_body', body: body, updated_at: new Date().toISOString() }])
+      });
+      if (!r.ok) throw new Error('Save ' + r.status + ': ' + (await r.text()).slice(0, 160));
+      _tcqOrTemplateBody = body;
+      close();
+    } catch (e) {
+      alert('Save failed: ' + e.message);
+    }
+  };
+}
+
+window.tcqOrSetLooking = tcqOrSetLooking;
+window.tcqOrTextOne = tcqOrTextOne;
+window.tcqOrOpenBulkModal = tcqOrOpenBulkModal;
+window.tcqOrCloseBulkModal = tcqOrCloseBulkModal;
+window.tcqOrApplyBulk = tcqOrApplyBulk;
+window.tcqOrOpenTemplateEditor = tcqOrOpenTemplateEditor;
+window.tcqOrRender = tcqOrRender;
 
 /* ────── Activity log viewer (3.69+) ──────
    Reads slate.rolodex_log via service-role JWT (the same SB_KEY the
