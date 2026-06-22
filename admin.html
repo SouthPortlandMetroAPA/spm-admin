@@ -2269,7 +2269,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION   = '3.105';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION   = '3.106';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -16013,16 +16013,26 @@ async function tcqRender() {
 }
 
 /* APA Masters lineup check: AT LEAST ONE 3-player subset of the team's
-   roster must sum to <= 15. Returns 'valid' | 'invalid' | 'incomplete'
-   (fewer than 3 SL-known players → can't be judged). */
+   roster must sum to <= 15. Returns an object so the caller can also
+   surface the minimum-possible sum (useful when reporting how far over
+   cap a team is).
+     { state: 'valid' | 'invalid' | 'incomplete',
+       minSum: number | null }    // smallest 3-combo sum, null if incomplete
+*/
 function tcqLineupCheck(players) {
   const sls = players.map(p => p.effective_skill_level).filter(v => v != null);
-  if (sls.length < 3) return 'incomplete';
+  if (sls.length < 3) return { state: 'incomplete', minSum: null };
+  let minSum = Infinity;
   for (let i = 0; i < sls.length; i++)
     for (let j = i + 1; j < sls.length; j++)
-      for (let k = j + 1; k < sls.length; k++)
-        if (sls[i] + sls[j] + sls[k] <= 15) return 'valid';
-  return 'invalid';
+      for (let k = j + 1; k < sls.length; k++) {
+        const s = sls[i] + sls[j] + sls[k];
+        if (s < minSum) minSum = s;
+      }
+  return {
+    state: minSum <= 15 ? 'valid' : 'invalid',
+    minSum: minSum
+  };
 }
 
 function tcqRenderTeamCard(team) {
@@ -16069,9 +16079,9 @@ function tcqRenderTeamCard(team) {
     +   '<div class="hint" style="font-size:0.82rem">'
     +     'Payment: ' + esc(team.payment_method || '—')
     +     ' &middot; ' + slotsUsed + ' / ' + maxSlots + ' players'
-    +     (lineup === 'invalid'
-        ? ' &middot; <span style="background:#ea002a;color:#fff;padding:2px 8px;border-radius:999px;font-weight:700;font-size:0.75rem" title="No 3-player combination sums to 15 or less.">&#9888; Over cap</span>'
-        : lineup === 'incomplete'
+    +     (lineup.state === 'invalid'
+        ? ' &middot; <span style="background:#ea002a;color:#fff;padding:2px 8px;border-radius:999px;font-weight:700;font-size:0.75rem" title="Lowest possible 3-player lineup totals SL'+lineup.minSum+'. Cap is 15.">&#9888; Over cap (min ' + lineup.minSum + ')</span>'
+        : lineup.state === 'incomplete'
           ? ' &middot; <span class="hint" style="font-size:0.75rem">(need 3+ players to check cap)</span>'
           : '')
     +   '</div>'
@@ -16249,10 +16259,12 @@ function tcqTextCaptain(teamId) {
     lines.push(p.position + '. ' + p.name + sl + (p.is_captain ? ' — captain' : ''));
   }
   lines.push('');
-  if (lineup === 'invalid') {
-    lines.push('⚠ Heads up — your current 3-player lineup options all total over the SL 15 cap. The team can\'t compete as-is. You\'ll need to swap or add a lower-SL player before the event.');
+  if (lineup.state === 'invalid') {
+    const over = lineup.minSum - 15;
+    lines.push('⚠ Heads up — your lowest possible 3-player lineup totals SL'
+      + lineup.minSum + ', which is ' + over + ' over the SL 15 cap. The team can\'t compete as-is — you\'ll need to swap or add a player whose SL is at least ' + over + ' lower than the player they replace.');
     lines.push('');
-  } else if (lineup === 'incomplete') {
+  } else if (lineup.state === 'incomplete') {
     lines.push('Note: you need at least 3 players on the roster to compete. Add ' + (3 - players.length) + ' more before the event.');
     lines.push('');
   }
