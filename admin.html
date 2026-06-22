@@ -2403,7 +2403,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION   = '3.114';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION   = '3.115';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -16220,10 +16220,13 @@ function tcqEligibilityParseTsv(text) {
     return null;
   };
   const out = [];
+  const seen = new Set();   // dedupe — UPSERT rejects same key twice in one batch
   for (let i = 1; i < lines.length; i++) {
     const cells = lines[i].split('\t');
     const member = (cells[ixMember] || '').trim();
-    if (!/^\d{5,8}$/.test(member)) continue;   // skip header-repeats / footnotes / empty rows
+    if (!/^\d{5,8}$/.test(member)) continue;
+    if (seen.has(member)) continue;
+    seen.add(member);
     out.push({
       member_number:    member,
       name:             (cells[ixName] || '').trim(),
@@ -17070,9 +17073,11 @@ async function tcqOrApplyBulk() {
   const field = document.getElementById('tcqOrBulkField').value;
   const val   = document.querySelector('input[name="tcqOrBulkVal"]:checked').value === 'true';
   const col = field === 'recruiting' ? 'recruiting' : 'looking';
-  const nums = (text.match(/\b\d{5,8}\b/g) || [])
-    .map(n => n.length === 5 ? '972' + n : n)
-    .filter(n => n.length === 8);
+  const nums = [...new Set(   // dedupe — PostgREST UPSERT 21000s on dup keys in one batch
+    (text.match(/\b\d{5,8}\b/g) || [])
+      .map(n => n.length === 5 ? '972' + n : n)
+      .filter(n => n.length === 8)
+  )];
   if (!nums.length) { alert('No APA numbers found in the paste.'); return; }
   const cohort = new Set(_tcqOrAll.map(r => r.member_number));
   const known   = nums.filter(n => cohort.has(n));
