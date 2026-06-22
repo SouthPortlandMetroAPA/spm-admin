@@ -2269,7 +2269,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION   = '3.103';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION   = '3.104';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -16012,10 +16012,24 @@ async function tcqRender() {
   }
 }
 
+/* APA Masters lineup check: AT LEAST ONE 3-player subset of the team's
+   roster must sum to <= 15. Returns 'valid' | 'invalid' | 'incomplete'
+   (fewer than 3 SL-known players → can't be judged). */
+function tcqLineupCheck(players) {
+  const sls = players.map(p => p.effective_skill_level).filter(v => v != null);
+  if (sls.length < 3) return 'incomplete';
+  for (let i = 0; i < sls.length; i++)
+    for (let j = i + 1; j < sls.length; j++)
+      for (let k = j + 1; k < sls.length; k++)
+        if (sls[i] + sls[j] + sls[k] <= 15) return 'valid';
+  return 'invalid';
+}
+
 function tcqRenderTeamCard(team) {
   const players = _tcqPlayersByTeam.get(team.id) || [];
   const captain = players.find(p => p.is_captain);
   const slotsUsed = players.length;
+  const lineup = tcqLineupCheck(players);
   const maxSlots = 5;
   const positionsTaken = new Set(players.map(p => p.position));
   const nextOpenPos = [1, 2, 3, 4, 5].find(p => !positionsTaken.has(p));
@@ -16055,6 +16069,11 @@ function tcqRenderTeamCard(team) {
     +   '<div class="hint" style="font-size:0.82rem">'
     +     'Payment: ' + esc(team.payment_method || '—')
     +     ' &middot; ' + slotsUsed + ' / ' + maxSlots + ' players'
+    +     (lineup === 'invalid'
+        ? ' &middot; <span style="background:#ea002a;color:#fff;padding:2px 8px;border-radius:999px;font-weight:700;font-size:0.75rem" title="No 3-player combination sums to 15 or less.">&#9888; Over cap</span>'
+        : lineup === 'incomplete'
+          ? ' &middot; <span class="hint" style="font-size:0.75rem">(need 3+ players to check cap)</span>'
+          : '')
     +   '</div>'
     +   '<div style="margin-left:auto;display:flex;gap:6px">'
     +     '<button class="btn btn-outline btn-sm" onclick="tcqOpenTeamModal(' + team.id + ')">Edit team</button>'
