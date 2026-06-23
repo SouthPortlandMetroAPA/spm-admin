@@ -2209,6 +2209,14 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           </div>
         </div>
 
+        <!-- Multi-select action bar — appears only when 1+ rows are checked. -->
+        <div id="tcqOrSelBar" style="display:none;align-items:center;gap:10px;padding:8px 12px;margin-bottom:10px;background:var(--accent-soft,#eef4ff);border:1px solid #b9cdf2;border-radius:6px;flex-wrap:wrap">
+          <strong id="tcqOrSelCount" style="font-size:0.9rem">0 selected</strong>
+          <span class="hint" id="tcqOrSelNames" style="font-size:0.78rem;flex:1;min-width:200px"></span>
+          <button class="btn btn-primary btn-sm" onclick="tcqOrMakeTeamFromSelection()">→ Make team from selected</button>
+          <button class="btn btn-outline btn-sm" onclick="tcqOrClearSelection()">Clear</button>
+        </div>
+
         <div id="tcqOrList"><p class="hint">Upload an eligibility report first.</p></div>
       </div>
 
@@ -2424,7 +2432,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION   = '3.126';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION   = '3.127';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -16615,6 +16623,14 @@ async function tcqSaveTeam() {
         }));
         await tcqPost('players', playerRows);
       }
+      /* If this team was built from an Outreach multi-select, clear the
+         selection + re-render the outreach list (has_tcq_team flips). */
+      if (typeof _tcqOrSel !== 'undefined' && _tcqOrSel.length) {
+        _tcqOrSel = [];
+        if (typeof tcqOrRender === 'function') {
+          tcqOrRender().catch(() => {});
+        }
+      }
     }
     tcqCloseTeamModal();
     await tcqRender();
@@ -17018,6 +17034,11 @@ let _tcqOrAll = [];                       // every candidate row from the view
 /* status: 'all' | 'looking' | 'recruiting' | 'none'
    team:   'all' | 'has' (already on a TCQ team) | 'none' (no TCQ team) */
 let _tcqOrFilter = { status: 'looking', team: 'all', sl: 'all', q: '', sort: 'name' };
+/* Multi-select state for "make team from selected".
+   Ordered array — index 0 = captain (slot 1), index 1 = slot 2, etc.
+   Capped at TCQ_OR_SEL_MAX (5). Survives filter/sort/refetch. */
+const TCQ_OR_SEL_MAX = 5;
+let _tcqOrSel = [];                       // member_numbers, in selection order
 const TCQ_OR_VARS = ['first_name', 'last_name', 'nickname', 'member_number',
   'sl', 'sl_8ball', 'sl_9ball', 'sessions_as_capt', 'spring_mp',
   'scores_8b', 'scores_9b'];
@@ -17122,7 +17143,79 @@ function tcqOrRedraw() {
                   : field === 'confirmed'  ? r.confirmed
                   : r.looking_for_team);
   });
+  /* Re-sync the multi-select checkboxes against _tcqOrSel after the
+     row template rebuilds. Filtered-out members stay in _tcqOrSel; their
+     count still shows in the bar. */
+  list.querySelectorAll('input.tcqor-sel').forEach(cb => {
+    cb.checked = _tcqOrSel.includes(cb.dataset.tcqorSelMember);
+  });
+  tcqOrRefreshSelBar();
 }
+
+/* ── Multi-select for "make team from selected" ──────────────── */
+function tcqOrToggleSelection(memberNumber, checked, cbEl) {
+  if (checked) {
+    if (_tcqOrSel.length >= TCQ_OR_SEL_MAX) {
+      if (cbEl) cbEl.checked = false;
+      alert('A team can have at most ' + TCQ_OR_SEL_MAX + ' players. Clear someone first.');
+      return;
+    }
+    if (!_tcqOrSel.includes(memberNumber)) _tcqOrSel.push(memberNumber);
+  } else {
+    _tcqOrSel = _tcqOrSel.filter(m => m !== memberNumber);
+  }
+  tcqOrRefreshSelBar();
+}
+function tcqOrClearSelection() {
+  _tcqOrSel = [];
+  document.querySelectorAll('input.tcqor-sel').forEach(cb => cb.checked = false);
+  tcqOrRefreshSelBar();
+}
+function tcqOrRefreshSelBar() {
+  const bar = document.getElementById('tcqOrSelBar');
+  if (!bar) return;
+  const n = _tcqOrSel.length;
+  bar.style.display = n ? 'flex' : 'none';
+  if (!n) return;
+  const byMember = new Map(_tcqOrAll.map(r => [r.member_number, r]));
+  const labels = _tcqOrSel.map((m, i) => {
+    const r = byMember.get(m);
+    const tag = (i === 0 ? 'C: ' : (i + 1) + '. ');
+    return tag + (r ? r.name + ' (SL' + (r.sl ?? '?') + ')' : '#' + m);
+  });
+  document.getElementById('tcqOrSelCount').textContent =
+    n + '/' + TCQ_OR_SEL_MAX + ' selected (first = captain)';
+  document.getElementById('tcqOrSelNames').textContent = labels.join(' · ');
+}
+function tcqOrMakeTeamFromSelection() {
+  if (!_tcqOrSel.length) return;
+  const byMember = new Map(_tcqOrAll.map(r => [r.member_number, r]));
+  /* Warn if any selected member is already on a TCQ team for this event. */
+  const onTeam = _tcqOrSel.filter(m => {
+    const r = byMember.get(m);
+    return r && r.has_tcq_team;
+  });
+  if (onTeam.length) {
+    const names = onTeam.map(m => (byMember.get(m) || {}).name || ('#' + m)).join(', ');
+    if (!confirm(onTeam.length + ' selected player(s) are already on a TCQ team: ' + names + '\n\nProceed anyway? (DB may reject the insert if the same player can\'t be on two teams.)')) return;
+  }
+  /* Build the paste in the same format the Add-Team modal expects. */
+  const lines = _tcqOrSel.map((m, i) => {
+    const r = byMember.get(m) || {};
+    const sl = (r.sl != null) ? String(r.sl) : '?';
+    return (i + 1) + ' - ' + (r.name || '') + ' - ' + m + ' - SL' + sl;
+  });
+  tcqOrPendingPaste = lines.join('\n');
+  tcqOpenTeamModal(null);
+  /* Inject paste after the modal renders (tcqOpenTeamModal clears the
+     textarea; we set it back here). */
+  const ta = document.getElementById('tcqTeamPaste');
+  if (ta) ta.value = tcqOrPendingPaste;
+  tcqOrPendingPaste = null;
+}
+/* Set by tcqOrMakeTeamFromSelection so a future tcqRender (after save)
+   clears the selection. Used as a one-shot signal. */
+let tcqOrPendingPaste = null;
 
 function tcqOrRowHtml(r) {
   const slLine = (r.sl != null)
@@ -17144,6 +17237,9 @@ function tcqOrRowHtml(r) {
   return ''
     + '<div class="card" style="padding:10px 12px;margin:0">'
     +   '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+    +     '<input type="checkbox" class="tcqor-sel" data-tcqor-sel-member="' + esc(r.member_number) + '"'
+    +       ' onchange="tcqOrToggleSelection(this.dataset.tcqorSelMember, this.checked, this)"'
+    +       ' title="Select for team-building" style="cursor:pointer;width:18px;height:18px;flex:0 0 auto">'
     +     '<div style="flex:1;min-width:200px">'
     +       '<div style="font-weight:700">' + esc(r.name) + ' ' + badges.join(' ') + ' ' + capt + '</div>'
     +       '<div class="hint" style="font-size:0.78rem">#' + esc(r.member_number) + ' &middot; ' + slLine + summer + '</div>'
@@ -17404,6 +17500,9 @@ window.tcqOrCloseBulkModal = tcqOrCloseBulkModal;
 window.tcqOrApplyBulk = tcqOrApplyBulk;
 window.tcqOrOpenTemplateEditor = tcqOrOpenTemplateEditor;
 window.tcqOrRender = tcqOrRender;
+window.tcqOrToggleSelection = tcqOrToggleSelection;
+window.tcqOrClearSelection = tcqOrClearSelection;
+window.tcqOrMakeTeamFromSelection = tcqOrMakeTeamFromSelection;
 
 /* ══════════════════════════════════════════════════════════════════════
    TCQ — Auto-group (3.114+)
