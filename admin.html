@@ -2450,7 +2450,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.136';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.137';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -17032,7 +17032,7 @@ function tcqBuildEmailVars(team, players, captain) {
   const sortedP = players.slice().sort((a, b) => a.position - b.position);
   const roster = sortedP.map(p => {
     const sl = (p.effective_skill_level != null) ? ' (SL' + p.effective_skill_level + ')' : '';
-    return '  ' + p.position + '. ' + p.name + sl + (p.is_captain ? ' — captain' : '');
+    return p.position + '. ' + p.name + sl + (p.is_captain ? ' — captain' : '');
   }).join('\n');
   const firstNames = sortedP.map(p =>
     (p.live_first_name) || (p.name ? p.name.split(/\s+/)[0] : '')
