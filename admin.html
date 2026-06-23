@@ -2451,7 +2451,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.139';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.140';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -16109,36 +16109,102 @@ function rolSafeHandle(f) {
       }
     });
 }
+/* Idempotent — safe to call N times. First call binds, subsequent calls
+   just refresh data. Required because the tab-switcher calls rolInit()
+   every time the user clicks the Rolodex tab. Without the guard, each
+   addEventListener('drop', ...) call piles a new handler on the zone
+   and one file drop fires rolSafeHandle() N times. */
+let _rolBindingsApplied = false;
 function rolInit() {
+  rolBindUpload();
+  /* Filter change re-renders the log without paging reset. */
+  const filterEl = document.getElementById('rolLogFilter');
+  if (filterEl && !filterEl.dataset.rolBound) {
+    filterEl.dataset.rolBound = '1';
+    filterEl.onchange = () => { _rolLogLimit = 50; rolLogRender(); };
+  }
+  rolRenderList();
+  rolLogRender();
+}
+
+function rolBindUpload() {
   const zone = document.getElementById('rolDropZone');
   const input = document.getElementById('rolFileInput');
   if (!zone || !input) {
-    console.warn('[rolodex] init skipped: zone=' + !!zone + ' input=' + !!input);
+    console.warn('[rolodex] bind skipped: zone=' + !!zone + ' input=' + !!input);
     return;
   }
-  zone.onclick = () => input.click();
-  input.onchange = (ev) => {
-    const f = ev.target.files && ev.target.files[0];
-    if (f) rolSafeHandle(f);
-    input.value = '';
+  if (_rolBindingsApplied) {
+    console.log('[rolodex] bindings already applied, skipping rebind');
+    return;
+  }
+  _rolBindingsApplied = true;
+
+  const onFile = (f) => {
+    if (!f) return;
+    /* PDF check is advisory (accept="application/pdf" already filters
+       the picker; drag-drop bypasses that). If something other than a
+       PDF lands here we still send it through — rolSafeHandle surfaces
+       parse errors as a visible status message. */
+    console.log('[rolodex] file received', f.name, f.size, f.type);
+    rolSafeHandle(f);
   };
-  ['dragenter','dragover'].forEach(evt => zone.addEventListener(evt, e => {
-    e.preventDefault(); e.stopPropagation();
-    zone.style.background = '#eef4ff';
-  }));
-  ['dragleave','drop'].forEach(evt => zone.addEventListener(evt, e => {
-    e.preventDefault(); e.stopPropagation();
-    zone.style.background = '#fafafa';
-  }));
-  zone.addEventListener('drop', e => {
-    const f = e.dataTransfer.files && e.dataTransfer.files[0];
-    if (f) rolSafeHandle(f);
+
+  /* Click-to-pick. Guard the click-loop where input.click() bubbles
+     back to zone and re-opens the picker → some browsers close the
+     picker immediately because a second open arrives before the first
+     finishes. e.target check + stopPropagation on input click. */
+  zone.addEventListener('click', (e) => {
+    if (e.target === input) return;   /* don't re-trigger from synth click */
+    input.click();
   });
-  /* Filter change re-renders the log without paging reset. */
-  const filterEl = document.getElementById('rolLogFilter');
-  if (filterEl) filterEl.onchange = () => { _rolLogLimit = 50; rolLogRender(); };
-  rolRenderList();
-  rolLogRender();
+  input.addEventListener('click', (e) => e.stopPropagation());
+
+  /* Picker → change. Clear value BEFORE handling so re-picking the
+     same file still fires change next time, even if handling throws. */
+  input.addEventListener('change', (e) => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = '';
+    onFile(f);
+  });
+
+  /* Drag-drop. Single drop handler does preventDefault + style reset +
+     file extraction in one shot — the prior split-handler version had
+     two competing drop listeners that race-conditioned on the file ref. */
+  const onDragOver = (e) => {
+    e.preventDefault();             /* required to enable drop */
+    e.dataTransfer.dropEffect = 'copy';
+    zone.style.background = '#eef4ff';
+  };
+  zone.addEventListener('dragenter', onDragOver);
+  zone.addEventListener('dragover',  onDragOver);
+  zone.addEventListener('dragleave', (e) => {
+    e.preventDefault();
+    zone.style.background = '#fafafa';
+  });
+  zone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    zone.style.background = '#fafafa';
+    /* dataTransfer.files is the standard path. items[] is a fallback
+       for edge cases (e.g. drag from a virtual filesystem on Windows). */
+    const f = (e.dataTransfer.files && e.dataTransfer.files[0])
+           || (e.dataTransfer.items && e.dataTransfer.items[0] &&
+               e.dataTransfer.items[0].kind === 'file' &&
+               e.dataTransfer.items[0].getAsFile());
+    onFile(f);
+  });
+
+  console.log('[rolodex] upload handlers bound');
+}
+
+/* DOMContentLoaded backup — if the user lands directly on the Rolodex
+   tab (e.g. via a bookmark with #tab=rolodex), bind without waiting for
+   a tab-switch. Idempotent so it composes cleanly with rolInit(). */
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', rolBindUpload, { once: true });
+} else {
+  /* admin.html main script runs deferred — DOM is already ready by now */
+  setTimeout(rolBindUpload, 0);
 }
 
 window.rolDelete = rolDelete;
