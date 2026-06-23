@@ -2102,6 +2102,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <div style="margin-left:auto;display:flex;gap:6px">
             <button class="btn btn-primary btn-sm" id="tcqNewTeamBtn">+ New team</button>
             <button class="btn btn-outline btn-sm" onclick="tcqOpenTemplateEditor()">📝 Text template</button>
+            <button class="btn btn-outline btn-sm" onclick="tcqOpenEmailTemplateEditor()">📧 Email template</button>
             <button class="btn btn-outline btn-sm" onclick="tcqRender()">↻ Refresh</button>
             <a class="btn btn-outline btn-sm" target="_blank" rel="noopener"
                href="https://southportlandmetroapa.github.io/captainsqualifier/">Open public roster ↗</a>
@@ -2432,7 +2433,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION   = '3.127';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION   = '3.128';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -16494,6 +16495,9 @@ function tcqRenderTeamCard(team) {
     +     '<button class="btn btn-primary btn-sm" onclick="tcqTextCaptain(' + team.id + ')"'
     +       (captain && captain.cell_phone ? '' : ' disabled title="No captain cell phone on file"')
     +       '>Text captain</button>'
+    +     '<button class="btn btn-primary btn-sm" onclick="tcqEmailRoster(' + team.id + ')"'
+    +       (players.length ? '' : ' disabled title="No players on this team yet"')
+    +       ' title="Email all players on this team via your mail app">📧 Email roster</button>'
     +     '<button class="btn btn-outline btn-sm" onclick="tcqOpenTeamModal(' + team.id + ')">Edit team</button>'
     +     '<button class="btn btn-outline btn-sm" onclick="tcqDeleteTeam(' + team.id + ')">Delete team</button>'
     +   '</div>'
@@ -16824,6 +16828,264 @@ async function tcqTextCaptain(teamId) {
   window.location.href = url;
 }
 
+/* ── Email roster (editable template, mailto: hand-off) ──────────────
+   Mirrors tcqTextCaptain but emails ALL players on the team via a
+   mailto: link. Subject + body live in tcq.templates as separate
+   rows (email_invite_subject / email_invite_body) so each can be
+   edited independently. Recipients = tcq.players.email (captain) +
+   slate.players.email (rest, looked up by member_number). Players
+   without any email on file are flagged in the preview but the send
+   button stays enabled so the admin can dispatch the rest. */
+let _tcqEmailTpl = null;
+const TCQ_EMAIL_VARS = ['team_index', 'captain_first', 'captain_full', 'first_names', 'roster', 'off_roster_names'];
+
+async function tcqLoadEmailTemplate() {
+  if (_tcqEmailTpl) return _tcqEmailTpl;
+  const empty = { subject: '', body: '' };
+  try {
+    const rows = await tcqGet('templates?kind=in.(email_invite_subject,email_invite_body)&select=kind,body');
+    const map = { ...empty };
+    for (const r of (rows || [])) {
+      if (r.kind === 'email_invite_subject') map.subject = r.body || '';
+      if (r.kind === 'email_invite_body')    map.body    = r.body || '';
+    }
+    _tcqEmailTpl = map;
+  } catch (e) {
+    console.error('[tcq] email template load failed', e);
+    _tcqEmailTpl = { ...empty };
+  }
+  return _tcqEmailTpl;
+}
+
+/* Looks up emails in slate.players for the given member numbers.
+   Returns Map<member_number, email>. Non-matches and empty emails
+   are simply absent from the map. Uses Accept-Profile: slate. */
+async function tcqLookupSlateEmails(memberNumbers) {
+  const cleaned = (memberNumbers || []).filter(Boolean).map(String);
+  if (!cleaned.length) return new Map();
+  const inList = cleaned.map(m => encodeURIComponent(m)).join(',');
+  try {
+    const r = await fetch(SB_URL + '/rest/v1/players?member_number=in.(' + inList + ')&select=member_number,email', {
+      headers: {
+        apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY,
+        'Accept-Profile': 'slate'
+      }
+    });
+    if (!r.ok) throw new Error('slate emails ' + r.status);
+    const rows = await r.json();
+    const m = new Map();
+    for (const row of rows) {
+      if (row.email) m.set(String(row.member_number), row.email);
+    }
+    return m;
+  } catch (e) {
+    console.warn('[tcq] slate email lookup failed', e);
+    return new Map();
+  }
+}
+
+function tcqBuildEmailVars(team, players, captain) {
+  const sortedP = players.slice().sort((a, b) => a.position - b.position);
+  const roster = sortedP.map(p => {
+    const sl = (p.effective_skill_level != null) ? ' (SL' + p.effective_skill_level + ')' : '';
+    return '  ' + p.position + '. ' + p.name + sl + (p.is_captain ? ' — captain' : '');
+  }).join('\n');
+  const firstNames = sortedP.map(p =>
+    (p.live_first_name) || (p.name ? p.name.split(/\s+/)[0] : '')
+  ).filter(Boolean);
+  const firstNamesStr = firstNames.length <= 1
+    ? (firstNames[0] || 'team')
+    : (firstNames.slice(0, -1).join(', ') + ' & ' + firstNames[firstNames.length - 1]);
+  const offRoster = tcqRosterCheck(sortedP);
+  return {
+    team_index:       team && team.team_index != null ? team.team_index : '',
+    captain_first:    captain ? ((captain.live_first_name) || captain.name.split(/\s+/)[0]) : '',
+    captain_full:     captain ? captain.name : '',
+    first_names:      firstNamesStr,
+    roster:           roster,
+    off_roster_names: offRoster.map(p => p.name).join(', ')
+  };
+}
+
+async function tcqEmailRoster(teamId) {
+  const team = _tcqTeams.find(t => t.id === teamId);
+  const players = (_tcqPlayersByTeam.get(teamId) || []).slice().sort((a, b) => a.position - b.position);
+  if (!players.length) { alert('No players on this team yet.'); return; }
+  const captain = players.find(p => p.is_captain);
+  const tpl = await tcqLoadEmailTemplate();
+  /* Captain email is on tcq.players.email; non-captains aren't asked
+     for one in the player modal — look them up from slate.players via
+     member_number. */
+  const lookupMembers = players
+    .filter(p => !p.email && p.member_number)
+    .map(p => p.member_number);
+  const slateMap = await tcqLookupSlateEmails(lookupMembers);
+  const recipients = [];
+  const missing = [];
+  for (const p of players) {
+    const email = p.email || slateMap.get(String(p.member_number)) || '';
+    if (email) recipients.push({ name: p.name, email: email, source: p.email ? 'tcq' : 'slate' });
+    else missing.push(p.name);
+  }
+  const vars = tcqBuildEmailVars(team, players, captain);
+  tcqOpenEmailModal({
+    teamId, team, players, captain,
+    recipients, missing,
+    subject: tcqSubstitute(tpl.subject, vars),
+    body:    tcqSubstitute(tpl.body, vars)
+  });
+}
+
+/* One per-team send modal — built on the fly so we don't have to keep
+   stale DOM around between teams. Layout: recipients list, subject
+   field, body textarea, mailto-send + cancel buttons. */
+function tcqOpenEmailModal(ctx) {
+  const existing = document.getElementById('tcqEmailModal');
+  if (existing) existing.remove();
+  const back = document.createElement('div');
+  back.id = 'tcqEmailModal';
+  back.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:2000;display:flex;align-items:center;justify-content:center;padding:20px';
+
+  const recipientsHtml = ctx.recipients.length
+    ? ctx.recipients.map(r => '<span style="display:inline-block;padding:2px 8px;background:#eef4ff;border:1px solid #b9cdf2;border-radius:999px;font-size:0.78rem;margin:2px">' + esc(r.name) + ' &lt;' + esc(r.email) + '&gt;</span>').join(' ')
+    : '<span class="hint" style="color:#c0392b">No emails on file for anyone on this team.</span>';
+  const missingHtml = ctx.missing.length
+    ? '<div class="hint" style="font-size:0.78rem;color:#c0392b;margin-top:4px">⚠ No email for: ' + esc(ctx.missing.join(', ')) + '</div>'
+    : '';
+
+  back.innerHTML = ''
+    + '<div style="background:#fff;border-radius:14px;padding:20px;max-width:760px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 10px 30px rgba(0,0,0,0.25)">'
+    +   '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'
+    +     '<div style="font-weight:800;font-size:1.05rem">📧 Email roster — Team #' + esc(ctx.team && ctx.team.team_index || ctx.teamId) + '</div>'
+    +     '<button type="button" id="tcqEmailClose" style="margin-left:auto;background:none;border:0;font-size:1.4rem;line-height:1;cursor:pointer;color:var(--muted)">×</button>'
+    +   '</div>'
+    +   '<div style="margin-bottom:10px">'
+    +     '<div style="font-weight:700;font-size:0.86rem;margin-bottom:4px">To (' + ctx.recipients.length + ')</div>'
+    +     '<div>' + recipientsHtml + '</div>'
+    +     missingHtml
+    +   '</div>'
+    +   '<div style="margin-bottom:10px">'
+    +     '<div style="font-weight:700;font-size:0.86rem;margin-bottom:4px">Subject</div>'
+    +     '<input type="text" id="tcqEmailSubject" class="form-input" value="' + esc(ctx.subject) + '">'
+    +   '</div>'
+    +   '<div style="margin-bottom:6px">'
+    +     '<div style="font-weight:700;font-size:0.86rem;margin-bottom:4px">Body</div>'
+    +     '<textarea id="tcqEmailBody" rows="14" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:0.92rem">' + esc(ctx.body) + '</textarea>'
+    +     '<div class="hint" style="font-size:0.74rem;margin-top:4px">Edits apply to this send only — use <strong>📧 Email template</strong> on the toolbar to change defaults.</div>'
+    +   '</div>'
+    +   '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">'
+    +     '<button class="btn btn-outline" id="tcqEmailCancel">Cancel</button>'
+    +     '<button class="btn btn-primary" id="tcqEmailSend"'
+    +       (ctx.recipients.length ? '' : ' disabled title="No recipients"')
+    +       '>Open in mail app</button>'
+    +   '</div>'
+    + '</div>';
+  document.body.appendChild(back);
+
+  const close = () => back.remove();
+  back.querySelector('#tcqEmailClose').onclick  = close;
+  back.querySelector('#tcqEmailCancel').onclick = close;
+  back.onclick = (ev) => { if (ev.target === back) close(); };
+  back.querySelector('#tcqEmailSend').onclick = () => {
+    const subject = document.getElementById('tcqEmailSubject').value;
+    const body    = document.getElementById('tcqEmailBody').value;
+    const to      = ctx.recipients.map(r => r.email).join(',');
+    /* mailto: max length is real but generous (~2000-8000 chars across
+       browsers). Templates here are well under. encodeURIComponent
+       handles newlines (%0A), commas inside body, etc. */
+    const url = 'mailto:' + encodeURIComponent(to)
+      + '?subject=' + encodeURIComponent(subject)
+      + '&body=' + encodeURIComponent(body);
+    window.location.href = url;
+    close();
+  };
+}
+
+/* Template editor — separate from the SMS one so each can evolve
+   independently. Two fields (subject + body), each with var pills. */
+async function tcqOpenEmailTemplateEditor() {
+  const existing = document.getElementById('tcqEmailTplModal');
+  if (existing) existing.remove();
+  const tpl = await tcqLoadEmailTemplate();
+  const back = document.createElement('div');
+  back.id = 'tcqEmailTplModal';
+  back.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:2000;display:flex;align-items:center;justify-content:center;padding:20px';
+
+  const pills = TCQ_EMAIL_VARS.map(v =>
+    '<button type="button" data-tcqemvar="' + esc(v) + '" '
+    + 'style="padding:3px 8px;font-size:0.74rem;font-weight:700;background:#f3f4f6;'
+    + 'border:1px solid var(--border);border-radius:6px;color:var(--text);cursor:pointer;'
+    + 'font-family:ui-monospace,SFMono-Regular,monospace">{' + esc(v) + '}</button>'
+  ).join(' ');
+
+  back.innerHTML = ''
+    + '<div style="background:#fff;border-radius:14px;padding:20px;max-width:760px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 10px 30px rgba(0,0,0,0.25)">'
+    +   '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'
+    +     '<div style="font-weight:800;font-size:1.05rem">📧 Email-roster template</div>'
+    +     '<button type="button" id="tcqEmailTplClose" style="margin-left:auto;background:none;border:0;font-size:1.4rem;line-height:1;cursor:pointer;color:var(--muted)">×</button>'
+    +   '</div>'
+    +   '<p class="hint" style="margin-top:0">Tap a variable pill to insert at the cursor. Both fields support the same vars.</p>'
+    +   '<div style="margin-top:8px"><div style="font-weight:700;font-size:0.92rem;margin-bottom:4px">Subject</div>'
+    +     '<div class="tcqemvar-bar" data-for="tcqEmailTplSubject" style="margin-bottom:6px;display:flex;gap:4px;flex-wrap:wrap">' + pills + '</div>'
+    +     '<input type="text" id="tcqEmailTplSubject" class="form-input" value="' + esc(tpl.subject) + '">'
+    +   '</div>'
+    +   '<div style="margin-top:14px"><div style="font-weight:700;font-size:0.92rem;margin-bottom:4px">Body</div>'
+    +     '<div class="tcqemvar-bar" data-for="tcqEmailTplBody" style="margin-bottom:6px;display:flex;gap:4px;flex-wrap:wrap">' + pills + '</div>'
+    +     '<textarea id="tcqEmailTplBody" rows="16" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:0.92rem">' + esc(tpl.body) + '</textarea>'
+    +   '</div>'
+    +   '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px">'
+    +     '<button class="btn btn-outline" id="tcqEmailTplCancel">Cancel</button>'
+    +     '<button class="btn btn-primary" id="tcqEmailTplSave">Save</button>'
+    +   '</div>'
+    + '</div>';
+  document.body.appendChild(back);
+
+  back.querySelectorAll('.tcqemvar-bar').forEach(bar => {
+    const taId = bar.dataset.for;
+    const ta = document.getElementById(taId);
+    bar.querySelectorAll('[data-tcqemvar]').forEach(btn => {
+      btn.onclick = () => {
+        const token = '{' + btn.dataset.tcqemvar + '}';
+        const s = ta.selectionStart || 0, e = ta.selectionEnd || 0;
+        ta.value = ta.value.slice(0, s) + token + ta.value.slice(e);
+        ta.focus();
+        ta.selectionStart = ta.selectionEnd = s + token.length;
+      };
+    });
+  });
+
+  const close = () => back.remove();
+  back.querySelector('#tcqEmailTplClose').onclick  = close;
+  back.querySelector('#tcqEmailTplCancel').onclick = close;
+  back.onclick = (ev) => { if (ev.target === back) close(); };
+  back.querySelector('#tcqEmailTplSave').onclick = async () => {
+    const subject = document.getElementById('tcqEmailTplSubject').value;
+    const body    = document.getElementById('tcqEmailTplBody').value;
+    try {
+      /* UPSERT both rows in one batch — see MEMORY.md PostgREST gotcha:
+         on_conflict in URL needs Prefer: resolution=merge-duplicates. */
+      const r = await fetch(SB_URL + '/rest/v1/templates?on_conflict=kind', {
+        method: 'POST',
+        headers: {
+          apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY,
+          'Accept-Profile': TCQ_PROFILE, 'Content-Profile': TCQ_PROFILE,
+          'Content-Type': 'application/json',
+          Prefer: 'resolution=merge-duplicates,return=minimal'
+        },
+        body: JSON.stringify([
+          { kind: 'email_invite_subject', body: subject },
+          { kind: 'email_invite_body',    body: body }
+        ])
+      });
+      if (!r.ok) throw new Error('Save ' + r.status + ': ' + (await r.text()).slice(0, 160));
+      _tcqEmailTpl = { subject, body };   /* refresh cache so next send picks it up */
+      close();
+    } catch (e) {
+      alert('Save failed: ' + e.message);
+    }
+  };
+}
+
 /* Template editor — three textareas (body / over-cap notice /
    incomplete notice). Each has its own variable-pill bar. Save UPSERTs
    all three in one batch so partial-save errors can't leave the kinds
@@ -17020,7 +17282,9 @@ window.tcqSavePlayer = tcqSavePlayer;
 window.tcqEditPlayer = tcqEditPlayer;
 window.tcqDeletePlayer = tcqDeletePlayer;
 window.tcqTextCaptain = tcqTextCaptain;
+window.tcqEmailRoster = tcqEmailRoster;
 window.tcqOpenTemplateEditor = tcqOpenTemplateEditor;
+window.tcqOpenEmailTemplateEditor = tcqOpenEmailTemplateEditor;
 
 /* ══════════════════════════════════════════════════════════════════════
    TCQ — Outreach (3.113+)
