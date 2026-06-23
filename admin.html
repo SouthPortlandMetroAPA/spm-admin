@@ -2116,6 +2116,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             <button class="btn btn-primary btn-sm" id="tcqNewTeamBtn">+ New team</button>
             <button class="btn btn-outline btn-sm" onclick="tcqOpenTemplateEditor()">📝 Text template</button>
             <button class="btn btn-outline btn-sm" onclick="tcqOpenEmailTemplateEditor()">📧 Email template</button>
+            <button class="btn btn-primary btn-sm"  onclick="tcqBulkEmailOpen()">✉️ Send all invites</button>
             <button class="btn btn-outline btn-sm" onclick="tcqRender()">↻ Refresh</button>
             <a class="btn btn-outline btn-sm" target="_blank" rel="noopener"
                href="https://southportlandmetroapa.github.io/captainsqualifier/">Open public roster ↗</a>
@@ -2448,7 +2449,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION   = '3.132';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION   = '3.133';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -16146,6 +16147,10 @@ window.rolInit = rolInit;
    so the UI stays in sync with the DB after each save/delete.
 */
 const TCQ_PROFILE = 'tcq';
+/* GAS apa-mailer (deployed as soldans@southportlandmetroapa.com). Used by
+   the Rolodex captain-PDF flow + (3.133+) the TCQ bulk-invite sender. */
+const TCQ_MAILER_URL = 'https://script.google.com/macros/s/AKfycbzGTzkBRTrIIP_tD6sbtOOUmNZkXDdtxPoO4c8fdWt5h3tZFueNSISPv8Q3LWStx73Whw/exec';
+const TCQ_BULK_BCC   = 'soldans@southportlandmetroapa.com';   // paper-trail copy
 let _tcqEvent = null;
 let _tcqTeams = [];
 let _tcqPlayersByTeam = new Map();
@@ -17128,6 +17133,216 @@ function tcqOpenEmailModal(ctx) {
   };
 }
 
+/* ── Bulk send all team invites via apa-mailer GAS ──────────────────
+   The per-team Email roster button uses mailto: (manual click-send in
+   the admin's mail client). Bulk send takes the same substituted body
+   and POSTs it per team to the GAS endpoint, which uses
+   MailApp.sendEmail() to dispatch from soldans@... — no user-side
+   click required. Each team is BCC'd to soldans for an inbox trail
+   and stamped with tcq.teams.emailed_at so future clicks skip it.
+
+   Flow:
+     1. tcqBulkEmailOpen()  — gather every team's recipients +
+        substituted subject/body, present a preview modal
+     2. tcqBulkEmailSend()  — POST each team to GAS sequentially with
+        a live status panel; stamp completed/error counters
+*/
+async function tcqBulkEmailGatherPlan() {
+  const tpl = await tcqLoadEmailTemplate();
+  const teams = (_tcqTeams || []).slice().sort((a, b) =>
+    (a.team_index || 0) - (b.team_index || 0));
+  /* Pre-fetch every non-captain player's email from slate in one shot
+     so we don't bombard the API per team. */
+  const allPlayers = teams.flatMap(t => _tcqPlayersByTeam.get(t.id) || []);
+  const lookupMembers = allPlayers
+    .filter(p => !p.email && p.member_number)
+    .map(p => p.member_number);
+  const slateMap = await tcqLookupSlateEmails([...new Set(lookupMembers)]);
+  const plan = [];
+  for (const team of teams) {
+    const players = (_tcqPlayersByTeam.get(team.id) || []).slice().sort((a, b) => a.position - b.position);
+    const captain = players.find(p => p.is_captain);
+    const recipients = [];
+    const missing = [];
+    for (const p of players) {
+      const email = p.email || slateMap.get(String(p.member_number)) || '';
+      if (email) recipients.push({ name: p.name, email });
+      else missing.push(p.name);
+    }
+    const vars = tcqBuildEmailVars(team, players, captain);
+    const subject = tcqSubstitute(tpl.subject, vars);
+    const body    = tcqSubstitute(tpl.body, vars);
+    plan.push({
+      team_id:    team.id,
+      team_index: team.team_index,
+      captain:    captain ? captain.name : '(no captain)',
+      recipients,
+      missing,
+      subject,
+      body,
+      already_sent: !!team.emailed_at,
+      emailed_at:   team.emailed_at || null
+    });
+  }
+  return plan;
+}
+
+async function tcqBulkEmailOpen() {
+  if (!_tcqEvent) { alert('No current TCQ event configured.'); return; }
+  const existing = document.getElementById('tcqBulkEmailModal');
+  if (existing) existing.remove();
+  const back = document.createElement('div');
+  back.id = 'tcqBulkEmailModal';
+  back.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:2000;display:flex;align-items:center;justify-content:center;padding:20px';
+  back.innerHTML = ''
+    + '<div style="background:#fff;border-radius:14px;padding:20px;max-width:820px;width:100%;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 10px 30px rgba(0,0,0,0.25)">'
+    +   '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">'
+    +     '<div style="font-weight:800;font-size:1.05rem">✉️ Send all team invites</div>'
+    +     '<button type="button" id="tcqBulkClose" style="margin-left:auto;background:none;border:0;font-size:1.4rem;line-height:1;cursor:pointer;color:var(--muted)">×</button>'
+    +   '</div>'
+    +   '<div id="tcqBulkSummary" class="hint" style="font-size:0.88rem">Gathering recipients…</div>'
+    +   '<div id="tcqBulkList" style="flex:1;overflow-y:auto;border:1px solid var(--border);border-radius:8px;margin-top:10px;padding:8px"></div>'
+    +   '<div style="display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap">'
+    +     '<label style="display:flex;align-items:center;gap:6px;font-size:0.85rem;cursor:pointer">'
+    +       '<input type="checkbox" id="tcqBulkForce"> Re-send to already-emailed teams'
+    +     '</label>'
+    +     '<div style="margin-left:auto;display:flex;gap:8px">'
+    +       '<button class="btn btn-outline" id="tcqBulkCancel">Cancel</button>'
+    +       '<button class="btn btn-primary" id="tcqBulkSendBtn" disabled>Send all</button>'
+    +     '</div>'
+    +   '</div>'
+    + '</div>';
+  document.body.appendChild(back);
+
+  const close = () => back.remove();
+  back.querySelector('#tcqBulkClose').onclick  = close;
+  back.querySelector('#tcqBulkCancel').onclick = close;
+  back.onclick = (ev) => { if (ev.target === back) close(); };
+
+  let plan = [];
+  try {
+    plan = await tcqBulkEmailGatherPlan();
+  } catch (e) {
+    document.getElementById('tcqBulkSummary').innerHTML
+      = '<span style="color:#c0392b">Failed to gather: ' + esc(e.message) + '</span>';
+    return;
+  }
+
+  const renderPlan = (force) => {
+    const summary = document.getElementById('tcqBulkSummary');
+    const list    = document.getElementById('tcqBulkList');
+    const btn     = document.getElementById('tcqBulkSendBtn');
+    const sendable = plan.filter(p => (force || !p.already_sent) && p.recipients.length);
+    const skipped  = plan.filter(p => !sendable.includes(p));
+    const recipientTotal = sendable.reduce((n, p) => n + p.recipients.length, 0);
+    summary.innerHTML = ''
+      + '<strong>' + sendable.length + '</strong> team(s) to send · '
+      + '<strong>' + recipientTotal + '</strong> total recipient(s) · '
+      + 'BCC: <code>' + esc(TCQ_BULK_BCC) + '</code>'
+      + (skipped.length ? ' · <span class="hint">' + skipped.length + ' skipped (already sent or no recipients)</span>' : '');
+    list.innerHTML = plan.map(p => {
+      const willSend = sendable.includes(p);
+      const stamp = p.already_sent
+        ? '<span style="background:#0a6b3a;color:#fff;padding:1px 6px;border-radius:999px;font-size:0.7rem;font-weight:700;margin-left:6px">SENT ' + esc(String(p.emailed_at).slice(0,10)) + '</span>'
+        : '';
+      const status = !p.recipients.length
+        ? '<span style="color:#c0392b">no recipients</span>'
+        : willSend
+          ? '<span style="color:#0a6b3a">→ will send to ' + p.recipients.length + '</span>'
+          : '<span class="hint">skipped</span>';
+      const missingHtml = p.missing.length
+        ? ' <span class="hint" style="color:#c0392b">⚠ no email: ' + esc(p.missing.join(', ')) + '</span>'
+        : '';
+      return '<div style="padding:6px 0;border-bottom:1px dashed #e0e4e9;font-size:0.86rem">'
+        +   '<div><strong>Team #' + esc(p.team_index) + '</strong> · ' + esc(p.captain) + stamp
+        +     ' &nbsp; ' + status + missingHtml + '</div>'
+        + '</div>';
+    }).join('');
+    btn.disabled = sendable.length === 0;
+    btn.textContent = 'Send to ' + sendable.length + ' team' + (sendable.length === 1 ? '' : 's');
+    return sendable;
+  };
+
+  let sendable = renderPlan(false);
+  document.getElementById('tcqBulkForce').onchange = (ev) => {
+    sendable = renderPlan(ev.target.checked);
+  };
+  document.getElementById('tcqBulkSendBtn').onclick = async () => {
+    sendable = renderPlan(document.getElementById('tcqBulkForce').checked);
+    if (!sendable.length) return;
+    if (!confirm('Send invites to ' + sendable.length + ' team(s)?\n\nEmails go out via apa-mailer (from soldans@). This is not reversible.')) return;
+    await tcqBulkEmailSend(sendable);
+  };
+}
+
+async function tcqBulkEmailSend(sendable) {
+  const list = document.getElementById('tcqBulkList');
+  const btn  = document.getElementById('tcqBulkSendBtn');
+  const force = document.getElementById('tcqBulkForce');
+  const cancel = document.getElementById('tcqBulkCancel');
+  btn.disabled = true;
+  if (force)  force.disabled  = true;
+  if (cancel) cancel.disabled = true;
+  /* Per-team status DOM nodes keyed by team_id. */
+  const statusMap = new Map();
+  list.innerHTML = sendable.map(p => {
+    return '<div data-tcqb-row="' + p.team_id + '" style="padding:6px 0;border-bottom:1px dashed #e0e4e9;font-size:0.86rem">'
+      + '<strong>Team #' + esc(p.team_index) + '</strong> · ' + esc(p.captain) + ' &nbsp; '
+      + '<span data-tcqb-status="' + p.team_id + '" class="hint">queued…</span>'
+      + '</div>';
+  }).join('');
+  list.querySelectorAll('[data-tcqb-status]').forEach(el => {
+    statusMap.set(Number(el.dataset.tcqbStatus), el);
+  });
+
+  let ok = 0, fail = 0;
+  for (const p of sendable) {
+    const statusEl = statusMap.get(p.team_id);
+    if (statusEl) { statusEl.textContent = 'sending…'; statusEl.style.color = ''; }
+    const to = p.recipients.map(r => r.email).join(',');
+    let res = null;
+    try {
+      const r = await fetch(TCQ_MAILER_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action:    'tcq_send_invite',
+          admin_key: SB_KEY,
+          team_id:   p.team_id,
+          to:        to,
+          subject:   p.subject,
+          body:      p.body,
+          bcc:       TCQ_BULK_BCC
+        }),
+        redirect: 'follow'
+      });
+      const txt = await r.text();
+      try { res = JSON.parse(txt); } catch (_) { res = { ok: false, error: 'bad gateway: ' + txt.slice(0, 120) }; }
+    } catch (e) {
+      res = { ok: false, error: e.message || 'network error' };
+    }
+    if (res && res.ok) {
+      ok++;
+      if (statusEl) { statusEl.textContent = '✓ sent (' + p.recipients.length + ')'; statusEl.style.color = '#0a6b3a'; }
+    } else {
+      fail++;
+      if (statusEl) { statusEl.textContent = '⚠ ' + ((res && res.error) || 'failed'); statusEl.style.color = '#c0392b'; }
+    }
+    /* Tiny pause keeps Gmail send quotas calm and avoids spamming the GAS
+       endpoint. ~150ms × 25 teams = under 4s total. */
+    await new Promise(r => setTimeout(r, 150));
+  }
+
+  const summary = document.getElementById('tcqBulkSummary');
+  summary.innerHTML = '<strong>Done.</strong> ' + ok + ' sent · ' + fail + ' failed.';
+  btn.disabled = false;
+  btn.textContent = 'Close';
+  btn.onclick = () => document.getElementById('tcqBulkEmailModal').remove();
+  if (cancel) cancel.style.display = 'none';
+  /* Refresh teams so the SENT badges appear on subsequent opens. */
+  tcqRender().catch(() => {});
+}
+
 /* Template editor — separate from the SMS one so each can evolve
    independently. Two fields (subject + body), each with var pills. */
 async function tcqOpenEmailTemplateEditor() {
@@ -17412,6 +17627,7 @@ window.tcqMakeCaptain = tcqMakeCaptain;
 window.tcqTextCaptain = tcqTextCaptain;
 window.tcqTextTeam = tcqTextTeam;
 window.tcqEmailRoster = tcqEmailRoster;
+window.tcqBulkEmailOpen = tcqBulkEmailOpen;
 window.tcqOpenTemplateEditor = tcqOpenTemplateEditor;
 window.tcqOpenEmailTemplateEditor = tcqOpenEmailTemplateEditor;
 
