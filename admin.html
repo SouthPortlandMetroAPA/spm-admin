@@ -2448,7 +2448,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION   = '3.130';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION   = '3.131';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -16510,6 +16510,9 @@ function tcqRenderTeamCard(team) {
     +     '<button class="btn btn-primary btn-sm" onclick="tcqTextCaptain(' + team.id + ')"'
     +       (captain && captain.cell_phone ? '' : ' disabled title="No captain cell phone on file"')
     +       '>Text captain</button>'
+    +     '<button class="btn btn-primary btn-sm" onclick="tcqTextTeam(' + team.id + ')"'
+    +       (players.some(p => p.cell_phone) ? '' : ' disabled title="No team cell phones on file"')
+    +       ' title="Group SMS to every player on this team">Text team</button>'
     +     '<button class="btn btn-primary btn-sm" onclick="tcqEmailRoster(' + team.id + ')"'
     +       (players.length ? '' : ' disabled title="No players on this team yet"')
     +       ' title="Email all players on this team via your mail app">📧 Email roster</button>'
@@ -16880,6 +16883,34 @@ async function tcqTextCaptain(teamId) {
   const tpl = await tcqLoadTemplates();
   const body = tcqSubstitute(tpl.body, tcqBuildVars(team, players, captain, lineup, tpl));
   const url = 'sms:' + phone + '?&body=' + encodeURIComponent(body);
+  window.location.href = url;
+}
+
+/* Group-text every player on a team. Same body template as tcqTextCaptain
+   (captain confirmation SMS) — recipients are comma-separated in the sms:
+   URI, which both iOS and Android resolve as a group thread. Players
+   without a usable cell phone are listed in a confirm before send so the
+   admin knows who's missed. */
+async function tcqTextTeam(teamId) {
+  const team = _tcqTeams.find(t => t.id === teamId);
+  const players = (_tcqPlayersByTeam.get(teamId) || []).slice().sort((a, b) => a.position - b.position);
+  if (!players.length) { alert('No players on this team yet.'); return; }
+  const captain = players.find(p => p.is_captain);
+  const phones = [];
+  const noPhone = [];
+  for (const p of players) {
+    const ph = tcqNormalizePhone(p.cell_phone);
+    if (ph) phones.push(ph);
+    else noPhone.push(p.name);
+  }
+  if (!phones.length) { alert('No usable cell phones on file for this team.'); return; }
+  if (noPhone.length) {
+    if (!confirm('No phone on file for: ' + noPhone.join(', ') + '\n\nText the rest of the team?')) return;
+  }
+  const lineup = tcqLineupCheck(players);
+  const tpl = await tcqLoadTemplates();
+  const body = tcqSubstitute(tpl.body, tcqBuildVars(team, players, captain, lineup, tpl));
+  const url = 'sms:' + phones.join(',') + '?&body=' + encodeURIComponent(body);
   window.location.href = url;
 }
 
@@ -17337,6 +17368,7 @@ window.tcqSavePlayer = tcqSavePlayer;
 window.tcqEditPlayer = tcqEditPlayer;
 window.tcqDeletePlayer = tcqDeletePlayer;
 window.tcqTextCaptain = tcqTextCaptain;
+window.tcqTextTeam = tcqTextTeam;
 window.tcqEmailRoster = tcqEmailRoster;
 window.tcqOpenTemplateEditor = tcqOpenTemplateEditor;
 window.tcqOpenEmailTemplateEditor = tcqOpenEmailTemplateEditor;
