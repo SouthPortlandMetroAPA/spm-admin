@@ -2448,7 +2448,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION   = '3.131';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION   = '3.132';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -16479,6 +16479,8 @@ function tcqRenderTeamCard(team) {
       +   (p.email ? ' <span class="hint" style="font-size:0.78rem">' + esc(p.email) + '</span>' : '')
       +   '<div class="hint" style="font-size:0.78rem">#' + esc(p.member_number || '?') + ' &middot; ' + slLabel + '</div>'
       + '</div>'
+      + (p.is_captain ? ''
+          : '<button class="btn btn-outline btn-sm" onclick="tcqMakeCaptain(' + p.id + ')" title="Promote this player to captain (slot 1) and move the current captain into their slot">Make captain</button>')
       + '<button class="btn btn-outline btn-sm" onclick="tcqEditPlayer(' + p.id + ')">Edit</button>'
       + '<button class="btn btn-outline btn-sm" onclick="tcqDeletePlayer(' + p.id + ', \'' + esc(p.name).replace(/'/g, "\\'") + '\')">Delete</button>'
       + '</div>';
@@ -16781,6 +16783,45 @@ async function tcqDeletePlayer(playerId, name) {
     await tcqRender();
   } catch (e) {
     alert('Delete failed: ' + e.message);
+  }
+}
+
+/* Promote a player to captain. Swap is atomic via the tcq.set_captain
+   RPC — the UNIQUE(team_id, position) constraint is DEFERRABLE so the
+   function can move both rows inside one transaction without a
+   per-statement collision (a JS-side PATCH pair would hit 23505 mid-swap). */
+async function tcqMakeCaptain(playerId) {
+  let newCaptain = null, oldCaptain = null, teamId = null;
+  for (const [tid, plist] of _tcqPlayersByTeam.entries()) {
+    const np = plist.find(x => x.id === playerId);
+    if (np) {
+      newCaptain = np;
+      teamId = tid;
+      oldCaptain = plist.find(x => x.is_captain) || null;
+      break;
+    }
+  }
+  if (!newCaptain) { alert('Player not found.'); return; }
+  if (newCaptain.is_captain) { alert(newCaptain.name + ' is already the captain.'); return; }
+  const msg = oldCaptain
+    ? 'Make ' + newCaptain.name + ' the captain?\n\n'
+      + oldCaptain.name + ' will move from slot 1 to slot ' + newCaptain.position + '.'
+    : 'Promote ' + newCaptain.name + ' to captain (slot 1)?';
+  if (!confirm(msg)) return;
+  try {
+    const r = await fetch(SB_URL + '/rest/v1/rpc/set_captain', {
+      method: 'POST',
+      headers: {
+        apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY,
+        'Accept-Profile': TCQ_PROFILE, 'Content-Profile': TCQ_PROFILE,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ p_player_id: playerId })
+    });
+    if (!r.ok) throw new Error('RPC ' + r.status + ': ' + (await r.text()).slice(0, 160));
+    await tcqRender();
+  } catch (e) {
+    alert('Make captain failed: ' + e.message);
   }
 }
 
@@ -17367,6 +17408,7 @@ window.tcqClosePlayerModal = tcqClosePlayerModal;
 window.tcqSavePlayer = tcqSavePlayer;
 window.tcqEditPlayer = tcqEditPlayer;
 window.tcqDeletePlayer = tcqDeletePlayer;
+window.tcqMakeCaptain = tcqMakeCaptain;
 window.tcqTextCaptain = tcqTextCaptain;
 window.tcqTextTeam = tcqTextTeam;
 window.tcqEmailRoster = tcqEmailRoster;
