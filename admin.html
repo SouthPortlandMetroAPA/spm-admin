@@ -2118,6 +2118,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             <button class="btn btn-outline btn-sm" onclick="tcqOpenEmailTemplateEditor()">📧 Email template</button>
             <button class="btn btn-outline btn-sm" onclick="tcqTestEmailOpen()">🧪 Test email</button>
             <button class="btn btn-primary btn-sm"  onclick="tcqBulkEmailOpen()">✉️ Send all invites</button>
+            <button class="btn btn-outline btn-sm" onclick="tcqCopyForBreakOut()">📋 Copy for BreakOut</button>
             <button class="btn btn-outline btn-sm" onclick="tcqRender()">↻ Refresh</button>
             <a class="btn btn-outline btn-sm" target="_blank" rel="noopener"
                href="https://southportlandmetroapa.github.io/captainsqualifier/">Open public roster ↗</a>
@@ -2450,7 +2451,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.138';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.139';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -17761,6 +17762,91 @@ const TCQ_DEFAULTS = {
 `
 };
 
+/* ── Copy team roster for BreakOut bulk-add paste ───────────────────
+   BreakOut admin's "Add teams" accepts tab-separated `number<TAB>name`
+   per line. team number must satisfy DD01–DD16 (the DDTT format). For
+   TCQ we use synthetic divisions so the constraint passes without
+   colliding with real league team numbers:
+     team_index 1..16  → 9901..9916  (synthetic division 99)
+     team_index 17..32 → 9801..9816  (synthetic division 98)
+   That covers up to 32 teams — enough for the 32-1 bracket cap. */
+function tcqBreakoutNumber(teamIndex) {
+  const i = Number(teamIndex);
+  if (!Number.isFinite(i) || i < 1 || i > 32) return null;
+  return i <= 16 ? (9900 + i) : (9800 + (i - 16));
+}
+
+function tcqCopyForBreakOut() {
+  if (!_tcqTeams.length) { alert('No TCQ teams to copy.'); return; }
+  const lines = [];
+  const noCaptain = [];
+  const teams = _tcqTeams.slice().sort((a, b) => (a.team_index || 0) - (b.team_index || 0));
+  for (const t of teams) {
+    const num = tcqBreakoutNumber(t.team_index);
+    if (!num) continue;
+    const players = (_tcqPlayersByTeam.get(t.id) || []);
+    const captain = players.find(p => p.is_captain);
+    const name = captain ? captain.name : ('Team #' + t.team_index);
+    if (!captain) noCaptain.push('Team #' + t.team_index);
+    lines.push(num + '\t' + name);
+  }
+  const text = lines.join('\n');
+
+  /* Render a modal with the text in a selectable textarea + a copy
+     button. Manual select+copy works too in case the Clipboard API
+     is blocked (rare on https). */
+  const existing = document.getElementById('tcqBoCopyModal');
+  if (existing) existing.remove();
+  const back = document.createElement('div');
+  back.id = 'tcqBoCopyModal';
+  back.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:2000;display:flex;align-items:center;justify-content:center;padding:20px';
+  back.innerHTML = ''
+    + '<div style="background:#fff;border-radius:14px;padding:20px;max-width:560px;width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 10px 30px rgba(0,0,0,0.25)">'
+    +   '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'
+    +     '<div style="font-weight:800;font-size:1.05rem">📋 Copy for BreakOut</div>'
+    +     '<button type="button" id="tcqBoCopyClose" style="margin-left:auto;background:none;border:0;font-size:1.4rem;line-height:1;cursor:pointer;color:var(--muted)">×</button>'
+    +   '</div>'
+    +   '<div class="hint" style="font-size:0.82rem;margin-bottom:6px">'
+    +     lines.length + ' team(s). Paste into BreakOut admin → Add teams → tab-separated rows. '
+    +     'Numbers follow the synthetic 99xx / 98xx convention to satisfy BreakOut\'s DDTT check.'
+    +   '</div>'
+    +   (noCaptain.length
+        ? '<div class="hint" style="font-size:0.78rem;color:#c0392b;margin-bottom:6px">⚠ No captain on: ' + esc(noCaptain.join(', ')) + ' — using placeholder names.</div>'
+        : '')
+    +   '<textarea id="tcqBoCopyText" rows="' + Math.min(20, Math.max(6, lines.length)) + '"'
+    +     ' style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:6px;'
+    +     'font-family:ui-monospace,Menlo,Consolas,monospace;font-size:0.88rem" readonly>'
+    +     esc(text) + '</textarea>'
+    +   '<div id="tcqBoCopyStatus" style="margin-top:6px;font-size:0.82rem;min-height:1.2em"></div>'
+    +   '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">'
+    +     '<button class="btn btn-outline" id="tcqBoCopyCancel">Close</button>'
+    +     '<button class="btn btn-primary" id="tcqBoCopyBtn">Copy to clipboard</button>'
+    +   '</div>'
+    + '</div>';
+  document.body.appendChild(back);
+  const close = () => back.remove();
+  back.querySelector('#tcqBoCopyClose').onclick  = close;
+  back.querySelector('#tcqBoCopyCancel').onclick = close;
+  back.onclick = (ev) => { if (ev.target === back) close(); };
+  /* Pre-select the text so Ctrl+C works even before the user clicks Copy. */
+  const ta = document.getElementById('tcqBoCopyText');
+  setTimeout(() => { ta.focus(); ta.select(); }, 50);
+  back.querySelector('#tcqBoCopyBtn').onclick = async () => {
+    const statusEl = document.getElementById('tcqBoCopyStatus');
+    try {
+      await navigator.clipboard.writeText(text);
+      statusEl.textContent = '✓ Copied ' + lines.length + ' line(s) to clipboard.';
+      statusEl.style.color = '#0a6b3a';
+    } catch (e) {
+      /* Clipboard API blocked (rare). Fallback: keep the textarea
+         selected so the user can Ctrl+C manually. */
+      ta.focus(); ta.select();
+      statusEl.textContent = '⚠ Browser blocked auto-copy — press Ctrl+C to copy the selected text.';
+      statusEl.style.color = '#c0392b';
+    }
+  };
+}
+
 /* ── REST helpers (service-role JWT via SB_KEY, profile=tcq) ───── */
 async function tcqGet(path) {
   const r = await fetch(SB_URL + '/rest/v1/' + path, {
@@ -17817,6 +17903,7 @@ window.tcqSavePlayer = tcqSavePlayer;
 window.tcqEditPlayer = tcqEditPlayer;
 window.tcqDeletePlayer = tcqDeletePlayer;
 window.tcqMakeCaptain = tcqMakeCaptain;
+window.tcqCopyForBreakOut = tcqCopyForBreakOut;
 window.tcqTextCaptain = tcqTextCaptain;
 window.tcqTextTeam = tcqTextTeam;
 window.tcqEmailRoster = tcqEmailRoster;
