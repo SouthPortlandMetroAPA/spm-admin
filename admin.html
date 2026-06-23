@@ -279,7 +279,15 @@ html,body {
 
 /* ── Form ── */
 .form-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; margin-bottom: 10px; }
-.form-row > * { flex: 1 1 150px; }
+.form-row > * { flex: 1 1 150px; min-width: 0; }
+/* Defensive: a direct <label> child of .form-row would otherwise sit
+   inline next to its sibling input (flex layout). Force it to span
+   the full row so the input wraps below — matches the visual intent
+   when authors forget to wrap a single label+input in a <div>. */
+.form-row > label { flex: 1 1 100%; margin-bottom: 4px; }
+/* Direct <input>/<select>/<textarea> children fill the row when their
+   sibling label has been bumped to full-width above. */
+.form-row > input, .form-row > select, .form-row > textarea { flex: 1 1 100%; }
 label {
   display: block;
   font-weight: 700;
@@ -2276,27 +2284,33 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <h3 id="tcqTeamModalTitle" style="margin:0 0 10px">New team</h3>
           <input type="hidden" id="tcqTeamId" value="">
           <div class="form-row">
-            <label>Payment method</label>
-            <select id="tcqTeamPayment" class="form-input">
-              <option value="">— Select —</option>
-              <option>Venmo</option>
-              <option>Zelle</option>
-              <option>Paypal</option>
-              <option>Cash</option>
-              <option>Other</option>
-            </select>
+            <div>
+              <label>Payment method</label>
+              <select id="tcqTeamPayment" class="form-input">
+                <option value="">— Select —</option>
+                <option>Venmo</option>
+                <option>Zelle</option>
+                <option>Paypal</option>
+                <option>Cash</option>
+                <option>Other</option>
+              </select>
+            </div>
           </div>
           <div class="form-row">
-            <label>Notes (optional)</label>
-            <input type="text" id="tcqTeamNotes" class="form-input" maxlength="200">
+            <div>
+              <label>Notes (optional)</label>
+              <input type="text" id="tcqTeamNotes" class="form-input" maxlength="200">
+            </div>
           </div>
           <div class="form-row" id="tcqTeamPasteRow">
-            <label>Paste roster (optional)</label>
-            <textarea id="tcqTeamPaste" class="form-input" rows="7" style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:0.85rem" placeholder="1 - Ruby Vandel - 97224863 - SL3&#10;2 - Jeffrey Kempter - 97291571 - SL6&#10;3 - Jacob Stern - 97219982 - SL7&#10;&#10;Optional:&#10;4 - Patrick Barney - 97218828 - SL4&#10;5 - [Not asked] - [Not asked] - SL[Not asked]"></textarea>
-            <div class="hint" id="tcqTeamPasteHint" style="margin-top:4px;font-size:0.78rem">
-              Format: <code>&lt;slot&gt; - &lt;name&gt; - &lt;member#&gt; - SL&lt;n&gt;</code>.
-              Lines with <code>[Not asked]</code> and the <code>Optional:</code> header are skipped.
-              Slot 1 is captain. SL is informational only (live SL is derived).
+            <div>
+              <label>Paste roster (optional)</label>
+              <textarea id="tcqTeamPaste" class="form-input" rows="7" style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:0.85rem" placeholder="1 - Ruby Vandel - 97224863 - SL3&#10;2 - Jeffrey Kempter - 97291571 - SL6&#10;3 - Jacob Stern - 97219982 - SL7&#10;&#10;Optional:&#10;4 - Patrick Barney - 97218828 - SL4&#10;5 - [Not asked] - [Not asked] - SL[Not asked]"></textarea>
+              <div class="hint" id="tcqTeamPasteHint" style="margin-top:4px;font-size:0.78rem">
+                Format: <code>&lt;slot&gt; - &lt;name&gt; - &lt;member#&gt; - SL&lt;n&gt;</code>.
+                Lines with <code>[Not asked]</code> and the <code>Optional:</code> header are skipped.
+                Slot 1 is captain. SL is informational only (live SL is derived).
+              </div>
             </div>
           </div>
           <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
@@ -2306,27 +2320,23 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         </div>
       </div>
 
-      <!-- Add player modal -->
+      <!-- Add player modal — just the APA #. Name + email are pulled
+           live from slate.players on save; if no match, save is blocked. -->
       <div class="modal-backdrop" id="tcqPlayerModal" style="display:none">
-        <div class="modal" id="tcqPlayerModalBody" style="max-width:520px">
+        <div class="modal" id="tcqPlayerModalBody" style="max-width:480px">
           <h3 id="tcqPlayerModalTitle" style="margin:0 0 10px">Add player</h3>
           <input type="hidden" id="tcqPlayerTeamId" value="">
           <input type="hidden" id="tcqPlayerPosition" value="">
           <div class="form-row">
-            <label>Name</label>
-            <input type="text" id="tcqPlayerName" class="form-input" maxlength="100" autocomplete="off">
-          </div>
-          <div class="form-row" id="tcqPlayerEmailRow">
-            <label>Email (captain only)</label>
-            <input type="email" id="tcqPlayerEmail" class="form-input" maxlength="200">
-          </div>
-          <div class="form-row">
-            <label>Member # (8-digit APA number)</label>
-            <input type="text" id="tcqPlayerNum" class="form-input" maxlength="20" inputmode="numeric"
-                   placeholder="97212345">
-            <div class="hint" style="font-size:0.78rem;margin-top:4px">
-              Skill level is sourced live from <code>slate.players</code>
-              (highest of 8-ball / 9-ball, capped at 7) — no manual entry.
+            <div>
+              <label>APA # (8 digits)</label>
+              <input type="text" id="tcqPlayerNum" class="form-input" maxlength="20" inputmode="numeric"
+                     placeholder="97212345" autocomplete="off">
+              <div class="hint" style="font-size:0.78rem;margin-top:4px">
+                Name, email, and skill level are pulled live from
+                <code>slate.players</code> — no manual entry needed.
+              </div>
+              <div id="tcqPlayerResolveStatus" style="margin-top:8px;font-size:0.86rem;min-height:1.2em"></div>
             </div>
           </div>
           <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
@@ -2433,7 +2443,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION   = '3.128';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION   = '3.129';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -16659,25 +16669,26 @@ function tcqOpenPlayerModal(teamId, position, playerId) {
   const modal = document.getElementById('tcqPlayerModal');
   document.getElementById('tcqPlayerTeamId').value = teamId;
   document.getElementById('tcqPlayerPosition').value = position;
-  /* hidden _tcqEditingPlayerId stored on the modal element so we know
-     INSERT vs UPDATE on save. */
   modal.dataset.playerId = playerId || '';
   const isEdit = !!playerId;
   document.getElementById('tcqPlayerModalTitle').textContent =
-    isEdit ? 'Edit player' : ('Add player — slot ' + position + (position === 1 ? ' (captain)' : ''));
+    isEdit ? 'Edit player' : ('Add player — slot ' + position + (Number(position) === 1 ? ' (captain)' : ''));
+  const numField   = document.getElementById('tcqPlayerNum');
+  const statusEl   = document.getElementById('tcqPlayerResolveStatus');
+  statusEl.textContent = '';
+  statusEl.style.color = '';
   if (isEdit) {
     const p = (_tcqPlayersByTeam.get(teamId) || []).find(x => x.id === playerId);
-    document.getElementById('tcqPlayerName').value = p ? p.name : '';
-    document.getElementById('tcqPlayerEmail').value = p ? (p.email || '') : '';
-    document.getElementById('tcqPlayerNum').value = p ? (p.member_number || '') : '';
+    numField.value = p ? (p.member_number || '') : '';
+    if (p && p.name) {
+      statusEl.textContent = 'Currently: ' + p.name + (p.email ? ' · ' + p.email : '');
+      statusEl.style.color = 'var(--muted)';
+    }
   } else {
-    document.getElementById('tcqPlayerName').value = '';
-    document.getElementById('tcqPlayerEmail').value = '';
-    document.getElementById('tcqPlayerNum').value = '';
+    numField.value = '';
   }
-  /* Email row only relevant for captain slot. */
-  document.getElementById('tcqPlayerEmailRow').style.display = (Number(position) === 1) ? '' : 'none';
   modal.style.display = 'flex';
+  setTimeout(() => numField.focus(), 50);
 }
 function tcqEditPlayer(playerId) {
   for (const [tid, plist] of _tcqPlayersByTeam.entries()) {
@@ -16688,17 +16699,55 @@ function tcqEditPlayer(playerId) {
 function tcqClosePlayerModal() {
   document.getElementById('tcqPlayerModal').style.display = 'none';
 }
+
+/* Resolve an APA # against slate.players. Returns { ok, name, email }
+   on match, { ok:false, error } otherwise. Uses the service-role JWT
+   that's already in scope on the admin page. */
+async function tcqResolveApaNumber(memberNumber) {
+  const num = String(memberNumber || '').trim();
+  if (!num) return { ok: false, error: 'APA # is required' };
+  try {
+    const r = await fetch(SB_URL + '/rest/v1/players?member_number=eq.' + encodeURIComponent(num)
+      + '&select=member_number,first_name,last_name,email&limit=1', {
+      headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Accept-Profile': 'slate' }
+    });
+    if (!r.ok) return { ok: false, error: 'Lookup failed (' + r.status + ')' };
+    const rows = await r.json();
+    if (!rows.length) return { ok: false, error: 'No player found with APA # ' + num };
+    const p = rows[0];
+    const name = [p.first_name, p.last_name].filter(Boolean).join(' ').trim() || ('#' + num);
+    return { ok: true, name: name, email: p.email || null, member_number: p.member_number };
+  } catch (e) {
+    return { ok: false, error: e.message || 'Lookup failed' };
+  }
+}
+
 async function tcqSavePlayer() {
   const modal = document.getElementById('tcqPlayerModal');
   const teamId = Number(document.getElementById('tcqPlayerTeamId').value);
   const position = Number(document.getElementById('tcqPlayerPosition').value);
   const playerId = modal.dataset.playerId ? Number(modal.dataset.playerId) : null;
-  const name = document.getElementById('tcqPlayerName').value.trim();
-  if (!name) { alert('Name is required'); return; }
+  const numField = document.getElementById('tcqPlayerNum');
+  const statusEl = document.getElementById('tcqPlayerResolveStatus');
+  const memberNumber = numField.value.trim();
+  /* Live resolve against slate.players — refuse to save without a match. */
+  statusEl.textContent = 'Looking up…';
+  statusEl.style.color = 'var(--muted)';
+  const resolved = await tcqResolveApaNumber(memberNumber);
+  if (!resolved.ok) {
+    statusEl.textContent = '⚠ ' + resolved.error;
+    statusEl.style.color = '#c0392b';
+    return;
+  }
+  statusEl.textContent = '✓ ' + resolved.name + (resolved.email ? ' · ' + resolved.email : '');
+  statusEl.style.color = '#0a6b3a';
   const body = {
-    name: name,
-    email: (position === 1) ? (document.getElementById('tcqPlayerEmail').value.trim() || null) : null,
-    member_number: document.getElementById('tcqPlayerNum').value.trim() || null
+    name:          resolved.name,
+    member_number: resolved.member_number,
+    /* Captain row stores the email too (used by the SMS / email flows).
+       Non-captain rows leave email null — looked up live from slate on
+       send so it always reflects the current player record. */
+    email:         (position === 1) ? resolved.email : null
     /* skill_level intentionally omitted — derived live from slate.players
        via the players_admin view (max of sl_8ball/sl_9ball, capped at 7). */
   };
@@ -16713,7 +16762,8 @@ async function tcqSavePlayer() {
     tcqClosePlayerModal();
     await tcqRender();
   } catch (e) {
-    alert('Save failed: ' + e.message);
+    statusEl.textContent = '⚠ Save failed: ' + (e.message || 'unknown');
+    statusEl.style.color = '#c0392b';
   }
 }
 async function tcqDeletePlayer(playerId, name) {
