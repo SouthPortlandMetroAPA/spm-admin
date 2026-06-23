@@ -2450,7 +2450,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.137';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.138';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -16972,14 +16972,18 @@ async function tcqTextTeam(teamId) {
   window.location.href = url;
 }
 
-/* ── Email roster (editable template, mailto: hand-off) ──────────────
-   Mirrors tcqTextCaptain but emails ALL players on the team via a
-   mailto: link. Subject + body live in tcq.templates as separate
-   rows (email_invite_subject / email_invite_body) so each can be
-   edited independently. Recipients = tcq.players.email (captain) +
+/* ── Email roster (editable template, GAS auto-send) ────────────────
+   Mirrors tcqTextCaptain but emails ALL players on the team via the
+   apa-mailer GAS endpoint (same path the bulk-send button uses).
+   Subject + body live in tcq.templates as separate rows
+   (email_invite_subject / email_invite_body) so each can be edited
+   independently. Recipients = tcq.players.email (captain) +
    slate.players.email (rest, looked up by member_number). Players
    without any email on file are flagged in the preview but the send
-   button stays enabled so the admin can dispatch the rest. */
+   button stays enabled so the admin can dispatch the rest. BCC goes
+   to soldans@ for an inbox paper trail (matches bulk send) and the
+   team gets stamped tcq.teams.emailed_at on success so the bulk
+   skip-already-sent logic stays consistent across both paths. */
 let _tcqEmailTpl = null;
 const TCQ_EMAIL_VARS = ['team_index', 'captain_first', 'captain_full', 'first_names', 'roster', 'off_roster_names'];
 
@@ -17097,12 +17101,18 @@ function tcqOpenEmailModal(ctx) {
     ? '<div class="hint" style="font-size:0.78rem;color:#c0392b;margin-top:4px">⚠ No email for: ' + esc(ctx.missing.join(', ')) + '</div>'
     : '';
 
+  const alreadySent = !!(ctx.team && ctx.team.emailed_at);
+  const sentBadge = alreadySent
+    ? '<span style="background:#0a6b3a;color:#fff;padding:2px 8px;border-radius:999px;font-weight:700;font-size:0.7rem;margin-left:8px">SENT ' + esc(String(ctx.team.emailed_at).slice(0,10)) + '</span>'
+    : '';
+
   back.innerHTML = ''
     + '<div style="background:#fff;border-radius:14px;padding:20px;max-width:760px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 10px 30px rgba(0,0,0,0.25)">'
     +   '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'
-    +     '<div style="font-weight:800;font-size:1.05rem">📧 Email roster — Team #' + esc(ctx.team && ctx.team.team_index || ctx.teamId) + '</div>'
+    +     '<div style="font-weight:800;font-size:1.05rem">📧 Email roster — Team #' + esc(ctx.team && ctx.team.team_index || ctx.teamId) + sentBadge + '</div>'
     +     '<button type="button" id="tcqEmailClose" style="margin-left:auto;background:none;border:0;font-size:1.4rem;line-height:1;cursor:pointer;color:var(--muted)">×</button>'
     +   '</div>'
+    +   '<div class="hint" style="font-size:0.8rem;margin-bottom:8px">From: <code>' + esc(TCQ_BULK_FROM) + '</code> · BCC: <code>' + esc(TCQ_BULK_BCC) + '</code></div>'
     +   '<div style="margin-bottom:10px">'
     +     '<div style="font-weight:700;font-size:0.86rem;margin-bottom:4px">To (' + ctx.recipients.length + ')</div>'
     +     '<div>' + recipientsHtml + '</div>'
@@ -17117,11 +17127,12 @@ function tcqOpenEmailModal(ctx) {
     +     '<textarea id="tcqEmailBody" rows="14" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:0.92rem">' + esc(ctx.body) + '</textarea>'
     +     '<div class="hint" style="font-size:0.74rem;margin-top:4px">Edits apply to this send only — use <strong>📧 Email template</strong> on the toolbar to change defaults.</div>'
     +   '</div>'
+    +   '<div id="tcqEmailStatus" style="margin:10px 0 0;font-size:0.88rem;min-height:1.3em"></div>'
     +   '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">'
     +     '<button class="btn btn-outline" id="tcqEmailCancel">Cancel</button>'
     +     '<button class="btn btn-primary" id="tcqEmailSend"'
     +       (ctx.recipients.length ? '' : ' disabled title="No recipients"')
-    +       '>Open in mail app</button>'
+    +       '>Send</button>'
     +   '</div>'
     + '</div>';
   document.body.appendChild(back);
@@ -17130,18 +17141,59 @@ function tcqOpenEmailModal(ctx) {
   back.querySelector('#tcqEmailClose').onclick  = close;
   back.querySelector('#tcqEmailCancel').onclick = close;
   back.onclick = (ev) => { if (ev.target === back) close(); };
-  back.querySelector('#tcqEmailSend').onclick = () => {
+
+  back.querySelector('#tcqEmailSend').onclick = async () => {
+    const sendBtn  = document.getElementById('tcqEmailSend');
+    const statusEl = document.getElementById('tcqEmailStatus');
+    if (alreadySent) {
+      if (!confirm('This team was already emailed (' + String(ctx.team.emailed_at).slice(0,10) + '). Send again?')) return;
+    }
     const subject = document.getElementById('tcqEmailSubject').value;
     const body    = document.getElementById('tcqEmailBody').value;
     const to      = ctx.recipients.map(r => r.email).join(',');
-    /* mailto: max length is real but generous (~2000-8000 chars across
-       browsers). Templates here are well under. encodeURIComponent
-       handles newlines (%0A), commas inside body, etc. */
-    const url = 'mailto:' + encodeURIComponent(to)
-      + '?subject=' + encodeURIComponent(subject)
-      + '&body=' + encodeURIComponent(body);
-    window.location.href = url;
-    close();
+    sendBtn.disabled = true;
+    sendBtn.textContent = 'Sending…';
+    statusEl.textContent = 'Sending…';
+    statusEl.style.color = 'var(--muted)';
+    try {
+      const r = await fetch(TCQ_MAILER_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action:    'tcq_send_invite',
+          admin_key: SB_KEY,
+          team_id:   ctx.teamId,
+          to:        to,
+          subject:   subject,
+          body:      body,
+          bcc:       TCQ_BULK_BCC
+        }),
+        redirect: 'follow'
+      });
+      const txt = await r.text();
+      let res = null;
+      try { res = JSON.parse(txt); } catch (_) { res = { ok: false, error: 'bad gateway: ' + txt.slice(0, 120) }; }
+      if (res && res.ok) {
+        statusEl.innerHTML = '✓ Sent to ' + ctx.recipients.length + ' recipient(s). Team marked as emailed.';
+        statusEl.style.color = '#0a6b3a';
+        sendBtn.textContent = 'Close';
+        sendBtn.disabled = false;
+        sendBtn.onclick = close;
+        /* Refresh teams so the SENT badge appears + bulk-send skip logic
+           picks this team up. */
+        tcqRender().catch(() => {});
+      } else {
+        statusEl.textContent = '⚠ ' + ((res && res.error) || 'send failed');
+        statusEl.style.color = '#c0392b';
+        sendBtn.disabled = false;
+        sendBtn.textContent = 'Send';
+      }
+    } catch (e) {
+      statusEl.textContent = '⚠ ' + (e.message || 'network error');
+      statusEl.style.color = '#c0392b';
+      sendBtn.disabled = false;
+      sendBtn.textContent = 'Send';
+    }
   };
 }
 
