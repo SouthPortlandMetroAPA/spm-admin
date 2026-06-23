@@ -288,6 +288,11 @@ html,body {
 /* Direct <input>/<select>/<textarea> children fill the row when their
    sibling label has been bumped to full-width above. */
 .form-row > input, .form-row > select, .form-row > textarea { flex: 1 1 100%; }
+/* Class-tagged form controls fill their container by default — keeps
+   inputs flush with labels regardless of whether they're a direct
+   child of .form-row or wrapped in an intermediate <div>. Inline
+   `width:auto` (the few search-filter cases) still wins on specificity. */
+.form-input { width: 100%; box-sizing: border-box; }
 label {
   display: block;
   font-weight: 700;
@@ -2443,7 +2448,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION   = '3.129';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION   = '3.130';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
