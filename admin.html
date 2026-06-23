@@ -2116,6 +2116,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             <button class="btn btn-primary btn-sm" id="tcqNewTeamBtn">+ New team</button>
             <button class="btn btn-outline btn-sm" onclick="tcqOpenTemplateEditor()">📝 Text template</button>
             <button class="btn btn-outline btn-sm" onclick="tcqOpenEmailTemplateEditor()">📧 Email template</button>
+            <button class="btn btn-outline btn-sm" onclick="tcqTestEmailOpen()">🧪 Test email</button>
             <button class="btn btn-primary btn-sm"  onclick="tcqBulkEmailOpen()">✉️ Send all invites</button>
             <button class="btn btn-outline btn-sm" onclick="tcqRender()">↻ Refresh</button>
             <a class="btn btn-outline btn-sm" target="_blank" rel="noopener"
@@ -2449,7 +2450,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION   = '3.134';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION   = '3.135';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -17353,6 +17354,129 @@ async function tcqBulkEmailSend(sendable) {
   tcqRender().catch(() => {});
 }
 
+/* ── Send a TEST email ───────────────────────────────────────────────
+   Routes the same substituted template through the GAS mailer to a
+   single arbitrary address so the admin can sanity-check what real
+   teams will receive. To keep it side-effect-free:
+     - team_id is a sentinel (999999) so the mark_team_emailed RPC
+       UPDATEs 0 rows (no row matches)
+     - bcc is empty so the soldans@ paper-trail address is not
+       cc'd on tests
+     - subject is prefixed [TEST] so it's distinguishable in inbox
+   Substitution uses the first team in the current event that has at
+   least one recipient on file — gives a realistic preview. Falls
+   back to a synthetic team if no teams have players yet. */
+async function tcqTestEmailOpen() {
+  const existing = document.getElementById('tcqTestEmailModal');
+  if (existing) existing.remove();
+  const back = document.createElement('div');
+  back.id = 'tcqTestEmailModal';
+  back.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:2000;display:flex;align-items:center;justify-content:center;padding:20px';
+  back.innerHTML = ''
+    + '<div style="background:#fff;border-radius:14px;padding:20px;max-width:520px;width:100%;box-shadow:0 10px 30px rgba(0,0,0,0.25)">'
+    +   '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">'
+    +     '<div style="font-weight:800;font-size:1.05rem">🧪 Send test email</div>'
+    +     '<button type="button" id="tcqTestClose" style="margin-left:auto;background:none;border:0;font-size:1.4rem;line-height:1;cursor:pointer;color:var(--muted)">×</button>'
+    +   '</div>'
+    +   '<div class="form-row">'
+    +     '<div>'
+    +       '<label>Send test to</label>'
+    +       '<input type="email" id="tcqTestEmail" class="form-input" placeholder="you@example.com" autocomplete="email">'
+    +       '<div class="hint" style="font-size:0.78rem;margin-top:4px">'
+    +         'Subject will be prefixed <code>[TEST]</code>. No BCC, no team marked as emailed. '
+    +         'Body uses real roster data from the first team in the event so substitutions look realistic.'
+    +       '</div>'
+    +     '</div>'
+    +   '</div>'
+    +   '<div id="tcqTestStatus" style="margin:10px 0 0;font-size:0.88rem;min-height:1.3em"></div>'
+    +   '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">'
+    +     '<button class="btn btn-outline" id="tcqTestCancel">Cancel</button>'
+    +     '<button class="btn btn-primary" id="tcqTestSend">Send test</button>'
+    +   '</div>'
+    + '</div>';
+  document.body.appendChild(back);
+
+  const close = () => back.remove();
+  back.querySelector('#tcqTestClose').onclick  = close;
+  back.querySelector('#tcqTestCancel').onclick = close;
+  back.onclick = (ev) => { if (ev.target === back) close(); };
+  const emailEl  = document.getElementById('tcqTestEmail');
+  const statusEl = document.getElementById('tcqTestStatus');
+  setTimeout(() => emailEl.focus(), 50);
+  emailEl.onkeydown = (ev) => { if (ev.key === 'Enter') document.getElementById('tcqTestSend').click(); };
+
+  document.getElementById('tcqTestSend').onclick = async () => {
+    const to = (emailEl.value || '').trim();
+    if (!to || to.indexOf('@') < 0) {
+      statusEl.textContent = '⚠ Enter a valid email address';
+      statusEl.style.color = '#c0392b';
+      return;
+    }
+    statusEl.textContent = 'Sending…';
+    statusEl.style.color = 'var(--muted)';
+    /* Build substituted body using the first team with recipients (so the
+       email looks like a real one). Fall back to synthetic data if the
+       event has no teams yet. */
+    const tpl = await tcqLoadEmailTemplate();
+    let subject, body, sourceLabel;
+    const teams = (_tcqTeams || []).slice().sort((a, b) => (a.team_index || 0) - (b.team_index || 0));
+    let sourceTeam = null;
+    for (const t of teams) {
+      const players = _tcqPlayersByTeam.get(t.id) || [];
+      if (players.length) { sourceTeam = t; break; }
+    }
+    if (sourceTeam) {
+      const players = (_tcqPlayersByTeam.get(sourceTeam.id) || []).slice().sort((a, b) => a.position - b.position);
+      const captain = players.find(p => p.is_captain);
+      const vars = tcqBuildEmailVars(sourceTeam, players, captain);
+      subject = '[TEST] ' + tcqSubstitute(tpl.subject, vars);
+      body    = tcqSubstitute(tpl.body, vars);
+      sourceLabel = 'Team #' + sourceTeam.team_index;
+    } else {
+      const vars = {
+        team_index: 99,
+        captain_first: 'Test',
+        captain_full:  'Test Captain',
+        first_names:   'Alice, Bob & Carol',
+        roster:        '  1. Test Captain (SL4) — captain\n  2. Alice Example (SL3)\n  3. Bob Example (SL5)',
+        off_roster_names: ''
+      };
+      subject = '[TEST] ' + tcqSubstitute(tpl.subject, vars);
+      body    = tcqSubstitute(tpl.body, vars);
+      sourceLabel = 'synthetic sample';
+    }
+    try {
+      const r = await fetch(TCQ_MAILER_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action:    'tcq_send_invite',
+          admin_key: SB_KEY,
+          team_id:   999999,   /* sentinel — no row matches, mark_team_emailed is a no-op */
+          to:        to,
+          subject:   subject,
+          body:      body,
+          bcc:       ''        /* no paper-trail BCC for tests */
+        }),
+        redirect: 'follow'
+      });
+      const txt = await r.text();
+      let res = null;
+      try { res = JSON.parse(txt); } catch (_) { res = { ok: false, error: 'bad gateway: ' + txt.slice(0, 120) }; }
+      if (res && res.ok) {
+        statusEl.innerHTML = '✓ Sent to <code>' + esc(to) + '</code> using ' + esc(sourceLabel) + '. Check inbox.';
+        statusEl.style.color = '#0a6b3a';
+      } else {
+        statusEl.textContent = '⚠ ' + ((res && res.error) || 'failed');
+        statusEl.style.color = '#c0392b';
+      }
+    } catch (e) {
+      statusEl.textContent = '⚠ ' + (e.message || 'network error');
+      statusEl.style.color = '#c0392b';
+    }
+  };
+}
+
 /* Template editor — separate from the SMS one so each can evolve
    independently. Two fields (subject + body), each with var pills. */
 async function tcqOpenEmailTemplateEditor() {
@@ -17638,6 +17762,7 @@ window.tcqTextCaptain = tcqTextCaptain;
 window.tcqTextTeam = tcqTextTeam;
 window.tcqEmailRoster = tcqEmailRoster;
 window.tcqBulkEmailOpen = tcqBulkEmailOpen;
+window.tcqTestEmailOpen = tcqTestEmailOpen;
 window.tcqOpenTemplateEditor = tcqOpenTemplateEditor;
 window.tcqOpenEmailTemplateEditor = tcqOpenEmailTemplateEditor;
 
