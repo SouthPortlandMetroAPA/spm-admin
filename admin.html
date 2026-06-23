@@ -2449,7 +2449,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION   = '3.133';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION   = '3.134';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -16150,6 +16150,10 @@ const TCQ_PROFILE = 'tcq';
 /* GAS apa-mailer (deployed as soldans@southportlandmetroapa.com). Used by
    the Rolodex captain-PDF flow + (3.133+) the TCQ bulk-invite sender. */
 const TCQ_MAILER_URL = 'https://script.google.com/macros/s/AKfycbzGTzkBRTrIIP_tD6sbtOOUmNZkXDdtxPoO4c8fdWt5h3tZFueNSISPv8Q3LWStx73Whw/exec';
+/* GAS deploy account — emails go FROM this address (display name set by
+   apa-mailer FROM_NAME = "South Portland Metro APA"). Used in the
+   preview modal + confirm dialog so the admin can verify before send. */
+const TCQ_BULK_FROM  = 'soldans@southportlandmetroapa.com';
 const TCQ_BULK_BCC   = 'soldans@southportlandmetroapa.com';   // paper-trail copy
 let _tcqEvent = null;
 let _tcqTeams = [];
@@ -17236,10 +17240,11 @@ async function tcqBulkEmailOpen() {
     const skipped  = plan.filter(p => !sendable.includes(p));
     const recipientTotal = sendable.reduce((n, p) => n + p.recipients.length, 0);
     summary.innerHTML = ''
-      + '<strong>' + sendable.length + '</strong> team(s) to send · '
-      + '<strong>' + recipientTotal + '</strong> total recipient(s) · '
-      + 'BCC: <code>' + esc(TCQ_BULK_BCC) + '</code>'
-      + (skipped.length ? ' · <span class="hint">' + skipped.length + ' skipped (already sent or no recipients)</span>' : '');
+      + '<div><strong>' + sendable.length + '</strong> team(s) to send · '
+      +   '<strong>' + recipientTotal + '</strong> total recipient(s)'
+      +   (skipped.length ? ' · <span class="hint">' + skipped.length + ' skipped (already sent or no recipients)</span>' : '')
+      + '</div>'
+      + '<div style="margin-top:4px;font-size:0.8rem">From: <code>' + esc(TCQ_BULK_FROM) + '</code> · BCC: <code>' + esc(TCQ_BULK_BCC) + '</code></div>';
     list.innerHTML = plan.map(p => {
       const willSend = sendable.includes(p);
       const stamp = p.already_sent
@@ -17270,7 +17275,12 @@ async function tcqBulkEmailOpen() {
   document.getElementById('tcqBulkSendBtn').onclick = async () => {
     sendable = renderPlan(document.getElementById('tcqBulkForce').checked);
     if (!sendable.length) return;
-    if (!confirm('Send invites to ' + sendable.length + ' team(s)?\n\nEmails go out via apa-mailer (from soldans@). This is not reversible.')) return;
+    if (!confirm(
+      'Send invites to ' + sendable.length + ' team(s)?\n\n' +
+      'From:  South Portland Metro APA <' + TCQ_BULK_FROM + '>\n' +
+      'BCC:   ' + TCQ_BULK_BCC + '\n\n' +
+      'This is not reversible.'
+    )) return;
     await tcqBulkEmailSend(sendable);
   };
 }
