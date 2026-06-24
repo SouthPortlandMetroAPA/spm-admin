@@ -2070,6 +2070,17 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <input type="file" id="rolFileInput" accept="application/pdf" style="display:none">
         </div>
         <div id="rolUploadStatus" class="status-line" style="margin-top:8px"></div>
+        <!-- Visual progress: rolProgress(pct, subtext) drives this from
+             rolHandleFile. pct < 100 → bar fills; subtext describes the
+             current phase (parse / split / upload N/M). Both elements
+             stay hidden until the first call, then fade away ~2s after
+             completion (or stay if there's an error). -->
+        <div id="rolUploadProgress" style="display:none;margin-top:8px">
+          <div style="height:10px;background:#e5e7eb;border-radius:999px;overflow:hidden">
+            <div id="rolUploadBar" style="height:100%;width:0%;background:var(--spm-accent,#0031a8);transition:width 0.3s ease"></div>
+          </div>
+          <div id="rolUploadSubtext" class="hint" style="font-size:0.78rem;margin-top:4px;text-align:center"></div>
+        </div>
       </div>
 
       <div class="card">
@@ -2451,7 +2462,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.141';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.142';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -15826,21 +15837,44 @@ async function rolSyncCaptains(sessionId, divisionNumber, capPdfId, captains) {
   console.log('[rolodex] synced ' + rows.length + ' captain(s) for division ' + divisionNumber);
 }
 
+/* Drives the rolUploadProgress widget. pct null → hide; 0..100 → fill.
+   Phase splits used by rolHandleFile (rough rule-of-thumb wall-clock
+   weights, not perfectly proportional but readable):
+     0-15  : read PDF bytes + extract per-page text
+     15-25 : detect division numbers + SPM filter lookup
+     25-40 : split source PDF into per-division PDFs (pdf-lib)
+     40-100: upload each division to R2 + write DB rows
+   Single-arg null call hides the widget (used on completion + on error). */
+function rolProgress(pct, subtext) {
+  const wrap = document.getElementById('rolUploadProgress');
+  const bar  = document.getElementById('rolUploadBar');
+  const sub  = document.getElementById('rolUploadSubtext');
+  if (!wrap || !bar || !sub) return;
+  if (pct == null) { wrap.style.display = 'none'; return; }
+  wrap.style.display = '';
+  bar.style.width = Math.min(100, Math.max(0, pct)) + '%';
+  bar.style.background = pct >= 100 ? '#0a6b3a' : 'var(--spm-accent,#0031a8)';
+  if (subtext != null) sub.textContent = subtext;
+}
+
 async function rolHandleFile(file) {
   const status = document.getElementById('rolUploadStatus');
   status.textContent = 'Reading PDF…';
   status.style.color = 'var(--muted)';
+  rolProgress(5, 'Reading ' + (file.name || 'PDF') + '…');
   try {
     /* Current session — same lookup the rest of the tabs use. */
     if (!currentSession) {
       status.textContent = 'No current session selected.';
       status.style.color = 'var(--danger)';
+      rolProgress(null);
       return;
     }
 
     /* 1. Parse text per page */
     const pages = await rolPdfPageLines(file);
     status.textContent = 'Parsing ' + pages.length + ' page(s)…';
+    rolProgress(15, 'Parsed ' + pages.length + ' page(s)');
 
     /* 2. Identify division per page */
     const perPage = pages.map((lines, i) => {
@@ -15849,10 +15883,12 @@ async function rolHandleFile(file) {
     });
     const matched = perPage.filter(p => p.division_number);
     const unmatched = perPage.filter(p => !p.division_number);
+    rolProgress(20, 'Detected ' + matched.length + ' page(s) with division headers');
     if (!matched.length) {
       status.textContent = 'No division numbers detected on any page. '
         + 'Check the PDF format (expecting "### - Name" header on each page).';
       status.style.color = 'var(--danger)';
+      rolProgress(null);
       return;
     }
 
@@ -15913,6 +15949,7 @@ async function rolHandleFile(file) {
           + 'Detected division numbers: <code>' + esc(divNums.join(', ')) + '</code><br>'
           + 'All were skipped: <code>' + esc(skippedNonSpm.join(', ')) + '</code>';
         status.style.color = 'var(--danger)';
+        rolProgress(null);
         return;
       }
     }
@@ -15920,18 +15957,23 @@ async function rolHandleFile(file) {
     status.textContent = 'Detected ' + divisionList.length + ' SPM division(s)'
       + (unmatched.length ? ' (' + unmatched.length + ' unmatched page(s) skipped)' : '')
       + '. Splitting…';
+    rolProgress(25, 'Splitting PDF into ' + divisionList.length + ' division file(s)…');
 
     /* 4. Split source PDF into per-division PDFs */
     const pdfLib = await rolLoadPdfLib();
     const srcBytes = await file.arrayBuffer();
     const srcDoc = await pdfLib.PDFDocument.load(srcBytes);
     const splits = [];
-    for (const g of divisionList) {
+    for (let gi = 0; gi < divisionList.length; gi++) {
+      const g = divisionList[gi];
       const outDoc = await pdfLib.PDFDocument.create();
       const copiedPages = await outDoc.copyPages(srcDoc, g.pageIndexes);
       copiedPages.forEach(p => outDoc.addPage(p));
       const bytes = await outDoc.save();
       splits.push({ ...g, bytes });
+      /* 25→40% spread across the split loop. */
+      rolProgress(25 + Math.round((gi + 1) / divisionList.length * 15),
+                  'Split ' + (gi + 1) + ' / ' + divisionList.length + ' (' + g.division_number + ')');
     }
 
     /* 5. Upload each split + write DB row (R2 PUT then UPSERT)
@@ -15947,6 +15989,10 @@ async function rolHandleFile(file) {
       i++;
       status.textContent = 'Uploading ' + i + ' / ' + splits.length
         + ': ' + s.division_number + ' (' + s.division_name + ')…';
+      /* 40→100% spread across the upload loop. Update BEFORE the work
+         so the user sees the next division name as soon as it starts. */
+      rolProgress(40 + Math.round((i - 1) / splits.length * 60),
+                  'Uploading ' + i + ' / ' + splits.length + ' · ' + s.division_number + ' ' + s.division_name);
       const path = 'rolodex/' + crypto.randomUUID() + '.pdf';
       const r = await fetch(ROL_R2_URL + '/' + path, {
         method: 'PUT',
@@ -16030,7 +16076,8 @@ async function rolHandleFile(file) {
 
     status.textContent = '✓ Uploaded ' + splits.length + ' division(s).';
     status.style.color = 'var(--success)';
-    setTimeout(() => { status.textContent = ''; rolRenderList(); }, 1200);
+    rolProgress(100, '✓ Done — ' + splits.length + ' division(s) uploaded');
+    setTimeout(() => { status.textContent = ''; rolProgress(null); rolRenderList(); }, 1800);
   } catch (e) {
     status.textContent = 'Failed: ' + e.message;
     status.style.color = 'var(--danger)';
@@ -16122,6 +16169,9 @@ function rolSafeHandle(f) {
       } else {
         alert(msg);
       }
+      /* Hide the progress widget on any error so the user isn't left
+         staring at a half-filled bar that looks "in progress" forever. */
+      if (typeof rolProgress === 'function') rolProgress(null);
     });
 }
 /* Idempotent — safe to call N times. First call binds, subsequent calls
