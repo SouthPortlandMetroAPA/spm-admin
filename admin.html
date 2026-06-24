@@ -2462,7 +2462,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.143';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.144';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -18386,18 +18386,28 @@ function tcqOrRowHtml(r) {
   const summer = r.summer_team === false
     ? '<span class="hint" style="font-size:0.74rem;color:#c9a64a"> · ⚠ off Su26 roster</span>'
     : '';
-  const phone = r.cell_phone || '';
-  /* Pretty-format the cell phone for the row display. Storage is raw
-     (mixed formats); we strip to digits and render as (xxx) xxx-xxxx
-     for US numbers. Anything else falls back to the raw string. */
-  const phoneDisplay = (() => {
-    const d = String(phone).replace(/[^0-9]/g, '');
+  /* All four phone fields from slate.players (view added 2026-06-24).
+     Display each non-empty number with a one-letter type tag (C/H/W/A)
+     and a tel: link for tap-to-call on mobile. Pretty-format US 10/11
+     digit numbers, fall back to the raw string for anything weird. */
+  const fmtPhone = (raw) => {
+    const d = String(raw || '').replace(/[^0-9]/g, '');
     if (d.length === 10) return '(' + d.slice(0,3) + ') ' + d.slice(3,6) + '-' + d.slice(6);
     if (d.length === 11 && d[0] === '1') return '(' + d.slice(1,4) + ') ' + d.slice(4,7) + '-' + d.slice(7);
-    return phone;
-  })();
-  const phoneSpan = phone
-    ? ' &middot; <a href="tel:' + esc(phone) + '" style="color:inherit;text-decoration:none">' + esc(phoneDisplay) + '</a>'
+    return raw;
+  };
+  const phoneFields = [
+    ['C', r.cell_phone],
+    ['H', r.home_phone],
+    ['W', r.work_phone],
+    ['A', r.alt_phone]
+  ].filter(([, v]) => v && String(v).replace(/[^0-9]/g, '').length >= 7);
+  const phoneSpan = phoneFields.length
+    ? ' &middot; ' + phoneFields.map(([tag, v]) =>
+        '<a href="tel:' + esc(v) + '" style="color:inherit;text-decoration:none">'
+        + '<span style="display:inline-block;background:#eef4ff;border:1px solid #b9cdf2;border-radius:4px;padding:0 4px;font-size:0.7rem;font-weight:700;margin-right:2px">' + tag + '</span>'
+        + esc(fmtPhone(v)) + '</a>'
+      ).join(' &middot; ')
     : ' &middot; <span style="color:#c0392b">no phone</span>';
   const badges = [];
   if (r.looking_for_team) badges.push('<span style="background:#0a6b3a;color:#fff;padding:2px 8px;border-radius:999px;font-weight:700;font-size:0.72rem">LOOKING</span>');
