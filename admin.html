@@ -2462,7 +2462,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.144';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.145';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -16773,10 +16773,22 @@ function tcqRenderTeamCard(team) {
       + '</div>';
   };
 
+  /* Paid badge: green pill if team has been marked paid; the badge
+     itself shows the payment method. Tooltip surfaces the timestamp.
+     If unpaid, falls back to the "Payment: <intended-method>" hint
+     line below so the admin still sees what method was discussed. */
+  const paidBadge = team.paid
+    ? '<span style="background:#0a6b3a;color:#fff;padding:2px 8px;border-radius:999px;font-weight:700;font-size:0.72rem;margin-left:6px"'
+      + ' title="Paid ' + esc(team.payment_method || '(unspecified)')
+      + (team.paid_at ? ' on ' + esc(new Date(team.paid_at).toLocaleString()) : '')
+      + '">✓ PAID' + (team.payment_method ? ' &middot; ' + esc(team.payment_method) : '') + '</span>'
+    : '';
+
   return '<div class="card" style="margin-top:10px">'
     + '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">'
     +   '<div><strong style="font-size:1.05rem">Team #' + esc(team.team_index || team.id) + '</strong>'
     +     (captain ? ' &middot; ' + esc(captain.name) : ' <span class="hint">(no captain yet)</span>')
+    +     paidBadge
     +   '</div>'
     +   '<div class="hint" style="font-size:0.82rem">'
     +     'Payment: ' + esc(team.payment_method || '—')
@@ -16805,6 +16817,9 @@ function tcqRenderTeamCard(team) {
     +     '<button class="btn btn-primary btn-sm" onclick="tcqEmailRoster(' + team.id + ')"'
     +       (players.length ? '' : ' disabled title="No players on this team yet"')
     +       ' title="Email all players on this team via your mail app">📧 Email roster</button>'
+    +     (team.paid
+        ? '<button class="btn btn-outline btn-sm" onclick="tcqMarkUnpaid(' + team.id + ')" title="Reverts the paid stamp. The payment_method (intended method) stays.">↶ Mark unpaid</button>'
+        : '<button class="btn btn-primary btn-sm" onclick="tcqOpenMarkPaid(' + team.id + ')" style="background:#0a6b3a;border-color:#0a6b3a" title="Stamp this team paid + record which method was used">💰 Mark paid</button>')
     +     '<button class="btn btn-outline btn-sm" onclick="tcqOpenTeamModal(' + team.id + ')">Edit team</button>'
     +     '<button class="btn btn-outline btn-sm" onclick="tcqDeleteTeam(' + team.id + ')">Delete team</button>'
     +   '</div>'
@@ -16958,6 +16973,77 @@ async function tcqDeleteTeam(teamId) {
     await tcqRender();
   } catch (e) {
     alert('Delete failed: ' + e.message);
+  }
+}
+
+/* ── Paid tracking ────────────────────────────────────────────────
+   Mark paid opens a quick picker for the payment method (the same
+   methods the team edit modal exposes). On click → PATCH paid=true,
+   paid_at=now, payment_method=<chosen>. Mark unpaid reverts paid
+   + paid_at; keeps payment_method (admin's intended-method memory).
+   Both re-render the team card so the badge appears/disappears. */
+const TCQ_PAYMENT_METHODS = ['Venmo', 'Zelle', 'Paypal', 'Cash', 'Other'];
+
+function tcqOpenMarkPaid(teamId) {
+  const team = _tcqTeams.find(t => t.id === teamId);
+  if (!team) return;
+  const existing = document.getElementById('tcqPaidModal');
+  if (existing) existing.remove();
+  const back = document.createElement('div');
+  back.id = 'tcqPaidModal';
+  back.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:2000;display:flex;align-items:center;justify-content:center;padding:20px';
+  back.innerHTML = ''
+    + '<div style="background:#fff;border-radius:14px;padding:20px;max-width:380px;width:100%;box-shadow:0 10px 30px rgba(0,0,0,0.25)">'
+    +   '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'
+    +     '<div style="font-weight:800;font-size:1.05rem">💰 Mark Team #' + esc(team.team_index || team.id) + ' paid</div>'
+    +     '<button type="button" id="tcqPaidClose" style="margin-left:auto;background:none;border:0;font-size:1.4rem;line-height:1;cursor:pointer;color:var(--muted)">×</button>'
+    +   '</div>'
+    +   '<div class="hint" style="font-size:0.84rem;margin-bottom:10px">How did they pay?</div>'
+    +   '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'
+    +     TCQ_PAYMENT_METHODS.map(m =>
+          '<button class="btn btn-primary" data-tcq-paid-method="' + esc(m) + '" style="background:#0a6b3a;border-color:#0a6b3a">' + esc(m) + '</button>'
+        ).join('')
+    +   '</div>'
+    +   '<div id="tcqPaidStatus" style="margin-top:10px;font-size:0.84rem;min-height:1.2em"></div>'
+    +   '<div style="display:flex;justify-content:flex-end;margin-top:10px">'
+    +     '<button class="btn btn-outline" id="tcqPaidCancel">Cancel</button>'
+    +   '</div>'
+    + '</div>';
+  document.body.appendChild(back);
+  const close = () => back.remove();
+  back.querySelector('#tcqPaidClose').onclick  = close;
+  back.querySelector('#tcqPaidCancel').onclick = close;
+  back.onclick = (ev) => { if (ev.target === back) close(); };
+  back.querySelectorAll('[data-tcq-paid-method]').forEach(b => {
+    b.onclick = async () => {
+      const method = b.dataset.tcqPaidMethod;
+      const status = document.getElementById('tcqPaidStatus');
+      status.textContent = 'Saving…';
+      try {
+        await tcqPatch('teams?id=eq.' + teamId, {
+          paid: true,
+          paid_at: new Date().toISOString(),
+          payment_method: method
+        });
+        close();
+        await tcqRender();
+      } catch (e) {
+        status.textContent = '⚠ ' + e.message;
+        status.style.color = '#c0392b';
+      }
+    };
+  });
+}
+
+async function tcqMarkUnpaid(teamId) {
+  const team = _tcqTeams.find(t => t.id === teamId);
+  if (!team) return;
+  if (!confirm('Revert paid status for Team #' + (team.team_index || teamId) + '?')) return;
+  try {
+    await tcqPatch('teams?id=eq.' + teamId, { paid: false, paid_at: null });
+    await tcqRender();
+  } catch (e) {
+    alert('Failed to revert: ' + e.message);
   }
 }
 
@@ -18166,6 +18252,8 @@ window.tcqOpenTeamModal = tcqOpenTeamModal;
 window.tcqCloseTeamModal = tcqCloseTeamModal;
 window.tcqSaveTeam = tcqSaveTeam;
 window.tcqDeleteTeam = tcqDeleteTeam;
+window.tcqOpenMarkPaid = tcqOpenMarkPaid;
+window.tcqMarkUnpaid = tcqMarkUnpaid;
 window.tcqOpenPlayerModal = tcqOpenPlayerModal;
 window.tcqClosePlayerModal = tcqClosePlayerModal;
 window.tcqSavePlayer = tcqSavePlayer;
