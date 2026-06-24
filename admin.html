@@ -2462,7 +2462,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.142';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.143';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -16100,33 +16100,170 @@ async function rolRenderList() {
       el.innerHTML = '<p class="hint">No captain PDFs uploaded for the current session yet.</p>';
       return;
     }
+    /* Pre-count extracted captains per division so the row header shows
+       the count without forcing a click. One aggregate fetch per render. */
+    const capCountByDiv = new Map();
+    try {
+      const cR = await fetch(SB_URL + '/rest/v1/rolodex_captains?select=division_number'
+        + '&session_id=eq.' + currentSession.id,
+        { headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Accept-Profile': 'slate' } });
+      if (cR.ok) {
+        const capRows = await cR.json();
+        for (const c of capRows) {
+          capCountByDiv.set(c.division_number, (capCountByDiv.get(c.division_number) || 0) + 1);
+        }
+      }
+    } catch (_) { /* non-fatal; rows render without counts */ }
+
     el.innerHTML =
       '<div style="display:grid;gap:6px">' +
       rows.map(row => {
         const kb = row.bytes ? Math.round(row.bytes/1024) + ' KB' : '';
-        /* 3.68: Open-link removed. The rolodex/ prefix now requires a
-           short-lived HMAC token to GET (per the security lockdown);
-           admin can't mint one without server-side help. Verify uploads
-           by inspecting the metadata (page_count, bytes, division name)
-           below, or by requesting the PDF as a captain via the public
-           Rolodex page. */
-        return '<div style="display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:8px;padding:8px 10px">' +
-          '<div style="flex:1;min-width:0">' +
-            '<div style="font-weight:700">' + esc(row.division_number) +
-              ' &mdash; ' + esc(row.division_name || '(no name)') + '</div>' +
-            '<div class="hint" style="font-size:0.74rem">' +
-              esc(row.page_count) + ' page' + (row.page_count === 1 ? '' : 's') +
-              ' &middot; ' + esc(kb) +
-              ' &middot; uploaded ' + esc(new Date(row.uploaded_at).toLocaleString()) +
-            '</div>' +
-          '</div>' +
-          '<button class="btn btn-danger btn-sm" onclick="rolDelete(' + row.id + ', \'' + esc(row.r2_path) + '\')">Delete</button>' +
-        '</div>';
+        const capCount = capCountByDiv.get(row.division_number) || 0;
+        const capBadge = capCount
+          ? '<span style="background:#0a6b3a;color:#fff;padding:1px 7px;border-radius:999px;font-size:0.7rem;font-weight:700;margin-left:6px">' + capCount + ' captain' + (capCount === 1 ? '' : 's') + '</span>'
+          : '<span style="background:#c0392b;color:#fff;padding:1px 7px;border-radius:999px;font-size:0.7rem;font-weight:700;margin-left:6px">0 captains</span>';
+        /* 3.68: Open-link removed (HMAC-gated GETs on rolodex/ prefix).
+           3.143: Rows are now collapsible — click anywhere on the header
+           to expand a captain-details table (team#, name, APA#, email)
+           pulled from slate.rolodex_captains + matched against
+           slate.players for the contact lookup. Lazy-loaded on first
+           expand and cached in a data attribute on the body element. */
+        return ''
+          + '<div class="rol-row" data-div="' + esc(row.division_number) + '" data-div-name="' + esc(row.division_name || '') + '"'
+          +   ' style="border:1px solid var(--border);border-radius:8px;overflow:hidden">'
+          +   '<div class="rol-row-head" style="display:flex;align-items:center;gap:10px;padding:8px 10px;cursor:pointer;background:#fafafa"'
+          +     ' onclick="rolToggleRow(this)">'
+          +     '<span class="rol-caret" style="display:inline-block;width:14px;text-align:center;font-family:monospace;transition:transform 0.15s ease">▶</span>'
+          +     '<div style="flex:1;min-width:0">'
+          +       '<div style="font-weight:700">' + esc(row.division_number)
+          +         ' &mdash; ' + esc(row.division_name || '(no name)') + capBadge + '</div>'
+          +       '<div class="hint" style="font-size:0.74rem">'
+          +         esc(row.page_count) + ' page' + (row.page_count === 1 ? '' : 's')
+          +         ' &middot; ' + esc(kb)
+          +         ' &middot; uploaded ' + esc(new Date(row.uploaded_at).toLocaleString())
+          +       '</div>'
+          +     '</div>'
+          +     '<button class="btn btn-danger btn-sm" onclick="event.stopPropagation();rolDelete(' + row.id + ', \'' + esc(row.r2_path) + '\')">Delete</button>'
+          +   '</div>'
+          +   '<div class="rol-row-body" style="display:none;border-top:1px solid var(--border);padding:8px 10px;background:#fff"></div>'
+          + '</div>';
       }).join('') +
       '</div>';
   } catch (e) {
     stat.textContent = 'Load failed: ' + e.message;
   }
+}
+
+/* Click handler for rolList row headers. Toggles the body open/closed
+   and lazy-loads captain details (rolodex_captains JOIN slate.players)
+   on the FIRST expand only. Body content is cached in the DOM so
+   re-expanding is instant. */
+async function rolToggleRow(headerEl) {
+  const wrap = headerEl.closest('.rol-row');
+  if (!wrap) return;
+  const body = wrap.querySelector('.rol-row-body');
+  const caret = headerEl.querySelector('.rol-caret');
+  const isOpen = body.style.display !== 'none';
+  if (isOpen) {
+    body.style.display = 'none';
+    if (caret) caret.style.transform = 'rotate(0deg)';
+    return;
+  }
+  body.style.display = '';
+  if (caret) caret.style.transform = 'rotate(90deg)';
+  /* If we've already populated this body, skip the fetch. */
+  if (body.dataset.loaded === '1') return;
+  body.innerHTML = '<div class="hint" style="padding:4px 0">Loading captain details…</div>';
+  const divNumber = wrap.dataset.div;
+  try {
+    const caps = await rolFetchDivisionCaptains(divNumber);
+    if (!caps.length) {
+      body.innerHTML = '<div class="hint" style="padding:4px 0;color:#c0392b">'
+        + 'No captains parsed from the PDF for this division. '
+        + 'Check the PDF format — the parser expects a "Captain:" or "Capt:" prefix per captain.</div>';
+      body.dataset.loaded = '1';
+      return;
+    }
+    body.innerHTML = ''
+      + '<table style="width:100%;border-collapse:collapse;font-size:0.86rem">'
+      +   '<thead><tr style="text-align:left;color:var(--muted);font-size:0.74rem;text-transform:uppercase">'
+      +     '<th style="padding:4px 6px">Team</th>'
+      +     '<th style="padding:4px 6px">Name</th>'
+      +     '<th style="padding:4px 6px">APA #</th>'
+      +     '<th style="padding:4px 6px">Email</th>'
+      +     '<th style="padding:4px 6px">Phone</th>'
+      +   '</tr></thead><tbody>'
+      +   caps.map(c => {
+            const noMatch = !c.member_number;
+            const matchWarn = noMatch
+              ? '<span title="No slate.players match — captain name didn\'t resolve" style="color:#c0392b;font-size:0.7rem">⚠ no match</span>'
+              : '';
+            return '<tr style="border-top:1px solid #f0f1f3">'
+              + '<td style="padding:4px 6px;font-family:ui-monospace,monospace;font-size:0.82rem">' + esc(c.team_number || '—') + '</td>'
+              + '<td style="padding:4px 6px">' + esc(c.first_name + ' ' + c.last_name) + ' ' + matchWarn + '</td>'
+              + '<td style="padding:4px 6px;font-family:ui-monospace,monospace;font-size:0.82rem">' + esc(c.member_number || '—') + '</td>'
+              + '<td style="padding:4px 6px"><span style="font-size:0.82rem">' + esc(c.email || '—') + '</span></td>'
+              + '<td style="padding:4px 6px;font-family:ui-monospace,monospace;font-size:0.82rem">' + esc(c.cell_phone || '—') + '</td>'
+              + '</tr>';
+          }).join('')
+      + '</tbody></table>';
+    body.dataset.loaded = '1';
+  } catch (e) {
+    body.innerHTML = '<div class="hint" style="color:#c0392b;padding:4px 0">Load failed: ' + esc(e.message) + '</div>';
+  }
+}
+
+/* Fetch the captain list for one division + enrich each row with the
+   slate.players contact info via batched name matching. Returns an
+   array of { team_number, first_name, last_name, member_number?,
+   email?, cell_phone? }. Members not found in slate.players come
+   back without member_number/email/cell_phone — UI marks those rows
+   with a "no match" warning so the admin can fix the name typo. */
+async function rolFetchDivisionCaptains(divisionNumber) {
+  if (!currentSession) return [];
+  /* Fetch captain rows for this division */
+  const cR = await fetch(SB_URL + '/rest/v1/rolodex_captains?select=*'
+    + '&session_id=eq.' + currentSession.id
+    + '&division_number=eq.' + encodeURIComponent(divisionNumber)
+    + '&order=team_number.asc',
+    { headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Accept-Profile': 'slate' } });
+  if (!cR.ok) throw new Error('captains fetch ' + cR.status);
+  const caps = await cR.json();
+  if (!caps.length) return [];
+  /* Batched name lookup. Build a PostgREST OR filter:
+       or=(and(first_name.ilike.X,last_name.ilike.Y),and(...))
+     One round-trip resolves all N captains. */
+  const orParts = caps.map(c =>
+    'and(first_name.ilike.' + encodeURIComponent(c.first_name)
+    + ',last_name.ilike.' + encodeURIComponent(c.last_name) + ')'
+  );
+  const pR = await fetch(SB_URL + '/rest/v1/players?select=member_number,first_name,last_name,email,cell_phone'
+    + '&or=(' + orParts.join(',') + ')',
+    { headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Accept-Profile': 'slate' } });
+  const players = pR.ok ? await pR.json() : [];
+  /* Index by lowercase first|last so we can match case-insensitive. */
+  const playerByName = new Map();
+  for (const p of players) {
+    const k = (p.first_name || '').toLowerCase().trim() + '|' + (p.last_name || '').toLowerCase().trim();
+    /* Lower-id wins — see MEMORY.md "lower-id wins name index" gotcha.
+       For Rolodex display we tolerate this: if two players share the
+       exact same first+last, we show the first one returned. Sharing
+       captain identity across teams is rare. */
+    if (!playerByName.has(k)) playerByName.set(k, p);
+  }
+  return caps.map(c => {
+    const k = (c.first_name || '').toLowerCase().trim() + '|' + (c.last_name || '').toLowerCase().trim();
+    const p = playerByName.get(k);
+    return {
+      team_number: c.team_number,
+      first_name: c.first_name,
+      last_name:  c.last_name,
+      member_number: p && p.member_number,
+      email:         p && p.email,
+      cell_phone:    p && p.cell_phone
+    };
+  });
 }
 
 async function rolDelete(id, r2Path) {
@@ -16274,6 +16411,7 @@ if (document.readyState === 'loading') {
 
 window.rolDelete = rolDelete;
 window.rolInit = rolInit;
+window.rolToggleRow = rolToggleRow;
 
 /* ══════════════════════════════════════════════════════════════════════
    TCQ — Team Captain's Qualifier admin (3.101+)
