@@ -2692,7 +2692,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.153';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.154';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -17175,7 +17175,14 @@ async function tcqRender() {
         _tcqPlayersByTeam.get(p.team_id).push(p);
       }
     }
-    stat.textContent = _tcqEvent.name + ' · ' + _tcqTeams.length + ' team(s)';
+    /* Visible count badge so the total is always present even after the
+       per-team numbering was removed in v3.154. tcqRender is called
+       after every add / delete / paid / email so the value stays
+       in sync without polling. */
+    stat.innerHTML = esc(_tcqEvent.name)
+      + ' · <strong style="background:#0a6b3a;color:#fff;padding:2px 9px;border-radius:999px;font-weight:800">'
+      + _tcqTeams.length + ' team' + (_tcqTeams.length === 1 ? '' : 's')
+      + '</strong>';
     list.innerHTML = _tcqTeams.length
       ? _tcqTeams.map(tcqRenderTeamCard).join('')
       : '<p class="hint">No teams yet. Click <strong>+ New team</strong> to add the first one.</p>';
@@ -17319,8 +17326,7 @@ function tcqRenderTeamCard(team) {
 
   return '<div class="card" style="margin-top:10px">'
     + '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">'
-    +   '<div><strong style="font-size:1.05rem">Team #' + esc(team.team_index || team.id) + '</strong>'
-    +     (captain ? ' &middot; ' + esc(captain.name) : ' <span class="hint">(no captain yet)</span>')
+    +   '<div><strong style="font-size:1.05rem">' + (captain ? esc(captain.name) : '<span class="hint">(no captain yet)</span>') + '</strong>'
     +     paidBadge
     +   '</div>'
     +   '<div class="hint" style="font-size:0.82rem">'
@@ -17500,7 +17506,7 @@ async function tcqSaveTeam() {
 async function tcqDeleteTeam(teamId) {
   const t = _tcqTeams.find(x => x.id === teamId);
   const cap = (_tcqPlayersByTeam.get(teamId) || []).find(p => p.is_captain);
-  if (!confirm('Delete team #' + (t && t.team_index || teamId) + (cap ? ' (' + cap.name + ')' : '') + '? This also deletes all its players.')) return;
+  if (!confirm('Delete ' + (cap ? cap.name + '\'s team' : 'this team') + '? This also deletes all its players.')) return;
   try {
     await tcqDelete('teams?id=eq.' + teamId);
     await tcqRender();
@@ -17528,7 +17534,7 @@ function tcqOpenMarkPaid(teamId) {
   back.innerHTML = ''
     + '<div style="background:#fff;border-radius:14px;padding:20px;max-width:380px;width:100%;box-shadow:0 10px 30px rgba(0,0,0,0.25)">'
     +   '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'
-    +     '<div style="font-weight:800;font-size:1.05rem">💰 Mark Team #' + esc(team.team_index || team.id) + ' paid</div>'
+    +     '<div style="font-weight:800;font-size:1.05rem">💰 Mark ' + esc((_tcqPlayersByTeam.get(team.id) || []).find(p => p.is_captain)?.name || 'team') + ' paid</div>'
     +     '<button type="button" id="tcqPaidClose" style="margin-left:auto;background:none;border:0;font-size:1.4rem;line-height:1;cursor:pointer;color:var(--muted)">×</button>'
     +   '</div>'
     +   '<div class="hint" style="font-size:0.84rem;margin-bottom:10px">How did they pay?</div>'
@@ -17571,7 +17577,7 @@ function tcqOpenMarkPaid(teamId) {
 async function tcqMarkUnpaid(teamId) {
   const team = _tcqTeams.find(t => t.id === teamId);
   if (!team) return;
-  if (!confirm('Revert paid status for Team #' + (team.team_index || teamId) + '?')) return;
+  if (!confirm('Revert paid status for ' + ((_tcqPlayersByTeam.get(teamId) || []).find(p => p.is_captain)?.name || 'this team') + '?')) return;
   try {
     await tcqPatch('teams?id=eq.' + teamId, { paid: false, paid_at: null });
     await tcqRender();
@@ -17998,7 +18004,7 @@ function tcqOpenEmailModal(ctx) {
   back.innerHTML = ''
     + '<div style="background:#fff;border-radius:14px;padding:20px;max-width:760px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 10px 30px rgba(0,0,0,0.25)">'
     +   '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'
-    +     '<div style="font-weight:800;font-size:1.05rem">📧 Email roster — Team #' + esc(ctx.team && ctx.team.team_index || ctx.teamId) + sentBadge + '</div>'
+    +     '<div style="font-weight:800;font-size:1.05rem">📧 Email roster — ' + esc(ctx.captain ? ctx.captain.name : 'team') + sentBadge + '</div>'
     +     '<button type="button" id="tcqEmailClose" style="margin-left:auto;background:none;border:0;font-size:1.4rem;line-height:1;cursor:pointer;color:var(--muted)">×</button>'
     +   '</div>'
     +   '<div class="hint" style="font-size:0.8rem;margin-bottom:8px">From: <code>' + esc(TCQ_BULK_FROM) + '</code> · BCC: <code>' + esc(TCQ_BULK_BCC) + '</code></div>'
@@ -18208,7 +18214,7 @@ async function tcqBulkEmailOpen() {
         ? ' <span class="hint" style="color:#c0392b">⚠ no email: ' + esc(p.missing.join(', ')) + '</span>'
         : '';
       return '<div style="padding:6px 0;border-bottom:1px dashed #e0e4e9;font-size:0.86rem">'
-        +   '<div><strong>Team #' + esc(p.team_index) + '</strong> · ' + esc(p.captain) + stamp
+        +   '<div><strong>' + esc(p.captain) + '</strong>' + stamp
         +     ' &nbsp; ' + status + missingHtml + '</div>'
         + '</div>';
     }).join('');
@@ -18246,7 +18252,7 @@ async function tcqBulkEmailSend(sendable) {
   const statusMap = new Map();
   list.innerHTML = sendable.map(p => {
     return '<div data-tcqb-row="' + p.team_id + '" style="padding:6px 0;border-bottom:1px dashed #e0e4e9;font-size:0.86rem">'
-      + '<strong>Team #' + esc(p.team_index) + '</strong> · ' + esc(p.captain) + ' &nbsp; '
+      + '<strong>' + esc(p.captain) + '</strong> &nbsp; '
       + '<span data-tcqb-status="' + p.team_id + '" class="hint">queued…</span>'
       + '</div>';
   }).join('');
@@ -18379,7 +18385,7 @@ async function tcqTestEmailOpen() {
       const vars = tcqBuildEmailVars(sourceTeam, players, captain);
       subject = '[TEST] ' + tcqSubstitute(tpl.subject, vars);
       body    = tcqSubstitute(tpl.body, vars);
-      sourceLabel = 'Team #' + sourceTeam.team_index;
+      sourceLabel = captain ? captain.name : 'Team';
     } else {
       const vars = {
         team_index: 99,
@@ -18674,8 +18680,8 @@ function tcqCopyForBreakOut() {
     if (!num) continue;
     const players = (_tcqPlayersByTeam.get(t.id) || []);
     const captain = players.find(p => p.is_captain);
-    const name = captain ? captain.name : ('Team #' + t.team_index);
-    if (!captain) noCaptain.push('Team #' + t.team_index);
+    const name = captain ? captain.name : '(no captain)';
+    if (!captain) noCaptain.push('one team has no captain');
     lines.push(num + '\t' + name);
   }
   const text = lines.join('\n');
