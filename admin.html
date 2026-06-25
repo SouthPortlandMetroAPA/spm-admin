@@ -932,6 +932,26 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
   cursor: pointer; margin-left: 6px; vertical-align: middle;
 }
 .sp-ovr-btn:hover { background: #f1f5f9; color: #0f172a; }
+.hp-drop {
+  border: 2px dashed #cbd5e1; border-radius: 8px; padding: 20px;
+  text-align: center; color: #64748b; font-size: 0.92rem;
+  background: #f8fafc; transition: all 0.15s ease;
+}
+.hp-drop.dragover { border-color: #0369a1; background: #e0f2fe; color: #0369a1; }
+.hp-drop.has-file { border-style: solid; border-color: #10b981; background: #ecfdf5; color: #047857; }
+.hp-venues-row {
+  display: grid; grid-template-columns: 1fr 80px auto auto auto;
+  gap: 10px; align-items: center; padding: 6px 8px;
+  border-bottom: 1px solid #f3f4f6;
+}
+.hp-venues-row:hover { background: #f9fafb; }
+.hp-cap-bar {
+  display: inline-block; background: #e5e7eb; border-radius: 4px;
+  height: 14px; overflow: hidden; vertical-align: middle;
+  min-width: 80px; position: relative;
+}
+.hp-cap-fill { background: #10b981; height: 100%; transition: width 0.2s; }
+.hp-cap-fill.over { background: #ef4444; }
 </style>
 </head>
 <body>
@@ -982,6 +1002,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="outreach">Outreach</button>
       <button class="tab" data-tab="switchboard">Switchboard</button>
       <button class="tab" data-tab="redtape">RedTape</button>
+      <button class="tab" data-tab="hostplan">Host Plan</button>
       <button class="tab" data-tab="rolodex">Rolodex</button>
       <button class="tab" data-tab="tcq">Captain's Qualifier</button>
       <button class="tab" data-tab="playoffs">Playoffs</button>
@@ -2506,6 +2527,111 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
     </div>
     <!-- ════════════════ /Certs ════════════════ -->
 
+    <!-- ══════════════════════════════════════════════════════════════
+         TAB: HOST PLAN — Place teams into host venues for the next
+         session. Built around 9 activities (see hp* JS below). v0.1
+         covers Activities 1+2 (venue setup, PDF upload); 3-8 land in
+         v0.2 (matching, coming-back, placement, capacity overview).
+         Schema lives in slate.host_venues + slate.team_screen_uploads
+         + slate.team_venue_placements. SPM-only (op1).
+         ══════════════════════════════════════════════════════════════ -->
+    <div id="tab-hostplan" class="tab-panel">
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
+          <h2 style="margin:0">Host Plan</h2>
+          <span class="hint" id="hpStatus"></span>
+        </div>
+        <p class="hint" style="margin-top:0;margin-bottom:14px">
+          Plan team placements into host venues for the next session, using
+          Spring + Summer Team Screen PDFs as priority history. v0.1 covers
+          venue setup and PDF upload; matching + placement land in v0.2.
+        </p>
+
+        <!-- target session + control bar -->
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:14px;padding:10px;border:1px solid var(--border);border-radius:8px;background:#fafbfc">
+          <label style="font-size:0.9rem">
+            Planning for session:
+            <select id="hpTargetSession" style="margin-left:6px;padding:6px;border:1px solid var(--border);border-radius:6px"></select>
+          </label>
+          <button class="btn btn-outline btn-sm" onclick="hpRefresh()">Refresh</button>
+        </div>
+
+        <!-- ── Activity 1: Venue setup ──────────────────────────── -->
+        <details open style="margin-bottom:14px;border:1px solid var(--border);border-radius:8px;padding:12px">
+          <summary style="cursor:pointer;font-weight:700;font-size:1.05rem">
+            1. Host venues &amp; capacity
+            <span class="hint" id="hpVenueSummary" style="font-weight:400;margin-left:8px"></span>
+          </summary>
+          <div style="margin-top:12px">
+            <p class="hint" style="margin-top:0">
+              Each row = one host venue. Capacity = 2 × # tables (each DJ team
+              shows as two rows in TMS). Mark "unavailable in Spring" if the
+              venue wasn't taking teams in Spring — this enables 2nd-priority
+              for Summer teams who started playing there.
+            </p>
+            <div id="hpVenuesTable" style="margin-top:8px"></div>
+            <div style="display:flex;gap:8px;margin-top:10px">
+              <input type="text" id="hpNewVenueName"
+                     placeholder="Add venue name…"
+                     style="flex:1;padding:8px;border:1px solid var(--border);border-radius:6px">
+              <input type="number" id="hpNewVenueTables" min="0" value="0"
+                     style="width:80px;padding:8px;border:1px solid var(--border);border-radius:6px"
+                     title="# tables">
+              <button class="btn btn-primary btn-sm" onclick="hpAddVenue()">Add</button>
+            </div>
+          </div>
+        </details>
+
+        <!-- ── Activity 2: Upload PDFs ──────────────────────────── -->
+        <details open style="margin-bottom:14px;border:1px solid var(--border);border-radius:8px;padding:12px">
+          <summary style="cursor:pointer;font-weight:700;font-size:1.05rem">
+            2. Upload Spring + Summer Team Screen PDFs
+            <span class="hint" id="hpUploadsSummary" style="font-weight:400;margin-left:8px"></span>
+          </summary>
+          <div style="margin-top:12px">
+            <p class="hint" style="margin-top:0">
+              Drop the Team Screen PDF for each session below. The parser
+              extracts team_number / team_name / venue per page. SPM-only
+              filtering happens at display time. Re-upload to replace.
+            </p>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+              <div>
+                <label style="font-weight:600">Spring 2026</label>
+                <div id="hpSpringDrop" class="hp-drop">Drop Spring PDF here…</div>
+                <div id="hpSpringMeta" class="hint" style="margin-top:6px"></div>
+              </div>
+              <div>
+                <label style="font-weight:600">Summer 2026</label>
+                <div id="hpSummerDrop" class="hp-drop">Drop Summer PDF here…</div>
+                <div id="hpSummerMeta" class="hint" style="margin-top:6px"></div>
+              </div>
+            </div>
+            <div id="hpUploadStatus" class="status-line"></div>
+          </div>
+        </details>
+
+        <!-- ── Activities 3-8 stub (v0.2) ──────────────────────── -->
+        <details style="margin-bottom:14px;border:1px solid var(--border);border-radius:8px;padding:12px;opacity:0.6">
+          <summary style="cursor:pointer;font-weight:700;font-size:1.05rem">
+            3-8. Match · coming back · confirm · new teams · place · overview
+            <span class="hint" style="font-weight:400;margin-left:8px">(v0.2 — coming next)</span>
+          </summary>
+          <div style="margin-top:12px">
+            <p class="hint">
+              Built once v0.1 (venues + uploads) is exercised:
+              <br>3. Match Spring → Summer (manual, click-to-link)
+              <br>4. Coming back for Fall toggle per team
+              <br>5. Confirm/correct each team's historical venue
+              <br>6. Add new Fall-only teams
+              <br>7. Place teams into Fall venues (DJ-paired auto-sync)
+              <br>8. Capacity overview + conflict flags
+            </p>
+          </div>
+        </details>
+      </div>
+    </div>
+    <!-- ════════════════ /Host Plan ════════════════ -->
+
   </div>
 
   <div class="footer" id="appFooter">Slate v0.1 · Phase 1 · Supabase-backed</div>
@@ -2528,7 +2654,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.147';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.148';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -4157,7 +4283,8 @@ const TAB_LABEL = {
   switchboard:   'Switchboard',
   redtape:       'RedTape',
   rolodex:       'Rolodex',
-  playoffs:      'Playoffs'
+  playoffs:      'Playoffs',
+  hostplan:      'Host Plan'
 };
 
 function switchTab(name) {
@@ -4179,6 +4306,7 @@ function switchTab(name) {
   if (name === 'tcq')         tcqInit();
   if (name === 'playoffs')    renderPlayoffsTab();
   if (name === 'certs')       certsAdminInit();
+  if (name === 'hostplan')    hpInit();
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -19433,6 +19561,285 @@ async function certsAdminGenerate() {
 window.certsAdminPreview  = certsAdminPreview;
 window.certsAdminGenerate = certsAdminGenerate;
 window.certsAdminInit     = certsAdminInit;
+
+/* ════════════════════════════════════════════════════════════════════
+   HOST PLAN — Activities 1+2 (venue setup + PDF upload)
+   ════════════════════════════════════════════════════════════════════
+   Schema lives in slate.host_venues + slate.team_screen_uploads.
+   See tools/claude/migrations/2026-06-25-host-plan.sql for the table
+   definitions and project_slate.md or this header for the rationale.
+
+   Activities 3-8 are stubbed in the UI; they'll consume the same
+   slate.team_venue_placements table when built. SPM-only filter
+   (operator_id=1) is applied during PDF parse.
+   ════════════════════════════════════════════════════════════════════ */
+
+let _hpVenues = [];                            // slate.host_venues rows
+let _hpUploads = { spring: null, summer: null }; // parsed PDF rows per session
+
+async function hpInit() {
+  await hpPopulateSessions();
+  await hpLoadVenues();
+  await hpLoadUploads();
+  hpRenderVenues();
+  hpRenderUploads();
+  hpWireDropZones();
+}
+
+async function hpPopulateSessions() {
+  const sel = document.getElementById('hpTargetSession');
+  if (!sel) return;
+  /* Pull all sessions; let the user choose the planning target. Future
+     sessions might not exist yet (Fall 26 hasn't been created) so we
+     also offer the most-recent name as a string label. */
+  const sessions = await sb('GET', 'sessions?select=id,name&order=id.asc');
+  sel.innerHTML = sessions.map(s =>
+    '<option value="' + s.id + '">' + esc(s.name) + '</option>').join('');
+}
+
+/* ── Activity 1: host venues ────────────────────────────────────── */
+
+async function hpLoadVenues() {
+  try {
+    _hpVenues = await sb('GET', 'host_venues?select=*&order=name.asc');
+  } catch (e) {
+    _hpVenues = [];
+    document.getElementById('hpStatus').innerHTML =
+      '<span style="color:#b91c1c">Venue load failed: ' + esc(e.message) + '</span>';
+  }
+}
+
+function hpRenderVenues() {
+  const el = document.getElementById('hpVenuesTable');
+  if (!el) return;
+  const summary = document.getElementById('hpVenueSummary');
+  if (summary) {
+    const totalCap = _hpVenues.reduce((s, v) => s + 2 * v.num_tables, 0);
+    summary.textContent = _hpVenues.length + ' venues · '
+      + totalCap + ' total team slots';
+  }
+  if (!_hpVenues.length) {
+    el.innerHTML = '<p class="hint" style="margin:0">No venues yet. Add one below.</p>';
+    return;
+  }
+  const header = '<div class="hp-venues-row" style="font-weight:600;border-bottom:2px solid var(--border)">'
+    + '<div>Venue</div><div>Tables</div><div>Capacity</div>'
+    + '<div title="Unavailable in Spring (enables 2nd-priority for Summer teams)">Spring unavail</div>'
+    + '<div></div></div>';
+  const rows = _hpVenues.map(v => {
+    const cap = 2 * v.num_tables;
+    const unavailChecked = v.unavailable_in_spring ? 'checked' : '';
+    return '<div class="hp-venues-row">'
+      + '<div>' + esc(v.name) + '</div>'
+      + '<div><input type="number" min="0" value="' + v.num_tables + '" '
+        + 'onchange="hpUpdateVenueTables(' + v.id + ', this.value)" '
+        + 'style="width:70px;padding:4px;border:1px solid var(--border);border-radius:4px"></div>'
+      + '<div>' + cap + ' slots</div>'
+      + '<div><input type="checkbox" ' + unavailChecked
+        + ' onchange="hpUpdateVenueUnavail(' + v.id + ', this.checked)"></div>'
+      + '<div><button class="btn-link" onclick="hpDeleteVenue(' + v.id + ')" '
+        + 'style="color:#b91c1c">Remove</button></div>'
+      + '</div>';
+  }).join('');
+  el.innerHTML = header + rows;
+}
+
+async function hpAddVenue() {
+  const nameEl = document.getElementById('hpNewVenueName');
+  const tablesEl = document.getElementById('hpNewVenueTables');
+  const name = (nameEl.value || '').trim();
+  const num = parseInt(tablesEl.value || '0', 10);
+  if (!name) { nameEl.focus(); return; }
+  try {
+    await sb('POST', 'host_venues', { name: name, num_tables: num });
+    nameEl.value = ''; tablesEl.value = '0';
+    await hpLoadVenues();
+    hpRenderVenues();
+  } catch (e) {
+    alert('Add failed: ' + e.message);
+  }
+}
+
+async function hpUpdateVenueTables(id, val) {
+  const n = parseInt(val, 10);
+  if (Number.isNaN(n) || n < 0) return;
+  try {
+    await sb('PATCH', 'host_venues?id=eq.' + id, { num_tables: n });
+    await hpLoadVenues();
+    hpRenderVenues();
+  } catch (e) { alert('Update failed: ' + e.message); }
+}
+
+async function hpUpdateVenueUnavail(id, checked) {
+  try {
+    await sb('PATCH', 'host_venues?id=eq.' + id, { unavailable_in_spring: checked });
+    await hpLoadVenues();
+    hpRenderVenues();
+  } catch (e) { alert('Update failed: ' + e.message); }
+}
+
+async function hpDeleteVenue(id) {
+  const v = _hpVenues.find(x => x.id === id);
+  if (!v) return;
+  if (!confirm('Remove venue "' + v.name + '"?')) return;
+  try {
+    await sb('DELETE', 'host_venues?id=eq.' + id);
+    await hpLoadVenues();
+    hpRenderVenues();
+  } catch (e) { alert('Delete failed: ' + e.message); }
+}
+
+/* ── Activity 2: PDF upload + parse ─────────────────────────────── */
+
+async function hpLoadUploads() {
+  try {
+    /* Latest one per session — there's a UNIQUE(session_id, operator_id)
+       on the table so this gives at most one row per (session, op). We
+       only care about op=1 (SPM) for now. */
+    const rows = await sb('GET',
+      'team_screen_uploads?select=*&order=uploaded_at.desc');
+    /* Pull most-recent Summer 26 (id=1) and Spring 26 (id=2). */
+    _hpUploads.summer = rows.find(r => r.session_id === 1) || null;
+    _hpUploads.spring = rows.find(r => r.session_id === 2) || null;
+  } catch (e) {
+    _hpUploads = { spring: null, summer: null };
+  }
+}
+
+function hpRenderUploads() {
+  const summary = document.getElementById('hpUploadsSummary');
+  const springMeta = document.getElementById('hpSpringMeta');
+  const summerMeta = document.getElementById('hpSummerMeta');
+  const springDrop = document.getElementById('hpSpringDrop');
+  const summerDrop = document.getElementById('hpSummerDrop');
+  const both = !!(_hpUploads.spring && _hpUploads.summer);
+  if (summary) {
+    summary.textContent = both ? '✓ both uploaded' :
+      (_hpUploads.spring ? 'Spring uploaded' :
+       _hpUploads.summer ? 'Summer uploaded' : 'no uploads yet');
+  }
+  function metaFor(rec) {
+    if (!rec) return '';
+    return rec.team_count + ' teams · uploaded '
+      + new Date(rec.uploaded_at).toLocaleString()
+      + (rec.source_filename ? ' from ' + esc(rec.source_filename) : '');
+  }
+  if (springMeta) springMeta.textContent = metaFor(_hpUploads.spring);
+  if (summerMeta) summerMeta.textContent = metaFor(_hpUploads.summer);
+  if (springDrop) springDrop.classList.toggle('has-file', !!_hpUploads.spring);
+  if (summerDrop) summerDrop.classList.toggle('has-file', !!_hpUploads.summer);
+  if (springDrop && _hpUploads.spring) springDrop.textContent = '✓ Spring loaded — drop to replace';
+  if (summerDrop && _hpUploads.summer) summerDrop.textContent = '✓ Summer loaded — drop to replace';
+}
+
+function hpWireDropZones() {
+  const zones = [
+    { el: document.getElementById('hpSpringDrop'), sessionId: 2, label: 'Spring' },
+    { el: document.getElementById('hpSummerDrop'), sessionId: 1, label: 'Summer' }
+  ];
+  for (const z of zones) {
+    if (!z.el || z.el._hpBound) continue;
+    z.el._hpBound = true;
+    z.el.addEventListener('dragover', e => { e.preventDefault(); z.el.classList.add('dragover'); });
+    z.el.addEventListener('dragleave', () => z.el.classList.remove('dragover'));
+    z.el.addEventListener('drop', async e => {
+      e.preventDefault();
+      z.el.classList.remove('dragover');
+      const file = e.dataTransfer.files && e.dataTransfer.files[0];
+      if (!file) return;
+      await hpHandlePdf(file, z.sessionId, z.label);
+    });
+    z.el.addEventListener('click', () => {
+      const inp = document.createElement('input');
+      inp.type = 'file'; inp.accept = 'application/pdf';
+      inp.onchange = async () => {
+        if (inp.files[0]) await hpHandlePdf(inp.files[0], z.sessionId, z.label);
+      };
+      inp.click();
+    });
+  }
+}
+
+async function hpHandlePdf(file, sessionId, label) {
+  const status = document.getElementById('hpUploadStatus');
+  status.textContent = 'Parsing ' + label + ' PDF (' + file.name + ')…';
+  try {
+    /* Reuse spPdfPageLines — same bucket-by-y line builder we use for
+       the SP labels parser. Each page becomes an array of strings. */
+    const pages = await spPdfPageLines(file);
+    const teams = hpParseTeamScreen(pages);
+    const spmTeams = teams.filter(t => hpIsSpmTeam(t.team_number));
+    /* Upsert into slate.team_screen_uploads */
+    await sb('POST',
+      'team_screen_uploads?on_conflict=session_id,operator_id',
+      { session_id: sessionId, operator_id: 1,
+        source_filename: file.name,
+        team_count: spmTeams.length,
+        parsed_json: spmTeams },
+      { Prefer: 'resolution=merge-duplicates,return=representation' });
+    status.innerHTML = '<span style="color:#047857">✓ ' + label + ': '
+      + spmTeams.length + ' SPM teams parsed (of ' + teams.length + ' total)</span>';
+    await hpLoadUploads();
+    hpRenderUploads();
+  } catch (e) {
+    status.innerHTML = '<span style="color:#b91c1c">Parse/upload failed: ' + esc(e.message) + '</span>';
+  }
+}
+
+/* The TMS Team Screen has one team per page. The header pattern is
+   "NNNNN  Team Name" at the top, and the next non-empty line is the
+   venue. Player rows match "NNNNN  Last, First" but we don't need
+   them for v0.1 (we'd use them for matching in v0.2). */
+function hpParseTeamScreen(pages) {
+  const teams = [];
+  for (const lines of pages) {
+    let team_number = null, team_name = null, venue = null;
+    for (let i = 0; i < Math.min(lines.length, 8); i++) {
+      const m = lines[i].match(/^(\d{4,5})\s+(.+?)$/);
+      if (m && !team_number) {
+        team_number = m[1];
+        team_name   = m[2].trim();
+        for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
+          const cand = lines[j];
+          if (/^Summer|^Fall|^Spring/.test(cand)) break;
+          venue = cand; break;
+        }
+        break;
+      }
+    }
+    if (team_number) teams.push({ team_number, team_name, venue });
+  }
+  return teams;
+}
+
+/* SPM (operator_id=1) divisions follow specific 3-digit prefixes
+   (010/012/013/015/017/018/027/028/040-043/048-051/080/081/084/085
+   /090-093/175/883/887/993/996). Anything else is CRA or another op.
+   Conservative SPM detection: read the leading 3 digits and pad. */
+const HP_SPM_DIV_PREFIXES = new Set([
+  '010','012','013','015','017','018','027','028',
+  '040','041','042','043','048','049','050','051',
+  '080','081','084','085','090','091','092','093',
+  '175','883','887','993','996'
+]);
+function hpIsSpmTeam(teamNumber) {
+  const div = String(teamNumber || '').slice(0, 3);
+  return HP_SPM_DIV_PREFIXES.has(div);
+}
+
+async function hpRefresh() {
+  await hpLoadVenues();
+  await hpLoadUploads();
+  hpRenderVenues();
+  hpRenderUploads();
+}
+
+window.hpInit               = hpInit;
+window.hpAddVenue           = hpAddVenue;
+window.hpUpdateVenueTables  = hpUpdateVenueTables;
+window.hpUpdateVenueUnavail = hpUpdateVenueUnavail;
+window.hpDeleteVenue        = hpDeleteVenue;
+window.hpRefresh            = hpRefresh;
 
 // (Session loading is triggered by switchTab('certs') → certsAdminInit(),
 //  matching how every other Slate tab lazy-loads its data. The earlier
