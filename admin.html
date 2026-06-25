@@ -2368,11 +2368,10 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <div class="form-row" id="tcqTeamPasteRow">
             <div>
               <label>Paste roster (optional)</label>
-              <textarea id="tcqTeamPaste" class="form-input" rows="7" style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:0.85rem" placeholder="1 - Ruby Vandel - 97224863 - SL3&#10;2 - Jeffrey Kempter - 97291571 - SL6&#10;3 - Jacob Stern - 97219982 - SL7&#10;&#10;Optional:&#10;4 - Patrick Barney - 97218828 - SL4&#10;5 - [Not asked] - [Not asked] - SL[Not asked]"></textarea>
+              <textarea id="tcqTeamPaste" class="form-input" rows="7" style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:0.85rem" placeholder="Either paste APA #s (5 or 8 digit), one per line:&#10;97224863&#10;97291571&#10;97219982&#10;&#10;…or the structured format:&#10;1 - Ruby Vandel - 97224863 - SL3&#10;2 - Jeffrey Kempter - 97291571 - SL6"></textarea>
               <div class="hint" id="tcqTeamPasteHint" style="margin-top:4px;font-size:0.78rem">
-                Format: <code>&lt;slot&gt; - &lt;name&gt; - &lt;member#&gt; - SL&lt;n&gt;</code>.
-                Lines with <code>[Not asked]</code> and the <code>Optional:</code> header are skipped.
-                Slot 1 is captain. SL is informational only (live SL is derived).
+                <strong>Quick:</strong> just paste APA #s (5- or 8-digit), one per line — names auto-resolve from slate.players, slot 1 = captain.<br>
+                <strong>Structured:</strong> <code>&lt;slot&gt; - &lt;name&gt; - &lt;member#&gt; - SL&lt;n&gt;</code>. Lines with <code>[Not asked]</code> and the <code>Optional:</code> header are skipped.
               </div>
             </div>
           </div>
@@ -2692,7 +2691,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.154';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.155';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -17400,19 +17399,51 @@ function tcqOpenTeamModal(teamId) {
      "[Not asked]" placeholders on any field.
    Returns { players, errors } where players is an array of
    { position, name, member_number } (no sl — derived live). */
+/* Normalize an APA number into the 8-digit slate.players format.
+   5-digit gets the '972' SPM region prefix; 8-digit passes through. */
+function tcqNormalizeApa(s) {
+  const d = String(s || '').replace(/[^0-9]/g, '');
+  if (d.length === 5) return '972' + d;
+  return d;
+}
+
 function tcqParseRosterPaste(text) {
   const players = [];
   const errors = [];
   const seenPos = new Set();
   const lines = String(text || '').split(/\r?\n/);
-  /* Match: <pos> - <name> - <member#> - SL<sl>
-     Name and member can contain non-dash text; SL is anything after "SL". */
-  const re = /^\s*(\d+)\s*[-–]\s*(.+?)\s*[-–]\s*(\S.*?)\s*[-–]\s*SL\s*(\S+)\s*$/i;
+  /* Structured format: <pos> - <name> - <member#> - SL<sl> */
+  const structuredRe = /^\s*(\d+)\s*[-–]\s*(.+?)\s*[-–]\s*(\S.*?)\s*[-–]\s*SL\s*(\S+)\s*$/i;
+  /* Quick format: just an APA # on its own line (5 or 8 digit). */
+  const apaOnlyRe = /^\s*(\d{5}|\d{8})\s*$/;
+  /* Auto-position counter for APA-only lines — picks the next open slot
+     1..5 each time, respecting any positions already claimed by
+     structured-format lines on the same paste. */
+  const nextOpenPos = () => {
+    for (let p = 1; p <= 5; p++) if (!seenPos.has(p)) return p;
+    return null;
+  };
   for (const raw of lines) {
     const line = raw.trim();
     if (!line) continue;
     if (/^optional\s*:?$/i.test(line)) continue;
-    const m = line.match(re);
+
+    /* APA-only line — quick format. Name resolves from slate.players at
+       save time. */
+    const apaMatch = line.match(apaOnlyRe);
+    if (apaMatch) {
+      const pos = nextOpenPos();
+      if (pos == null) {
+        errors.push('Skipped (no open slot for ' + line + ' — already 5 players)');
+        continue;
+      }
+      seenPos.add(pos);
+      players.push({ position: pos, name: '', member_number: tcqNormalizeApa(apaMatch[1]) });
+      continue;
+    }
+
+    /* Structured line */
+    const m = line.match(structuredRe);
     if (!m) {
       errors.push('Skipped (unrecognized format): ' + line);
       continue;
@@ -17421,7 +17452,6 @@ function tcqParseRosterPaste(text) {
     const name = m[2].trim();
     const mem  = m[3].trim();
     const sl   = m[4].trim();
-    /* A slot is "not asked yet" if ANY required field is the placeholder. */
     const naRe = /\[?not\s*asked\]?/i;
     if (naRe.test(name) || naRe.test(mem) || naRe.test(sl)) continue;
     if (!Number.isFinite(pos) || pos < 1 || pos > 5) {
@@ -17433,10 +17463,36 @@ function tcqParseRosterPaste(text) {
       continue;
     }
     seenPos.add(pos);
-    players.push({ position: pos, name, member_number: mem });
+    players.push({ position: pos, name, member_number: tcqNormalizeApa(mem) });
   }
   players.sort((a, b) => a.position - b.position);
   return { players, errors };
+}
+
+/* Batch-fetch names from slate.players for any parsed rows that came in
+   as APA-only (empty name). Mutates the input array. Returns an array
+   of APA numbers that did NOT resolve — caller can surface the error. */
+async function tcqResolveMissingNames(players) {
+  const need = players.filter(p => !p.name && p.member_number);
+  if (!need.length) return [];
+  const nums = [...new Set(need.map(p => p.member_number))];
+  /* slate.players is in the default schema for sb(), so no Accept-Profile
+     header swap is needed here. */
+  const rows = await sb('GET',
+    'players?member_number=in.(' + nums.join(',') + ')&select=member_number,first_name,last_name');
+  const nameByMember = {};
+  for (const r of rows) {
+    const full = [r.first_name, r.last_name].filter(Boolean).join(' ').trim();
+    if (full) nameByMember[r.member_number] = full;
+  }
+  const unresolved = [];
+  for (const p of players) {
+    if (!p.name && p.member_number) {
+      if (nameByMember[p.member_number]) p.name = nameByMember[p.member_number];
+      else unresolved.push(p.member_number);
+    }
+  }
+  return unresolved;
 }
 function tcqCloseTeamModal() {
   document.getElementById('tcqTeamModal').style.display = 'none';
@@ -17456,6 +17512,18 @@ async function tcqSaveTeam() {
       paste = tcqParseRosterPaste(pasteText);
       if (paste.errors.length) {
         if (!confirm(paste.errors.length + ' line(s) were skipped:\n\n' + paste.errors.slice(0, 6).join('\n') + '\n\nContinue with ' + paste.players.length + ' valid player(s)?')) return;
+      }
+      /* If quick-format APA-only lines were used, resolve their names
+         from slate.players in one batched lookup. */
+      if (paste.players.some(p => !p.name && p.member_number)) {
+        try {
+          const unresolved = await tcqResolveMissingNames(paste.players);
+          if (unresolved.length) {
+            if (!confirm(unresolved.length + ' APA #(s) had no match in slate.players:\n\n' + unresolved.join(', ') + '\n\nContinue without a name on those rows?')) return;
+          }
+        } catch (e) {
+          if (!confirm('Name lookup failed: ' + e.message + '\n\nContinue saving without auto-resolved names?')) return;
+        }
       }
     }
   }
