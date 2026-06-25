@@ -926,6 +926,12 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 }
 .sp-tag-reg  { background: #f3f4f6; color: #1f2937; border-color: #e5e7eb; }
 .sp-tag-slam { background: #fef9c3; color: #713f12; border-color: #fde68a; font-weight: 700; }
+.sp-ovr-btn {
+  background: transparent; border: 1px solid #cbd5e1; color: #475569;
+  font-size: 0.72rem; padding: 1px 7px; border-radius: 999px;
+  cursor: pointer; margin-left: 6px; vertical-align: middle;
+}
+.sp-ovr-btn:hover { background: #f1f5f9; color: #0f172a; }
 </style>
 </head>
 <body>
@@ -2400,6 +2406,66 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
     <!-- ════════════════ /Playoffs ════════════════ -->
 
     <!-- ══════════════════════════════════════════════════════════════
+         MODAL: SP label override editor — opened from the Patches
+         envelope blocks via the "+ c/o" / "✏ override" pill.
+         ══════════════════════════════════════════════════════════════ -->
+    <div class="modal-backdrop" id="spOvrModal" style="display:none">
+      <div class="modal" style="max-width:520px">
+        <h3 style="margin:0 0 6px">Mailing override</h3>
+        <div class="hint" style="margin-bottom:12px">
+          Applies across every session for this contact name. Leave address
+          fields blank to keep the original label address and only add the c/o line.
+        </div>
+        <input type="hidden" id="spOvrId">
+        <input type="hidden" id="spOvrOpId">
+        <div style="display:grid;grid-template-columns:1fr;gap:8px">
+          <label>Contact name (read-only)<br>
+            <input type="text" id="spOvrContact" readonly
+                   style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:#f9fafb">
+          </label>
+          <label>c/o name <span style="color:#b91c1c">*</span><br>
+            <input type="text" id="spOvrCoName" placeholder="e.g. Nikki Jones"
+                   style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px">
+          </label>
+          <label>Address line 1 (optional override)<br>
+            <input type="text" id="spOvrAddr1"
+                   style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px">
+          </label>
+          <label>Address line 2 (optional)<br>
+            <input type="text" id="spOvrAddr2"
+                   style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px">
+          </label>
+          <div style="display:grid;grid-template-columns:2fr 60px 80px;gap:8px">
+            <label>City<br>
+              <input type="text" id="spOvrCity"
+                     style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px">
+            </label>
+            <label>State<br>
+              <input type="text" id="spOvrState" maxlength="2"
+                     style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;text-transform:uppercase">
+            </label>
+            <label>ZIP<br>
+              <input type="text" id="spOvrZip"
+                     style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px">
+            </label>
+          </div>
+          <label>Notes<br>
+            <textarea id="spOvrNotes" rows="2"
+                      style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;resize:vertical"></textarea>
+          </label>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-top:14px;gap:8px">
+          <button class="btn btn-outline" id="spOvrClearBtn" style="color:#b91c1c">Remove override</button>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-outline" onclick="spCloseOverrideModal()">Cancel</button>
+            <button class="btn btn-primary" onclick="spSaveOverride()">Save</button>
+          </div>
+        </div>
+        <div id="spOvrStatus" class="status-line"></div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════════
          TAB: CERTS — Trigger PatchCheck cert generation for a session
          ══════════════════════════════════════════════════════════════ -->
     <div id="tab-certs" class="tab-panel">
@@ -2462,7 +2528,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.146';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.147';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -8259,8 +8325,17 @@ function spRenderPatches() {
     const envCount = Math.max(1, Math.ceil(weightSum / ENVELOPE_CAPACITY));
     const sample = patches[0];
     const teams = [...new Set(patches.map(p => p.team_number))].sort();
+    /* If sp_label_overrides has a row matching this contact, sp_patches_v
+       surfaces co_name + has_override + (coalesced) address. Render a
+       small c/o line and a clickable override pill. */
+    const ovrBtn = sample.contact_name
+      ? ' <button class="btn-link sp-ovr-btn" data-contact="' + esc(sample.contact_name)
+        + '" data-opid="' + esc(sample.operator_id) + '">'
+        + (sample.has_override ? '✏ override' : '+ c/o') + '</button>'
+      : '';
     const head = sample.contact_name
-      ? '<strong>' + esc(sample.contact_name) + '</strong>'
+      ? '<strong>' + esc(sample.contact_name) + '</strong>' + ovrBtn
+        + (sample.co_name ? '<div style="color:#0369a1; font-size:0.9rem; margin-top:2px;">c/o ' + esc(sample.co_name) + '</div>' : '')
       : '<strong style="color:#b91c1c;">Team ' + esc(sample.team_number) + ' — no mailing label</strong>';
     const addr = sample.contact_name
       ? esc(sample.address_line1)
@@ -8301,6 +8376,126 @@ function spRenderPatches() {
   }
   root.innerHTML = blocks.join('');
 }
+
+/* ── Mailing-label overrides (slate.sp_label_overrides) ──────────────────
+   "Some patches go to Onessia but I need them addressed c/o someone
+   else." The override table matches case-insensitively on contact_name
+   (the captain name from the Labels PDF) and optionally narrows by
+   operator. sp_patches_v COALESCEs the address fields and exposes
+   co_name + has_override so any consumer picks it up automatically.
+
+   Click flow:
+     1. User clicks "+ c/o" or "✏ override" on an envelope block
+     2. spOpenOverrideModal loads the existing row (if any) and shows form
+     3. User edits or removes; spSaveOverride / spClearOverride writes
+     4. spLoadPatches re-fires so the view's COALESCE picks up changes */
+document.addEventListener('click', function(e) {
+  const btn = e.target.closest('.sp-ovr-btn');
+  if (!btn) return;
+  e.preventDefault();
+  spOpenOverrideModal(btn.dataset.contact, btn.dataset.opid);
+});
+
+async function spOpenOverrideModal(contactName, opId) {
+  const m = document.getElementById('spOvrModal');
+  if (!m) return;
+  document.getElementById('spOvrContact').value  = contactName || '';
+  document.getElementById('spOvrOpId').value     = opId || '';
+  document.getElementById('spOvrCoName').value   = '';
+  document.getElementById('spOvrAddr1').value    = '';
+  document.getElementById('spOvrAddr2').value    = '';
+  document.getElementById('spOvrCity').value     = '';
+  document.getElementById('spOvrState').value    = '';
+  document.getElementById('spOvrZip').value      = '';
+  document.getElementById('spOvrNotes').value    = '';
+  document.getElementById('spOvrId').value       = '';
+  document.getElementById('spOvrStatus').textContent = '';
+  document.getElementById('spOvrClearBtn').style.display = 'none';
+
+  try {
+    const matchName = encodeURIComponent(contactName.trim().toLowerCase());
+    const rows = await sb('GET',
+      'sp_label_overrides?select=*&match_name=eq.' + matchName
+      + '&or=(operator_id.is.null,operator_id.eq.' + opId + ')');
+    if (rows && rows.length) {
+      const r = rows[0];
+      document.getElementById('spOvrId').value     = r.id;
+      document.getElementById('spOvrCoName').value = r.co_name || '';
+      document.getElementById('spOvrAddr1').value  = r.address_line1 || '';
+      document.getElementById('spOvrAddr2').value  = r.address_line2 || '';
+      document.getElementById('spOvrCity').value   = r.city || '';
+      document.getElementById('spOvrState').value  = r.state || '';
+      document.getElementById('spOvrZip').value    = r.zip || '';
+      document.getElementById('spOvrNotes').value  = r.notes || '';
+      document.getElementById('spOvrClearBtn').style.display = '';
+    }
+  } catch (err) {
+    document.getElementById('spOvrStatus').innerHTML =
+      '<span style="color:#b91c1c">Lookup failed: ' + esc(err.message) + '</span>';
+  }
+  m.style.display = 'flex';
+}
+
+function spCloseOverrideModal() {
+  const m = document.getElementById('spOvrModal');
+  if (m) m.style.display = 'none';
+}
+
+async function spSaveOverride() {
+  const status = document.getElementById('spOvrStatus');
+  status.innerHTML = '';
+  const contact = document.getElementById('spOvrContact').value.trim();
+  const coName  = document.getElementById('spOvrCoName').value.trim();
+  if (!contact || !coName) {
+    status.innerHTML = '<span style="color:#b91c1c">Contact name and c/o name are required.</span>';
+    return;
+  }
+  const opIdRaw = document.getElementById('spOvrOpId').value;
+  const opId = opIdRaw ? parseInt(opIdRaw, 10) : null;
+  const id   = document.getElementById('spOvrId').value;
+  const payload = {
+    match_name:    contact.toLowerCase(),
+    operator_id:   opId,
+    co_name:       coName,
+    address_line1: document.getElementById('spOvrAddr1').value.trim() || null,
+    address_line2: document.getElementById('spOvrAddr2').value.trim() || null,
+    city:          document.getElementById('spOvrCity').value.trim()  || null,
+    state:         (document.getElementById('spOvrState').value.trim() || '').toUpperCase() || null,
+    zip:           document.getElementById('spOvrZip').value.trim()   || null,
+    notes:         document.getElementById('spOvrNotes').value.trim() || null
+  };
+  try {
+    if (id) {
+      await sb('PATCH', 'sp_label_overrides?id=eq.' + encodeURIComponent(id), payload);
+    } else {
+      /* Upsert on (match_name, operator_id) so re-opening + saving works. */
+      await sb('POST', 'sp_label_overrides?on_conflict=match_name,operator_id',
+        payload, { Prefer: 'resolution=merge-duplicates,return=representation' });
+    }
+    spCloseOverrideModal();
+    if (typeof spLoadPatches === 'function') await spLoadPatches();
+  } catch (err) {
+    status.innerHTML = '<span style="color:#b91c1c">Save failed: ' + esc(err.message) + '</span>';
+  }
+}
+
+async function spClearOverride() {
+  if (!confirm('Remove this mailing override?')) return;
+  const id = document.getElementById('spOvrId').value;
+  if (!id) { spCloseOverrideModal(); return; }
+  try {
+    await sb('DELETE', 'sp_label_overrides?id=eq.' + encodeURIComponent(id));
+    spCloseOverrideModal();
+    if (typeof spLoadPatches === 'function') await spLoadPatches();
+  } catch (err) {
+    document.getElementById('spOvrStatus').innerHTML =
+      '<span style="color:#b91c1c">Remove failed: ' + esc(err.message) + '</span>';
+  }
+}
+document.addEventListener('DOMContentLoaded', function() {
+  const btn = document.getElementById('spOvrClearBtn');
+  if (btn) btn.addEventListener('click', spClearOverride);
+});
 
 function spRenderPatchesSummary(list, lastBatch) {
   const root = document.getElementById('spPatchesSummary');
