@@ -2692,7 +2692,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.150';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.151';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -9001,6 +9001,10 @@ function spBatchEnvelopes(patches) {
     for (const chunk of chunks) {
       envelopes.push({
         contact_name: sample.contact_name,
+        /* sp_patches_v COALESCEs override fields and exposes co_name +
+           has_override; propagate co_name so the envelope renderer can
+           draw the "c/o ..." line between recipient and street. */
+        co_name: sample.co_name || null,
         address_line1: sample.address_line1,
         address_line2: sample.address_line2,
         city: sample.city, state: sample.state, zip: sample.zip,
@@ -9306,6 +9310,7 @@ function spBuildEnvelopesHTML(envs, op) {
     + '<img class="env-cat" src="' + SP_ENV_CAT_LOGO + '" alt="">'
     + '<div class="recipient">'
     +   '<div>' + esc(e.contact_name) + '</div>'
+    +   (e.co_name ? '<div>c/o ' + esc(e.co_name) + '</div>' : '')
     +   '<div>' + esc(e.address_line1) + '</div>'
     +   (e.address_line2 ? '<div>' + esc(e.address_line2) + '</div>' : '')
     +   '<div>' + esc(e.city) + ', ' + esc(e.state) + ' ' + esc(e.zip) + '</div>'
