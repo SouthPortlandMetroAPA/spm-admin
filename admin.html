@@ -888,6 +888,20 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
   padding: 22px; max-width: 460px; width: 100%;
   box-shadow: 0 20px 60px rgba(0,0,0,0.3);
 }
+/* `.modal` is the same shape as `.modal-card` — the older TCQ modals
+   used this class name. Defining it explicitly so every backdrop's
+   inner card renders correctly without each call site needing to
+   re-do the inline styling. Per 2026 modal-UX practices, also keep
+   overflow auto-scrolling so tall content (the TCQ Add-Game form
+   or the override list) never bleeds outside the viewport. */
+.modal {
+  background: #fff; border-radius: 14px;
+  padding: 22px; max-width: 460px; width: 100%;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
 
 .sp-report-row {
   display: grid; grid-template-columns: auto 1fr auto; gap: 10px;
@@ -2678,7 +2692,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.149';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.150';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -4232,6 +4246,34 @@ function pollForDeploy(targetVersion) {
    INIT
    ══════════════════════════════════════════════════════════════════════ */
 document.addEventListener('DOMContentLoaded', init);
+
+/* ── Global modal UX (2026 best practices) ──────────────────────────
+   Esc closes any open `.modal-backdrop`; clicking the dimmed backdrop
+   area (not the inner `.modal` / `.modal-card`) also closes. Avoids
+   per-modal wiring and matches the behaviour users expect from native
+   <dialog>. We close by clearing the inline display style so each
+   modal's own opener can re-show via .style.display = 'flex'. */
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const open = [...document.querySelectorAll('.modal-backdrop')]
+    .filter(el => el.style.display === 'flex' || el.classList.contains('shown'));
+  if (open.length) {
+    /* Close only the top-most (last opened) so layered modals close in order. */
+    const top = open[open.length - 1];
+    top.style.display = 'none';
+    top.classList.remove('shown');
+    e.preventDefault();
+  }
+});
+document.addEventListener('click', (e) => {
+  const bd = e.target.closest('.modal-backdrop');
+  if (!bd) return;
+  /* Only fire when the click is on the backdrop itself, not bubbled
+     from a child element inside the .modal. */
+  if (e.target !== bd) return;
+  bd.style.display = 'none';
+  bd.classList.remove('shown');
+});
 
 /* Hydrate every user-visible string from APP_NAME / APP_VERSION.
  * Runs before any auth check so even the key gate shows the right name. */
