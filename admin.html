@@ -2692,7 +2692,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.152';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.153';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -16566,6 +16566,46 @@ async function rolHandleFile(file) {
         } catch (_) { /* non-fatal */ }
       }
     }
+
+    /* 3.153 — Validate that every captain we just wrote into
+       slate.rolodex_captains actually resolves to a slate.players
+       row. The captain PDF parser is best-effort, so a mis-parsed
+       name (truncation, multi-word last name, suffix loss) silently
+       breaks Rolodex lookups for that captain. Surface unresolvable
+       captains as an error here instead of letting them slip
+       through. RPC defined in tools/claude/migrations/
+       2026-06-25-rolodex-validation.sql. */
+    try {
+      const divNums = splits.map(s => s.division_number);
+      const vR = await fetch(SB_URL + '/rest/v1/rpc/rolodex_unmatched_captains', {
+        method: 'POST',
+        headers: {
+          apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY,
+          'Accept-Profile': 'slate', 'Content-Profile': 'slate',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ p_session_id: currentSession.id, p_division_numbers: divNums })
+      });
+      if (vR.ok) {
+        const unmatched = await vR.json();
+        if (unmatched && unmatched.length) {
+          const lines = unmatched.map(u =>
+            '· Div ' + u.division_number
+            + (u.team_number ? ' (team ' + u.team_number + ')' : '')
+            + ' — ' + u.first_name + ' ' + u.last_name);
+          status.innerHTML = '⚠ Uploaded ' + splits.length + ' division(s), but '
+            + unmatched.length + ' captain(s) couldn’t be matched to an APA #:<br>'
+            + lines.join('<br>')
+            + '<br>Fix the source PDF or update slate.players, then re-upload.';
+          status.style.color = 'var(--danger)';
+          rolProgress(null);
+          rolRenderList();
+          return;
+        }
+      } else {
+        console.warn('[rolodex] validation RPC failed', vR.status);
+      }
+    } catch (e) { console.warn('[rolodex] validation step errored', e); }
 
     status.textContent = '✓ Uploaded ' + splits.length + ' division(s).';
     status.style.color = 'var(--success)';
