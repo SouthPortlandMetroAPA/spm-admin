@@ -2174,6 +2174,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             <button class="btn btn-outline btn-sm" onclick="tcqTestEmailOpen()">🧪 Test email</button>
             <button class="btn btn-primary btn-sm"  onclick="tcqBulkEmailOpen()">✉️ Send all invites</button>
             <button class="btn btn-outline btn-sm" onclick="tcqCopyForBreakOut()">📋 Copy for BreakOut</button>
+            <button class="btn btn-outline btn-sm" onclick="tcqCopyAllEmails()" title="Copy a comma-separated list of every player's email across every team (deduped) — paste into Gmail/Outlook BCC for a bulk email">📋 Copy all emails</button>
             <button class="btn btn-outline btn-sm" onclick="tcqRender()">↻ Refresh</button>
             <a class="btn btn-outline btn-sm" target="_blank" rel="noopener"
                href="https://southportlandmetroapa.github.io/captainsqualifier/">Open public roster ↗</a>
@@ -2691,7 +2692,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.155';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.156';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -18808,6 +18809,92 @@ function tcqCopyForBreakOut() {
     }
   };
 }
+
+/* Collect every TCQ player's email across every team, dedup, and copy
+   to the clipboard as a single comma-separated list — pasteable into
+   Gmail/Outlook BCC for a bulk email. Captain emails come from
+   tcq.players.email; non-captains aren't asked for one in the player
+   modal, so those are looked up from slate.players by member_number
+   in a single batched call. */
+async function tcqCopyAllEmails() {
+  if (!_tcqEvent || !_tcqTeams || !_tcqTeams.length) {
+    alert('No teams loaded yet.');
+    return;
+  }
+  /* Collect every player on every team. */
+  const allPlayers = [];
+  for (const t of _tcqTeams) {
+    const arr = _tcqPlayersByTeam.get(t.id) || [];
+    for (const p of arr) allPlayers.push(p);
+  }
+  if (!allPlayers.length) { alert('No players on any team yet.'); return; }
+  /* Batch-fetch slate emails for players without a tcq.players.email. */
+  const needLookup = allPlayers
+    .filter(p => !p.email && p.member_number)
+    .map(p => String(p.member_number));
+  const slateMap = await tcqLookupSlateEmails(needLookup);
+  /* Dedup by lowercased email so case-variants don't double up. */
+  const seen = new Set();
+  const recipients = [];
+  const missing = [];
+  for (const p of allPlayers) {
+    const email = (p.email || slateMap.get(String(p.member_number)) || '').trim();
+    if (!email) { missing.push(p.name || p.member_number); continue; }
+    const k = email.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    recipients.push({ name: p.name, email });
+  }
+  if (!recipients.length) {
+    alert('No emails found across ' + allPlayers.length + ' player(s).');
+    return;
+  }
+  /* Show the result in a modal with a textarea + copy button. Same
+     pattern as tcqCopyForBreakOut so users get a consistent UX. */
+  const existing = document.getElementById('tcqAllEmailsModal');
+  if (existing) existing.remove();
+  const back = document.createElement('div');
+  back.id = 'tcqAllEmailsModal';
+  back.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:2000;display:flex;align-items:center;justify-content:center;padding:20px';
+  const list = recipients.map(r => r.email).join(', ');
+  back.innerHTML = ''
+    + '<div style="background:#fff;border-radius:14px;padding:20px;max-width:760px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 10px 30px rgba(0,0,0,0.25)">'
+    +   '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'
+    +     '<div style="font-weight:800;font-size:1.05rem">📋 All TCQ player emails</div>'
+    +     '<button type="button" id="tcqAllEmailsClose" style="margin-left:auto;background:none;border:0;font-size:1.4rem;line-height:1;cursor:pointer;color:var(--muted)">×</button>'
+    +   '</div>'
+    +   '<div class="hint" style="font-size:0.86rem;margin-bottom:10px">'
+    +     recipients.length + ' unique email(s) from ' + allPlayers.length + ' player(s) across ' + _tcqTeams.length + ' team(s)'
+    +     (missing.length ? ' &middot; <span style="color:#c0392b">⚠ ' + missing.length + ' player(s) had no email: ' + esc(missing.slice(0, 6).join(', ')) + (missing.length > 6 ? ' …' : '') + '</span>' : '')
+    +   '</div>'
+    +   '<textarea id="tcqAllEmailsText" readonly rows="10" style="width:100%;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:0.82rem;padding:10px;border:1px solid var(--border);border-radius:6px;resize:vertical">' + esc(list) + '</textarea>'
+    +   '<div id="tcqAllEmailsStatus" class="status-line" style="margin-top:8px"></div>'
+    +   '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">'
+    +     '<button class="btn btn-outline" id="tcqAllEmailsCancel">Close</button>'
+    +     '<button class="btn btn-primary" id="tcqAllEmailsCopy">Copy to clipboard</button>'
+    +   '</div>'
+    + '</div>';
+  document.body.appendChild(back);
+  const close = () => back.remove();
+  back.querySelector('#tcqAllEmailsClose').onclick  = close;
+  back.querySelector('#tcqAllEmailsCancel').onclick = close;
+  back.onclick = (ev) => { if (ev.target === back) close(); };
+  const ta = document.getElementById('tcqAllEmailsText');
+  setTimeout(() => { ta.focus(); ta.select(); }, 50);
+  document.getElementById('tcqAllEmailsCopy').onclick = async () => {
+    const statusEl = document.getElementById('tcqAllEmailsStatus');
+    try {
+      await navigator.clipboard.writeText(list);
+      statusEl.textContent = '✓ Copied ' + recipients.length + ' email(s) to clipboard.';
+      statusEl.style.color = '#0a6b3a';
+    } catch (e) {
+      ta.focus(); ta.select();
+      statusEl.textContent = '⚠ Browser blocked auto-copy — press Ctrl+C to copy the selected text.';
+      statusEl.style.color = '#c0392b';
+    }
+  };
+}
+window.tcqCopyAllEmails = tcqCopyAllEmails;
 
 /* ── REST helpers (service-role JWT via SB_KEY, profile=tcq) ───── */
 async function tcqGet(path) {
