@@ -2693,7 +2693,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.157';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.158';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -17314,18 +17314,22 @@ function tcqRenderTeamCard(team) {
       + '</div>';
   };
 
-  /* Paid badge: green pill if team has been marked paid; the badge
-     itself shows the payment method. Tooltip surfaces the timestamp.
-     If unpaid, falls back to the "Payment: <intended-method>" hint
-     line below so the admin still sees what method was discussed. */
+  /* Paid badge: green pill if paid, red error pill if not. Unpaid teams
+     also get a red left border + tint on the card for at-a-glance scan. */
   const paidBadge = team.paid
     ? '<span style="background:#0a6b3a;color:#fff;padding:2px 8px;border-radius:999px;font-weight:700;font-size:0.72rem;margin-left:6px"'
       + ' title="Paid ' + esc(team.payment_method || '(unspecified)')
       + (team.paid_at ? ' on ' + esc(new Date(team.paid_at).toLocaleString()) : '')
       + '">✓ PAID' + (team.payment_method ? ' &middot; ' + esc(team.payment_method) : '') + '</span>'
-    : '';
+    : '<span style="background:#ea002a;color:#fff;padding:2px 10px;border-radius:999px;font-weight:800;font-size:0.78rem;margin-left:6px;letter-spacing:0.04em"'
+      + ' title="This team has not paid. Intended method: ' + esc(team.payment_method || '(none)') + '"'
+      + '>&#10060; NOT PAID</span>';
 
-  return '<div class="card" style="margin-top:10px">'
+  const cardStyle = team.paid
+    ? 'margin-top:10px'
+    : 'margin-top:10px;border-left:6px solid #ea002a;background:#fdecee';
+
+  return '<div class="card" style="' + cardStyle + '">'
     + '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">'
     +   '<div><strong style="font-size:1.05rem">' + (captain ? esc(captain.name) : '<span class="hint">(no captain yet)</span>') + '</strong>'
     +     paidBadge
