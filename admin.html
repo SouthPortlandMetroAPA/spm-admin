@@ -2175,6 +2175,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             <button class="btn btn-primary btn-sm"  onclick="tcqBulkEmailOpen()">✉️ Send all invites</button>
             <button class="btn btn-outline btn-sm" onclick="tcqCopyForBreakOut()">📋 Copy for BreakOut</button>
             <button class="btn btn-outline btn-sm" onclick="tcqCopyAllEmails()" title="Copy a comma-separated list of every player's email across every team (deduped) — paste into Gmail/Outlook BCC for a bulk email">📋 Copy all emails</button>
+            <button class="btn btn-outline btn-sm" onclick="tcqDownloadRosterCsv()" title="Download a CSV with one row per team and columns for Players 1–5 — for mail-merging roster labels onto scoresheets">📥 Roster CSV</button>
             <button class="btn btn-outline btn-sm" onclick="tcqRender()">↻ Refresh</button>
             <a class="btn btn-outline btn-sm" target="_blank" rel="noopener"
                href="https://southportlandmetroapa.github.io/captainsqualifier/">Open public roster ↗</a>
@@ -2692,7 +2693,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.156';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.157';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -18895,6 +18896,68 @@ async function tcqCopyAllEmails() {
   };
 }
 window.tcqCopyAllEmails = tcqCopyAllEmails;
+
+/* Download a roster CSV — one row per team, columns for the captain and
+   Players 1–5. Intended as a mail-merge source for printing roster
+   labels onto Captains' Qualifier scoresheets. Each player gets three
+   columns: Name, APA #, SL. Empty cells when a slot is unfilled.
+   Teams are sorted by team_index (matches the public roster order). */
+function tcqDownloadRosterCsv() {
+  if (!_tcqEvent || !_tcqTeams || !_tcqTeams.length) {
+    alert('No teams to export yet.');
+    return;
+  }
+  const teams = _tcqTeams.slice().sort((a, b) => (a.team_index || 0) - (b.team_index || 0));
+
+  /* CSV escaping — RFC-4180 style. Wrap any cell with commas, quotes, or
+     newlines in double quotes and double any embedded quotes. */
+  function esc(v) {
+    const s = v == null ? '' : String(v);
+    if (/[",\r\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+    return s;
+  }
+
+  const header = ['Captain'];
+  for (let i = 1; i <= 5; i++) {
+    header.push('Player' + i + '_Name', 'Player' + i + '_APA', 'Player' + i + '_SL');
+  }
+  const lines = [header.map(esc).join(',')];
+
+  for (const team of teams) {
+    const players = (_tcqPlayersByTeam.get(team.id) || [])
+      .slice()
+      .sort((a, b) => (a.position || 99) - (b.position || 99));
+    const captain = players.find(p => p.is_captain);
+    const row = [captain ? captain.name : ''];
+    for (let pos = 1; pos <= 5; pos++) {
+      const p = players.find(x => x.position === pos);
+      if (!p) { row.push('', '', ''); continue; }
+      /* SL: prefer live, then stored, then blank. Mirrors the team-card
+         rendering decision in tcqRenderTeamCard so the CSV matches what
+         the admin sees on screen. */
+      let sl = '';
+      if (p.live_skill_level != null)        sl = String(p.live_skill_level);
+      else if (p.effective_skill_level != null) sl = String(p.effective_skill_level);
+      else if (p.stored_skill_level != null) sl = String(p.stored_skill_level);
+      row.push(p.name || '', p.member_number || '', sl);
+    }
+    lines.push(row.map(esc).join(','));
+  }
+
+  /* Trigger the download. BOM keeps Excel happy with UTF-8 names. */
+  const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const stamp = new Date().toISOString().slice(0, 10);
+  const eventSlug = (_tcqEvent.name || 'tcq').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  a.download = 'tcq-rosters-' + eventSlug + '-' + stamp + '.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+window.tcqDownloadRosterCsv = tcqDownloadRosterCsv;
 
 /* ── REST helpers (service-role JWT via SB_KEY, profile=tcq) ───── */
 async function tcqGet(path) {
