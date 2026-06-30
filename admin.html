@@ -2610,16 +2610,30 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
               for Summer teams who started playing there.
             </p>
             <div id="hpVenuesTable" style="margin-top:8px"></div>
-            <div style="display:flex;gap:8px;margin-top:10px">
+            <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center">
               <input type="text" id="hpNewVenueName"
                      placeholder="Add venue name…"
-                     style="flex:1;padding:8px;border:1px solid var(--border);border-radius:6px">
+                     style="flex:1;min-width:220px;padding:8px;border:1px solid var(--border);border-radius:6px">
               <input type="number" id="hpNewVenueTables" min="0" value="0"
                      style="width:80px;padding:8px;border:1px solid var(--border);border-radius:6px"
                      title="# tables">
               <button class="btn btn-primary btn-sm" onclick="hpAddVenue()">Add</button>
+              <span style="flex-basis:100%;height:0"></span>
+              <button class="btn btn-outline btn-sm" onclick="hpAutoExtractClick()"
+                      title="Read every unique venue name from the most-recent uploaded PDFs and add any that aren't already in the table. Existing rows (and their capacity edits) are left alone.">
+                ✨ Auto-extract venues from uploads
+              </button>
             </div>
           </div>
+        </details>
+
+        <!-- ── Activity 1.5: Teams grouped by venue (read-only view) ── -->
+        <details style="margin-bottom:14px;border:1px solid var(--border);border-radius:8px;padding:12px">
+          <summary style="cursor:pointer;font-weight:700;font-size:1.05rem">
+            1.5 Teams by venue (parsed from uploads)
+            <span class="hint" style="font-weight:400;margin-left:8px">read-only — verify the parse</span>
+          </summary>
+          <div style="margin-top:12px" id="hpTeamsByVenue"></div>
         </details>
 
         <!-- ── Activity 2: Upload PDFs ──────────────────────────── -->
@@ -2694,7 +2708,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.159';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.160';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -20101,7 +20115,58 @@ async function hpInit() {
   await hpLoadUploads();
   hpRenderVenues();
   hpRenderUploads();
+  hpRenderTeamsByVenue();
   hpWireDropZones();
+}
+
+/* Auto-extract unique venue names from the most-recent uploaded PDFs
+   (Spring + Summer) and upsert them into slate.host_venues. Existing
+   rows are left alone so user-edited capacities aren't clobbered. New
+   venues get num_tables = max(2, ceil(latest_team_count / 2)) since
+   1 table = 2 team slots (DJ pairs show as 2 TMS rows). Returns the
+   list of newly-created venue names so the caller can surface them. */
+async function hpAutoExtractVenues() {
+  const teamsByVenue = hpAggregateLatestTeamsByVenue();
+  if (!teamsByVenue.size) return [];
+  const existing = new Set(_hpVenues.map(v => v.name.toLowerCase()));
+  const newRows = [];
+  for (const [venue, teams] of teamsByVenue.entries()) {
+    if (!venue) continue;
+    if (existing.has(venue.toLowerCase())) continue;
+    const tables = Math.max(2, Math.ceil(teams.length / 2));
+    newRows.push({ name: venue, num_tables: tables });
+  }
+  if (!newRows.length) return [];
+  await sb('POST', 'host_venues', newRows);
+  return newRows.map(r => r.name);
+}
+
+/* Walk both uploaded PDF snapshots and bucket teams by venue. The
+   Summer (most recent) upload wins when a team appears in both — it's
+   the team's CURRENT placement. Returns a Map<venue, team[]> sorted
+   by team_number within each venue for stable display. */
+function hpAggregateLatestTeamsByVenue() {
+  const byVenue = new Map();
+  const seen = new Set();
+  /* Prefer Summer (most recent) first so it wins on conflict; then
+     fall back to Spring for teams that only exist in Spring (e.g.
+     dropped out before Summer). */
+  const sources = [_hpUploads.summer, _hpUploads.spring].filter(Boolean);
+  for (const src of sources) {
+    const teams = Array.isArray(src.parsed_json) ? src.parsed_json : [];
+    for (const t of teams) {
+      if (!t || !t.team_number) continue;
+      if (seen.has(t.team_number)) continue;
+      seen.add(t.team_number);
+      const v = (t.venue || '').trim() || '(unknown venue)';
+      if (!byVenue.has(v)) byVenue.set(v, []);
+      byVenue.get(v).push(t);
+    }
+  }
+  for (const arr of byVenue.values()) {
+    arr.sort((a, b) => String(a.team_number).localeCompare(String(b.team_number)));
+  }
+  return byVenue;
 }
 
 async function hpPopulateSessions() {
@@ -20130,29 +20195,53 @@ async function hpLoadVenues() {
 function hpRenderVenues() {
   const el = document.getElementById('hpVenuesTable');
   if (!el) return;
+  const teamsByVenue = hpAggregateLatestTeamsByVenue();
   const summary = document.getElementById('hpVenueSummary');
   if (summary) {
     const totalCap = _hpVenues.reduce((s, v) => s + 2 * v.num_tables, 0);
+    const totalDemand = Array.from(teamsByVenue.values()).reduce((s, arr) => s + arr.length, 0);
     summary.textContent = _hpVenues.length + ' venues · '
-      + totalCap + ' total team slots';
+      + totalCap + ' total team slots'
+      + (totalDemand ? ' · current demand ' + totalDemand + ' teams' : '');
   }
   if (!_hpVenues.length) {
-    el.innerHTML = '<p class="hint" style="margin:0">No venues yet. Add one below.</p>';
+    const hasUploads = !!(_hpUploads.spring || _hpUploads.summer);
+    el.innerHTML = '<p class="hint" style="margin:0">No venues yet. '
+      + (hasUploads
+          ? 'Click <strong>Auto-extract from uploads</strong> below to pull venue names from the parsed PDFs.'
+          : 'Upload a Spring or Summer Team Screen PDF in section 2, or add manually below.')
+      + '</p>';
     return;
   }
+  const lookupCounts = name => {
+    /* Case-insensitive venue match against the aggregated teams list. */
+    if (!name) return 0;
+    const key = name.toLowerCase().trim();
+    for (const [v, arr] of teamsByVenue.entries()) {
+      if ((v || '').toLowerCase().trim() === key) return arr.length;
+    }
+    return 0;
+  };
   const header = '<div class="hp-venues-row" style="font-weight:600;border-bottom:2px solid var(--border)">'
     + '<div>Venue</div><div>Tables</div><div>Capacity</div>'
+    + '<div title="Current SPM teams in latest upload">Current</div>'
     + '<div title="Unavailable in Spring (enables 2nd-priority for Summer teams)">Spring unavail</div>'
     + '<div></div></div>';
-  const rows = _hpVenues.map(v => {
+  const rows = _hpVenues.slice().sort((a, b) => a.name.localeCompare(b.name)).map(v => {
     const cap = 2 * v.num_tables;
+    const current = lookupCounts(v.name);
     const unavailChecked = v.unavailable_in_spring ? 'checked' : '';
+    const fitColor = current === 0 ? '#9ca3af'
+                   : current > cap ? '#b91c1c'
+                   : current === cap ? '#0a6b3a'
+                   : '#0031a1';
     return '<div class="hp-venues-row">'
       + '<div>' + esc(v.name) + '</div>'
       + '<div><input type="number" min="0" value="' + v.num_tables + '" '
         + 'onchange="hpUpdateVenueTables(' + v.id + ', this.value)" '
         + 'style="width:70px;padding:4px;border:1px solid var(--border);border-radius:4px"></div>'
       + '<div>' + cap + ' slots</div>'
+      + '<div style="color:' + fitColor + ';font-weight:700">' + current + (current > cap ? ' ⚠' : '') + '</div>'
       + '<div><input type="checkbox" ' + unavailChecked
         + ' onchange="hpUpdateVenueUnavail(' + v.id + ', this.checked)"></div>'
       + '<div><button class="btn-link" onclick="hpDeleteVenue(' + v.id + ')" '
@@ -20160,6 +20249,64 @@ function hpRenderVenues() {
       + '</div>';
   }).join('');
   el.innerHTML = header + rows;
+}
+
+/* Teams-by-venue browser. Renders a collapsible per venue listing the
+   teams hosted there in the most-recent upload (Summer wins; Spring-
+   only teams shown next). Used by Activity 1.5 to verify the parse and
+   eyeball capacity needs. */
+function hpRenderTeamsByVenue() {
+  const el = document.getElementById('hpTeamsByVenue');
+  if (!el) return;
+  const teamsByVenue = hpAggregateLatestTeamsByVenue();
+  if (!teamsByVenue.size) {
+    el.innerHTML = '<p class="hint" style="margin:0">Upload a Team Screen PDF (section 2) to see teams grouped by venue here.</p>';
+    return;
+  }
+  /* Sort venues by team count desc — biggest hosts first. */
+  const sorted = Array.from(teamsByVenue.entries())
+    .sort((a, b) => b[1].length - a[1].length);
+  const total = sorted.reduce((s, [, arr]) => s + arr.length, 0);
+  let html = '<p class="hint" style="margin:0 0 8px">'
+    + sorted.length + ' venues hosting ' + total + ' SPM teams (latest upload).</p>';
+  for (const [venue, teams] of sorted) {
+    html += '<details style="border-bottom:1px solid var(--border);padding:6px 4px">'
+      + '<summary style="cursor:pointer;display:flex;gap:10px">'
+      +   '<strong style="flex:1">' + esc(venue) + '</strong>'
+      +   '<span style="background:#eef;color:#0031a1;padding:2px 9px;border-radius:999px;font-weight:700;font-size:0.78rem">'
+      +     teams.length + ' team' + (teams.length === 1 ? '' : 's')
+      +   '</span>'
+      + '</summary>'
+      + '<ul style="margin:6px 0 4px 0;padding-left:24px;font-size:0.86rem;list-style:none">'
+      +   teams.map(t => '<li>'
+            + '<code style="color:#0031a1">' + esc(t.team_number || '?') + '</code> '
+            + esc(t.team_name || '(no name)')
+            + '</li>').join('')
+      + '</ul>'
+      + '</details>';
+  }
+  el.innerHTML = html;
+}
+
+async function hpAutoExtractClick() {
+  const status = document.getElementById('hpUploadStatus');
+  try {
+    const newNames = await hpAutoExtractVenues();
+    await hpLoadVenues();
+    hpRenderVenues();
+    hpRenderTeamsByVenue();
+    if (status) {
+      if (!newNames.length) {
+        status.innerHTML = '<span style="color:#0031a1">All venues from uploads are already in the table.</span>';
+      } else {
+        status.innerHTML = '<span style="color:#047857">✓ Added ' + newNames.length
+          + ' venue' + (newNames.length === 1 ? '' : 's') + ': '
+          + esc(newNames.slice(0, 6).join(', ')) + (newNames.length > 6 ? '…' : '') + '</span>';
+      }
+    }
+  } catch (e) {
+    if (status) status.innerHTML = '<span style="color:#b91c1c">Auto-extract failed: ' + esc(e.message) + '</span>';
+  }
 }
 
 async function hpAddVenue() {
@@ -20295,10 +20442,28 @@ async function hpHandlePdf(file, sessionId, label) {
         team_count: spmTeams.length,
         parsed_json: spmTeams },
       { Prefer: 'resolution=merge-duplicates,return=representation' });
-    status.innerHTML = '<span style="color:#047857">✓ ' + label + ': '
-      + spmTeams.length + ' SPM teams parsed (of ' + teams.length + ' total)</span>';
     await hpLoadUploads();
+    /* Auto-extract any new venues from the freshly-uploaded teams. We
+       run this on every upload so the venue table stays in sync with
+       whatever the most recent PDF surfaces. Existing rows aren't
+       touched (capacity edits preserved). */
+    let venueNote = '';
+    try {
+      const newNames = await hpAutoExtractVenues();
+      await hpLoadVenues();
+      if (newNames.length) {
+        venueNote = ' · + ' + newNames.length + ' new venue'
+          + (newNames.length === 1 ? '' : 's');
+      }
+    } catch (ve) {
+      venueNote = ' (venue auto-extract failed: ' + esc(ve.message) + ')';
+    }
+    status.innerHTML = '<span style="color:#047857">✓ ' + label + ': '
+      + spmTeams.length + ' SPM teams parsed (of ' + teams.length + ' total)'
+      + venueNote + '</span>';
     hpRenderUploads();
+    hpRenderVenues();
+    hpRenderTeamsByVenue();
   } catch (e) {
     status.innerHTML = '<span style="color:#b91c1c">Parse/upload failed: ' + esc(e.message) + '</span>';
   }
@@ -20350,6 +20515,7 @@ async function hpRefresh() {
   await hpLoadUploads();
   hpRenderVenues();
   hpRenderUploads();
+  hpRenderTeamsByVenue();
 }
 
 window.hpInit               = hpInit;
@@ -20357,6 +20523,7 @@ window.hpAddVenue           = hpAddVenue;
 window.hpUpdateVenueTables  = hpUpdateVenueTables;
 window.hpUpdateVenueUnavail = hpUpdateVenueUnavail;
 window.hpDeleteVenue        = hpDeleteVenue;
+window.hpAutoExtractClick   = hpAutoExtractClick;
 window.hpRefresh            = hpRefresh;
 
 // (Session loading is triggered by switchTab('certs') → certsAdminInit(),
