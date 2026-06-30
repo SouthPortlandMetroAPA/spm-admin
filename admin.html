@@ -2211,6 +2211,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           </div>
         </details>
 
+        <div id="tcqPaymentBreakdown"></div>
         <div id="tcqList"><p class="hint">Loading…</p></div>
       </div>
 
@@ -2357,7 +2358,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
                 <option>Zelle</option>
                 <option>Paypal</option>
                 <option>Cash</option>
-                <option>Other</option>
+                <option>Pre-Pay Boomer</option>
               </select>
             </div>
           </div>
@@ -2693,7 +2694,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.158';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.159';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -17150,6 +17151,84 @@ async function tcqEligibilityHandlePaste(text) {
   setTimeout(() => { stat.textContent = ''; }, 5000);
 }
 
+/* Payment breakdown panel — total collected, outstanding, per-method
+   count + $ and (in collapsibles) which teams paid each way. Built
+   from the in-memory _tcqTeams snapshot + _tcqPlayersByTeam captain
+   lookup, so it stays in sync with the cards below on every render. */
+function tcqRenderPaymentBreakdown() {
+  const el = document.getElementById('tcqPaymentBreakdown');
+  if (!el) return;
+  if (!_tcqEvent || !_tcqTeams || !_tcqTeams.length) { el.innerHTML = ''; return; }
+  const feeC = Number(_tcqEvent.entry_fee_cents || 0);
+  const $ = c => '$' + (c / 100).toFixed(c % 100 === 0 ? 0 : 2);
+  const captainName = (teamId) => {
+    const ps = _tcqPlayersByTeam.get(teamId) || [];
+    const c = ps.find(p => p.is_captain);
+    return c ? c.name : '(no captain)';
+  };
+  // Methods in display order — TCQ_PAYMENT_METHODS plus an "Unspecified"
+  // bucket for paid teams whose admin never picked a method.
+  const order = TCQ_PAYMENT_METHODS.concat(['(Unspecified)']);
+  const buckets = Object.fromEntries(order.map(m => [m, []]));
+  let paidCount = 0, unpaidCount = 0;
+  for (const t of _tcqTeams) {
+    if (t.paid) {
+      paidCount++;
+      const method = t.payment_method || '(Unspecified)';
+      (buckets[method] = buckets[method] || []).push(t);
+    } else {
+      unpaidCount++;
+    }
+  }
+  const collected = paidCount * feeC;
+  const outstanding = unpaidCount * feeC;
+  const expectedTotal = (paidCount + unpaidCount) * feeC;
+  // Sort each bucket by team_index for stable display.
+  for (const k of Object.keys(buckets)) {
+    buckets[k].sort((a, b) => (a.team_index || 0) - (b.team_index || 0));
+  }
+  const tile = (label, value, sub, color) =>
+    '<div style="flex:1;min-width:140px;background:' + color + ';color:#fff;border-radius:12px;padding:12px 14px">'
+    +   '<div style="font-size:0.72rem;letter-spacing:0.06em;text-transform:uppercase;opacity:0.85">' + esc(label) + '</div>'
+    +   '<div style="font-size:1.5rem;font-weight:800;line-height:1.1;margin-top:2px">' + esc(value) + '</div>'
+    +   '<div style="font-size:0.78rem;opacity:0.85;margin-top:2px">' + esc(sub) + '</div>'
+    + '</div>';
+  let methodRows = '';
+  for (const m of order) {
+    const teams = buckets[m] || [];
+    if (!teams.length) continue;
+    const subtotal = teams.length * feeC;
+    methodRows += '<details style="border-bottom:1px solid var(--border);padding:8px 4px">'
+      + '<summary style="cursor:pointer;display:flex;align-items:center;gap:10px">'
+      +   '<strong style="flex:1">' + esc(m) + '</strong>'
+      +   '<span style="background:#eef;color:#0031a1;padding:2px 9px;border-radius:999px;font-weight:700;font-size:0.78rem">' + teams.length + ' team' + (teams.length === 1 ? '' : 's') + '</span>'
+      +   '<span style="font-weight:700">' + esc($(subtotal)) + '</span>'
+      + '</summary>'
+      + '<ul style="margin:8px 0 4px 0;padding-left:24px;font-size:0.88rem">'
+      +   teams.map(t => '<li>'
+            + esc(captainName(t.id))
+            + '<span class="hint" style="margin-left:6px;font-size:0.78rem">'
+            +   (t.paid_at ? new Date(t.paid_at).toLocaleDateString() : '')
+            + '</span></li>').join('')
+      + '</ul>'
+      + '</details>';
+  }
+  if (!methodRows) {
+    methodRows = '<p class="hint" style="margin:0">No paid teams yet.</p>';
+  }
+  el.innerHTML = '<div class="card" style="margin-bottom:12px">'
+    + '<h3 style="margin:0 0 10px">Payment breakdown</h3>'
+    + '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
+    +   tile('Collected', $(collected), paidCount + ' paid', '#0a6b3a')
+    +   tile('Outstanding', $(outstanding), unpaidCount + ' unpaid', '#ea002a')
+    +   tile('Expected total', $(expectedTotal), (paidCount + unpaidCount) + ' team' + ((paidCount + unpaidCount) === 1 ? '' : 's') + ' × ' + $(feeC), '#0031a1')
+    + '</div>'
+    + '<div style="background:#fafafa;border:1px solid var(--border);border-radius:10px;padding:6px 12px">'
+    +   methodRows
+    + '</div>'
+    + '</div>';
+}
+
 async function tcqRender() {
   const list = document.getElementById('tcqList');
   const stat = document.getElementById('tcqStatus');
@@ -17187,6 +17266,7 @@ async function tcqRender() {
     list.innerHTML = _tcqTeams.length
       ? _tcqTeams.map(tcqRenderTeamCard).join('')
       : '<p class="hint">No teams yet. Click <strong>+ New team</strong> to add the first one.</p>';
+    tcqRenderPaymentBreakdown();
   } catch (e) {
     list.innerHTML = '<p class="hint err">Load failed: ' + esc(e.message) + '</p>';
     stat.textContent = '';
@@ -17595,7 +17675,7 @@ async function tcqDeleteTeam(teamId) {
    paid_at=now, payment_method=<chosen>. Mark unpaid reverts paid
    + paid_at; keeps payment_method (admin's intended-method memory).
    Both re-render the team card so the badge appears/disappears. */
-const TCQ_PAYMENT_METHODS = ['Venmo', 'Zelle', 'Paypal', 'Cash', 'Other'];
+const TCQ_PAYMENT_METHODS = ['Venmo', 'Zelle', 'Paypal', 'Cash', 'Pre-Pay Boomer'];
 
 function tcqOpenMarkPaid(teamId) {
   const team = _tcqTeams.find(t => t.id === teamId);
