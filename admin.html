@@ -2607,7 +2607,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
               <button class="btn btn-primary btn-sm" onclick="certsNotifySaveTemplate()">Save template</button>
               <button class="btn btn-outline btn-sm" onclick="certsNotifyPreview()">Preview (first recipient)</button>
-              <span id="certsNotifyTemplateStatus" class="status-line" style="flex:1"></span>
+              <span id="certsNotifyTemplateStatus" class="status-line" style="flex:1" role="status" aria-live="polite"></span>
             </div>
             <div id="certsNotifyPreview" style="display:none;margin-top:10px;padding:10px;border:1px solid var(--border);border-radius:8px;background:#fff">
               <div style="font-size:0.86rem;font-weight:700;color:#666;margin-bottom:6px" id="certsNotifyPreviewLine"></div>
@@ -2631,13 +2631,13 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
               </div>
               <button class="btn btn-primary btn-sm" onclick="certsNotifySendTest()">Send test</button>
             </div>
-            <div id="certsNotifyTestStatus" class="status-line" style="margin-top:6px"></div>
+            <div id="certsNotifyTestStatus" class="status-line" style="margin-top:6px" role="status" aria-live="polite"></div>
           </div>
         </details>
 
         <!-- Recipients + bulk send -->
         <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
-          <input type="text" id="certsNotifySearch" placeholder="Search name or APA…" class="form-input" style="flex:1;min-width:220px" oninput="certsNotifyRenderList()">
+          <input type="text" id="certsNotifySearch" placeholder="Search name or APA…" class="form-input" style="flex:1;min-width:220px" oninput="certsNotifyDebouncedRender()">
           <label style="display:inline-flex;align-items:center;gap:4px;font-size:0.86rem">
             <input type="checkbox" id="certsNotifyOnlyChecked" onchange="certsNotifyRenderList()">
             Show only checked
@@ -2646,8 +2646,8 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <button class="btn btn-outline btn-sm" onclick="certsNotifyToggleAll(false)">Uncheck all filtered</button>
           <button class="btn btn-primary" onclick="certsNotifySendBulk()">Send to checked</button>
         </div>
-        <div id="certsNotifyBulkStatus" class="status-line" style="margin-bottom:8px"></div>
-        <div id="certsNotifyProgress" style="display:none;margin-bottom:8px;padding:10px;background:#f6f6f4;border:1px solid #e2e0d8;border-radius:8px;font-size:0.86rem"></div>
+        <div id="certsNotifyBulkStatus" class="status-line" style="margin-bottom:8px" role="status" aria-live="polite"></div>
+        <div id="certsNotifyProgress" style="display:none;margin-bottom:8px;padding:10px;background:#f6f6f4;border:1px solid #e2e0d8;border-radius:8px;font-size:0.86rem" role="status" aria-live="polite"></div>
         <div id="certsNotifyList" style="max-height:520px;overflow:auto;border:1px solid var(--border);border-radius:8px;background:#fff"></div>
 
         <!-- Recent batches -->
@@ -3049,7 +3049,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.166';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.167';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -20776,13 +20776,30 @@ async function certsNotifySaveTemplate() {
   try {
     await sb('PATCH', 'cert_notify_template?operator_id=eq.1',
       { subject, body_html, updated_by: getDeviceId(), updated_at: new Date().toISOString() },
-      { 'Accept-Profile': 'slate' });
+      { 'Accept-Profile': 'slate', 'Content-Profile': 'slate' });
     _certsNotifyTemplate = { subject, body_html };
     stat.textContent = '✓ Template saved.'; stat.className = 'status-line ok';
     setTimeout(() => { stat.textContent = ''; stat.className = 'status-line'; }, 3000);
+    /* If preview is currently open, refresh it so the operator sees the
+       new template applied without re-clicking Preview. Invalidates the
+       cached certs so a fresh preview build fetches this recipient's
+       data through the current template. */
+    _certsNotifyLastPreviewCerts = null;
+    if (document.getElementById('certsNotifyPreview')?.style?.display === 'block') {
+      certsNotifyPreview().catch(() => {});
+    }
   } catch (e) {
     stat.textContent = 'Save failed: ' + e.message; stat.className = 'status-line err';
   }
+}
+
+/* Search debounce — the recipient table can be 600+ rows, so re-rendering
+   on every keystroke stutters the UI. Coalesce keystrokes into ~120ms
+   windows and render once per settle. */
+let _certsNotifyDebounceTimer = null;
+function certsNotifyDebouncedRender() {
+  if (_certsNotifyDebounceTimer) clearTimeout(_certsNotifyDebounceTimer);
+  _certsNotifyDebounceTimer = setTimeout(() => certsNotifyRenderList(), 120);
 }
 
 async function certsNotifyReloadHolders() {
@@ -20900,7 +20917,11 @@ function certsNotifySubstitute(str, ctx) {
     (_, k) => (ctx[k] == null ? '' : String(ctx[k])));
 }
 
-/* Build a context object for one recipient using their fetched certs. */
+/* Build a context object for one recipient using their fetched certs.
+   All string ctx values are HTML-encoded so that a name like "O'Brien" or
+   an accidentally-HTML name like "<b>Alan</b>" can't break the email body
+   or inject markup. cert_list_html is intentionally raw — it's built here
+   from esc()'d fields, so it's trusted output. */
 async function certsNotifyBuildContext(holder, sessionName) {
   const certs = await sb('POST', 'rpc/player_certs',
     { p_member_number: holder.member_number, p_session_id: Number(document.getElementById('certsNotifySession').value) },
@@ -20913,11 +20934,13 @@ async function certsNotifyBuildContext(holder, sessionName) {
     return '<li>' + tier + esc(c.sp_label || '') + div + (c.cert_count > 1 ? ' ×' + c.cert_count : '') + '</li>';
   }).join('');
   const count = (certs || []).length;
+  const first = holder.first_name || '';
+  const last  = holder.last_name || '';
   return {
-    first_name:        holder.first_name || '',
-    last_name:         holder.last_name || '',
-    full_name:         ((holder.first_name || '') + ' ' + (holder.last_name || '')).trim(),
-    session_name:      sessionName,
+    first_name:        esc(first),
+    last_name:         esc(last),
+    full_name:         esc((first + ' ' + last).trim()),
+    session_name:      esc(sessionName),
     cert_count:        count,
     cert_count_plural: count === 1 ? '' : 's',
     cert_list_html:    list ? '<ul>' + list + '</ul>' : '',
@@ -21009,7 +21032,13 @@ async function certsNotifySendTest() {
   }
 }
 
+let _certsNotifyBulkInFlight = false;
+let _certsNotifyBulkCancel   = false;
 async function certsNotifySendBulk() {
+  if (_certsNotifyBulkInFlight) {
+    alert('A send is already running. Wait for it to finish or click Cancel.');
+    return;
+  }
   const sid = Number(document.getElementById('certsNotifySession').value);
   const sessionName = certsNotifyGetSessionName();
   const targets = _certsNotifyHolders.filter(r => _certsNotifyChecked.get(r.apa_number || r.member_number) && r.email);
@@ -21017,6 +21046,16 @@ async function certsNotifySendBulk() {
     alert('No recipients checked. Check at least one row above.'); return;
   }
   if (!confirm(`Send cert-notification email to ${targets.length} recipient${targets.length === 1 ? '' : 's'} for ${sessionName}? This is a live send.`)) return;
+  _certsNotifyBulkInFlight = true;
+  _certsNotifyBulkCancel   = false;
+  /* Swap the Send button in place with a Cancel affordance for the duration
+     of the batch — clicking Cancel stops the loop between iterations. */
+  const sendBtn = document.querySelector('button[onclick="certsNotifySendBulk()"]');
+  const origLabel = sendBtn?.textContent;
+  if (sendBtn) {
+    sendBtn.textContent = 'Cancel send';
+    sendBtn.setAttribute('onclick', 'certsNotifyCancelBulk()');
+  }
   const batchId = crypto.randomUUID();
   const stat = document.getElementById('certsNotifyBulkStatus');
   const progress = document.getElementById('certsNotifyProgress');
@@ -21031,26 +21070,49 @@ async function certsNotifySendBulk() {
   const subjectTpl = document.getElementById('certsNotifySubject').value;
   const bodyTpl    = document.getElementById('certsNotifyBody').value;
   /* Sequential send — GAS + Gmail can't handle parallel bursts of 100s.
-     Small delay between sends stays under Gmail's per-second cap. */
-  for (const holder of targets) {
-    try {
-      const ctx = await certsNotifyBuildContext(holder, sessionName);
-      const subject   = certsNotifySubstitute(subjectTpl, ctx);
-      const body_html = certsNotifySubstitute(bodyTpl,    ctx);
-      const res = await certsNotifySend(holder.email, subject, body_html, {
-        session_id: sid, member_number: holder.member_number, cert_count: ctx.cert_count, batch_id: batchId
-      }, /* isTest */ false);
-      if (res.ok) sent++;
-      else { failed++; errors.push((holder.email || '?') + ': ' + (res.error || 'unknown')); }
-    } catch (e) {
-      failed++; errors.push((holder.email || '?') + ': ' + e.message);
+     Small delay between sends stays under Gmail's per-second cap.
+     Between iterations, check the cancel flag so the user can stop the
+     batch cleanly without leaving inflight requests dangling. */
+  let cancelledCount = 0;
+  try {
+    for (const holder of targets) {
+      if (_certsNotifyBulkCancel) { cancelledCount = targets.length - sent - failed; break; }
+      try {
+        const ctx = await certsNotifyBuildContext(holder, sessionName);
+        const subject   = certsNotifySubstitute(subjectTpl, ctx);
+        const body_html = certsNotifySubstitute(bodyTpl,    ctx);
+        const res = await certsNotifySend(holder.email, subject, body_html, {
+          session_id: sid, member_number: holder.member_number, cert_count: ctx.cert_count, batch_id: batchId
+        }, /* isTest */ false);
+        if (res.ok) sent++;
+        else { failed++; errors.push((holder.email || '?') + ': ' + (res.error || 'unknown')); }
+      } catch (e) {
+        failed++; errors.push((holder.email || '?') + ': ' + e.message);
+      }
+      renderProgress();
+      await new Promise(r => setTimeout(r, 250));  // throttle
     }
-    renderProgress();
-    await new Promise(r => setTimeout(r, 250));  // throttle
+    const totalDesc = cancelledCount
+      ? `Batch ${batchId.slice(0,8)} CANCELLED — ${sent} sent, ${failed} failed, ${cancelledCount} skipped.`
+      : `Batch ${batchId.slice(0,8)} complete — ${sent} sent, ${failed} failed.`;
+    stat.textContent = (failed || cancelledCount ? '⚠ ' : '✓ ') + totalDesc;
+    stat.className = (failed || cancelledCount) ? 'status-line err' : 'status-line ok';
+    await certsNotifyLoadBatchLog();
+  } finally {
+    _certsNotifyBulkInFlight = false;
+    _certsNotifyBulkCancel   = false;
+    if (sendBtn) {
+      sendBtn.textContent = origLabel || 'Send to checked';
+      sendBtn.setAttribute('onclick', 'certsNotifySendBulk()');
+    }
   }
-  stat.textContent = `✓ Batch ${batchId.slice(0,8)} complete — ${sent} sent, ${failed} failed.`;
-  stat.className = failed ? 'status-line err' : 'status-line ok';
-  await certsNotifyLoadBatchLog();
+}
+
+function certsNotifyCancelBulk() {
+  if (!_certsNotifyBulkInFlight) return;
+  _certsNotifyBulkCancel = true;
+  const stat = document.getElementById('certsNotifyBulkStatus');
+  if (stat) { stat.textContent = 'Cancelling after the current send…'; stat.className = 'status-line'; }
 }
 
 async function certsNotifyLoadBatchLog() {
@@ -21092,15 +21154,17 @@ async function certsNotifyLoadBatchLog() {
   }
 }
 
-window.certsNotifyInit           = certsNotifyInit;
-window.certsNotifyReloadHolders  = certsNotifyReloadHolders;
-window.certsNotifySaveTemplate   = certsNotifySaveTemplate;
-window.certsNotifyPreview        = certsNotifyPreview;
-window.certsNotifySendTest       = certsNotifySendTest;
-window.certsNotifySendBulk       = certsNotifySendBulk;
-window.certsNotifyRenderList     = certsNotifyRenderList;
-window.certsNotifyToggleAll      = certsNotifyToggleAll;
-window.certsNotifyToggleOne      = certsNotifyToggleOne;
+window.certsNotifyInit             = certsNotifyInit;
+window.certsNotifyReloadHolders    = certsNotifyReloadHolders;
+window.certsNotifySaveTemplate     = certsNotifySaveTemplate;
+window.certsNotifyPreview          = certsNotifyPreview;
+window.certsNotifySendTest         = certsNotifySendTest;
+window.certsNotifySendBulk         = certsNotifySendBulk;
+window.certsNotifyCancelBulk       = certsNotifyCancelBulk;
+window.certsNotifyRenderList       = certsNotifyRenderList;
+window.certsNotifyToggleAll        = certsNotifyToggleAll;
+window.certsNotifyToggleOne        = certsNotifyToggleOne;
+window.certsNotifyDebouncedRender  = certsNotifyDebouncedRender;
 
 /* ════════════════════════════════════════════════════════════════════
    HOST PLAN — Activities 1+2 (venue setup + PDF upload)
