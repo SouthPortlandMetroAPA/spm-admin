@@ -3142,7 +3142,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.175';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.176';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -8291,11 +8291,19 @@ function spRenderOptouts() {
           ? 'all patches opted out'
           : (offCount === OPTOUT_CODES.length ? 'no patches opted out (row has no effect)'
                                               : (types.size + ' of ' + OPTOUT_CODES.length + ' opted out'));
+        /* Encode the opt-out array as a compact CSV token so it can ride
+           safely inside the onclick attribute — Sets don't serialize
+           through HTML the way objects do. */
+        const codesCsv = (o.opted_out_types || []).join(',');
         return '<div style="padding:8px 0; border-bottom:1px solid #f1f1f1;">'
-          + '<div style="display:flex; gap:10px; align-items:center;">'
+          + '<div style="display:flex; gap:8px; align-items:center;">'
           +   '<span style="font-family:ui-monospace,Menlo,monospace; font-weight:700; min-width:60px;">'
           +     esc(o.member_number) + '</span>'
           +   '<span style="flex:1; font-size:0.9rem;">' + esc(o._name || '—') + '</span>'
+          +   '<button class="btn btn-outline" style="padding:2px 10px; font-size:0.78rem;"'
+          +     ' title="Send confirmation email for the current opt-out state to their email on file"'
+          +     ' onclick="spSendOptoutConfirmManual(\'' + esc(o.member_number) + '\',\'' + esc(codesCsv) + '\')">'
+          +     '✉ Email</button>'
           +   '<button class="btn btn-outline" style="padding:2px 10px; font-size:0.78rem;"'
           +     ' onclick="spRemoveOptout(\'' + esc(o.member_number) + '\')">Remove</button>'
           + '</div>'
@@ -8817,6 +8825,41 @@ async function mailerQuotaCheck() {
   }
 }
 window.mailerQuotaCheck = mailerQuotaCheck;
+
+/* Manual re-send of the opt-out confirmation email for a specific member.
+   Used to back-fill emails for players who opted out before the auto-email
+   feature went live, or when a re-send is needed for any reason. Uses the
+   GAS player mode: no admin_key, GAS looks up their email + template
+   server-side, sends to email-on-file only (never admin-supplied). Rate-
+   limited 10s per APA# on the GAS side, so successive rapid clicks against
+   the same person will bounce with a friendly error. */
+async function spSendOptoutConfirmManual(memberShort, codesCsv) {
+  const codes = (codesCsv || '').split(',').filter(Boolean);
+  if (!codes.length) { alert('This row has no active opt-outs — nothing to confirm.'); return; }
+  if (!confirm('Send opt-out confirmation email to APA member ' + memberShort + '?\n\n'
+             + codes.length + ' code' + (codes.length === 1 ? '' : 's') + ' will be listed as "you will no longer receive".')) return;
+  try {
+    const res = await fetch(OPTOUT_CONFIRM_MAILER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action:        'optout_confirm_send',
+        apa_number:    memberShort,
+        added_codes:   codes,
+        removed_codes: []
+      }),
+      redirect: 'follow'
+    });
+    const txt = await res.text();
+    let r = null;
+    try { r = JSON.parse(txt); } catch (_) { r = { ok: false, error: 'bad gateway: ' + txt.slice(0, 80) }; }
+    if (r.ok) alert('✓ Sent to ' + (r.sent_to_masked || 'email on file') + '.');
+    else      alert('✗ ' + (r.error || 'send failed'));
+  } catch (e) {
+    alert('✗ ' + e.message);
+  }
+}
+window.spSendOptoutConfirmManual = spSendOptoutConfirmManual;
 
 /* Inactive team — pulled mid-session and renumbered with a team-within-
    division number > 16 (APA convention). Active teams are 01-16. A 5-digit
