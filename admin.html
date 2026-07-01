@@ -2565,6 +2565,97 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           Manifest: <code>slate.certs</code>
         </p>
       </div>
+
+      <!-- ── Cert Notification Emailer (3.166+) ────────────────────────
+           Emails cert holders that their certs are ready to view. Reads
+           cert holders from slate.session_cert_holders(session_id) RPC,
+           template from slate.cert_notify_template, sends via apa-mailer
+           GAS (action=cert_notify_send), logs each send to
+           slate.cert_notify_log. Default: all recipients pre-checked. -->
+      <div class="card" style="margin-top:16px" id="certsNotifyCard">
+        <h2>Notify players about their certs</h2>
+        <p class="hint" style="margin-bottom:10px">
+          Emails everyone in the selected session who earned at least one
+          cert. Template supports <code>{first_name}</code>,
+          <code>{last_name}</code>, <code>{full_name}</code>,
+          <code>{session_name}</code>, <code>{cert_count}</code>,
+          <code>{cert_count_plural}</code>, <code>{cert_list_html}</code>.
+          Each send is logged to <code>slate.cert_notify_log</code>.
+        </p>
+
+        <div class="row" style="margin-bottom:10px;align-items:flex-end">
+          <div>
+            <label for="certsNotifySession">Session</label>
+            <select id="certsNotifySession"></select>
+          </div>
+          <div style="flex:1">
+            <div id="certsNotifySummary" class="hint" style="font-size:0.86rem"></div>
+          </div>
+          <div>
+            <button class="btn btn-outline btn-sm" onclick="certsNotifyReloadHolders()">Refresh list</button>
+          </div>
+        </div>
+
+        <!-- Template editor -->
+        <details open style="margin-bottom:12px">
+          <summary style="cursor:pointer;font-weight:700">Email template</summary>
+          <div style="padding:10px 0">
+            <label for="certsNotifySubject">Subject</label>
+            <input type="text" id="certsNotifySubject" class="form-input" style="width:100%;margin-bottom:8px">
+            <label for="certsNotifyBody">HTML body</label>
+            <textarea id="certsNotifyBody" class="form-input" rows="8" style="width:100%;font-family:ui-monospace,Menlo,monospace;font-size:0.86rem"></textarea>
+            <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+              <button class="btn btn-primary btn-sm" onclick="certsNotifySaveTemplate()">Save template</button>
+              <button class="btn btn-outline btn-sm" onclick="certsNotifyPreview()">Preview (first recipient)</button>
+              <span id="certsNotifyTemplateStatus" class="status-line" style="flex:1"></span>
+            </div>
+            <div id="certsNotifyPreview" style="display:none;margin-top:10px;padding:10px;border:1px solid var(--border);border-radius:8px;background:#fff">
+              <div style="font-size:0.86rem;font-weight:700;color:#666;margin-bottom:6px" id="certsNotifyPreviewLine"></div>
+              <div id="certsNotifyPreviewBody" style="border-top:1px solid #f1f1f1;padding-top:8px"></div>
+            </div>
+          </div>
+        </details>
+
+        <!-- Test send -->
+        <details style="margin-bottom:12px">
+          <summary style="cursor:pointer;font-weight:700">Test email</summary>
+          <div style="padding:10px 0">
+            <p class="hint" style="margin:0 0 8px;font-size:0.86rem">
+              Sends one email using the current template + the first checked recipient's cert data,
+              but to whatever address you enter here. Logged with <code>status='test'</code>.
+            </p>
+            <div style="display:flex;gap:8px;align-items:flex-end">
+              <div style="flex:1">
+                <label for="certsNotifyTestEmail">Send test to</label>
+                <input type="email" id="certsNotifyTestEmail" class="form-input" placeholder="you@example.com" style="width:100%">
+              </div>
+              <button class="btn btn-primary btn-sm" onclick="certsNotifySendTest()">Send test</button>
+            </div>
+            <div id="certsNotifyTestStatus" class="status-line" style="margin-top:6px"></div>
+          </div>
+        </details>
+
+        <!-- Recipients + bulk send -->
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+          <input type="text" id="certsNotifySearch" placeholder="Search name or APA…" class="form-input" style="flex:1;min-width:220px" oninput="certsNotifyRenderList()">
+          <label style="display:inline-flex;align-items:center;gap:4px;font-size:0.86rem">
+            <input type="checkbox" id="certsNotifyOnlyChecked" onchange="certsNotifyRenderList()">
+            Show only checked
+          </label>
+          <button class="btn btn-outline btn-sm" onclick="certsNotifyToggleAll(true)">Check all filtered</button>
+          <button class="btn btn-outline btn-sm" onclick="certsNotifyToggleAll(false)">Uncheck all filtered</button>
+          <button class="btn btn-primary" onclick="certsNotifySendBulk()">Send to checked</button>
+        </div>
+        <div id="certsNotifyBulkStatus" class="status-line" style="margin-bottom:8px"></div>
+        <div id="certsNotifyProgress" style="display:none;margin-bottom:8px;padding:10px;background:#f6f6f4;border:1px solid #e2e0d8;border-radius:8px;font-size:0.86rem"></div>
+        <div id="certsNotifyList" style="max-height:520px;overflow:auto;border:1px solid var(--border);border-radius:8px;background:#fff"></div>
+
+        <!-- Recent batches -->
+        <details style="margin-top:16px">
+          <summary style="cursor:pointer;font-weight:700">Recent batches</summary>
+          <div id="certsNotifyBatchLog" style="padding:10px 0;font-size:0.86rem;color:#333"></div>
+        </details>
+      </div>
     </div>
     <!-- ════════════════ /Certs ════════════════ -->
 
@@ -2958,7 +3049,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.165';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.166';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -4639,7 +4730,7 @@ function switchTab(name) {
   if (name === 'tcq')         tcqInit();
   if (name === 'playoffs')    renderPlayoffsTab();
   if (name === 'dolphin')     dpInit();
-  if (name === 'certs')       certsAdminInit();
+  if (name === 'certs')       { certsAdminInit(); certsNotifyInit(); }
   if (name === 'hostplan')    hpInit();
 }
 
@@ -20619,6 +20710,397 @@ async function certsAdminGenerate() {
 window.certsAdminPreview  = certsAdminPreview;
 window.certsAdminGenerate = certsAdminGenerate;
 window.certsAdminInit     = certsAdminInit;
+
+/* ════════════════════════════════════════════════════════════════════
+   CERT NOTIFICATION EMAILER (3.166+)
+   ════════════════════════════════════════════════════════════════════
+   Emails players about their earned certs for a session. Reads:
+     - slate.session_cert_holders(session_id)     → recipient list
+     - slate.cert_notify_template (operator=1)    → editable template
+     - slate.compute_player_certs(...)            → per-recipient cert list
+   Sends via apa-mailer GAS (action=cert_notify_send). Every send is
+   logged to slate.cert_notify_log with a batch_id so operators can
+   audit + spot double-sends. Defaults: all recipients pre-checked. */
+
+const CERTS_NOTIFY_MAILER_URL = TCQ_MAILER_URL;  // same GAS endpoint
+let _certsNotifyHolders  = [];      // [{member_number, apa_number, first_name, last_name, email, cert_count, _checked}]
+let _certsNotifyChecked  = new Map(); // apa_number → bool (persisted across filter changes)
+let _certsNotifyTemplate = { subject: '', body_html: '' };
+let _certsNotifySessionOpts = [];   // [{id, name}]
+let _certsNotifyLastPreviewCerts = null; // cached certs for the first recipient
+
+/* Init: populate session dropdown, load template + holders, wire events. */
+async function certsNotifyInit() {
+  const sel = document.getElementById('certsNotifySession');
+  if (!sel) return;
+  if (!sel.options.length) {
+    sel.innerHTML = '<option>Loading…</option>';
+    try {
+      const sessions = await sb('GET',
+        'sessions?select=id,name,start_date,is_current&order=start_date.desc.nullslast');
+      _certsNotifySessionOpts = sessions || [];
+      sel.innerHTML = (sessions || []).map(s =>
+        `<option value="${s.id}">${esc(s.name)}${s.is_current ? ' (current)' : ''}</option>`
+      ).join('');
+      const past = (sessions || []).find(s => !s.is_current);
+      if (past) sel.value = String(past.id);
+      sel.onchange = () => certsNotifyReloadHolders();
+    } catch (e) {
+      sel.innerHTML = '<option value="">Failed to load sessions</option>';
+    }
+  }
+  await certsNotifyLoadTemplate();
+  await certsNotifyReloadHolders();
+  await certsNotifyLoadBatchLog();
+}
+
+async function certsNotifyLoadTemplate() {
+  try {
+    const rows = await sb('GET', 'cert_notify_template?operator_id=eq.1&select=subject,body_html',
+      null, { 'Accept-Profile': 'slate' });
+    if (rows && rows.length) {
+      _certsNotifyTemplate = { subject: rows[0].subject, body_html: rows[0].body_html };
+      document.getElementById('certsNotifySubject').value = rows[0].subject;
+      document.getElementById('certsNotifyBody').value    = rows[0].body_html;
+    }
+  } catch (e) { console.warn('[cert-notify] template load', e); }
+}
+
+async function certsNotifySaveTemplate() {
+  const subject = document.getElementById('certsNotifySubject').value.trim();
+  const body_html = document.getElementById('certsNotifyBody').value;
+  const stat = document.getElementById('certsNotifyTemplateStatus');
+  if (!subject || !body_html) {
+    stat.textContent = 'Subject + body required.'; stat.className = 'status-line err'; return;
+  }
+  try {
+    await sb('PATCH', 'cert_notify_template?operator_id=eq.1',
+      { subject, body_html, updated_by: getDeviceId(), updated_at: new Date().toISOString() },
+      { 'Accept-Profile': 'slate' });
+    _certsNotifyTemplate = { subject, body_html };
+    stat.textContent = '✓ Template saved.'; stat.className = 'status-line ok';
+    setTimeout(() => { stat.textContent = ''; stat.className = 'status-line'; }, 3000);
+  } catch (e) {
+    stat.textContent = 'Save failed: ' + e.message; stat.className = 'status-line err';
+  }
+}
+
+async function certsNotifyReloadHolders() {
+  const sel = document.getElementById('certsNotifySession');
+  const sid = Number(sel?.value || 0);
+  if (!sid) return;
+  const summary = document.getElementById('certsNotifySummary');
+  summary.textContent = 'Loading recipients…';
+  try {
+    const rows = await sb('POST', 'rpc/session_cert_holders', { p_session_id: sid },
+      { 'Accept-Profile': 'slate', 'Content-Profile': 'slate' });
+    _certsNotifyHolders = (rows || []).map(r => {
+      const key = r.apa_number || r.member_number;
+      /* Preserve prior checked state on refresh; new rows default to checked. */
+      if (!_certsNotifyChecked.has(key)) _certsNotifyChecked.set(key, true);
+      return { ...r };
+    });
+    const total = _certsNotifyHolders.length;
+    const withEmail = _certsNotifyHolders.filter(r => r.email).length;
+    summary.textContent = `${total} cert holder${total === 1 ? '' : 's'} · ${withEmail} with email on file` +
+                          (withEmail < total ? ` · ${total - withEmail} missing email (will skip)` : '');
+    _certsNotifyLastPreviewCerts = null;   // invalidate preview cache
+    certsNotifyRenderList();
+  } catch (e) {
+    summary.textContent = 'Failed to load recipients: ' + e.message;
+  }
+}
+
+function certsNotifyGetFiltered() {
+  const q = (document.getElementById('certsNotifySearch').value || '').trim().toLowerCase();
+  const onlyChecked = document.getElementById('certsNotifyOnlyChecked').checked;
+  return _certsNotifyHolders.filter(r => {
+    const key = r.apa_number || r.member_number;
+    if (onlyChecked && !_certsNotifyChecked.get(key)) return false;
+    if (q) {
+      const hay = [r.first_name, r.last_name, r.apa_number, r.email].filter(Boolean).join(' ').toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+}
+
+function certsNotifyRenderList() {
+  const el = document.getElementById('certsNotifyList');
+  if (!el) return;
+  const rows = certsNotifyGetFiltered();
+  if (!rows.length) {
+    el.innerHTML = '<p class="hint" style="padding:12px;margin:0">' +
+      (_certsNotifyHolders.length ? 'No recipients match the current filter.'
+                                  : 'No cert holders for the selected session yet.') + '</p>';
+    return;
+  }
+  let checkedFiltered = 0, uncheckedFiltered = 0;
+  for (const r of rows) {
+    if (_certsNotifyChecked.get(r.apa_number || r.member_number)) checkedFiltered++;
+    else uncheckedFiltered++;
+  }
+  let html = '<div style="padding:8px 10px;background:#f9fafb;border-bottom:1px solid var(--border);font-size:0.82rem;color:#555">' +
+    `Showing ${rows.length} recipient${rows.length === 1 ? '' : 's'} · ${checkedFiltered} checked · ${uncheckedFiltered} unchecked` +
+    '</div>';
+  html += '<table style="width:100%;border-collapse:collapse;font-size:0.88rem">';
+  html += '<thead><tr style="text-align:left;background:#fff;position:sticky;top:0;z-index:1">' +
+    '<th style="padding:6px 10px;border-bottom:2px solid var(--border);width:36px"></th>' +
+    '<th style="padding:6px 10px;border-bottom:2px solid var(--border)">Name</th>' +
+    '<th style="padding:6px 10px;border-bottom:2px solid var(--border)">APA #</th>' +
+    '<th style="padding:6px 10px;border-bottom:2px solid var(--border)">Email</th>' +
+    '<th style="padding:6px 10px;border-bottom:2px solid var(--border);width:60px">Certs</th>' +
+    '</tr></thead><tbody>';
+  for (const r of rows) {
+    const key = r.apa_number || r.member_number;
+    const checked = _certsNotifyChecked.get(key);
+    const noEmail = !r.email;
+    html += '<tr style="border-bottom:1px solid #f1f1f1' + (noEmail ? ';color:#b91c1c' : '') + '">' +
+      '<td style="padding:6px 10px">' +
+        '<input type="checkbox"' + (checked ? ' checked' : '') + (noEmail ? ' disabled title="No email on file"' : '') +
+        ` onchange="certsNotifyToggleOne('${esc(key)}', this.checked)">` +
+      '</td>' +
+      '<td style="padding:6px 10px">' + esc((r.first_name || '') + ' ' + (r.last_name || '')).trim() + '</td>' +
+      '<td style="padding:6px 10px;font-variant-numeric:tabular-nums">' + esc(r.apa_number || r.member_number) + '</td>' +
+      '<td style="padding:6px 10px">' + (noEmail ? '<em>none</em>' : esc(r.email)) + '</td>' +
+      '<td style="padding:6px 10px;text-align:right;font-variant-numeric:tabular-nums;font-weight:700">' + (r.cert_count || 0) + '</td>' +
+      '</tr>';
+  }
+  html += '</tbody></table>';
+  el.innerHTML = html;
+}
+
+function certsNotifyToggleOne(key, checked) {
+  _certsNotifyChecked.set(key, checked);
+  /* Only re-render the summary bar, not the whole list — otherwise the
+     scroll position jumps every time you click a checkbox. Update the
+     header counts in place. */
+  const list = document.getElementById('certsNotifyList');
+  const header = list.querySelector('div');
+  if (!header) return;
+  const rows = certsNotifyGetFiltered();
+  let c = 0;
+  for (const r of rows) if (_certsNotifyChecked.get(r.apa_number || r.member_number)) c++;
+  header.textContent = `Showing ${rows.length} recipient${rows.length === 1 ? '' : 's'} · ${c} checked · ${rows.length - c} unchecked`;
+}
+
+function certsNotifyToggleAll(checked) {
+  const rows = certsNotifyGetFiltered();
+  for (const r of rows) {
+    const key = r.apa_number || r.member_number;
+    if (!r.email) continue;   // never check no-email rows
+    _certsNotifyChecked.set(key, checked);
+  }
+  certsNotifyRenderList();
+}
+
+/* Template substitution — safe: only replaces known {tokens}. */
+function certsNotifySubstitute(str, ctx) {
+  return String(str || '').replace(/\{(first_name|last_name|full_name|session_name|cert_count|cert_count_plural|cert_list_html)\}/g,
+    (_, k) => (ctx[k] == null ? '' : String(ctx[k])));
+}
+
+/* Build a context object for one recipient using their fetched certs. */
+async function certsNotifyBuildContext(holder, sessionName) {
+  const certs = await sb('POST', 'rpc/player_certs',
+    { p_member_number: holder.member_number, p_session_id: Number(document.getElementById('certsNotifySession').value) },
+    { 'Accept-Profile': 'slate', 'Content-Profile': 'slate' });
+  const list = (certs || []).map(c => {
+    const div = c.division_name ? ' — <em>' + esc(c.division_name) + '</em>' : '';
+    const tier = c.tier === 'exceptional' ? '<strong style="color:#0031a1">Exceptional</strong> · '
+                : c.tier === 'the_most'    ? '<strong style="color:#0a6b3a">The Most</strong> · '
+                : '';
+    return '<li>' + tier + esc(c.sp_label || '') + div + (c.cert_count > 1 ? ' ×' + c.cert_count : '') + '</li>';
+  }).join('');
+  const count = (certs || []).length;
+  return {
+    first_name:        holder.first_name || '',
+    last_name:         holder.last_name || '',
+    full_name:         ((holder.first_name || '') + ' ' + (holder.last_name || '')).trim(),
+    session_name:      sessionName,
+    cert_count:        count,
+    cert_count_plural: count === 1 ? '' : 's',
+    cert_list_html:    list ? '<ul>' + list + '</ul>' : '',
+    _certs:            certs || [],
+  };
+}
+
+function certsNotifyGetSessionName() {
+  const sel = document.getElementById('certsNotifySession');
+  return sel.options[sel.selectedIndex]?.textContent?.replace(/\s+\(current\)$/, '') || '';
+}
+
+async function certsNotifyPreview() {
+  const rows = certsNotifyGetFiltered().filter(r => _certsNotifyChecked.get(r.apa_number || r.member_number) && r.email);
+  const stat = document.getElementById('certsNotifyTemplateStatus');
+  if (!rows.length) {
+    stat.textContent = 'No checked recipient with email — nothing to preview.';
+    stat.className = 'status-line err';
+    return;
+  }
+  const holder = rows[0];
+  const sessionName = certsNotifyGetSessionName();
+  const box = document.getElementById('certsNotifyPreview');
+  box.style.display = 'block';
+  document.getElementById('certsNotifyPreviewLine').textContent = 'Preview for ' + (holder.first_name || '') + ' ' + (holder.last_name || '') + ' — subject: ' + document.getElementById('certsNotifySubject').value;
+  document.getElementById('certsNotifyPreviewBody').innerHTML = 'Loading certs…';
+  try {
+    const ctx = await certsNotifyBuildContext(holder, sessionName);
+    _certsNotifyLastPreviewCerts = ctx;
+    const bodyHtml = certsNotifySubstitute(document.getElementById('certsNotifyBody').value, ctx);
+    document.getElementById('certsNotifyPreviewBody').innerHTML = bodyHtml;
+    stat.textContent = ''; stat.className = 'status-line';
+  } catch (e) {
+    document.getElementById('certsNotifyPreviewBody').innerHTML = '<em>Preview failed: ' + esc(e.message) + '</em>';
+  }
+}
+
+async function certsNotifySend(to, subject, body_html, meta, isTest) {
+  const batchId = meta.batch_id || crypto.randomUUID();
+  const r = await fetch(CERTS_NOTIFY_MAILER_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({
+      action:        'cert_notify_send',
+      admin_key:     SB_KEY,
+      to, subject, body_html,
+      session_id:    meta.session_id,
+      member_number: meta.member_number,
+      cert_count:    meta.cert_count,
+      batch_id:      batchId,
+      is_test:       !!isTest,
+    }),
+    redirect: 'follow'
+  });
+  const txt = await r.text();
+  try { return JSON.parse(txt); } catch (_) { return { ok: false, error: 'bad gateway: ' + txt.slice(0, 120) }; }
+}
+
+async function certsNotifySendTest() {
+  const to = document.getElementById('certsNotifyTestEmail').value.trim();
+  const stat = document.getElementById('certsNotifyTestStatus');
+  if (!to || !/@/.test(to)) {
+    stat.textContent = 'Enter a valid email address.'; stat.className = 'status-line err'; return;
+  }
+  const checked = _certsNotifyHolders.filter(r => _certsNotifyChecked.get(r.apa_number || r.member_number) && r.email);
+  if (!checked.length) {
+    stat.textContent = 'No checked recipient with email — check at least one so the test has real cert data to use.';
+    stat.className = 'status-line err'; return;
+  }
+  const holder = checked[0];
+  const sessionName = certsNotifyGetSessionName();
+  const sid = Number(document.getElementById('certsNotifySession').value);
+  stat.textContent = 'Sending test…'; stat.className = 'status-line';
+  try {
+    const ctx = await certsNotifyBuildContext(holder, sessionName);
+    const subject   = certsNotifySubstitute(document.getElementById('certsNotifySubject').value, ctx);
+    const body_html = certsNotifySubstitute(document.getElementById('certsNotifyBody').value, ctx);
+    const res = await certsNotifySend(to, subject, body_html, {
+      session_id: sid, member_number: holder.member_number, cert_count: ctx.cert_count
+    }, /* isTest */ true);
+    if (res.ok) {
+      stat.textContent = '✓ Test sent to ' + to + ' (using ' + (holder.first_name || 'first recipient') + '\'s cert data).';
+      stat.className = 'status-line ok';
+    } else {
+      stat.textContent = '✗ ' + (res.error || 'send failed'); stat.className = 'status-line err';
+    }
+  } catch (e) {
+    stat.textContent = '✗ ' + e.message; stat.className = 'status-line err';
+  }
+}
+
+async function certsNotifySendBulk() {
+  const sid = Number(document.getElementById('certsNotifySession').value);
+  const sessionName = certsNotifyGetSessionName();
+  const targets = _certsNotifyHolders.filter(r => _certsNotifyChecked.get(r.apa_number || r.member_number) && r.email);
+  if (!targets.length) {
+    alert('No recipients checked. Check at least one row above.'); return;
+  }
+  if (!confirm(`Send cert-notification email to ${targets.length} recipient${targets.length === 1 ? '' : 's'} for ${sessionName}? This is a live send.`)) return;
+  const batchId = crypto.randomUUID();
+  const stat = document.getElementById('certsNotifyBulkStatus');
+  const progress = document.getElementById('certsNotifyProgress');
+  progress.style.display = 'block';
+  let sent = 0, failed = 0;
+  const errors = [];
+  const renderProgress = () => {
+    progress.innerHTML = `<strong>Batch ${batchId.slice(0,8)}…</strong> — ${sent} sent · ${failed} failed · ${targets.length - sent - failed} remaining` +
+      (errors.length ? ('<div style="margin-top:6px;color:#b91c1c;font-size:0.78rem">Recent failures: ' + errors.slice(-5).map(e => esc(e)).join(' · ') + '</div>') : '');
+  };
+  renderProgress();
+  const subjectTpl = document.getElementById('certsNotifySubject').value;
+  const bodyTpl    = document.getElementById('certsNotifyBody').value;
+  /* Sequential send — GAS + Gmail can't handle parallel bursts of 100s.
+     Small delay between sends stays under Gmail's per-second cap. */
+  for (const holder of targets) {
+    try {
+      const ctx = await certsNotifyBuildContext(holder, sessionName);
+      const subject   = certsNotifySubstitute(subjectTpl, ctx);
+      const body_html = certsNotifySubstitute(bodyTpl,    ctx);
+      const res = await certsNotifySend(holder.email, subject, body_html, {
+        session_id: sid, member_number: holder.member_number, cert_count: ctx.cert_count, batch_id: batchId
+      }, /* isTest */ false);
+      if (res.ok) sent++;
+      else { failed++; errors.push((holder.email || '?') + ': ' + (res.error || 'unknown')); }
+    } catch (e) {
+      failed++; errors.push((holder.email || '?') + ': ' + e.message);
+    }
+    renderProgress();
+    await new Promise(r => setTimeout(r, 250));  // throttle
+  }
+  stat.textContent = `✓ Batch ${batchId.slice(0,8)} complete — ${sent} sent, ${failed} failed.`;
+  stat.className = failed ? 'status-line err' : 'status-line ok';
+  await certsNotifyLoadBatchLog();
+}
+
+async function certsNotifyLoadBatchLog() {
+  const el = document.getElementById('certsNotifyBatchLog');
+  if (!el) return;
+  try {
+    /* Aggregate per batch_id — count sent/failed/test, most-recent first. */
+    const rows = await sb('GET',
+      'cert_notify_log?select=batch_id,session_id,sent_at,status&order=sent_at.desc&limit=500',
+      null, { 'Accept-Profile': 'slate' });
+    if (!rows || !rows.length) { el.innerHTML = '<p class="hint" style="margin:0">No batches yet.</p>'; return; }
+    const byBatch = new Map();
+    for (const r of rows) {
+      const b = byBatch.get(r.batch_id) || { batch_id: r.batch_id, session_id: r.session_id, first: r.sent_at, sent:0, failed:0, test:0 };
+      b[r.status]++;
+      if (r.sent_at > b.first) b.first = r.sent_at;
+      byBatch.set(r.batch_id, b);
+    }
+    const arr = [...byBatch.values()].sort((a, b) => (b.first > a.first ? 1 : -1)).slice(0, 20);
+    el.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:0.82rem">' +
+      '<thead><tr style="text-align:left">' +
+      '<th style="padding:4px 8px">When</th>' +
+      '<th style="padding:4px 8px">Session</th>' +
+      '<th style="padding:4px 8px">Batch</th>' +
+      '<th style="padding:4px 8px;text-align:right">Sent</th>' +
+      '<th style="padding:4px 8px;text-align:right">Failed</th>' +
+      '<th style="padding:4px 8px;text-align:right">Test</th>' +
+      '</tr></thead><tbody>' +
+      arr.map(b => '<tr style="border-top:1px solid #f1f1f1">' +
+        '<td style="padding:4px 8px;color:var(--muted)">' + esc(new Date(b.first).toLocaleString()) + '</td>' +
+        '<td style="padding:4px 8px">' + b.session_id + '</td>' +
+        '<td style="padding:4px 8px;font-family:ui-monospace,monospace">' + esc(b.batch_id.slice(0, 8)) + '…</td>' +
+        '<td style="padding:4px 8px;text-align:right;color:#0a6b3a;font-weight:700">' + b.sent + '</td>' +
+        '<td style="padding:4px 8px;text-align:right;color:#b91c1c;font-weight:700">' + b.failed + '</td>' +
+        '<td style="padding:4px 8px;text-align:right;color:#666">' + b.test + '</td>' +
+      '</tr>').join('') + '</tbody></table>';
+  } catch (e) {
+    el.innerHTML = '<p class="hint" style="margin:0;color:#b91c1c">Log load failed: ' + esc(e.message) + '</p>';
+  }
+}
+
+window.certsNotifyInit           = certsNotifyInit;
+window.certsNotifyReloadHolders  = certsNotifyReloadHolders;
+window.certsNotifySaveTemplate   = certsNotifySaveTemplate;
+window.certsNotifyPreview        = certsNotifyPreview;
+window.certsNotifySendTest       = certsNotifySendTest;
+window.certsNotifySendBulk       = certsNotifySendBulk;
+window.certsNotifyRenderList     = certsNotifyRenderList;
+window.certsNotifyToggleAll      = certsNotifyToggleAll;
+window.certsNotifyToggleOne      = certsNotifyToggleOne;
 
 /* ════════════════════════════════════════════════════════════════════
    HOST PLAN — Activities 1+2 (venue setup + PDF upload)
