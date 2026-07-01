@@ -1419,7 +1419,13 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
            next to the data it describes; sends log to
            slate.optout_confirm_log. -->
       <div class="card" style="margin-bottom:14px;" id="spOptoutEmailCard">
-        <h2 style="margin:0 0 6px;">Opt-out confirmation email</h2>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:6px">
+          <h2 style="margin:0">Opt-out confirmation email</h2>
+          <div style="display:flex;align-items:center;gap:8px">
+            <button class="btn btn-outline btn-sm" onclick="mailerQuotaCheck()" title="Check remaining Gmail daily send quota">📊 Check mailer quota</button>
+            <span id="mailerQuotaResult" class="hint" style="font-size:0.82rem" role="status" aria-live="polite"></span>
+          </div>
+        </div>
         <p class="hint" style="margin:0 0 10px;">
           Fires from PatchCheck whenever a player saves an opt-out change.
           <strong>No email is sent</strong> if they hit Save with no
@@ -3136,7 +3142,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.174';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.175';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -8777,6 +8783,40 @@ window.optoutConfirmSaveTemplate  = optoutConfirmSaveTemplate;
 window.optoutConfirmPreview       = optoutConfirmPreview;
 window.optoutConfirmSendTest      = optoutConfirmSendTest;
 window.optoutConfirmMaybeSend     = optoutConfirmMaybeSend;
+
+/* Mailer quota check — hits the apa-mailer GAS `mailer_quota` action and
+   displays the remaining Gmail send count. Gmail Workspace accounts get
+   1,500/day; consumer 100/day. Refreshes daily at midnight PT (Gmail
+   rolling window is per-account, not per-project). */
+async function mailerQuotaCheck() {
+  const el = document.getElementById('mailerQuotaResult');
+  if (!el) return;
+  el.textContent = 'Checking…';
+  el.style.color = 'var(--muted)';
+  try {
+    const r = await fetch(OPTOUT_CONFIRM_MAILER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'mailer_quota', admin_key: SB_KEY }),
+      redirect: 'follow'
+    });
+    const txt = await r.text();
+    let res = null;
+    try { res = JSON.parse(txt); } catch (_) { res = { ok: false, error: 'bad gateway: ' + txt.slice(0, 120) }; }
+    if (res.ok) {
+      el.innerHTML = '<strong>' + res.remaining + '</strong> emails left today · from '
+        + esc(res.from_account || 'GAS deploy account');
+      el.style.color = res.remaining > 100 ? '#0a6b3a' : res.remaining > 25 ? '#a76c00' : '#b91c1c';
+    } else {
+      el.textContent = '✗ ' + (res.error || 'unknown error');
+      el.style.color = '#b91c1c';
+    }
+  } catch (e) {
+    el.textContent = '✗ ' + e.message;
+    el.style.color = '#b91c1c';
+  }
+}
+window.mailerQuotaCheck = mailerQuotaCheck;
 
 /* Inactive team — pulled mid-session and renumbered with a team-within-
    division number > 16 (APA convention). Active teams are 01-16. A 5-digit
