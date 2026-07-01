@@ -1472,6 +1472,36 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         </div>
         <div class="status-line" id="spAdhocStatus" style="margin-top:6px;"></div>
       </div>
+
+      <!-- ── Opt-out slip printer (3.170+) ────────────────────────────
+           Prints N "Too Awesome for More Patches?" QR-code slips, 3 per
+           US Letter sheet, ready to cut and drop into envelopes. Lives
+           next to the SP Reports envelope-print flow because that's the
+           workflow that consumes them. -->
+      <div class="card" style="margin-top:0" id="spSlipsCard">
+        <h2 style="margin:0 0 6px;">Print opt-out slips</h2>
+        <p class="hint" style="margin:0 0 10px;">
+          Prints "Too Awesome for More Patches?" QR-code slips (3 per
+          Letter page). Drop one in each envelope so players know they can
+          opt out of future patches. QR resolves to
+          <code>southportlandmetroapa.github.io/patchcheck/</code>.
+        </p>
+        <div style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;">
+          <div>
+            <label for="spSlipsCount" style="font-weight:700; font-size:0.86rem;">How many slips?</label>
+            <input type="number" id="spSlipsCount" min="1" max="5000" step="1" placeholder="e.g. 300"
+                   style="width:160px; padding:8px 10px; border:1px solid #e5e7eb; border-radius:8px; font-size:1rem;"
+                   oninput="spSlipsUpdateHint()">
+          </div>
+          <div id="spSlipsHint" style="flex:1; color:var(--muted); font-size:0.86rem;"></div>
+          <div>
+            <button type="button" class="btn btn-primary" onclick="spSlipsPrint()">🖨 Open print preview</button>
+          </div>
+        </div>
+        <p class="hint" style="margin:8px 0 0; font-size:0.78rem; color:#888;">
+          Print at 100% scale with no margins. Cut on the dashed lines.
+        </p>
+      </div>
     </div>
     <!-- ════════════════ /SP Reports ════════════════ -->
 
@@ -2658,37 +2688,6 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         </details>
       </div>
 
-      <!-- ── Print opt-out envelope slips (3.169+) ────────────────────
-           Renders the PatchCheck opt-out slip (3 per US Letter page)
-           N times into a new browser window, ready to print. Defaults
-           the count to the current session's cert-holder count so
-           there's one slip per envelope you're stuffing. -->
-      <div class="card" style="margin-top:16px" id="certsSlipsCard">
-        <h2>Print opt-out slips for envelopes</h2>
-        <p class="hint" style="margin-bottom:10px">
-          Tucks a "Too Awesome for More Patches?" QR-code slip into each
-          certificate envelope. 3 slips per Letter page — the count auto-
-          fills from <code>slate.session_cert_holders</code> so you get
-          one per envelope; round up to the next multiple of 3 if you
-          want a full last page.
-        </p>
-        <div class="row" style="align-items:flex-end;gap:12px;margin-bottom:6px">
-          <div>
-            <label for="certsSlipsCount">Number of slips to print</label>
-            <input type="number" id="certsSlipsCount" min="1" max="5000" step="1"
-                   style="width:140px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:1rem"
-                   placeholder="e.g. 667">
-          </div>
-          <div style="flex:1;color:var(--muted);font-size:0.86rem" id="certsSlipsHint"></div>
-          <div>
-            <button class="btn btn-primary" onclick="certsSlipsPrint()">🖨 Open print preview</button>
-          </div>
-        </div>
-        <p class="hint" style="margin:0;font-size:0.78rem;color:#888">
-          Print at 100% scale, no margins. QR resolves to
-          <code>southportlandmetroapa.github.io/patchcheck/</code>.
-        </p>
-      </div>
     </div>
     <!-- ════════════════ /Certs ════════════════ -->
 
@@ -3082,7 +3081,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.169';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.170';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -20785,7 +20784,6 @@ async function certsNotifyInit() {
   await certsNotifyLoadTemplate();
   await certsNotifyReloadHolders();
   await certsNotifyLoadBatchLog();
-  certsSlipsRefreshCount();
 }
 
 async function certsNotifyLoadTemplate() {
@@ -20857,9 +20855,6 @@ async function certsNotifyReloadHolders() {
                           (withEmail < total ? ` · ${total - withEmail} missing email (will skip)` : '');
     _certsNotifyLastPreviewCerts = null;   // invalidate preview cache
     certsNotifyRenderList();
-    /* Session change → refresh the slip-printer count to match the new
-       cert-holder total, unless the operator already typed a custom N. */
-    certsSlipsRefreshCount();
   } catch (e) {
     summary.textContent = 'Failed to load recipients: ' + e.message;
   }
@@ -21205,16 +21200,17 @@ window.certsNotifyToggleOne        = certsNotifyToggleOne;
 window.certsNotifyDebouncedRender  = certsNotifyDebouncedRender;
 
 /* ════════════════════════════════════════════════════════════════════
-   OPT-OUT SLIP PRINTER (3.169+)
+   OPT-OUT SLIP PRINTER (3.170+)
    ════════════════════════════════════════════════════════════════════
-   Opens a print-ready browser window with N envelope-stuffer slips.
-   The slip design mirrors Apps/PatchCheck/tools/optout-slip.html — QR
-   points at https://southportlandmetroapa.github.io/patchcheck/ (error-
-   correction H so it survives folds), 3 slips per US Letter page, cut
-   lines between them.
+   Lives in the SP Reports tab (next to the "Print envelopes" flow that
+   consumes these slips). Opens a print-ready browser window with N
+   envelope-stuffer slips. Design mirrors Apps/PatchCheck/tools/optout-
+   slip.html — QR points at https://southportlandmetroapa.github.io/
+   patchcheck/ (error-correction H so it survives folds), 3 slips per
+   US Letter page, cut lines between them.
 
-   Count auto-populates from the currently-selected session's cert-
-   holder count so operators get one slip per envelope by default. */
+   No auto-population: operator types the count each print. Keeps the
+   UI decoupled from any specific session or envelope pipeline. */
 
 /* QR SVG for the PatchCheck URL. Pre-rendered with error-correction H
    (30% recoverable) so a coffee stain or envelope crease doesn't kill
@@ -21222,40 +21218,28 @@ window.certsNotifyDebouncedRender  = certsNotifyDebouncedRender;
    print window — critical, because window.open('') has no origin and
    can't reach GH Pages. If PatchCheck moves, regenerate via:
      npx qrcode "https://<new-url>/" -t svg -e H -o optout-qr.svg  */
-const CERTS_SLIP_QR_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 49 49" shape-rendering="crispEdges"><path fill="#ffffff" d="M0 0h49v49H0z"/><path stroke="#000000" d="M4 4.5h7m3 0h4m1 0h1m2 0h2m2 0h1m1 0h1m1 0h1m2 0h2m3 0h7M4 5.5h1m5 0h1m1 0h1m3 0h3m3 0h1m2 0h3m1 0h2m5 0h1m1 0h1m5 0h1M4 6.5h1m1 0h3m1 0h1m1 0h2m1 0h1m4 0h3m4 0h1m2 0h2m1 0h1m1 0h2m1 0h1m1 0h3m1 0h1M4 7.5h1m1 0h3m1 0h1m1 0h1m2 0h2m1 0h3m2 0h6m1 0h1m4 0h2m1 0h1m1 0h3m1 0h1M4 8.5h1m1 0h3m1 0h1m1 0h1m1 0h1m2 0h2m1 0h2m1 0h1m1 0h1m4 0h1m2 0h1m4 0h1m1 0h3m1 0h1M4 9.5h1m5 0h1m1 0h2m2 0h1m1 0h3m1 0h1m1 0h1m1 0h1m2 0h1m3 0h1m2 0h1m1 0h1m5 0h1M4 10.5h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7M13 11.5h3m1 0h2m2 0h2m1 0h2m4 0h1m3 0h1m1 0h1M6 12.5h1m2 0h7m2 0h1m1 0h1m1 0h1m1 0h1m2 0h1m3 0h1m3 0h1m1 0h1m1 0h5M4 13.5h3m1 0h1m2 0h2m1 0h2m2 0h1m1 0h1m1 0h2m2 0h1m3 0h3m2 0h5m2 0h1m1 0h1M4 14.5h1m1 0h2m1 0h2m1 0h1m2 0h4m1 0h1m1 0h1m1 0h1m2 0h7m1 0h1m1 0h6m1 0h1M4 15.5h1m2 0h1m3 0h1m2 0h2m3 0h2m1 0h1m1 0h1m1 0h5m4 0h4m1 0h2M6 16.5h1m1 0h3m1 0h3m1 0h3m1 0h2m1 0h1m1 0h1m1 0h1m1 0h1m6 0h1m1 0h2m3 0h1M4 17.5h2m1 0h2m2 0h1m1 0h2m3 0h1m2 0h1m1 0h1m1 0h4m1 0h1m2 0h2m1 0h1m1 0h2m4 0h1M4 18.5h4m2 0h1m1 0h2m7 0h1m2 0h2m2 0h1m1 0h2m4 0h3m1 0h2m2 0h1M5 19.5h2m2 0h1m2 0h2m3 0h3m2 0h1m3 0h1m1 0h3m3 0h5m2 0h1m2 0h1M4 20.5h1m1 0h1m1 0h1m1 0h2m8 0h1m1 0h1m2 0h1m2 0h2m1 0h1m2 0h1m1 0h3M4 21.5h1m2 0h1m1 0h1m1 0h1m4 0h1m2 0h1m3 0h3m1 0h1m2 0h4m1 0h5m1 0h1m1 0h2M7 22.5h1m2 0h2m2 0h2m1 0h1m1 0h1m4 0h1m2 0h1m2 0h2m3 0h2m2 0h2m3 0h1M5 23.5h1m1 0h1m1 0h1m5 0h2m1 0h1m4 0h2m8 0h1m1 0h2m1 0h1m2 0h1m1 0h2M4 24.5h1m3 0h1m1 0h1m1 0h1m2 0h2m2 0h2m1 0h2m6 0h2m1 0h1m2 0h1m1 0h2m1 0h1M5 25.5h2m1 0h1m2 0h1m2 0h2m1 0h2m1 0h3m2 0h1m2 0h6m1 0h2m1 0h2m4 0h1M9 26.5h2m3 0h2m1 0h4m1 0h2m1 0h2m3 0h2m3 0h1m2 0h1m1 0h1m3 0h1M5 27.5h1m1 0h2m2 0h3m2 0h1m2 0h1m1 0h1m3 0h2m1 0h3m3 0h1m1 0h2m1 0h1m1 0h1m1 0h2M6 28.5h5m1 0h2m2 0h2m2 0h2m2 0h1m1 0h2m1 0h1m1 0h2m3 0h1m1 0h2m1 0h1m1 0h2M4 29.5h2m6 0h2m1 0h1m1 0h1m1 0h2m2 0h1m3 0h1m2 0h3m1 0h2m2 0h2m1 0h1m2 0h1M10 30.5h2m1 0h1m1 0h2m3 0h3m2 0h1m2 0h5m1 0h2m1 0h1m1 0h4m1 0h1M4 31.5h1m1 0h3m2 0h1m1 0h2m4 0h1m1 0h2m2 0h2m1 0h1m3 0h1m2 0h5m1 0h1m1 0h2M5 32.5h1m4 0h2m1 0h2m3 0h1m1 0h2m1 0h4m3 0h3m3 0h4m3 0h2M9 33.5h1m4 0h2m1 0h2m1 0h3m2 0h1m4 0h1m1 0h2m4 0h2m1 0h1m2 0h1M4 34.5h2m1 0h1m2 0h1m2 0h1m2 0h5m2 0h2m3 0h1m3 0h1m2 0h1m1 0h1m1 0h6M6 35.5h1m8 0h1m2 0h1m2 0h1m4 0h3m2 0h2m1 0h3m1 0h4m1 0h1M4 36.5h2m1 0h1m2 0h7m5 0h1m3 0h5m1 0h1m3 0h6m1 0h2M12 37.5h2m3 0h1m3 0h2m6 0h4m1 0h1m1 0h1m3 0h1m1 0h1m1 0h1M4 38.5h7m1 0h1m2 0h3m1 0h1m1 0h1m1 0h4m1 0h1m1 0h5m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1M4 39.5h1m5 0h1m1 0h1m1 0h1m5 0h1m3 0h1m1 0h1m2 0h2m3 0h1m1 0h1m3 0h2M4 40.5h1m1 0h3m1 0h1m4 0h1m1 0h1m3 0h1m2 0h2m3 0h1m1 0h10m2 0h2M4 41.5h1m1 0h3m1 0h1m3 0h3m3 0h1m2 0h1m4 0h5m1 0h1m1 0h1m2 0h2m1 0h3M4 42.5h1m1 0h3m1 0h1m1 0h1m2 0h3m1 0h4m3 0h2m1 0h3m1 0h1m1 0h3m2 0h5M4 43.5h1m5 0h1m2 0h2m1 0h1m1 0h4m1 0h1m1 0h3m1 0h1m1 0h2m1 0h1m1 0h2m3 0h1M4 44.5h7m2 0h1m1 0h2m4 0h3m1 0h1m2 0h1m1 0h1m5 0h3m1 0h2m2 0h1"/></svg>';
+const SP_SLIP_QR_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 49 49" shape-rendering="crispEdges"><path fill="#ffffff" d="M0 0h49v49H0z"/><path stroke="#000000" d="M4 4.5h7m3 0h4m1 0h1m2 0h2m2 0h1m1 0h1m1 0h1m2 0h2m3 0h7M4 5.5h1m5 0h1m1 0h1m3 0h3m3 0h1m2 0h3m1 0h2m5 0h1m1 0h1m5 0h1M4 6.5h1m1 0h3m1 0h1m1 0h2m1 0h1m4 0h3m4 0h1m2 0h2m1 0h1m1 0h2m1 0h1m1 0h3m1 0h1M4 7.5h1m1 0h3m1 0h1m1 0h1m2 0h2m1 0h3m2 0h6m1 0h1m4 0h2m1 0h1m1 0h3m1 0h1M4 8.5h1m1 0h3m1 0h1m1 0h1m1 0h1m2 0h2m1 0h2m1 0h1m1 0h1m4 0h1m2 0h1m4 0h1m1 0h3m1 0h1M4 9.5h1m5 0h1m1 0h2m2 0h1m1 0h3m1 0h1m1 0h1m1 0h1m2 0h1m3 0h1m2 0h1m1 0h1m5 0h1M4 10.5h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7M13 11.5h3m1 0h2m2 0h2m1 0h2m4 0h1m3 0h1m1 0h1M6 12.5h1m2 0h7m2 0h1m1 0h1m1 0h1m1 0h1m2 0h1m3 0h1m3 0h1m1 0h1m1 0h5M4 13.5h3m1 0h1m2 0h2m1 0h2m2 0h1m1 0h1m1 0h2m2 0h1m3 0h3m2 0h5m2 0h1m1 0h1M4 14.5h1m1 0h2m1 0h2m1 0h1m2 0h4m1 0h1m1 0h1m1 0h1m2 0h7m1 0h1m1 0h6m1 0h1M4 15.5h1m2 0h1m3 0h1m2 0h2m3 0h2m1 0h1m1 0h1m1 0h5m4 0h4m1 0h2M6 16.5h1m1 0h3m1 0h3m1 0h3m1 0h2m1 0h1m1 0h1m1 0h1m1 0h1m6 0h1m1 0h2m3 0h1M4 17.5h2m1 0h2m2 0h1m1 0h2m3 0h1m2 0h1m1 0h1m1 0h4m1 0h1m2 0h2m1 0h1m1 0h2m4 0h1M4 18.5h4m2 0h1m1 0h2m7 0h1m2 0h2m2 0h1m1 0h2m4 0h3m1 0h2m2 0h1M5 19.5h2m2 0h1m2 0h2m3 0h3m2 0h1m3 0h1m1 0h3m3 0h5m2 0h1m2 0h1M4 20.5h1m1 0h1m1 0h1m1 0h2m8 0h1m1 0h1m2 0h1m2 0h2m1 0h1m2 0h1m1 0h3M4 21.5h1m2 0h1m1 0h1m1 0h1m4 0h1m2 0h1m3 0h3m1 0h1m2 0h4m1 0h5m1 0h1m1 0h2M7 22.5h1m2 0h2m2 0h2m1 0h1m1 0h1m4 0h1m2 0h1m2 0h2m3 0h2m2 0h2m3 0h1M5 23.5h1m1 0h1m1 0h1m5 0h2m1 0h1m4 0h2m8 0h1m1 0h2m1 0h1m2 0h1m1 0h2M4 24.5h1m3 0h1m1 0h1m1 0h1m2 0h2m2 0h2m1 0h2m6 0h2m1 0h1m2 0h1m1 0h2m1 0h1M5 25.5h2m1 0h1m2 0h1m2 0h2m1 0h2m1 0h3m2 0h1m2 0h6m1 0h2m1 0h2m4 0h1M9 26.5h2m3 0h2m1 0h4m1 0h2m1 0h2m3 0h2m3 0h1m2 0h1m1 0h1m3 0h1M5 27.5h1m1 0h2m2 0h3m2 0h1m2 0h1m1 0h1m3 0h2m1 0h3m3 0h1m1 0h2m1 0h1m1 0h1m1 0h2M6 28.5h5m1 0h2m2 0h2m2 0h2m2 0h1m1 0h2m1 0h1m1 0h2m3 0h1m1 0h2m1 0h1m1 0h2M4 29.5h2m6 0h2m1 0h1m1 0h1m1 0h2m2 0h1m3 0h1m2 0h3m1 0h2m2 0h2m1 0h1m2 0h1M10 30.5h2m1 0h1m1 0h2m3 0h3m2 0h1m2 0h5m1 0h2m1 0h1m1 0h4m1 0h1M4 31.5h1m1 0h3m2 0h1m1 0h2m4 0h1m1 0h2m2 0h2m1 0h1m3 0h1m2 0h5m1 0h1m1 0h2M5 32.5h1m4 0h2m1 0h2m3 0h1m1 0h2m1 0h4m3 0h3m3 0h4m3 0h2M9 33.5h1m4 0h2m1 0h2m1 0h3m2 0h1m4 0h1m1 0h2m4 0h2m1 0h1m2 0h1M4 34.5h2m1 0h1m2 0h1m2 0h1m2 0h5m2 0h2m3 0h1m3 0h1m2 0h1m1 0h1m1 0h6M6 35.5h1m8 0h1m2 0h1m2 0h1m4 0h3m2 0h2m1 0h3m1 0h4m1 0h1M4 36.5h2m1 0h1m2 0h7m5 0h1m3 0h5m1 0h1m3 0h6m1 0h2M12 37.5h2m3 0h1m3 0h2m6 0h4m1 0h1m1 0h1m3 0h1m1 0h1m1 0h1M4 38.5h7m1 0h1m2 0h3m1 0h1m1 0h1m1 0h4m1 0h1m1 0h5m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1M4 39.5h1m5 0h1m1 0h1m1 0h1m5 0h1m3 0h1m1 0h1m2 0h2m3 0h1m1 0h1m3 0h2M4 40.5h1m1 0h3m1 0h1m4 0h1m1 0h1m3 0h1m2 0h2m3 0h1m1 0h10m2 0h2M4 41.5h1m1 0h3m1 0h1m3 0h3m3 0h1m2 0h1m4 0h5m1 0h1m1 0h1m2 0h2m1 0h3M4 42.5h1m1 0h3m1 0h1m1 0h1m2 0h3m1 0h4m3 0h2m1 0h3m1 0h1m1 0h3m2 0h5M4 43.5h1m5 0h1m2 0h2m1 0h1m1 0h4m1 0h1m1 0h3m1 0h1m1 0h2m1 0h1m1 0h2m3 0h1M4 44.5h7m2 0h1m1 0h2m4 0h3m1 0h1m2 0h1m1 0h1m5 0h3m1 0h2m2 0h1"/></svg>';
 
-/* Auto-populate the count input from the currently-selected session. Runs
-   whenever the Certs tab is entered OR the notify session picker changes,
-   so the number always reflects the intended print scope. */
-function certsSlipsRefreshCount() {
-  const holders = _certsNotifyHolders || [];
-  const input   = document.getElementById('certsSlipsCount');
-  const hintEl  = document.getElementById('certsSlipsHint');
-  if (!input) return;
-  const n = holders.length;
-  /* Only overwrite when the operator hasn't typed a custom number. */
-  if (!input.dataset.userEdited) input.value = n || '';
-  const pages = Math.ceil((Number(input.value) || 0) / 3);
-  if (hintEl) {
-    hintEl.textContent = n
-      ? '≈ ' + pages + ' page' + (pages === 1 ? '' : 's') + ' at 3 slips per Letter · session has ' + n + ' cert holder' + (n === 1 ? '' : 's')
-      : 'Select a session (above) to auto-fill the count';
-  }
-  input.oninput = () => {
-    input.dataset.userEdited = '1';
-    const p = Math.ceil((Number(input.value) || 0) / 3);
-    if (hintEl) hintEl.textContent = '≈ ' + p + ' page' + (p === 1 ? '' : 's') + ' at 3 slips per Letter · custom count';
-  };
+/* Live-update the "≈ N pages" hint as the operator types. Called from the
+   input's oninput handler. */
+function spSlipsUpdateHint() {
+  const input  = document.getElementById('spSlipsCount');
+  const hintEl = document.getElementById('spSlipsHint');
+  if (!input || !hintEl) return;
+  const n = Number(input.value) || 0;
+  if (!n) { hintEl.textContent = ''; return; }
+  const pages = Math.ceil(n / 3);
+  hintEl.textContent = '≈ ' + pages + ' page' + (pages === 1 ? '' : 's') + ' at 3 slips per Letter';
 }
 
 /* Build one slip's HTML. Kept as a template literal so tweaks stay in one
    place — the standalone Apps/PatchCheck/tools/optout-slip.html is the
    design source-of-truth; this is a mirror of it. */
-function certsSlipsOneSlipHtml() {
+function spSlipsOneSlipHtml() {
   return '' +
     '<div class="slip">' +
       '<div class="qr-block">' +
-        CERTS_SLIP_QR_SVG +
+        SP_SLIP_QR_SVG +
         '<div class="url">southportlandmetroapa.github.io/patchcheck</div>' +
       '</div>' +
       '<div class="copy">' +
@@ -21282,8 +21266,8 @@ function certsSlipsOneSlipHtml() {
     '</div>';
 }
 
-function certsSlipsPrint() {
-  const raw = Number(document.getElementById('certsSlipsCount').value);
+function spSlipsPrint() {
+  const raw = Number(document.getElementById('spSlipsCount').value);
   if (!Number.isFinite(raw) || raw < 1) {
     alert('Enter how many slips you need (at least 1).');
     return;
@@ -21292,7 +21276,7 @@ function certsSlipsPrint() {
   const w = window.open('', '_blank', 'width=900,height=1100');
   if (!w) { alert('Popup blocked — allow popups from this site and try again.'); return; }
 
-  const slipHtml = certsSlipsOneSlipHtml();
+  const slipHtml = spSlipsOneSlipHtml();
   const cutHtml  = '<div class="cut"></div>';
   /* Assemble N slips grouped 3 per <div.sheet> so @page breaks land
      between sheets, not mid-slip. */
@@ -21343,8 +21327,8 @@ function certsSlipsPrint() {
   w.focus();
 }
 
-window.certsSlipsPrint         = certsSlipsPrint;
-window.certsSlipsRefreshCount  = certsSlipsRefreshCount;
+window.spSlipsPrint       = spSlipsPrint;
+window.spSlipsUpdateHint  = spSlipsUpdateHint;
 
 /* ════════════════════════════════════════════════════════════════════
    HOST PLAN — Activities 1+2 (venue setup + PDF upload)
