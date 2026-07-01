@@ -1499,7 +1499,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           </div>
         </div>
         <p class="hint" style="margin:8px 0 0; font-size:0.78rem; color:#888;">
-          Print at 100% scale with no margins. Cut on the dashed lines.
+          Print at 100% scale with no margins, then cut the sheet into thirds.
         </p>
       </div>
     </div>
@@ -3081,7 +3081,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.170';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.171';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -21277,17 +21277,13 @@ function spSlipsPrint() {
   if (!w) { alert('Popup blocked — allow popups from this site and try again.'); return; }
 
   const slipHtml = spSlipsOneSlipHtml();
-  const cutHtml  = '<div class="cut"></div>';
   /* Assemble N slips grouped 3 per <div.sheet> so @page breaks land
      between sheets, not mid-slip. */
   let body = '';
   for (let i = 0; i < n; i += 3) {
     const on = Math.min(3, n - i);
     body += '<div class="sheet">';
-    for (let j = 0; j < on; j++) {
-      body += slipHtml;
-      if (j < on - 1) body += cutHtml;
-    }
+    for (let j = 0; j < on; j++) body += slipHtml;
     body += '</div>';
   }
   const pages = Math.ceil(n / 3);
@@ -21298,8 +21294,6 @@ function spSlipsPrint() {
     '.sheet:last-child { page-break-after:auto; break-after:auto; }',
     '@media print { body { background:#fff; } .sheet { margin:0; box-shadow:none; } }',
     '.slip { flex:1 1 0; display:grid; grid-template-columns:2.7in 1fr; gap:0.35in; padding:0.35in 0.45in; box-sizing:border-box; position:relative; break-inside:avoid; }',
-    '.cut { border-top:1px dashed #bbb; position:relative; height:0; }',
-    '.cut::before { content:"✂  cut"; position:absolute; left:0.35in; top:-0.09in; background:#fff; padding:0 6px; font-size:8pt; color:#999; letter-spacing:0.06em; }',
     '.qr-block { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6pt; }',
     '.qr-block svg { width:2in; height:2in; display:block; }',
     '.qr-block .url { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:8.5pt; color:#333; letter-spacing:-0.01em; text-align:center; }',
@@ -21317,7 +21311,7 @@ function spSlipsPrint() {
     '@media print { .banner { display:none; } }'
   ].join('\n');
 
-  const banner = '<div class="banner"><span>' + n + ' slip' + (n === 1 ? '' : 's') + ' across ' + pages + ' page' + (pages === 1 ? '' : 's') + ' — print at 100% scale, no margins, then cut on the dashed lines.</span><button onclick="window.print()">Print</button></div>';
+  const banner = '<div class="banner"><span>' + n + ' slip' + (n === 1 ? '' : 's') + ' across ' + pages + ' page' + (pages === 1 ? '' : 's') + ' — print at 100% scale, no margins, then cut each sheet into thirds.</span><button onclick="window.print()">Print</button></div>';
 
   w.document.open();
   w.document.write(
