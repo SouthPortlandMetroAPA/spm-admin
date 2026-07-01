@@ -3142,7 +3142,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.176';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.177';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -8295,20 +8295,25 @@ function spRenderOptouts() {
            safely inside the onclick attribute — Sets don't serialize
            through HTML the way objects do. */
         const codesCsv = (o.opted_out_types || []).join(',');
+        const mn = esc(o.member_number);
         return '<div style="padding:8px 0; border-bottom:1px solid #f1f1f1;">'
           + '<div style="display:flex; gap:8px; align-items:center;">'
           +   '<span style="font-family:ui-monospace,Menlo,monospace; font-weight:700; min-width:60px;">'
-          +     esc(o.member_number) + '</span>'
+          +     mn + '</span>'
           +   '<span style="flex:1; font-size:0.9rem;">' + esc(o._name || '—') + '</span>'
           +   '<button class="btn btn-outline" style="padding:2px 10px; font-size:0.78rem;"'
           +     ' title="Send confirmation email for the current opt-out state to their email on file"'
-          +     ' onclick="spSendOptoutConfirmManual(\'' + esc(o.member_number) + '\',\'' + esc(codesCsv) + '\')">'
+          +     ' onclick="spSendOptoutConfirmManual(\'' + mn + '\',\'' + esc(codesCsv) + '\')">'
           +     '✉ Email</button>'
           +   '<button class="btn btn-outline" style="padding:2px 10px; font-size:0.78rem;"'
-          +     ' onclick="spRemoveOptout(\'' + esc(o.member_number) + '\')">Remove</button>'
+          +     ' onclick="spRemoveOptout(\'' + mn + '\')">Remove</button>'
           + '</div>'
           + '<div style="display:flex; flex-wrap:wrap; gap:4px; margin-top:6px;">' + chips + '</div>'
           + '<div style="font-size:0.72rem; color:#6b7280; margin-top:4px;">' + esc(summary) + '</div>'
+          + '<details style="margin-top:6px" ontoggle="if(this.open)spLoadOptoutHistory(\'' + mn + '\')">'
+          +   '<summary style="cursor:pointer;font-size:0.78rem;color:#4b5563">📜 Change history</summary>'
+          +   '<div id="spOptoutHistory-' + mn + '" style="margin-top:6px;font-size:0.78rem;color:#333">Loading…</div>'
+          + '</details>'
           + '</div>';
       }).join('');
 }
@@ -8860,6 +8865,66 @@ async function spSendOptoutConfirmManual(memberShort, codesCsv) {
   }
 }
 window.spSendOptoutConfirmManual = spSendOptoutConfirmManual;
+
+/* Load + render the full change history for one opt-out row. Fired on
+   details.ontoggle=this.open — so the query only runs when the operator
+   expands the panel, not on every list render. Once loaded, subsequent
+   toggles re-render from _spOptoutHistoryCache without a re-fetch. */
+const _spOptoutHistoryCache = new Map();
+async function spLoadOptoutHistory(memberNumber) {
+  const el = document.getElementById('spOptoutHistory-' + memberNumber);
+  if (!el) return;
+  const cached = _spOptoutHistoryCache.get(memberNumber);
+  if (cached) { el.innerHTML = cached; return; }
+  try {
+    const rows = await sb('GET',
+      'patch_optouts_audit?member_number=eq.' + encodeURIComponent(memberNumber)
+      + '&select=action,old_types,new_types,added,removed,note,changed_at,changed_by'
+      + '&order=changed_at.desc&limit=200',
+      null, { 'Accept-Profile': 'slate' });
+    if (!rows || !rows.length) {
+      const empty = '<p class="hint" style="margin:0">No history yet.</p>';
+      _spOptoutHistoryCache.set(memberNumber, empty);
+      el.innerHTML = empty;
+      return;
+    }
+    const codeList = arr => (arr && arr.length)
+      ? arr.map(c => '<span style="display:inline-block;padding:1px 6px;margin:1px 2px;border-radius:6px;background:#eef;font-family:ui-monospace,monospace;font-size:0.72rem" title="' + esc(SP_FULL_NAME[c] || c) + '">' + esc(c) + '</span>').join('')
+      : '<span style="color:#9ca3af">—</span>';
+    const actionBadge = a => {
+      const map = {
+        insert: { bg: '#0a6b3a', label: 'first opt-out' },
+        update: { bg: '#0031a1', label: 'updated' },
+        delete: { bg: '#b91c1c', label: 'fully opted back in' }
+      };
+      const m = map[a] || { bg: '#666', label: a };
+      return '<span style="background:' + m.bg + ';color:#fff;padding:1px 6px;border-radius:8px;font-size:0.68rem;font-weight:700">' + esc(m.label) + '</span>';
+    };
+    const html = '<table style="width:100%;border-collapse:collapse;font-size:0.78rem">'
+      + '<thead><tr style="text-align:left;color:#4b5563">'
+      +   '<th style="padding:4px 6px;border-bottom:1px solid #f1f1f1">When</th>'
+      +   '<th style="padding:4px 6px;border-bottom:1px solid #f1f1f1">Action</th>'
+      +   '<th style="padding:4px 6px;border-bottom:1px solid #f1f1f1">Added (opted OUT of)</th>'
+      +   '<th style="padding:4px 6px;border-bottom:1px solid #f1f1f1">Removed (opted back IN)</th>'
+      +   '<th style="padding:4px 6px;border-bottom:1px solid #f1f1f1">Source</th>'
+      + '</tr></thead><tbody>'
+      + rows.map(r => '<tr style="border-bottom:1px solid #f9f9f9">'
+          + '<td style="padding:4px 6px;color:#6b7280;white-space:nowrap;font-variant-numeric:tabular-nums">'
+          +   esc(new Date(r.changed_at).toLocaleString())
+          + '</td>'
+          + '<td style="padding:4px 6px">' + actionBadge(r.action) + '</td>'
+          + '<td style="padding:4px 6px">' + codeList(r.added) + '</td>'
+          + '<td style="padding:4px 6px">' + codeList(r.removed) + '</td>'
+          + '<td style="padding:4px 6px;color:#6b7280;font-size:0.72rem">' + esc(r.changed_by || '—') + '</td>'
+        + '</tr>').join('')
+      + '</tbody></table>';
+    _spOptoutHistoryCache.set(memberNumber, html);
+    el.innerHTML = html;
+  } catch (e) {
+    el.innerHTML = '<p class="hint" style="margin:0;color:#b91c1c">History load failed: ' + esc(e.message) + '</p>';
+  }
+}
+window.spLoadOptoutHistory = spLoadOptoutHistory;
 
 /* Inactive team — pulled mid-session and renumbered with a team-within-
    division number > 16 (APA convention). Active teams are 01-16. A 5-digit
