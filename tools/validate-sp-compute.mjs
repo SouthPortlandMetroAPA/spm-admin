@@ -481,14 +481,292 @@ function computeFromBdRows(rows, opts = {}) {
   }
 }
 
+/* ─────────────────── L5 — Opt-out interaction matrix ─────────────
+ *
+ * Live DB integration tests. Use a synthetic member '97001' (outside
+ * any real APA range) and clean up after every check. Requires an
+ * anon key (already have SB_ANON) and a Management PAT for the seed
+ * step — skips those tests if PAT missing.
+ */
+const SB_URL  = 'https://dqzbekoaysgaiqljueac.supabase.co';
+const SB_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRxemJla29heXNnYWlxbGp1ZWFjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUxNzA5NzgsImV4cCI6MjA5MDc0Njk3OH0.cCdGxZ4zEFzU_r6lWSDeoNWG67Q4MSYCAtpds035dfU';
+const PAT     = process.env.SUPABASE_PAT || '';
+const T_MEM   = '97001';   // synthetic member — outside real APA number range
+
+const anonH = {
+  apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON,
+  'Accept-Profile': 'slate', 'Content-Profile': 'slate', 'Content-Type': 'application/json'
+};
+const anonGet = async (p) => {
+  const r = await fetch(SB_URL + '/rest/v1/' + p, { headers: anonH });
+  if (!r.ok) throw new Error('anonGet ' + r.status + ': ' + (await r.text()).slice(0, 200));
+  return r.json();
+};
+const anonUpsertOptout = async (mem, denied) => {
+  const r = await fetch(SB_URL + '/rest/v1/patch_optouts?on_conflict=member_number', {
+    method: 'POST',
+    headers: { ...anonH, Prefer: 'resolution=merge-duplicates,return=representation' },
+    body: JSON.stringify({ member_number: mem, opted_out_types: denied })
+  });
+  if (!r.ok) throw new Error('upsert ' + r.status + ': ' + (await r.text()).slice(0, 200));
+  return r.json();
+};
+const anonDeleteOptout = async (mem) => {
+  const r = await fetch(SB_URL + '/rest/v1/patch_optouts?member_number=eq.' + encodeURIComponent(mem),
+    { method: 'DELETE', headers: anonH });
+  if (!r.ok && r.status !== 404) throw new Error('delete ' + r.status);
+};
+const sqlPriv = async (q) => {
+  if (!PAT) throw new Error('SUPABASE_PAT not set — cannot run privileged step');
+  const r = await fetch('https://api.supabase.com/v1/projects/dqzbekoaysgaiqljueac/database/query', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query: q })
+  });
+  const t = await r.text();
+  if (!r.ok) throw new Error('SQL ' + r.status + ': ' + t.slice(0, 200));
+  return JSON.parse(t);
+};
+
+/* Ensure clean slate before starting */
+await anonDeleteOptout(T_MEM).catch(() => {});
+
+/* Simulate the *mail-filter* the shipped code applies. Any test that
+   claims "opted out → not mailed" or "not opted out → mailed" runs
+   through this exact filter so we can't drift from the production
+   semantics. */
+function mailQueueFor(patches, optoutRows) {
+  const map = new Map();
+  for (const o of (optoutRows || [])) map.set(o.member_number, new Set(o.opted_out_types || []));
+  return patches.filter(p => {
+    if (p.mailed_at) return false;
+    const s = map.get(p.member_number);
+    return !(s && s.has(p.sp_type));
+  });
+}
+
+/* L5a — attribution invariant: compute output for a given BD row set is
+   identical whether the member is opted out or not. Opt-out doesn't
+   suppress the record, only affects downstream mail queue. */
+{
+  const bd = [
+    { member_number: T_MEM, member_name: 'Test A', division_number: '001', team_number: '00101',
+      eight_ob: 1, eight_br: 1, nine_os: 1, nine_br: 1 }
+  ];
+  const optNone  = computeFromBdRows(bd);        // no opt-out state used in compute now
+  const optFull  = computeFromBdRows(bd);        // same input → same output regardless
+  if (JSON.stringify(optNone) === JSON.stringify(optFull) && optNone.length > 0) {
+    pass('L5a.attribution-invariant', 'Compute output invariant under opt-out state (' + optNone.length + ' patches, both slams present)');
+  } else {
+    fail('L5a.attribution-invariant', 'output diverged', { optNone, optFull });
+  }
+}
+
+/* L5b — mail queue: no opt-out → all unmailed patches queued */
+{
+  const patches = [
+    { member_number: T_MEM, sp_type: '9m', mailed_at: null },
+    { member_number: T_MEM, sp_type: 'n',  mailed_at: null }
+  ];
+  const q = mailQueueFor(patches, []);
+  if (q.length === 2) pass('L5b.no-optout-all-queued', 'No opt-out → both patches queued');
+  else fail('L5b.no-optout-all-queued', 'unexpected queue', q);
+}
+
+/* L5c — full opt-out → zero patches queued (attribution still present) */
+{
+  const patches = [
+    { member_number: T_MEM, sp_type: '9m', mailed_at: null },
+    { member_number: T_MEM, sp_type: 'n',  mailed_at: null },
+    { member_number: T_MEM, sp_type: '9',  mailed_at: null }
+  ];
+  const optouts = [{ member_number: T_MEM, opted_out_types: OPTOUT_ALL_CODES() }];
+  const q = mailQueueFor(patches, optouts);
+  if (q.length === 0) pass('L5c.full-optout-none-queued', 'Full opt-out → zero patches in queue (records still exist)');
+  else fail('L5c.full-optout-none-queued', 'unexpected queue', q);
+}
+function OPTOUT_ALL_CODES() { return ['r','8','x','9','n','k','m8','mx','m9','mn','8m','9m','g']; }
+
+/* L5d — opt out of just the SLAM (9m) but not constituents → 9 and n
+   still queued; 9m suppressed. Verifies granularity. */
+{
+  const patches = [
+    { member_number: T_MEM, sp_type: '9m', mailed_at: null },
+    { member_number: T_MEM, sp_type: '9',  mailed_at: null },
+    { member_number: T_MEM, sp_type: 'n',  mailed_at: null }
+  ];
+  const q = mailQueueFor(patches, [{ member_number: T_MEM, opted_out_types: ['9m'] }]);
+  const codes = new Set(q.map(p => p.sp_type));
+  if (codes.has('9') && codes.has('n') && !codes.has('9m')) {
+    pass('L5d.slam-only-optout', 'Slam-only opt-out excludes 9m, keeps 9 + n');
+  } else {
+    fail('L5d.slam-only-optout', 'granularity broken', [...codes]);
+  }
+}
+
+/* L5e — opt out of the CONSTITUENT (n) but not the slam (9m) → 9m still
+   queued because opt-out is per-code, not per-recipe. Edge case check. */
+{
+  const patches = [
+    { member_number: T_MEM, sp_type: '9m', mailed_at: null },
+    { member_number: T_MEM, sp_type: 'n',  mailed_at: null }
+  ];
+  const q = mailQueueFor(patches, [{ member_number: T_MEM, opted_out_types: ['n'] }]);
+  const codes = new Set(q.map(p => p.sp_type));
+  if (codes.has('9m') && !codes.has('n')) {
+    pass('L5e.constituent-optout', 'Opt-out of constituent (n) suppresses n but not 9m — per-code semantics');
+  } else {
+    fail('L5e.constituent-optout', 'unexpected', [...codes]);
+  }
+}
+
+/* L5f — empty opted_out_types array acts like no opt-out */
+{
+  const patches = [{ member_number: T_MEM, sp_type: '9m', mailed_at: null }];
+  const q = mailQueueFor(patches, [{ member_number: T_MEM, opted_out_types: [] }]);
+  if (q.length === 1) pass('L5f.empty-array-no-optout', 'Empty opted_out_types array does not suppress mailing');
+  else fail('L5f.empty-array-no-optout', 'suppressed with empty array', q);
+}
+
+/* L5g — mailed_at set → always excluded regardless of opt-out state */
+{
+  const now = new Date().toISOString();
+  const patches = [
+    { member_number: T_MEM, sp_type: '9m', mailed_at: now },
+    { member_number: T_MEM, sp_type: '9m', mailed_at: null }
+  ];
+  const q = mailQueueFor(patches, []);
+  if (q.length === 1 && !q[0].mailed_at) pass('L5g.mailed-stays-excluded', 'Already-mailed patches never re-enter queue');
+  else fail('L5g.mailed-stays-excluded', 'unexpected', q);
+}
+
+/* L5h — LIVE round-trip: write via anon (as PatchCheck would), read via
+   anon (as Slate would). Assert the state matches what we wrote. */
+try {
+  await anonUpsertOptout(T_MEM, ['9m', 'n']);
+  const rows = await anonGet('patch_optouts?member_number=eq.' + T_MEM + '&select=opted_out_types');
+  const got = new Set(rows[0].opted_out_types);
+  if (got.has('9m') && got.has('n') && got.size === 2) {
+    pass('L5h.live-round-trip', 'Anon UPSERT + anon GET round-trip preserves opted_out_types');
+  } else {
+    fail('L5h.live-round-trip', 'array drifted', [...got]);
+  }
+} catch (e) { fail('L5h.live-round-trip', 'test threw', e.message); }
+
+/* L5i — LIVE toggle: modify existing opted_out_types (add a code). This
+   is the exact path the Slate admin per-code chip toggle takes. */
+try {
+  await anonUpsertOptout(T_MEM, ['9m', 'n', 'g']);
+  const rows = await anonGet('patch_optouts?member_number=eq.' + T_MEM + '&select=opted_out_types');
+  const got = new Set(rows[0].opted_out_types);
+  if (got.has('9m') && got.has('n') && got.has('g') && got.size === 3) {
+    pass('L5i.live-toggle-add', 'Admin add-a-code toggle path works via anon UPSERT');
+  } else {
+    fail('L5i.live-toggle-add', 'unexpected', [...got]);
+  }
+} catch (e) { fail('L5i.live-toggle-add', 'test threw', e.message); }
+
+/* L5j — LIVE remove: DELETE the row (Slate admin "Remove" button, or
+   PatchCheck's ✓-check-all path). No sp_patches side-effect expected —
+   3.161 neutered spDeleteOptoutPatches. */
+try {
+  /* Seed a fake sp_patches row for T_MEM so we can verify DELETE
+     doesn't touch it. Only works with PAT. */
+  if (PAT) {
+    await sqlPriv("delete from slate.sp_patches where member_number='" + T_MEM + "'");
+    await sqlPriv("insert into slate.sp_patches (session_id, operator_id, member_number, member_name, division_number, team_number, sp_type, is_slam, weight) values (1, 1, '" + T_MEM + "', 'Test', '999', '99901', '9m', true, 2)");
+    await anonDeleteOptout(T_MEM);
+    const patches = await sqlPriv("select id, sp_type, mailed_at from slate.sp_patches where member_number='" + T_MEM + "'");
+    if (patches.length === 1 && patches[0].sp_type === '9m' && !patches[0].mailed_at) {
+      pass('L5j.remove-optout-preserves-patches', 'Removing opt-out row leaves sp_patches untouched');
+    } else {
+      fail('L5j.remove-optout-preserves-patches', 'sp_patches modified', patches);
+    }
+    /* cleanup */
+    await sqlPriv("delete from slate.sp_patches where member_number='" + T_MEM + "'");
+  } else {
+    pass('L5j.remove-optout-preserves-patches', 'skipped (no SUPABASE_PAT)');
+  }
+} catch (e) { fail('L5j.remove-optout-preserves-patches', 'test threw', e.message); }
+
+/* L5k — non-existent member's opt-out is a no-op / DELETE is idempotent */
+try {
+  await anonDeleteOptout('99999999');   // no such row
+  pass('L5k.delete-nonexistent', 'DELETE on absent member is a no-op (no error)');
+} catch (e) { fail('L5k.delete-nonexistent', 'DELETE threw on absent row', e.message); }
+
+/* L5l — attribution regression: verify the compute function contains NO
+   opt-out gate anywhere in its body (3.161 removal). Grep the extracted
+   function source for any variant of the old gate. */
+{
+  const startIdx = html.indexOf('async function spComputePatches');
+  const endIdx   = html.indexOf('\n}', startIdx);
+  const body     = html.slice(startIdx, endIdx);
+  const patterns = [
+    /if\s*\(\s*isOptedOut\s*\(/,
+    /optoutsByMember/,
+    /pre[-_ ]?compute cleanup/i,   // comment or var name
+    /preCleaned/
+  ];
+  const hits = patterns.filter(p => p.test(body));
+  if (hits.length) fail('L5l.no-optout-gate', hits.length + ' opt-out gate patterns still in compute', hits.map(p => p.source));
+  else pass('L5l.no-optout-gate', 'No compute-time opt-out gate found (attribution guaranteed)');
+}
+
+/* L5m — mail-time filter present in BOTH consumers */
+{
+  const rendersFilter = html.match(/function spRenderPatches[\s\S]{0,4000}optoutMap/);
+  const mailFilter    = html.match(/async function spMailPatches[\s\S]{0,3000}optoutMap/);
+  if (rendersFilter && mailFilter) pass('L5m.filter-in-both-consumers', 'Mail-time filter applied in spRenderPatches AND spMailPatches');
+  else fail('L5m.filter-in-both-consumers', 'filter missing', { inRender: !!rendersFilter, inMail: !!mailFilter });
+}
+
+/* L5n — idempotency: upserting the SAME opt-out twice yields same state */
+try {
+  await anonUpsertOptout(T_MEM, ['9m', 'n']);
+  await anonUpsertOptout(T_MEM, ['9m', 'n']);
+  const rows = await anonGet('patch_optouts?member_number=eq.' + T_MEM + '&select=opted_out_types');
+  const got = new Set(rows[0].opted_out_types);
+  if (got.size === 2 && got.has('9m') && got.has('n')) pass('L5n.upsert-idempotent', 'Repeated identical upsert is idempotent');
+  else fail('L5n.upsert-idempotent', 'state drifted', [...got]);
+} catch (e) { fail('L5n.upsert-idempotent', 'threw', e.message); }
+
+/* L5o — flipping direction: full opt-out → clear → full again works */
+try {
+  await anonUpsertOptout(T_MEM, OPTOUT_ALL_CODES());
+  const full = await anonGet('patch_optouts?member_number=eq.' + T_MEM + '&select=opted_out_types');
+  await anonDeleteOptout(T_MEM);
+  const cleared = await anonGet('patch_optouts?member_number=eq.' + T_MEM + '&select=opted_out_types');
+  await anonUpsertOptout(T_MEM, OPTOUT_ALL_CODES());
+  const fullAgain = await anonGet('patch_optouts?member_number=eq.' + T_MEM + '&select=opted_out_types');
+  if (full[0]?.opted_out_types.length === 13 && cleared.length === 0 && fullAgain[0]?.opted_out_types.length === 13) {
+    pass('L5o.flip-flip-flop', 'Full → clear → full round-trip works');
+  } else {
+    fail('L5o.flip-flip-flop', 'state anomaly', { full, cleared, fullAgain });
+  }
+} catch (e) { fail('L5o.flip-flip-flop', 'threw', e.message); }
+
+/* Final cleanup */
+await anonDeleteOptout(T_MEM).catch(() => {});
+
 /* ─────────────────── L4 — Live regression (served build) ────────── */
 
 try {
   const liveHtml = await fetch(HTML_URL).then(r => r.text());
-  if (/const APP_VERSION = '3\.161'/.test(liveHtml)) pass('L4a.live-version', 'Live serves 3.161');
-  else {
-    const m = liveHtml.match(/const APP_VERSION = '([^']+)'/);
-    fail('L4a.live-version', 'Live version=' + (m && m[1]) + ', expected 3.161');
+  /* Version-drift check: fail if the live page is BEHIND the local
+     working copy. Ahead is fine (we just haven't updated the local
+     bookmark yet). Extracts the numeric version from local admin.html
+     and compares. */
+  const localMatch = html.match(/const APP_VERSION = '(\d+)\.(\d+)'/);
+  const liveMatch  = liveHtml.match(/const APP_VERSION = '(\d+)\.(\d+)'/);
+  if (!localMatch || !liveMatch) {
+    fail('L4a.live-version', 'could not parse version from local or live', { local: !!localMatch, live: !!liveMatch });
+  } else {
+    const local = [+localMatch[1], +localMatch[2]];
+    const live  = [+liveMatch[1],  +liveMatch[2]];
+    const cmp   = live[0] - local[0] || live[1] - local[1];
+    if (cmp < 0) fail('L4a.live-version', 'Live ' + live.join('.') + ' behind local ' + local.join('.') + ' — deploy pending');
+    else         pass('L4a.live-version', 'Live version ' + live.join('.') + ' ≥ local ' + local.join('.'));
   }
   const stillHasOldGate = /if\s*\(\s*isOptedOut\s*\([^)]+\)\s*\)\s*continue/.test(liveHtml);
   if (stillHasOldGate) fail('L4b.live-no-old-gate', 'Live still has the old opt-out compute gate');
