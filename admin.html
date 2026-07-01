@@ -2578,8 +2578,9 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           Emails everyone in the selected session who earned at least one
           cert. Template supports <code>{first_name}</code>,
           <code>{last_name}</code>, <code>{full_name}</code>,
-          <code>{session_name}</code>, <code>{cert_count}</code>,
-          <code>{cert_count_plural}</code>, <code>{cert_list_html}</code>.
+          <code>{apa_number}</code>, <code>{session_name}</code>,
+          <code>{cert_count}</code>, <code>{cert_count_plural}</code>,
+          <code>{cert_list_html}</code>.
           Each send is logged to <code>slate.cert_notify_log</code>.
         </p>
 
@@ -3049,7 +3050,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.167';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.168';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -20913,7 +20914,7 @@ function certsNotifyToggleAll(checked) {
 
 /* Template substitution — safe: only replaces known {tokens}. */
 function certsNotifySubstitute(str, ctx) {
-  return String(str || '').replace(/\{(first_name|last_name|full_name|session_name|cert_count|cert_count_plural|cert_list_html)\}/g,
+  return String(str || '').replace(/\{(first_name|last_name|full_name|session_name|cert_count|cert_count_plural|cert_list_html|apa_number)\}/g,
     (_, k) => (ctx[k] == null ? '' : String(ctx[k])));
 }
 
@@ -20941,6 +20942,7 @@ async function certsNotifyBuildContext(holder, sessionName) {
     last_name:         esc(last),
     full_name:         esc((first + ' ' + last).trim()),
     session_name:      esc(sessionName),
+    apa_number:        esc(holder.apa_number || holder.member_number || ''),
     cert_count:        count,
     cert_count_plural: count === 1 ? '' : 's',
     cert_list_html:    list ? '<ul>' + list + '</ul>' : '',
