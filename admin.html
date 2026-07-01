@@ -3081,7 +3081,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.172';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.173';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -9848,10 +9848,29 @@ async function spAdhocEnvelopes() {
       if (!p.address1 || !p.city) { noAddr.push({ mn, name }); continue; }
       /* Strip the dangling "97123-____" zip pattern seen in some rows. */
       const zip = (p.zip || '').replace(/[-_\s]+$/, '');
+      /* If either address line starts with "c/o …", route it to co_name so
+         it renders BETWEEN the recipient and the street (matching the main
+         SP Print Envelopes path). Otherwise it would land after the street
+         because address_line2 renders below address_line1. Handles: c/o,
+         C/O, c/o., co, C/o. */
+      let addr1  = p.address1;
+      let addr2  = p.address2 || null;
+      let coName = null;
+      const coRe = /^\s*c\s*\/?\s*o\.?\s+/i;
+      if (addr1 && coRe.test(addr1)) {
+        coName = addr1.replace(coRe, '').trim();
+        addr1  = addr2 || '';
+        addr2  = null;
+      } else if (addr2 && coRe.test(addr2)) {
+        coName = addr2.replace(coRe, '').trim();
+        addr2  = null;
+      }
+      if (!addr1) { noAddr.push({ mn, name }); continue; }
       envs.push({
         contact_name:  name,
-        address_line1: p.address1,
-        address_line2: p.address2 || null,
+        co_name:       coName,
+        address_line1: addr1,
+        address_line2: addr2,
         city:          p.city,
         state:         p.state || '',
         zip:           zip,
