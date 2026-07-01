@@ -1413,6 +1413,61 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         <div id="spOptoutList" style="margin-top:10px;"><p class="hint" style="margin:0;">No opt-outs.</p></div>
       </div>
 
+      <!-- ── Opt-out confirmation email template (3.174+) ─────────────
+           PatchCheck sends this to a player each time their opt-out
+           choices actually change. Template lives here because it sits
+           next to the data it describes; sends log to
+           slate.optout_confirm_log. -->
+      <div class="card" style="margin-bottom:14px;" id="spOptoutEmailCard">
+        <h2 style="margin:0 0 6px;">Opt-out confirmation email</h2>
+        <p class="hint" style="margin:0 0 10px;">
+          Fires from PatchCheck whenever a player saves an opt-out change.
+          <strong>No email is sent</strong> if they hit Save with no
+          changes. Supports these tokens:
+          <code>{first_name}</code>, <code>{last_name}</code>,
+          <code>{full_name}</code>, <code>{apa_number}</code>,
+          <code>{now_optout_html}</code> (self-rendering section for
+          patches they'll NO LONGER receive; empty when no additions),
+          <code>{now_optin_html}</code> (section for patches they'll
+          NOW receive; empty when no re-enables).
+        </p>
+        <label for="optoutConfirmSubject" style="font-weight:700;font-size:0.86rem">Subject</label>
+        <input type="text" id="optoutConfirmSubject" class="form-input" style="width:100%;margin-bottom:8px">
+        <label for="optoutConfirmBody" style="font-weight:700;font-size:0.86rem">HTML body</label>
+        <textarea id="optoutConfirmBody" class="form-input" rows="10" style="width:100%;font-family:ui-monospace,Menlo,monospace;font-size:0.86rem"></textarea>
+        <div style="display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap">
+          <button class="btn btn-primary btn-sm" onclick="optoutConfirmSaveTemplate()">Save template</button>
+          <button class="btn btn-outline btn-sm" onclick="optoutConfirmPreview()">Preview (sample data)</button>
+          <span id="optoutConfirmTemplateStatus" class="status-line" style="flex:1" role="status" aria-live="polite"></span>
+        </div>
+        <div id="optoutConfirmPreview" style="display:none;margin-top:10px;padding:10px;border:1px solid var(--border);border-radius:8px;background:#fff">
+          <div style="font-size:0.86rem;font-weight:700;color:#666;margin-bottom:6px" id="optoutConfirmPreviewLine"></div>
+          <div id="optoutConfirmPreviewBody" style="border-top:1px solid #f1f1f1;padding-top:8px"></div>
+        </div>
+        <details style="margin-top:12px">
+          <summary style="cursor:pointer;font-weight:700">Test send</summary>
+          <div style="padding:8px 0">
+            <p class="hint" style="margin:0 0 8px;font-size:0.86rem">
+              Sends one email using the current template + sample opt-out
+              change data to any address you enter. Logged with
+              <code>status='test'</code>.
+            </p>
+            <div style="display:flex;gap:8px;align-items:flex-end">
+              <div style="flex:1">
+                <label for="optoutConfirmTestEmail" style="font-weight:700;font-size:0.86rem">Send test to</label>
+                <input type="email" id="optoutConfirmTestEmail" class="form-input" placeholder="you@example.com" style="width:100%">
+              </div>
+              <button class="btn btn-primary btn-sm" onclick="optoutConfirmSendTest()">Send test</button>
+            </div>
+            <div id="optoutConfirmTestStatus" class="status-line" style="margin-top:6px" role="status" aria-live="polite"></div>
+          </div>
+        </details>
+        <details style="margin-top:8px">
+          <summary style="cursor:pointer;font-weight:700">Recent sends</summary>
+          <div id="optoutConfirmLog" style="padding:8px 0;font-size:0.86rem;color:#333"></div>
+        </details>
+      </div>
+
       <!-- Patches — computation, envelope-grouped list, mail batch, undo -->
       <div class="card" style="margin-bottom:14px;">
         <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
@@ -3081,7 +3136,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.173';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.174';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -8161,6 +8216,7 @@ async function spLoadAll() {
   spRenderReports();
   spRenderExpected();
   spLoadOptouts();
+  optoutConfirmInit().catch(e => console.warn('[optout-confirm] init', e));
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -8509,6 +8565,218 @@ const SP_FULL_NAME = {
   '9m':'9-Ball Mini Slam',
   'g':'Grand Slam'
 };
+
+/* ════════════════════════════════════════════════════════════════════
+   OPT-OUT CONFIRMATION EMAIL — Slate side (3.174+)
+   ════════════════════════════════════════════════════════════════════
+   PatchCheck fires this email when a player saves an opt-out change.
+   Slate owns:
+     - the editable template   (slate.optout_confirm_template, op=1)
+     - the sends log           (slate.optout_confirm_log)
+     - preview + test-send UX  (this card lives in SP Reports)
+   PatchCheck owns the diff computation + send trigger. GAS action:
+   optout_confirm_send. */
+
+/* Same GAS endpoint as TCQ + cert-notify. Hardcoded rather than referencing
+   TCQ_MAILER_URL because that const is declared later in the file and the
+   module load order would put this at TDZ. */
+const OPTOUT_CONFIRM_MAILER_URL = 'https://script.google.com/macros/s/AKfycbzGTzkBRTrIIP_tD6sbtOOUmNZkXDdtxPoO4c8fdWt5h3tZFueNSISPv8Q3LWStx73Whw/exec';
+
+let _optoutConfirmTemplate = { subject: '', body_html: '' };
+
+async function optoutConfirmInit() {
+  await optoutConfirmLoadTemplate();
+  await optoutConfirmLoadLog();
+}
+
+async function optoutConfirmLoadTemplate() {
+  try {
+    const rows = await sb('GET',
+      'optout_confirm_template?operator_id=eq.1&select=subject,body_html',
+      null, { 'Accept-Profile': 'slate' });
+    if (rows && rows.length) {
+      _optoutConfirmTemplate = { subject: rows[0].subject, body_html: rows[0].body_html };
+      const s = document.getElementById('optoutConfirmSubject');
+      const b = document.getElementById('optoutConfirmBody');
+      if (s) s.value = rows[0].subject;
+      if (b) b.value = rows[0].body_html;
+    }
+  } catch (e) { console.warn('[optout-confirm] template load', e); }
+}
+
+async function optoutConfirmSaveTemplate() {
+  const subject   = document.getElementById('optoutConfirmSubject').value.trim();
+  const body_html = document.getElementById('optoutConfirmBody').value;
+  const stat = document.getElementById('optoutConfirmTemplateStatus');
+  if (!subject || !body_html) {
+    stat.textContent = 'Subject + body required.'; stat.className = 'status-line err'; return;
+  }
+  try {
+    await sb('PATCH', 'optout_confirm_template?operator_id=eq.1',
+      { subject, body_html, updated_by: getDeviceId(), updated_at: new Date().toISOString() },
+      { 'Accept-Profile': 'slate', 'Content-Profile': 'slate' });
+    _optoutConfirmTemplate = { subject, body_html };
+    stat.textContent = '✓ Template saved.'; stat.className = 'status-line ok';
+    setTimeout(() => { stat.textContent = ''; stat.className = 'status-line'; }, 3000);
+    /* Re-render preview if visible. */
+    if (document.getElementById('optoutConfirmPreview')?.style?.display === 'block') {
+      optoutConfirmPreview();
+    }
+  } catch (e) {
+    stat.textContent = 'Save failed: ' + e.message; stat.className = 'status-line err';
+  }
+}
+
+/* Substitution — same shape as the cert-notify emailer for consistency.
+   ctx.first_name/last_name/etc are pre-encoded before substitution. */
+function optoutConfirmSubstitute(str, ctx) {
+  return String(str || '').replace(/\{(first_name|last_name|full_name|apa_number|now_optout_html|now_optin_html)\}/g,
+    (_, k) => (ctx[k] == null ? '' : String(ctx[k])));
+}
+
+/* Build a section HTML block for a list of SP codes. Empty string when
+   the list is empty so the parent template shows nothing on that side. */
+function optoutConfirmSectionHtml(codes, header) {
+  if (!codes || !codes.length) return '';
+  const items = codes.map(c => '<li>' + esc(SP_FULL_NAME[c] || c) + '</li>').join('');
+  return '<p><strong>' + esc(header) + '</strong></p><ul>' + items + '</ul>';
+}
+
+/* Build a sample context for preview + test-send. Two mock changes
+   demonstrate both directions so the admin can eyeball the layout. */
+function optoutConfirmSampleCtx() {
+  return {
+    first_name:      esc('Sample'),
+    last_name:       esc('Player'),
+    full_name:       esc('Sample Player'),
+    apa_number:      esc('97200000'),
+    now_optout_html: optoutConfirmSectionHtml(['r','x'], "You'll NO LONGER receive:"),
+    now_optin_html:  optoutConfirmSectionHtml(['k'],     "You'll NOW receive:"),
+    _added_codes:    ['r','x'],
+    _removed_codes:  ['k'],
+  };
+}
+
+function optoutConfirmPreview() {
+  const box = document.getElementById('optoutConfirmPreview');
+  const line = document.getElementById('optoutConfirmPreviewLine');
+  const body = document.getElementById('optoutConfirmPreviewBody');
+  const ctx = optoutConfirmSampleCtx();
+  const subject   = optoutConfirmSubstitute(document.getElementById('optoutConfirmSubject').value, ctx);
+  const body_html = optoutConfirmSubstitute(document.getElementById('optoutConfirmBody').value, ctx);
+  box.style.display = 'block';
+  line.textContent  = 'Preview — subject: ' + subject;
+  body.innerHTML    = body_html;
+}
+
+async function optoutConfirmSend(to, subject, body_html, ctx, isTest) {
+  const r = await fetch(OPTOUT_CONFIRM_MAILER_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({
+      action:        'optout_confirm_send',
+      admin_key:     SB_KEY,
+      to, subject, body_html,
+      member_number: ctx.member_number || 'test',
+      added_codes:   ctx._added_codes   || [],
+      removed_codes: ctx._removed_codes || [],
+      is_test:       !!isTest
+    }),
+    redirect: 'follow'
+  });
+  const txt = await r.text();
+  try { return JSON.parse(txt); } catch (_) { return { ok: false, error: 'bad gateway: ' + txt.slice(0, 120) }; }
+}
+
+async function optoutConfirmSendTest() {
+  const to = document.getElementById('optoutConfirmTestEmail').value.trim();
+  const stat = document.getElementById('optoutConfirmTestStatus');
+  if (!to || !/@/.test(to)) {
+    stat.textContent = 'Enter a valid email address.'; stat.className = 'status-line err'; return;
+  }
+  const ctx = optoutConfirmSampleCtx();
+  const subject   = optoutConfirmSubstitute(document.getElementById('optoutConfirmSubject').value, ctx);
+  const body_html = optoutConfirmSubstitute(document.getElementById('optoutConfirmBody').value, ctx);
+  stat.textContent = 'Sending test…'; stat.className = 'status-line';
+  try {
+    const res = await optoutConfirmSend(to, subject, body_html, ctx, /* isTest */ true);
+    if (res.ok) {
+      stat.textContent = '✓ Test sent to ' + to + '.';
+      stat.className = 'status-line ok';
+      optoutConfirmLoadLog().catch(() => {});
+    } else {
+      stat.textContent = '✗ ' + (res.error || 'send failed'); stat.className = 'status-line err';
+    }
+  } catch (e) {
+    stat.textContent = '✗ ' + e.message; stat.className = 'status-line err';
+  }
+}
+
+async function optoutConfirmLoadLog() {
+  const el = document.getElementById('optoutConfirmLog');
+  if (!el) return;
+  try {
+    const rows = await sb('GET',
+      'optout_confirm_log?select=member_number,recipient_email,status,sent_at&order=sent_at.desc&limit=25',
+      null, { 'Accept-Profile': 'slate' });
+    if (!rows || !rows.length) { el.innerHTML = '<p class="hint" style="margin:0">No sends yet.</p>'; return; }
+    el.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:0.82rem">' +
+      '<thead><tr style="text-align:left">' +
+      '<th style="padding:4px 8px">When</th>' +
+      '<th style="padding:4px 8px">Member</th>' +
+      '<th style="padding:4px 8px">Recipient</th>' +
+      '<th style="padding:4px 8px">Status</th>' +
+      '</tr></thead><tbody>' +
+      rows.map(r => '<tr style="border-top:1px solid #f1f1f1">' +
+        '<td style="padding:4px 8px;color:var(--muted)">' + esc(new Date(r.sent_at).toLocaleString()) + '</td>' +
+        '<td style="padding:4px 8px;font-family:ui-monospace,monospace">' + esc(r.member_number) + '</td>' +
+        '<td style="padding:4px 8px">' + esc(r.recipient_email) + '</td>' +
+        '<td style="padding:4px 8px;font-weight:700;color:' +
+          (r.status === 'sent' ? '#0a6b3a' : r.status === 'test' ? '#666' : '#b91c1c') +
+          '">' + esc(r.status) + '</td>' +
+      '</tr>').join('') + '</tbody></table>';
+  } catch (e) {
+    el.innerHTML = '<p class="hint" style="margin:0;color:#b91c1c">Log load failed: ' + esc(e.message) + '</p>';
+  }
+}
+
+/* Public helper for PatchCheck (or any client): given a member + email +
+   before/after opt-out arrays, compute the diff, load the template, and
+   send the confirmation. Returns { ok, error?, added_codes, removed_codes,
+   skipped } — skipped=true if before === after (no email fired). */
+async function optoutConfirmMaybeSend(memberNumber, recipientEmail, playerNames, before, after) {
+  const setBefore = new Set(before || []);
+  const setAfter  = new Set(after  || []);
+  const added   = [...setAfter].filter(c => !setBefore.has(c));   // now opted OUT
+  const removed = [...setBefore].filter(c => !setAfter.has(c));   // now opted IN
+  if (!added.length && !removed.length) return { ok: true, skipped: true, added_codes: [], removed_codes: [] };
+  if (!recipientEmail) return { ok: false, error: 'no email on file', added_codes: added, removed_codes: removed };
+  await optoutConfirmLoadTemplate();
+  const first = playerNames?.first_name || '';
+  const last  = playerNames?.last_name  || '';
+  const apa   = playerNames?.apa_number || memberNumber;
+  const ctx = {
+    first_name:      esc(first),
+    last_name:       esc(last),
+    full_name:       esc((first + ' ' + last).trim()),
+    apa_number:      esc(apa),
+    now_optout_html: optoutConfirmSectionHtml(added,   "You'll NO LONGER receive:"),
+    now_optin_html:  optoutConfirmSectionHtml(removed, "You'll NOW receive:"),
+    member_number:   memberNumber,
+    _added_codes:    added,
+    _removed_codes:  removed,
+  };
+  const subject   = optoutConfirmSubstitute(_optoutConfirmTemplate.subject || '', ctx);
+  const body_html = optoutConfirmSubstitute(_optoutConfirmTemplate.body_html || '', ctx);
+  const res = await optoutConfirmSend(recipientEmail, subject, body_html, ctx, /* isTest */ false);
+  return { ...res, added_codes: added, removed_codes: removed };
+}
+
+window.optoutConfirmInit          = optoutConfirmInit;
+window.optoutConfirmSaveTemplate  = optoutConfirmSaveTemplate;
+window.optoutConfirmPreview       = optoutConfirmPreview;
+window.optoutConfirmSendTest      = optoutConfirmSendTest;
+window.optoutConfirmMaybeSend     = optoutConfirmMaybeSend;
 
 /* Inactive team — pulled mid-session and renumbered with a team-within-
    division number > 16 (APA convention). Active teams are 01-16. A 5-digit
