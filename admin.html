@@ -2708,7 +2708,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.160';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.161';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -7905,24 +7905,14 @@ window.spToggleOptoutType = spToggleOptoutType;
    to the current (session, operator). Already-mailed patches are never
    touched. Returns the number of rows deleted (PostgREST returns them
    when Prefer: return=representation is set). */
-async function spDeleteOptoutPatches(memberNumber, codes) {
-  if (!currentSession || !currentSession.id) return 0;
-  if (!codes || !codes.length) return 0;
-  const opId = SP_OPERATOR_SHORTS[_spOperatorFilter];
-  if (opId == null) return 0;
-  try {
-    const res = await sb('DELETE',
-      'sp_patches?member_number=eq.' + encodeURIComponent(memberNumber)
-      + '&sp_type=in.(' + codes.map(c => encodeURIComponent(c)).join(',') + ')'
-      + '&mailed_at=is.null'
-      + '&session_id=eq.' + currentSession.id
-      + '&operator_id=eq.' + opId,
-      null, { 'Prefer': 'return=representation' });
-    return (res || []).length;
-  } catch (e) {
-    console.warn('[optout] delete failed', memberNumber, codes, e);
-    return 0;
-  }
+async function spDeleteOptoutPatches(/* memberNumber, codes */) {
+  /* No-op since 2026-07-01 (Slate 3.161). Opt-out is a MAILING preference
+     and must not erase attribution. The mail-queue filter in
+     spRenderPatches drops opted-out (member × sp_type) from the "to mail"
+     set at render time, preserving the sp_patches record for history,
+     certs, and PatchCheck. Retained as a stub so existing call-sites
+     keep working. */
+  return 0;
 }
 
 async function spSaveOptouts() {
@@ -8287,42 +8277,15 @@ async function spComputePatches() {
       'sp_by_division_rows?report_id=eq.' + bdReport.id + '&select=*&order=id.asc');
     console.log('[patches] BD report', bdReport.id, 'has', rows.length, 'rows');
 
-    // Pull the opt-out list fresh (in case it was edited since page load).
-    // Each opt-out lists which SP codes the member is opted out of; the
-    // loops below check `optoutsByMember[mem]` per code, so an opt-out
-    // for just one code (e.g. only Rackless) leaves the rest to compute
-    // normally. Already-mailed patches stay untouched.
-    let optoutsByMember = new Map();   // member_number → Set<sp_code>
-    try {
-      const optouts = await sb('GET',
-        'patch_optouts?select=member_number,opted_out_types');
-      for (const o of (optouts || [])) {
-        optoutsByMember.set(o.member_number, new Set(o.opted_out_types || []));
-      }
-    } catch (e) { /* non-fatal — proceed without opt-out filter */ }
-    const isOptedOut = (mem, code) =>
-      optoutsByMember.has(mem) && optoutsByMember.get(mem).has(code);
-
-    /* Pre-compute cleanup — drop any UNMAILED patches that already exist
-       for an opted-out (member × sp_type). Opt-outs added after a prior
-       compute leave stale rows in sp_patches; this clears them so the
-       re-compute lands in the right state. Mailed patches are never
-       touched. */
-    let preCleaned = 0;
-    for (const [mem, codes] of optoutsByMember.entries()) {
-      if (!codes.size) continue;
-      try {
-        const res = await sb('DELETE',
-          'sp_patches?member_number=eq.' + encodeURIComponent(mem)
-          + '&sp_type=in.(' + [...codes].map(c => encodeURIComponent(c)).join(',') + ')'
-          + '&mailed_at=is.null'
-          + '&session_id=eq.' + currentSession.id
-          + '&operator_id=eq.' + opId,
-          null, { 'Prefer': 'return=representation' });
-        preCleaned += (res || []).length;
-      } catch (e) { /* per-member failure non-fatal */ }
-    }
-    if (preCleaned) console.log('[patches] pre-compute optout cleanup removed:', preCleaned);
+    /* Opt-out is a MAIL-TIME preference, not an attribution suppressor.
+       Compute always creates the sp_patches row for every earned patch
+       (including slams). The mailing queue (spRenderPatches / the
+       envelope builder) filters opted-out (member × sp_type) at RENDER
+       time. Rationale: the record of the achievement should be
+       preserved so cert generation, historical lookups, PatchCheck
+       history, and any downstream analytics see the full picture.
+       Opt-out was previously gated here + deleted unmailed rows on
+       opt-out; both removed 2026-07-01 (Slate 3.161). */
 
     // Filter rows to operator-tagged divisions for this operator. Also
     // drop inactive teams (team-within-division > 16) — those were pulled
@@ -8357,9 +8320,9 @@ async function spComputePatches() {
         if (cnt < 1) continue;
         // The stored patch code: masters variant in a Masters division.
         const storedSp = (isMasters && MASTERS_REMAP[sp]) ? MASTERS_REMAP[sp] : sp;
-        // Per-code opt-out — this player has asked to skip this patch type.
-        if (isOptedOut(mem, storedSp)) continue;
-        // Per-code key (uses the stored — masters-aware — code)
+        // Per-code key (uses the stored — masters-aware — code).
+        // Opt-out is enforced at mail time, NOT here — attribution is
+        // always recorded so history/certs/PatchCheck see the earned patch.
         const key = mem + '|' + div + '|' + storedSp;
         const prior = perCodeMap.get(key);
         if (!prior || teamN > prior.team_number) {
@@ -8400,8 +8363,9 @@ async function spComputePatches() {
       if (!candidates.length) continue;
       const teamsByCode = memberTeamByCode.get(mem) || {};
       for (const slamType of candidates) {
-        // Per-code opt-out — the player has asked to skip this slam.
-        if (isOptedOut(mem, slamType)) continue;
+        // Opt-out is enforced at mail time, NOT here — a mini/grand slam
+        // is a real achievement and stays attributed even if the player
+        // asked us not to MAIL them the patch.
         const deps = SLAM_DEPS[slamType];
         // Routing tiebreaker: highest team# across all constituent SPs
         let bestTeam = null;
@@ -8466,7 +8430,19 @@ function spRenderPatches() {
   const root = document.getElementById('spPatchesList');
   if (!root) return;
   const list = _spPatches || [];
-  const unmailed = list.filter(p => !p.mailed_at);
+  /* Opt-out is applied HERE — as a mail-time filter — so the sp_patches
+     record itself stays intact. Any patch whose (member, sp_type) is in
+     the opt-out list is skipped from the mailing queue but still shows
+     in the list below (with the "opted out" tag rendered per-row). */
+  const optoutMap = new Map();  // member_number → Set<sp_type>
+  for (const o of (_spOptouts || [])) {
+    optoutMap.set(o.member_number, new Set(o.opted_out_types || []));
+  }
+  const isMailBlocked = (p) => {
+    const s = optoutMap.get(p.member_number);
+    return !!(s && s.has(p.sp_type));
+  };
+  const unmailed = list.filter(p => !p.mailed_at && !isMailBlocked(p));
 
   spRenderPatchesSummary(list, _spLastBatch);
 
@@ -8845,7 +8821,19 @@ function spRenderPatchesSummary(list, lastBatch) {
 async function spMailPatches() {
   if (!currentSession || _spOperatorFilter === 'ALL') return;
   const opId = SP_OPERATOR_SHORTS[_spOperatorFilter];
-  const unmailed = (_spPatches || []).filter(p => !p.mailed_at);
+  /* Same mail-time opt-out filter as spRenderPatches — patches whose
+     (member, sp_type) is in the opt-out list are excluded from the
+     batch. The sp_patches row stays in the DB, unmailed forever
+     (unless the player un-opts-out). */
+  const optoutMap = new Map();
+  for (const o of (_spOptouts || [])) {
+    optoutMap.set(o.member_number, new Set(o.opted_out_types || []));
+  }
+  const unmailed = (_spPatches || []).filter(p => {
+    if (p.mailed_at) return false;
+    const s = optoutMap.get(p.member_number);
+    return !(s && s.has(p.sp_type));
+  });
   if (!unmailed.length) return;
 
   const btn = document.getElementById('spMailPatchesBtn');
