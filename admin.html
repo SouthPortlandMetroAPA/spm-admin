@@ -2739,9 +2739,9 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         </details>
 
         <!-- Add-new-team modal -->
-        <div class="modal-backdrop" id="hpNewTeamModal" style="display:none">
+        <div class="modal-backdrop" id="hpNewTeamModal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="hpNewTeamModalTitle" onkeydown="if(event.key==='Escape'){hpCloseNewTeamModal();}">
           <div class="modal" style="max-width:520px">
-            <h3 style="margin:0 0 10px">Add new Fall team</h3>
+            <h3 id="hpNewTeamModalTitle" style="margin:0 0 10px">Add new Fall team</h3>
             <p class="hint" style="margin-top:0;margin-bottom:10px">
               For a team that will play in Fall but wasn't in Summer/Spring. They start as
               "New for Fall" and land in the placement builder right away.
@@ -2958,7 +2958,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.164';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.165';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -21073,9 +21073,18 @@ async function hpLoadPlanTeams() {
   }
 }
 
-/* Strip trailing "8 Ball" / "9 Ball" so DJ pairs share a key. */
+/* Normalize a team name: collapse internal whitespace, straighten curly apostrophes,
+   trim. Used as the canonical DB form so dedup + unique(target_session, team_name)
+   don't get tripped by "Diamond Jim's" vs "Diamond Jim's" or double spaces. */
+function hpNormalizeName(name) {
+  return (name || '').replace(/[‘’]/g, "'").replace(/\s+/g, ' ').trim();
+}
+
+/* Strip trailing "N Ball" / "N-Ball" markers so DJ pairs share a base key.
+   Requires leading whitespace before the marker so a leading-Ball team like
+   "8-Ball Bandits" is NOT flattened to "". Handles multi-digit ("10 Ball"). */
 function hpBaseName(name) {
-  return (name || '').replace(/\s*\d[- ]?[Bb]all.*$/, '').trim();
+  return hpNormalizeName(name).replace(/\s+\d+[- ]?[Bb]all(?:\s.*)?$/, '').trim();
 }
 
 /* Read summer + spring uploads (in memory from hpLoadUploads) and upsert
@@ -21093,28 +21102,38 @@ async function hpSyncFromUploads() {
      where the number stayed the same. Team name is a fallback. */
   const springByNum  = new Map();
   const springByName = new Map();
+  const springSeen   = new Set();
   for (const t of spring) {
     if (t.team_number) springByNum.set(String(t.team_number), t);
     if (t.team_name)   springByName.set(hpBaseName(t.team_name).toLowerCase(), t);
   }
+  /* Dedup existing plan rows by NORMALIZED name so a stored "Diamond Jim's 8 Ball"
+     (with straight apos) matches a re-parsed "Diamond Jim's 8 Ball" (curly). */
   const existing = new Map();
-  for (const r of _hpPlanTeams) existing.set(r.team_name, r);
+  for (const r of _hpPlanTeams) existing.set(hpNormalizeName(r.team_name).toLowerCase(), r);
 
   const toInsert = [];
-  const toPatch = [];
-  for (const t of summer) {
-    const name = (t.team_name || '').trim();
-    if (!name) continue;
+  const toPatch  = [];
+  const seenKeys = new Set();
+
+  const consider = (t, source) => {
+    const name = hpNormalizeName(t.team_name);
+    if (!name) return;
+    const key = name.toLowerCase();
+    if (seenKeys.has(key)) return;
+    seenKeys.add(key);
+    if (source === 'spring') springSeen.add(key);
     const springHit = (t.team_number && springByNum.get(String(t.team_number)))
                    || springByName.get(hpBaseName(name).toLowerCase())
-                   || null;
-    const prior = existing.get(name);
+                   || (source === 'spring' ? t : null);
+    const summerData = source === 'summer' ? t : null;
+    const prior = existing.get(key);
     if (!prior) {
       toInsert.push({
         target_session:     HP_TARGET_SESSION,
         team_name:          name,
-        summer_team_number: t.team_number || null,
-        summer_venue:       t.venue || null,
+        summer_team_number: summerData ? (summerData.team_number || null) : null,
+        summer_venue:       summerData ? (summerData.venue || null) : null,
         spring_venue:       springHit ? (springHit.venue || null) : null,
         captain_name:       null,
         return_status:      'unknown',
@@ -21127,12 +21146,17 @@ async function hpSyncFromUploads() {
     } else {
       /* Only fill in blank source fields — never overwrite operator edits. */
       const patch = {};
-      if (!prior.summer_venue       && t.venue)          patch.summer_venue       = t.venue;
-      if (!prior.summer_team_number && t.team_number)    patch.summer_team_number = t.team_number;
+      if (summerData) {
+        if (!prior.summer_venue       && summerData.venue)       patch.summer_venue       = summerData.venue;
+        if (!prior.summer_team_number && summerData.team_number) patch.summer_team_number = summerData.team_number;
+      }
       if (!prior.spring_venue       && springHit && springHit.venue) patch.spring_venue = springHit.venue;
       if (Object.keys(patch).length) toPatch.push({ id: prior.id, patch });
     }
-  }
+  };
+  for (const t of summer) consider(t, 'summer');
+  /* Spring-only teams (dropped in Summer, potentially back in Fall) get created too. */
+  for (const t of spring) consider(t, 'spring');
   try {
     setStatus('hpStatus', 'Syncing…', '');
     if (toInsert.length) {
@@ -21251,6 +21275,7 @@ async function hpDeletePlanTeam(id) {
   } catch (e) { alert('Delete failed: ' + e.message); }
 }
 
+let _hpModalEscHandler = null;
 function hpOpenNewTeamModal() {
   document.getElementById('hpNewTeamName').value = '';
   document.getElementById('hpNewCaptain').value = '';
@@ -21258,17 +21283,32 @@ function hpOpenNewTeamModal() {
   document.getElementById('hpNewNotes').value = '';
   document.getElementById('hpNewTeamStatus').textContent = '';
   document.getElementById('hpNewTeamModal').style.display = 'flex';
+  /* Document-level ESC listener so pressing Escape anywhere closes the modal. */
+  _hpModalEscHandler = e => { if (e.key === 'Escape') hpCloseNewTeamModal(); };
+  document.addEventListener('keydown', _hpModalEscHandler);
+  /* Move focus into the modal for keyboard users. */
+  setTimeout(() => document.getElementById('hpNewTeamName').focus(), 0);
 }
 function hpCloseNewTeamModal() {
   document.getElementById('hpNewTeamModal').style.display = 'none';
+  if (_hpModalEscHandler) {
+    document.removeEventListener('keydown', _hpModalEscHandler);
+    _hpModalEscHandler = null;
+  }
 }
 async function hpSaveNewTeam() {
-  const name    = document.getElementById('hpNewTeamName').value.trim();
+  const name    = hpNormalizeName(document.getElementById('hpNewTeamName').value);
   const captain = document.getElementById('hpNewCaptain').value.trim();
   const night   = document.getElementById('hpNewNight').value;
   const notes   = document.getElementById('hpNewNotes').value.trim();
   const stat = document.getElementById('hpNewTeamStatus');
   if (!name) { stat.textContent = 'Team name is required.'; stat.className = 'status-line err'; return; }
+  const clash = _hpPlanTeams.find(r => hpNormalizeName(r.team_name).toLowerCase() === name.toLowerCase());
+  if (clash) {
+    stat.textContent = 'A team named "' + name + '" is already on the Fall roster.';
+    stat.className = 'status-line err';
+    return;
+  }
   try {
     await sb('POST', 'host_plan_teams', {
       target_session:   HP_TARGET_SESSION,
