@@ -1021,6 +1021,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="tcq">Captain's Qualifier</button>
       <button class="tab" data-tab="playoffs">Playoffs</button>
       <button class="tab" data-tab="certs">Certs</button>
+      <button class="tab" data-tab="dolphin">Dolphin</button>
     </div>
 
     <div id="globalStatus" class="status-line"></div>
@@ -2686,6 +2687,161 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
     </div>
     <!-- ════════════════ /Host Plan ════════════════ -->
 
+    <!-- ══════════════════════════════════════════════════════════════
+         TAB: DOLPHIN — team preferences for away matches at The Dolphin
+         Extensible via slate.host_preferences.host_location if other
+         venues need the same tracking later.
+         ══════════════════════════════════════════════════════════════ -->
+    <div id="tab-dolphin" class="tab-panel">
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
+          <h2 style="margin:0">The Dolphin — Team preferences</h2>
+          <span class="hint" id="dpStatus"></span>
+          <div style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn btn-primary btn-sm" onclick="dpOpenModal()">+ Add / Update Team</button>
+            <button class="btn btn-outline btn-sm" onclick="dpExportDeclinesCsv()">📥 Declines CSV</button>
+            <button class="btn btn-outline btn-sm" onclick="dpRender()">↻ Refresh</button>
+          </div>
+        </div>
+        <p class="hint" style="margin-top:0;margin-bottom:12px">
+          Team preferences are recorded manually by league operators. A team may
+          choose not to play away matches at The Dolphin without providing a reason.
+        </p>
+
+        <!-- Summary tiles -->
+        <div id="dpSummary" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px"></div>
+
+        <!-- Filters -->
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+          <input type="text" id="dpSearch" placeholder="Search team, captain, notes…"
+                 style="flex:1;min-width:200px;padding:8px;border:1px solid var(--border);border-radius:6px"
+                 oninput="dpRender()">
+          <select id="dpFilterPref" onchange="dpRender()"
+                  style="padding:8px;border:1px solid var(--border);border-radius:6px">
+            <option value="">All preferences</option>
+            <option value="declines">Does not want to play</option>
+            <option value="will_play">Will play</option>
+            <option value="not_set">No preference recorded</option>
+          </select>
+          <select id="dpFilterDiv" onchange="dpRender()"
+                  style="padding:8px;border:1px solid var(--border);border-radius:6px">
+            <option value="">All divisions</option>
+          </select>
+          <select id="dpFilterNight" onchange="dpRender()"
+                  style="padding:8px;border:1px solid var(--border);border-radius:6px">
+            <option value="">All nights</option>
+          </select>
+          <select id="dpFilterSession" onchange="dpRender()"
+                  style="padding:8px;border:1px solid var(--border);border-radius:6px">
+            <option value="">All sessions</option>
+          </select>
+        </div>
+
+        <div id="dpList"></div>
+      </div>
+    </div>
+
+    <!-- Add/Edit modal -->
+    <div class="modal-backdrop" id="dpModal" style="display:none">
+      <div class="modal" style="max-width:640px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <h3 style="margin:0" id="dpModalTitle">Add team preference</h3>
+          <button class="btn btn-outline btn-sm" style="margin-left:auto" onclick="dpCloseModal()">Cancel</button>
+        </div>
+        <input type="hidden" id="dpId">
+        <div class="form-row">
+          <div>
+            <label>Team name <span style="color:#b91c1c">*</span></label>
+            <input type="text" id="dpTeamName" class="form-input" required maxlength="200">
+          </div>
+          <div>
+            <label>Team number</label>
+            <input type="text" id="dpTeamNumber" class="form-input" maxlength="20">
+          </div>
+        </div>
+        <div class="form-row">
+          <div>
+            <label>Division</label>
+            <input type="text" id="dpDivision" class="form-input" maxlength="60">
+          </div>
+          <div>
+            <label>League night</label>
+            <select id="dpNight" class="form-input">
+              <option value=""></option>
+              <option>Monday</option>
+              <option>Tuesday</option>
+              <option>Wednesday</option>
+              <option>Thursday</option>
+              <option>Friday</option>
+              <option>Saturday</option>
+              <option>Sunday</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div>
+            <label>Home host location</label>
+            <input type="text" id="dpHomeHost" class="form-input" maxlength="200">
+          </div>
+          <div>
+            <label>Team contact email</label>
+            <input type="email" id="dpTeamEmail" class="form-input" maxlength="200">
+          </div>
+        </div>
+        <div class="form-row">
+          <div>
+            <label>Captain name</label>
+            <input type="text" id="dpCaptain" class="form-input" maxlength="120">
+          </div>
+          <div>
+            <label>Co-captain name</label>
+            <input type="text" id="dpCoCaptain" class="form-input" maxlength="120">
+          </div>
+        </div>
+        <div class="form-row">
+          <div>
+            <label>Dolphin preference <span style="color:#b91c1c">*</span></label>
+            <select id="dpPreference" class="form-input" required>
+              <option value="not_set">No preference recorded</option>
+              <option value="will_play">Will play at The Dolphin</option>
+              <option value="declines">Does not want to play at The Dolphin</option>
+            </select>
+          </div>
+          <div>
+            <label>Effective session</label>
+            <input type="text" id="dpSession" class="form-input" value="Fall 2026" maxlength="40">
+          </div>
+        </div>
+        <div class="form-row">
+          <div>
+            <label>Contacted by</label>
+            <select id="dpContactedBy" class="form-input">
+              <option value=""></option>
+              <option value="captain">Captain</option>
+              <option value="player">Player</option>
+              <option value="operator">League operator</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <div>
+            <label>Requested by (name)</label>
+            <input type="text" id="dpRequestedBy" class="form-input" maxlength="200">
+          </div>
+        </div>
+        <div style="margin-top:8px">
+          <label>Internal notes</label>
+          <textarea id="dpNotes" rows="3" class="form-input" maxlength="2000"></textarea>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end">
+          <button class="btn btn-outline" onclick="dpDelete()" id="dpDeleteBtn" style="margin-right:auto;color:#b91c1c;display:none">Delete</button>
+          <button class="btn btn-outline" onclick="dpCloseModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="dpSave()">Save</button>
+        </div>
+        <div class="status-line" id="dpModalStatus"></div>
+      </div>
+    </div>
+    <!-- ════════════════ /Dolphin ════════════════ -->
+
   </div>
 
   <div class="footer" id="appFooter">Slate v0.1 · Phase 1 · Supabase-backed</div>
@@ -2708,7 +2864,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.162';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.163';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -4366,7 +4522,8 @@ const TAB_LABEL = {
   redtape:       'RedTape',
   rolodex:       'Rolodex',
   playoffs:      'Playoffs',
-  hostplan:      'Host Plan'
+  hostplan:      'Host Plan',
+  dolphin:       'Dolphin'
 };
 
 function switchTab(name) {
@@ -4387,6 +4544,7 @@ function switchTab(name) {
   if (name === 'rolodex')     rolInit();
   if (name === 'tcq')         tcqInit();
   if (name === 'playoffs')    renderPlayoffsTab();
+  if (name === 'dolphin')     dpInit();
   if (name === 'certs')       certsAdminInit();
   if (name === 'hostplan')    hpInit();
 }
@@ -10840,6 +10998,293 @@ function poBuildTable(title, divs, teamsByDiv, ruleByCount) {
   </div>`;
 }
 window.renderPlayoffsTab = renderPlayoffsTab;
+
+/* ════════════════════════════════════════════════════════════════════════
+   DOLPHIN — team preferences for away matches at The Dolphin.
+   Storage: slate.host_preferences (host_location = 'The Dolphin').
+   Audit:   slate.host_preference_log (trigger-driven; auto-populated).
+   Access:  service_role only via HEADERS_STAFF.
+   ──────────────────────────────────────────────────────────────────────
+   The host_location field defaults to 'The Dolphin' at the DB level. A
+   future version could switch which venue this tab talks to by changing
+   DP_HOST — everything else is host-neutral so a second venue is a
+   dropdown-swap away, not a schema change. */
+const DP_HOST = 'The Dolphin';
+let _dpRows = [];
+
+async function dpInit() {
+  await dpRender();
+}
+
+async function dpRender() {
+  const stat = document.getElementById('dpStatus');
+  if (stat) stat.textContent = 'Loading…';
+  try {
+    _dpRows = await sb('GET',
+      'host_preferences?host_location=eq.' + encodeURIComponent(DP_HOST)
+      + '&select=*&order=updated_at.desc');
+
+    /* Rebuild filter option lists from live data (once per render). */
+    dpFillFilterOptions();
+
+    /* Render summary tiles + filtered list. */
+    dpRenderSummary();
+    dpRenderList();
+    if (stat) stat.textContent = '';
+  } catch (e) {
+    if (stat) stat.textContent = '';
+    document.getElementById('dpList').innerHTML =
+      '<p class="hint err">Load failed: ' + esc(e.message) + '</p>';
+  }
+}
+
+function dpRenderSummary() {
+  const totals = { declines: 0, will_play: 0, not_set: 0 };
+  for (const r of _dpRows) totals[r.preference] = (totals[r.preference] || 0) + 1;
+  const total = _dpRows.length;
+  const tile = (label, n, sub, color) =>
+    '<div style="flex:1;min-width:150px;background:' + color + ';color:#fff;border-radius:10px;padding:12px 14px">'
+    +   '<div style="font-size:0.72rem;letter-spacing:0.06em;text-transform:uppercase;opacity:0.85">' + esc(label) + '</div>'
+    +   '<div style="font-size:1.6rem;font-weight:800;line-height:1.1;margin-top:2px">' + n + '</div>'
+    +   (sub ? '<div style="font-size:0.78rem;opacity:0.85;margin-top:2px">' + esc(sub) + '</div>' : '')
+    + '</div>';
+  const box = document.getElementById('dpSummary');
+  box.innerHTML =
+      tile('Does not want to play', totals.declines, 'teams declining', '#7a5d12')
+    + tile('Will play',              totals.will_play, '', '#0a6b3a')
+    + tile('No preference recorded', totals.not_set, '', '#6b7280')
+    + tile('Total tracked teams',    total,         '', '#0031a1');
+}
+
+function dpFillFilterOptions() {
+  /* Cheap: re-sort on every render but only when the option set differs. */
+  const divs    = [...new Set(_dpRows.map(r => r.division_number).filter(Boolean))].sort();
+  const nights  = [...new Set(_dpRows.map(r => r.night_of_play).filter(Boolean))];
+  const sessions = [...new Set(_dpRows.map(r => r.effective_session).filter(Boolean))].sort();
+  const dayOrder = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+  nights.sort((a, b) => dayOrder.indexOf(a) - dayOrder.indexOf(b));
+
+  const fill = (id, values) => {
+    const sel = document.getElementById(id);
+    const cur = sel.value;
+    /* Keep only the first (blank) option, then re-populate. */
+    while (sel.options.length > 1) sel.remove(1);
+    for (const v of values) {
+      const opt = document.createElement('option');
+      opt.value = v; opt.textContent = v;
+      sel.appendChild(opt);
+    }
+    if (values.includes(cur)) sel.value = cur;
+  };
+  fill('dpFilterDiv', divs);
+  fill('dpFilterNight', nights);
+  fill('dpFilterSession', sessions);
+}
+
+function dpMatchesFilters(r) {
+  const search    = document.getElementById('dpSearch').value.trim().toLowerCase();
+  const fPref     = document.getElementById('dpFilterPref').value;
+  const fDiv      = document.getElementById('dpFilterDiv').value;
+  const fNight    = document.getElementById('dpFilterNight').value;
+  const fSession  = document.getElementById('dpFilterSession').value;
+  if (fPref    && r.preference !== fPref) return false;
+  if (fDiv     && r.division_number !== fDiv) return false;
+  if (fNight   && r.night_of_play !== fNight) return false;
+  if (fSession && r.effective_session !== fSession) return false;
+  if (search) {
+    const hay = [r.team_name, r.team_number, r.captain_name, r.co_captain_name,
+                 r.division_number, r.home_host, r.notes, r.requested_by_name]
+                 .filter(Boolean).join(' ').toLowerCase();
+    if (!hay.includes(search)) return false;
+  }
+  return true;
+}
+
+const DP_PREF_LABEL = {
+  declines:  'Does not want to play',
+  will_play: 'Will play',
+  not_set:   'No preference recorded'
+};
+
+function dpRenderList() {
+  const list = document.getElementById('dpList');
+  const rows = _dpRows.filter(dpMatchesFilters);
+  if (!rows.length) {
+    list.innerHTML = '<p class="hint" style="margin:0">'
+      + (_dpRows.length ? 'No teams match the current filters.'
+                        : 'No teams tracked yet. Click <strong>+ Add / Update Team</strong> to add the first one.')
+      + '</p>';
+    return;
+  }
+  /* Sort: declines first, then no-pref, then will-play. Within a group,
+     league night then team name. */
+  const rank = { declines: 0, not_set: 1, will_play: 2 };
+  const dayOrder = { Monday:1, Tuesday:2, Wednesday:3, Thursday:4, Friday:5, Saturday:6, Sunday:7, '':8 };
+  const sorted = rows.slice().sort((a, b) => {
+    const r = (rank[a.preference] ?? 9) - (rank[b.preference] ?? 9);
+    if (r) return r;
+    const d = (dayOrder[a.night_of_play || ''] || 8) - (dayOrder[b.night_of_play || ''] || 8);
+    if (d) return d;
+    return (a.team_name || '').localeCompare(b.team_name || '');
+  });
+  const badgeStyle = (pref) => pref === 'declines'
+    ? 'background:#7a5d12;color:#fff'
+    : pref === 'will_play' ? 'background:#0a6b3a;color:#fff'
+                           : 'background:#e5e7eb;color:#374151';
+  let html = '<table style="width:100%;border-collapse:collapse;font-size:0.88rem;background:#fff">'
+    + '<thead><tr style="background:#f9fafb;text-align:left">'
+    + '<th style="padding:8px;border-bottom:2px solid var(--border)">Team</th>'
+    + '<th style="padding:8px;border-bottom:2px solid var(--border);width:80px">Team #</th>'
+    + '<th style="padding:8px;border-bottom:2px solid var(--border);width:60px">Div</th>'
+    + '<th style="padding:8px;border-bottom:2px solid var(--border);width:80px">Night</th>'
+    + '<th style="padding:8px;border-bottom:2px solid var(--border)">Home host</th>'
+    + '<th style="padding:8px;border-bottom:2px solid var(--border);width:180px">Dolphin preference</th>'
+    + '<th style="padding:8px;border-bottom:2px solid var(--border);width:120px">Updated</th>'
+    + '<th style="padding:8px;border-bottom:2px solid var(--border);width:36px"></th>'
+    + '</tr></thead><tbody>';
+  for (const r of sorted) {
+    const noteHint = r.notes ? '<span title="' + esc(r.notes) + '" style="margin-left:6px">📝</span>' : '';
+    html += '<tr>'
+      + '<td style="padding:8px;border-bottom:1px solid #f1f1f1"><strong>' + esc(r.team_name) + '</strong>'
+      +   (r.captain_name ? '<div class="hint" style="font-size:0.78rem">Capt: ' + esc(r.captain_name) + '</div>' : '')
+      + '</td>'
+      + '<td style="padding:8px;border-bottom:1px solid #f1f1f1"><code>' + esc(r.team_number || '—') + '</code></td>'
+      + '<td style="padding:8px;border-bottom:1px solid #f1f1f1">' + esc(r.division_number || '—') + '</td>'
+      + '<td style="padding:8px;border-bottom:1px solid #f1f1f1">' + esc(r.night_of_play || '—') + '</td>'
+      + '<td style="padding:8px;border-bottom:1px solid #f1f1f1">' + esc(r.home_host || '—') + '</td>'
+      + '<td style="padding:8px;border-bottom:1px solid #f1f1f1">'
+      +   '<span style="' + badgeStyle(r.preference) + ';padding:3px 10px;border-radius:999px;font-weight:700;font-size:0.78rem">'
+      +     esc(DP_PREF_LABEL[r.preference] || r.preference) + '</span>' + noteHint
+      + '</td>'
+      + '<td style="padding:8px;border-bottom:1px solid #f1f1f1;font-size:0.8rem;color:#666">'
+      +   esc(new Date(r.updated_at).toLocaleDateString()) + '</td>'
+      + '<td style="padding:8px;border-bottom:1px solid #f1f1f1">'
+      +   '<button class="btn btn-outline btn-sm" onclick="dpOpenModal(' + r.id + ')">Edit</button></td>'
+      + '</tr>';
+  }
+  html += '</tbody></table>'
+    + '<p class="hint" style="margin-top:8px">Showing ' + rows.length + ' of ' + _dpRows.length + ' teams.</p>';
+  list.innerHTML = html;
+}
+
+function dpOpenModal(id) {
+  const row = id ? _dpRows.find(r => r.id === id) : null;
+  const set = (k, v) => document.getElementById(k).value = v || '';
+  document.getElementById('dpModalTitle').textContent = row ? 'Edit team preference' : 'Add team preference';
+  document.getElementById('dpDeleteBtn').style.display = row ? 'inline-block' : 'none';
+  document.getElementById('dpId').value = row ? row.id : '';
+  set('dpTeamName',    row?.team_name);
+  set('dpTeamNumber',  row?.team_number);
+  set('dpDivision',    row?.division_number);
+  set('dpNight',       row?.night_of_play);
+  set('dpHomeHost',    row?.home_host);
+  set('dpTeamEmail',   row?.team_email);
+  set('dpCaptain',     row?.captain_name);
+  set('dpCoCaptain',   row?.co_captain_name);
+  set('dpPreference',  row?.preference || 'not_set');
+  set('dpSession',     row?.effective_session || 'Fall 2026');
+  set('dpContactedBy', row?.contacted_by);
+  set('dpRequestedBy', row?.requested_by_name);
+  set('dpNotes',       row?.notes);
+  document.getElementById('dpModalStatus').textContent = '';
+  document.getElementById('dpModal').style.display = 'flex';
+}
+
+function dpCloseModal() {
+  document.getElementById('dpModal').style.display = 'none';
+}
+
+async function dpSave() {
+  const stat = document.getElementById('dpModalStatus');
+  const val = (id) => document.getElementById(id).value.trim() || null;
+  const teamName = val('dpTeamName');
+  const preference = val('dpPreference') || 'not_set';
+  if (!teamName) {
+    stat.textContent = 'Team name is required.';
+    stat.className = 'status-line err';
+    return;
+  }
+  const body = {
+    team_name:         teamName,
+    team_number:       val('dpTeamNumber'),
+    division_number:   val('dpDivision'),
+    night_of_play:     val('dpNight'),
+    home_host:         val('dpHomeHost'),
+    team_email:        val('dpTeamEmail'),
+    captain_name:      val('dpCaptain'),
+    co_captain_name:   val('dpCoCaptain'),
+    host_location:     DP_HOST,
+    preference:        preference,
+    effective_session: val('dpSession') || 'Fall 2026',
+    contacted_by:      val('dpContactedBy'),
+    requested_by_name: val('dpRequestedBy'),
+    notes:             val('dpNotes'),
+    updated_by:        getDeviceId()
+  };
+  const id = document.getElementById('dpId').value;
+  try {
+    stat.textContent = 'Saving…';
+    stat.className = 'status-line';
+    if (id) {
+      await sb('PATCH', 'host_preferences?id=eq.' + id, body);
+    } else {
+      await sb('POST', 'host_preferences', body);
+    }
+    dpCloseModal();
+    await dpRender();
+  } catch (e) {
+    stat.textContent = 'Save failed: ' + e.message;
+    stat.className = 'status-line err';
+  }
+}
+
+async function dpDelete() {
+  const id = document.getElementById('dpId').value;
+  if (!id) return;
+  const row = _dpRows.find(r => r.id == id);
+  if (!row) return;
+  if (!confirm('Delete "' + row.team_name + '" from the tracker?\n\nThis removes the row and its activity-log entries.')) return;
+  try {
+    await sb('DELETE', 'host_preferences?id=eq.' + id);
+    dpCloseModal();
+    await dpRender();
+  } catch (e) {
+    const stat = document.getElementById('dpModalStatus');
+    stat.textContent = 'Delete failed: ' + e.message;
+    stat.className = 'status-line err';
+  }
+}
+
+function dpExportDeclinesCsv() {
+  const declines = _dpRows.filter(r => r.preference === 'declines');
+  if (!declines.length) { alert('No teams are marked as "Does not want to play at The Dolphin".'); return; }
+  const cols = ['team_name','team_number','division_number','night_of_play','home_host',
+                'captain_name','co_captain_name','team_email','effective_session',
+                'updated_at','notes','requested_by_name','contacted_by'];
+  const header = ['Team','Team #','Division','Night','Home host','Captain','Co-captain',
+                  'Team email','Effective session','Last updated','Notes','Requested by','Contacted by'];
+  const escCell = (v) => {
+    if (v == null) return '';
+    const s = String(v).replace(/"/g, '""');
+    return /[",\r\n]/.test(s) ? '"' + s + '"' : s;
+  };
+  const rows = [header.join(',')];
+  for (const r of declines) rows.push(cols.map(c => escCell(r[c])).join(','));
+  const blob = new Blob(['﻿' + rows.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'dolphin-declines-' + new Date().toISOString().slice(0, 10) + '.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 500);
+}
+
+window.dpInit             = dpInit;
+window.dpRender           = dpRender;
+window.dpOpenModal        = dpOpenModal;
+window.dpCloseModal       = dpCloseModal;
+window.dpSave             = dpSave;
+window.dpDelete           = dpDelete;
+window.dpExportDeclinesCsv = dpExportDeclinesCsv;
 
 /* ════════════════════════════════════════════════════════════════════════
    COMMON PLAYERS — Roster & Handicap Report parser + transitive grouping
