@@ -3142,7 +3142,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.177';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.178';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -8237,7 +8237,7 @@ let _spOptouts = [];
 async function spLoadOptouts() {
   try {
     const rows = await sb('GET',
-      'patch_optouts?select=member_number,note,opted_out_types,created_at&order=member_number');
+      'patch_optouts?select=member_number,note,opted_out_types,created_at,updated_at&order=updated_at.desc');
     _spOptouts = rows || [];
   } catch (e) {
     _spOptouts = [];
