@@ -3081,7 +3081,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.171';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.172';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -9681,13 +9681,21 @@ function spBuildEnvelopesHTML(envs, op) {
      at a glance), recipient address between them with a narrow
      max-width so it ends BESIDE the logo, not behind it. The cat sits
      bottom-left as a small accent above the USPS barcode zone. */
+  /* Strip `"Nickname"` from a mailing name so envelopes read `John Smith`
+     not `John "Johnny" Smith`. Handles straight quotes + curly variants.
+     Kept as a helper so the ad-hoc and main flows stay in lockstep. */
+  const stripNick = (name) => String(name || '')
+    .replace(/\s*["“”][^"“”]*["“”]\s*/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
   const envHtml = e =>
     '<div class="env">'
     + '<div class="return-address">' + ret + '</div>'
     + '<img class="env-logo" src="' + SP_ENV_PATCHES_LOGO + '" alt="">'
     + '<img class="env-cat" src="' + SP_ENV_CAT_LOGO + '" alt="">'
     + '<div class="recipient">'
-    +   '<div>' + esc(e.contact_name) + '</div>'
+    +   '<div>' + esc(stripNick(e.contact_name)) + '</div>'
     +   (e.co_name ? '<div>c/o ' + esc(e.co_name) + '</div>' : '')
     +   '<div>' + esc(e.address_line1) + '</div>'
     +   (e.address_line2 ? '<div>' + esc(e.address_line2) + '</div>' : '')
@@ -9831,10 +9839,11 @@ async function spAdhocEnvelopes() {
     for (const mn of memberNums) {
       const p = byMember[mn];
       if (!p) { notFound.push(valid.get(mn)); continue; }
+      /* Ad-hoc envelopes: never include the nickname. Matches the main
+         Print Envelopes path, which strips `"Nickname"` at render time. */
       const f  = (p.first_name || '').trim();
       const l  = (p.last_name  || '').trim();
-      const nk = (p.nickname   || '').trim();
-      const name = (nk ? f + ' "' + nk + '" ' + l : f + ' ' + l).replace(/\s+/g, ' ').trim()
+      const name = (f + ' ' + l).replace(/\s+/g, ' ').trim()
                 || ('Member ' + mn);
       if (!p.address1 || !p.city) { noAddr.push({ mn, name }); continue; }
       /* Strip the dangling "97123-____" zip pattern seen in some rows. */
