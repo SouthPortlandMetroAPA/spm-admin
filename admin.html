@@ -2708,7 +2708,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.161';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.162';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -8295,8 +8295,7 @@ async function spComputePatches() {
     const opRows = rows.filter(r =>
       _spDivisionMeta.get(r.division_number) === opId
       && !spIsInactiveTeam(r.team_number));
-    console.log('[patches] rows after operator filter:', opRows.length,
-                '(opt-out members:', optoutsByMember.size, ')');
+    console.log('[patches] rows after operator filter:', opRows.length);
 
     // Per-code patches: collapse rows by (member, division, sp_type)
     // — sum counts across teams within the division, take the team#
