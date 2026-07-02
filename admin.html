@@ -3142,7 +3142,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.178';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.179';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -4632,6 +4632,13 @@ let _versionMismatch = false;
 
 async function checkVersion() {
   if (_versionMismatch) return;
+  /* 3.179: never start an update-reload while a long-running bulk
+     operation owns the page. The 667-recipient cert-notify batch takes
+     ~20 minutes; a mid-batch deploy reloaded the tab at 99/667 on
+     2026-07-01. window.slateBulkBusy is set by any in-page bulk op
+     (plain window property — TDZ-safe, this code runs before the
+     bulk-op `let` declarations lower in the file are initialized). */
+  if (window.slateBulkBusy) return;
   try {
     // Anon-only fetch — version lookup shouldn't require the admin key.
     // cache:'no-store' so the browser doesn't serve a stale apa_core
@@ -4672,7 +4679,11 @@ function pollForDeploy(targetVersion) {
         // manual refresh. Regex escapes dots in the version literal.
         const escaped = String(targetVersion).replace(/[.+*?^${}()|[\]\\]/g, '\\$&');
         const versionRe = new RegExp("APP_VERSION\\s*=\\s*'" + escaped + "'");
-        if (versionRe.test(html)) {
+        /* 3.179: same bulk-op guard as checkVersion — covers the race
+           where a bulk send starts after the overlay is already up.
+           Keep polling instead of reloading; reload happens when the
+           batch releases the flag. */
+        if (versionRe.test(html) && !window.slateBulkBusy) {
           // 3.54 fix: location.reload(true) busts the BROWSER cache but
           // NOT Fastly's edge cache (Cache-Control: max-age=600 on GitHub
           // Pages). The reloaded page would hit the same stale edge copy
@@ -21287,16 +21298,32 @@ async function certsNotifyReloadHolders() {
   try {
     const rows = await sb('POST', 'rpc/session_cert_holders', { p_session_id: sid },
       { 'Accept-Profile': 'slate', 'Content-Profile': 'slate' });
+    /* 3.179: members already emailed for this session (status='sent' in
+       cert_notify_log) start UNCHECKED so a resumed bulk send skips them.
+       Log stores the 5-digit member_number — same key holders carry.
+       The operator can still re-check a row for a deliberate resend. */
+    let sentSet = new Set();
+    try {
+      const sentRows = await sb('GET',
+        'cert_notify_log?select=member_number&status=eq.sent&session_id=eq.' + sid + '&limit=1000',
+        null, { 'Accept-Profile': 'slate' });
+      sentSet = new Set((sentRows || []).map(r => r.member_number));
+    } catch (e) { console.warn('[cert-notify] sent-log load failed — no dedup this load', e); }
     _certsNotifyHolders = (rows || []).map(r => {
       const key = r.apa_number || r.member_number;
-      /* Preserve prior checked state on refresh; new rows default to checked. */
-      if (!_certsNotifyChecked.has(key)) _certsNotifyChecked.set(key, true);
-      return { ...r };
+      const already = sentSet.has(r.member_number);
+      /* Already-sent rows are force-unchecked on every reload (safety wins
+         over sticky state); everyone else keeps prior state / defaults on. */
+      if (already) _certsNotifyChecked.set(key, false);
+      else if (!_certsNotifyChecked.has(key)) _certsNotifyChecked.set(key, true);
+      return { ...r, _sent: already };
     });
     const total = _certsNotifyHolders.length;
     const withEmail = _certsNotifyHolders.filter(r => r.email).length;
+    const alreadySent = _certsNotifyHolders.filter(r => r._sent).length;
     summary.textContent = `${total} cert holder${total === 1 ? '' : 's'} · ${withEmail} with email on file` +
-                          (withEmail < total ? ` · ${total - withEmail} missing email (will skip)` : '');
+                          (withEmail < total ? ` · ${total - withEmail} missing email (will skip)` : '') +
+                          (alreadySent ? ` · ${alreadySent} already emailed (unchecked)` : '');
     _certsNotifyLastPreviewCerts = null;   // invalidate preview cache
     certsNotifyRenderList();
   } catch (e) {
@@ -21353,7 +21380,9 @@ function certsNotifyRenderList() {
         '<input type="checkbox"' + (checked ? ' checked' : '') + (noEmail ? ' disabled title="No email on file"' : '') +
         ` onchange="certsNotifyToggleOne('${esc(key)}', this.checked)">` +
       '</td>' +
-      '<td style="padding:6px 10px">' + esc((r.first_name || '') + ' ' + (r.last_name || '')).trim() + '</td>' +
+      '<td style="padding:6px 10px">' + esc((r.first_name || '') + ' ' + (r.last_name || '')).trim() +
+        (r._sent ? ' <span style="background:#0a6b3a;color:#fff;padding:1px 6px;border-radius:999px;font-size:0.68rem;font-weight:700" title="A confirmation was already sent to this member for this session">✓ sent</span>' : '') +
+      '</td>' +
       '<td style="padding:6px 10px;font-variant-numeric:tabular-nums">' + esc(r.apa_number || r.member_number) + '</td>' +
       '<td style="padding:6px 10px">' + (noEmail ? '<em>none</em>' : esc(r.email)) + '</td>' +
       '<td style="padding:6px 10px;text-align:right;font-variant-numeric:tabular-nums;font-weight:700">' + (r.cert_count || 0) + '</td>' +
@@ -21381,7 +21410,8 @@ function certsNotifyToggleAll(checked) {
   const rows = certsNotifyGetFiltered();
   for (const r of rows) {
     const key = r.apa_number || r.member_number;
-    if (!r.email) continue;   // never check no-email rows
+    if (!r.email) continue;             // never check no-email rows
+    if (checked && r._sent) continue;   // check-all skips already-emailed; re-check individually for a deliberate resend
     _certsNotifyChecked.set(key, checked);
   }
   certsNotifyRenderList();
@@ -21525,6 +21555,9 @@ async function certsNotifySendBulk() {
   if (!confirm(`Send cert-notification email to ${targets.length} recipient${targets.length === 1 ? '' : 's'} for ${sessionName}? This is a live send.`)) return;
   _certsNotifyBulkInFlight = true;
   _certsNotifyBulkCancel   = false;
+  /* Tell the auto-updater a bulk op owns the page — a version-bump
+     reload mid-batch killed a send at 99/667 on 2026-07-01. */
+  window.slateBulkBusy = true;
   /* Swap the Send button in place with a Cancel affordance for the duration
      of the batch — clicking Cancel stops the loop between iterations. */
   const sendBtn = document.querySelector('button[onclick="certsNotifySendBulk()"]');
@@ -21578,6 +21611,7 @@ async function certsNotifySendBulk() {
   } finally {
     _certsNotifyBulkInFlight = false;
     _certsNotifyBulkCancel   = false;
+    window.slateBulkBusy     = false;
     if (sendBtn) {
       sendBtn.textContent = origLabel || 'Send to checked';
       sendBtn.setAttribute('onclick', 'certsNotifySendBulk()');
