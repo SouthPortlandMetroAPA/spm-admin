@@ -3142,7 +3142,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.179';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.180';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -4653,7 +4653,15 @@ async function checkVersion() {
     const data = await r.json();
     if (!data || !data.length) return;
     const remote = data[0].version;
+    /* 3.180: only treat the mismatch as an update when remote is NEWER.
+       If remote is OLDER than the running page, we're inside a deploy
+       window (HTML landed, DB not bumped yet) or a deliberate DB
+       rollback — showing the overlay would strand this tab polling for
+       HTML that will never change (2026-07-02 incident). Skip; the DB
+       will catch up and the next 30s tick re-evaluates. */
     if (remote && remote !== APP_VERSION) {
+      const rNum = parseFloat(remote), lNum = parseFloat(APP_VERSION);
+      if (Number.isFinite(rNum) && Number.isFinite(lNum) && rNum < lNum) return;
       _versionMismatch = true;
       document.getElementById('updateAppName').textContent = APP_NAME;
       document.getElementById('updateOverlay').classList.add('shown');
@@ -4664,26 +4672,37 @@ async function checkVersion() {
   }
 }
 
-function pollForDeploy(targetVersion) {
+function pollForDeploy(targetVersion, _attempt) {
+  const attempt = _attempt || 0;
+  /* 3.180: give-up cap. If Pages hasn't served ANY new version after
+     ~2 minutes (40 × 3s), the deploy is wedged (GitHub Pages backend
+     failure, 2026-07-02 incident: build stuck in 'building', every
+     deploy erroring). Dismiss the overlay, reset the mismatch latch,
+     and let the normal 30s checkVersion cycle retry in the background.
+     The operator gets the app back instead of an infinite spinner. */
+  if (attempt >= 40) {
+    console.warn('[updater] deploy not served after ~2min — dismissing overlay, will retry in background');
+    document.getElementById('updateOverlay').classList.remove('shown');
+    _versionMismatch = false;
+    return;
+  }
   setTimeout(async () => {
     try {
-      // Cache-bust with a timestamp. If GitHub Pages has the new HTML,
-      // the source will contain `APP_VERSION = 'X.X'` for the new X.X.
+      // Cache-bust with a timestamp. If GitHub Pages has new HTML, the
+      // source will contain an APP_VERSION different from ours.
       const resp = await fetch('admin.html?_=' + Date.now(), { cache: 'no-store' });
       if (resp.ok) {
         const html = await resp.text();
-        // 3.136 fix: tolerate any whitespace between APP_VERSION and =.
-        // Earlier indexOf("APP_VERSION = '" + …) required exactly one
-        // space — a reformatted "APP_VERSION   = " (alignment spaces)
-        // made the substring miss forever and the overlay spin until
-        // manual refresh. Regex escapes dots in the version literal.
-        const escaped = String(targetVersion).replace(/[.+*?^${}()|[\]\\]/g, '\\$&');
-        const versionRe = new RegExp("APP_VERSION\\s*=\\s*'" + escaped + "'");
-        /* 3.179: same bulk-op guard as checkVersion — covers the race
-           where a bulk send starts after the overlay is already up.
-           Keep polling instead of reloading; reload happens when the
-           batch releases the flag. */
-        if (versionRe.test(html) && !window.slateBulkBusy) {
+        /* 3.180: match ANY served version different from the RUNNING
+           one, not the pinned target. Pinning strands the tab when a
+           second bump (or a DB rollback) lands while we're polling: it
+           waits for '3.176' in HTML that already says '3.177'
+           (2026-07-02 incident). Whitespace-tolerant per the 3.136 fix. */
+        const m = html.match(/APP_VERSION\s*=\s*'([0-9.]+)'/);
+        const servedVersion = m ? m[1] : null;
+        /* 3.179 bulk-op guard: keep polling instead of reloading while a
+           bulk send owns the page. */
+        if (servedVersion && servedVersion !== APP_VERSION && !window.slateBulkBusy) {
           // 3.54 fix: location.reload(true) busts the BROWSER cache but
           // NOT Fastly's edge cache (Cache-Control: max-age=600 on GitHub
           // Pages). The reloaded page would hit the same stale edge copy
@@ -4692,14 +4711,14 @@ function pollForDeploy(targetVersion) {
           // through Fastly to origin. The url params survive across
           // reloads until the user navigates away.
           const url = new URL(location.href);
-          url.searchParams.set('_v', targetVersion);
+          url.searchParams.set('_v', servedVersion);
           url.searchParams.set('_t', Date.now().toString());
           location.replace(url.toString());
           return;
         }
       }
     } catch (_) { /* fall through to retry */ }
-    pollForDeploy(targetVersion);
+    pollForDeploy(targetVersion, attempt + 1);
   }, 3000);
 }
 
