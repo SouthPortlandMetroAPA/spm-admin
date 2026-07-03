@@ -2767,9 +2767,9 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <span class="hint" id="hpStatus"></span>
         </div>
         <p class="hint" style="margin-top:0;margin-bottom:14px">
-          Plan team placements into host venues for the next session, using
-          Spring + Summer Team Screen PDFs as priority history. v0.1 covers
-          venue setup and PDF upload; matching + placement land in v0.2.
+          Plan Fall host placements one division at a time. Set up venues (1),
+          upload the Spring + Summer Team Screen PDFs (2), then work the
+          Division planner (3): every venue card shows whether its teams fit.
         </p>
 
         <!-- target session + control bar -->
@@ -2849,76 +2849,37 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           </div>
         </details>
 
-        <!-- ── Activity 3: Team roster for Fall (returning + new) ── -->
+        <!-- ── Activity 3: Division planner (3.181 rebuild) ──────────
+             Division-by-division workflow. Pick a division; see its host
+             venues as cards; each card shows the Spring + Summer teams
+             whose home is that venue and whether they all FIT within the
+             venue's capacity. Capacity resets per division — divisions
+             play on different nights, so the same venue's full capacity
+             is available in every division independently. -->
         <details open style="margin-bottom:14px;border:1px solid var(--border);border-radius:8px;padding:12px">
           <summary style="cursor:pointer;font-weight:700;font-size:1.05rem">
-            3. Team roster for Fall — coming back + new teams
-            <span class="hint" id="hpRosterSummary" style="font-weight:400;margin-left:8px"></span>
+            3. Division planner
+            <span class="hint" id="hpPlanSummary" style="font-weight:400;margin-left:8px"></span>
           </summary>
           <div style="margin-top:12px">
             <p class="hint" style="margin-top:0">
-              Mark each Summer team's return status for the target session. The Sync button pulls
-              the latest Summer + Spring team-screen uploads and merges them into this roster.
-              Existing rows keep their edits — sync only fills in what's missing.
+              Work one division at a time. Each card is a host venue showing the
+              <strong>Spring + Summer teams</strong> based there in this division and whether
+              they all fit the venue's capacity. Capacity is the venue's full capacity —
+              it resets for every division (different nights). Teams marked
+              <strong>No</strong> stop counting against capacity. Use the venue dropdown on a
+              team row to move it; counts update live.
             </p>
             <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
               <button class="btn btn-primary btn-sm" onclick="hpSyncFromUploads()"
-                      title="Read the parsed Summer + Spring uploads and upsert one row per team into this Fall roster.">
+                      title="Read the parsed Summer + Spring uploads and upsert one row per team number into the plan.">
                 🔄 Sync from Summer + Spring
               </button>
               <button class="btn btn-outline btn-sm" onclick="hpOpenNewTeamModal()">+ Add new Fall team</button>
-              <span style="flex-basis:100%;height:0"></span>
-              <select id="hpRosterFilter" onchange="hpRenderRoster()"
-                      style="padding:6px 10px;border:1px solid var(--border);border-radius:6px">
-                <option value="">All teams</option>
-                <option value="unknown">Unknown</option>
-                <option value="yes">Returning</option>
-                <option value="no">Not returning</option>
-                <option value="new">New for Fall</option>
-              </select>
-              <input type="text" id="hpRosterSearch" placeholder="Search…" oninput="hpRenderRoster()"
-                     style="flex:1;min-width:180px;padding:6px 10px;border:1px solid var(--border);border-radius:6px">
+              <button class="btn btn-outline btn-sm" onclick="hpExportPlanCsv()">📥 Plan CSV</button>
             </div>
-            <div id="hpRosterList"></div>
-          </div>
-        </details>
-
-        <!-- ── Activity 4: Fall placement ─────────────────────── -->
-        <details open style="margin-bottom:14px;border:1px solid var(--border);border-radius:8px;padding:12px">
-          <summary style="cursor:pointer;font-weight:700;font-size:1.05rem">
-            4. Fall placement
-            <span class="hint" id="hpPlacementSummary" style="font-weight:400;margin-left:8px"></span>
-          </summary>
-          <div style="margin-top:12px">
-            <p class="hint" style="margin-top:0">
-              Shows every team marked <strong>Returning</strong> or <strong>New for Fall</strong>.
-              Each row's <em>Suggested</em> venue defaults to the Summer venue when that venue still
-              exists in the host list; otherwise falls back to the Spring venue.
-              <label style="margin-left:8px">
-                <input type="checkbox" id="hpAutoSyncDj" checked onchange="hpRenderPlacement()">
-                Auto-sync DJ pairs (place the 8-Ball, its 9-Ball twin follows)
-              </label>
-            </p>
-            <div id="hpPlacementList"></div>
-          </div>
-        </details>
-
-        <!-- ── Activity 5: Capacity overview ──────────────────── -->
-        <details open style="margin-bottom:14px;border:1px solid var(--border);border-radius:8px;padding:12px">
-          <summary style="cursor:pointer;font-weight:700;font-size:1.05rem">
-            5. Capacity overview
-            <span class="hint" id="hpCapSummary" style="font-weight:400;margin-left:8px"></span>
-          </summary>
-          <div style="margin-top:12px">
-            <p class="hint" style="margin-top:0">
-              Each host venue is a card: capacity, current placements, and overflow warning.
-              Also lists teams that have not been placed yet.
-            </p>
-            <div id="hpCapacityList"></div>
-            <div id="hpUnplacedList" style="margin-top:16px"></div>
-            <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
-              <button class="btn btn-outline btn-sm" onclick="hpExportPlanCsv()">📥 Placement CSV</button>
-            </div>
+            <div id="hpDivNav" style="margin-bottom:12px"></div>
+            <div id="hpDivPane"></div>
           </div>
         </details>
 
@@ -2927,8 +2888,8 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <div class="modal" style="max-width:520px">
             <h3 id="hpNewTeamModalTitle" style="margin:0 0 10px">Add new Fall team</h3>
             <p class="hint" style="margin-top:0;margin-bottom:10px">
-              For a team that will play in Fall but wasn't in Summer/Spring. They start as
-              "New for Fall" and land in the placement builder right away.
+              For a team that will play in Fall but wasn't in Summer/Spring. It lands in the
+              chosen division as "New for Fall" and counts against venue capacity right away.
             </p>
             <div class="form-row">
               <div>
@@ -2936,18 +2897,14 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
                 <input type="text" id="hpNewTeamName" class="form-input" required maxlength="200">
               </div>
               <div>
-                <label>Captain</label>
-                <input type="text" id="hpNewCaptain" class="form-input" maxlength="120">
+                <label>Division <span style="color:#b91c1c">*</span></label>
+                <select id="hpNewDivision" class="form-input"></select>
               </div>
             </div>
             <div class="form-row">
               <div>
-                <label>Night of play</label>
-                <select id="hpNewNight" class="form-input">
-                  <option value=""></option>
-                  <option>Monday</option><option>Tuesday</option><option>Wednesday</option>
-                  <option>Thursday</option><option>Friday</option><option>Saturday</option><option>Sunday</option>
-                </select>
+                <label>Captain</label>
+                <input type="text" id="hpNewCaptain" class="form-input" maxlength="120">
               </div>
               <div>
                 <label>Notes</label>
@@ -3142,7 +3099,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.180';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.181';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -21841,12 +21798,11 @@ async function hpInit() {
   await hpLoadVenues();
   await hpLoadUploads();
   await hpLoadPlanTeams();
+  await hpLoadDivisionMeta();
   hpRenderVenues();
   hpRenderUploads();
   hpRenderTeamsByVenue();
-  hpRenderRoster();
-  hpRenderPlacement();
-  hpRenderCapacity();
+  hpRenderPlanner();
   hpWireDropZones();
 }
 
@@ -22245,51 +22201,74 @@ async function hpRefresh() {
   await hpLoadVenues();
   await hpLoadUploads();
   await hpLoadPlanTeams();
+  await hpLoadDivisionMeta();
   hpRenderVenues();
   hpRenderUploads();
   hpRenderTeamsByVenue();
-  hpRenderRoster();
-  hpRenderPlacement();
-  hpRenderCapacity();
+  hpRenderPlanner();
 }
 
-/* ── Activities 3-5: roster / placement / capacity ─────────────────
+/* ── Activity 3: DIVISION PLANNER (3.181 rebuild) ────────────────────
  *
- * State lives in slate.host_plan_teams. One row per (target_session,
- * team_name). Sync from uploads is idempotent — it fills in the source
- * columns (summer_venue, spring_venue, captain_name) for existing rows
- * without touching the operator's edits (return_status, placement, notes).
+ * Division-by-division workflow. State lives in slate.host_plan_teams —
+ * one row per (target_session, team_number_full). The 5-digit team
+ * number encodes the division: <3-digit division><2-digit team>, so
+ * DJ pairs (same name, two divisions) are naturally separate rows.
+ *
+ * Capacity is evaluated per (venue, division): divisions play on
+ * different nights, so a venue's FULL capacity (2 × tables, set in
+ * Activity 1) is available fresh in every division. A venue card is
+ * green when its counting teams (status ≠ 'no') fit, red when over.
  */
-const HP_TARGET_SESSION = 'Fall 2026';   // hardcoded for v0.2; picker deferred
+const HP_TARGET_SESSION = 'Fall 2026';   // hardcoded for v0.3; picker deferred
 let _hpPlanTeams = [];
+let _hpDivMeta   = new Map();   // division_number → { name, night }
+let _hpActiveDiv = null;
+
+const HP_NIGHT_ORDER = { Monday:0, Tuesday:1, Wednesday:2, Thursday:3, Friday:4, Saturday:5, Sunday:6 };
 
 async function hpLoadPlanTeams() {
   try {
     _hpPlanTeams = await sb('GET',
       'host_plan_teams?target_session=eq.' + encodeURIComponent(HP_TARGET_SESSION)
-      + '&select=*&order=team_name.asc');
+      + '&select=*&order=team_number_full.asc');
   } catch (e) {
     _hpPlanTeams = [];
     console.warn('[hostplan] plan teams load failed', e);
   }
 }
 
-/* Normalize a team name: collapse internal whitespace, straighten curly apostrophes,
-   trim. Used as the canonical DB form so dedup + unique(target_session, team_name)
-   don't get tripped by "Diamond Jim's" vs "Diamond Jim's" or double spaces. */
+/* Division names + nights from slate.divisions. Spring first so Summer
+   overwrites — Summer metadata wins when a division ran in both. */
+async function hpLoadDivisionMeta() {
+  try {
+    const sids = [];
+    if (_hpUploads.spring?.session_id) sids.push(_hpUploads.spring.session_id);
+    if (_hpUploads.summer?.session_id) sids.push(_hpUploads.summer.session_id);
+    if (!sids.length) sids.push(1, 2);
+    const rows = await sb('GET',
+      'divisions?session_id=in.(' + sids.join(',') + ')&operator_id=eq.1'
+      + '&select=session_id,division_number,name,night_of_play');
+    _hpDivMeta = new Map();
+    const ordered = (rows || []).slice().sort((a, b) => a.session_id - b.session_id).reverse();
+    for (const d of ordered) {
+      /* reverse() puts the LOWER session id (summer=1) last → it wins. */
+      _hpDivMeta.set(d.division_number, { name: d.name || '', night: d.night_of_play || '' });
+    }
+  } catch (e) {
+    _hpDivMeta = new Map();
+    console.warn('[hostplan] division meta load failed', e);
+  }
+}
+
+/* Normalize a team name: collapse whitespace, straighten curly apostrophes. */
 function hpNormalizeName(name) {
   return (name || '').replace(/[‘’]/g, "'").replace(/\s+/g, ' ').trim();
 }
 
-/* Strip trailing "N Ball" / "N-Ball" markers so DJ pairs share a base key.
-   Requires leading whitespace before the marker so a leading-Ball team like
-   "8-Ball Bandits" is NOT flattened to "". Handles multi-digit ("10 Ball"). */
-function hpBaseName(name) {
-  return hpNormalizeName(name).replace(/\s+\d+[- ]?[Bb]all(?:\s.*)?$/, '').trim();
-}
-
-/* Read summer + spring uploads (in memory from hpLoadUploads) and upsert
-   one row per team into host_plan_teams for the target session. */
+/* Sync — one row per SPM team_number across the Summer + Spring uploads.
+   Existing rows keep operator edits (return_status, placement, notes);
+   sync only fills blank source fields and session flags. */
 async function hpSyncFromUploads() {
   const summer = (_hpUploads.summer && Array.isArray(_hpUploads.summer.parsed_json))
     ? _hpUploads.summer.parsed_json : [];
@@ -22299,195 +22278,336 @@ async function hpSyncFromUploads() {
     alert('No parsed uploads found. Upload the Summer + Spring Team Screen PDFs in section 2 first.');
     return;
   }
-  /* Spring lookup keyed on team_number so we can match across sessions
-     where the number stayed the same. Team name is a fallback. */
-  const springByNum  = new Map();
-  const springByName = new Map();
-  const springSeen   = new Set();
-  for (const t of spring) {
-    if (t.team_number) springByNum.set(String(t.team_number), t);
-    if (t.team_name)   springByName.set(hpBaseName(t.team_name).toLowerCase(), t);
-  }
-  /* Dedup existing plan rows by NORMALIZED name so a stored "Diamond Jim's 8 Ball"
-     (with straight apos) matches a re-parsed "Diamond Jim's 8 Ball" (curly). */
   const existing = new Map();
-  for (const r of _hpPlanTeams) existing.set(hpNormalizeName(r.team_name).toLowerCase(), r);
+  for (const r of _hpPlanTeams) existing.set(r.team_number_full, r);
+
+  const merged = new Map();   // team_number_full → record under construction
+  const takeRow = (t, which) => {
+    const tn = String(t.team_number || '').trim();
+    if (!/^\d{5}$/.test(tn)) return;              // skip malformed numbers
+    if (!hpIsSpmTeam(tn)) return;                 // CRA divisions stay out of the plan
+    let rec = merged.get(tn);
+    if (!rec) {
+      rec = { team_number_full: tn, division_number: tn.slice(0, 3),
+              team_name: '', summer_venue: null, spring_venue: null,
+              in_summer: false, in_spring: false };
+      merged.set(tn, rec);
+    }
+    const name = hpNormalizeName(t.team_name);
+    if (which === 'summer') {
+      rec.in_summer = true;
+      rec.summer_venue = t.venue || rec.summer_venue;
+      if (name) rec.team_name = name;                       // summer name wins
+    } else {
+      rec.in_spring = true;
+      rec.spring_venue = t.venue || rec.spring_venue;
+      if (name && !rec.team_name) rec.team_name = name;     // spring fills gaps
+    }
+  };
+  for (const t of summer) takeRow(t, 'summer');
+  for (const t of spring) takeRow(t, 'spring');
 
   const toInsert = [];
   const toPatch  = [];
-  const seenKeys = new Set();
-
-  const consider = (t, source) => {
-    const name = hpNormalizeName(t.team_name);
-    if (!name) return;
-    const key = name.toLowerCase();
-    if (seenKeys.has(key)) return;
-    seenKeys.add(key);
-    if (source === 'spring') springSeen.add(key);
-    const springHit = (t.team_number && springByNum.get(String(t.team_number)))
-                   || springByName.get(hpBaseName(name).toLowerCase())
-                   || (source === 'spring' ? t : null);
-    const summerData = source === 'summer' ? t : null;
-    const prior = existing.get(key);
+  for (const [tn, rec] of merged) {
+    const prior = existing.get(tn);
     if (!prior) {
       toInsert.push({
-        target_session:     HP_TARGET_SESSION,
-        team_name:          name,
-        summer_team_number: summerData ? (summerData.team_number || null) : null,
-        summer_venue:       summerData ? (summerData.venue || null) : null,
-        spring_venue:       springHit ? (springHit.venue || null) : null,
-        captain_name:       null,
-        return_status:      'unknown',
-        is_new_for_fall:    false,
-        placement_status:   'unassigned',
-        night_of_play:      null,
-        notes:              null,
-        updated_by:         getDeviceId()
+        target_session:   HP_TARGET_SESSION,
+        team_number_full: tn,
+        division_number:  rec.division_number,
+        team_name:        rec.team_name || ('Team ' + tn),
+        summer_team_number: rec.in_summer ? tn : null,
+        summer_venue:     rec.summer_venue,
+        spring_venue:     rec.spring_venue,
+        in_summer:        rec.in_summer,
+        in_spring:        rec.in_spring,
+        return_status:    'unknown',
+        is_new_for_fall:  false,
+        placement_status: 'unassigned',
+        updated_by:       getDeviceId()
       });
     } else {
-      /* Only fill in blank source fields — never overwrite operator edits. */
       const patch = {};
-      if (summerData) {
-        if (!prior.summer_venue       && summerData.venue)       patch.summer_venue       = summerData.venue;
-        if (!prior.summer_team_number && summerData.team_number) patch.summer_team_number = summerData.team_number;
-      }
-      if (!prior.spring_venue       && springHit && springHit.venue) patch.spring_venue = springHit.venue;
-      if (Object.keys(patch).length) toPatch.push({ id: prior.id, patch });
+      if (!prior.summer_venue && rec.summer_venue) patch.summer_venue = rec.summer_venue;
+      if (!prior.spring_venue && rec.spring_venue) patch.spring_venue = rec.spring_venue;
+      if (!prior.division_number)                  patch.division_number = rec.division_number;
+      if (rec.in_summer && !prior.in_summer)       patch.in_summer = true;
+      if (rec.in_spring && !prior.in_spring)       patch.in_spring = true;
+      if (Object.keys(patch).length) toPatch.push({ tn, patch });
     }
-  };
-  for (const t of summer) consider(t, 'summer');
-  /* Spring-only teams (dropped in Summer, potentially back in Fall) get created too. */
-  for (const t of spring) consider(t, 'spring');
+  }
+
   try {
     setStatus('hpStatus', 'Syncing…', '');
-    if (toInsert.length) {
-      /* Chunked insert to stay under PostgREST body limits. */
-      const CHUNK = 200;
-      for (let i = 0; i < toInsert.length; i += CHUNK) {
-        await sb('POST', 'host_plan_teams', toInsert.slice(i, i + CHUNK));
-      }
+    const CHUNK = 200;
+    for (let i = 0; i < toInsert.length; i += CHUNK) {
+      await sb('POST', 'host_plan_teams', toInsert.slice(i, i + CHUNK));
     }
-    for (const p of toPatch) await sb('PATCH', 'host_plan_teams?id=eq.' + p.id, p.patch);
+    for (const p of toPatch) {
+      await sb('PATCH', 'host_plan_teams?target_session=eq.' + encodeURIComponent(HP_TARGET_SESSION)
+        + '&team_number_full=eq.' + encodeURIComponent(p.tn), p.patch);
+    }
     await hpLoadPlanTeams();
-    hpRenderRoster();
-    hpRenderPlacement();
-    hpRenderCapacity();
-    setStatus('hpStatus',
-      'Sync complete — ' + toInsert.length + ' new, ' + toPatch.length + ' filled in.', 'ok');
+    await hpLoadDivisionMeta();
+    hpRenderPlanner();
+    setStatus('hpStatus', 'Sync complete — ' + toInsert.length + ' new, ' + toPatch.length + ' filled in.', 'ok');
     setTimeout(() => setStatus('hpStatus', '', ''), 4000);
   } catch (e) {
     setStatus('hpStatus', 'Sync failed: ' + e.message, 'err');
   }
 }
 
-const HP_RET_LABEL = { yes: 'Returning', no: 'Not returning', unknown: 'Unknown' };
-
-function hpRenderRoster() {
-  const el = document.getElementById('hpRosterList');
-  if (!el) return;
-  const summaryEl = document.getElementById('hpRosterSummary');
-  const counts = { yes: 0, no: 0, unknown: 0, new: 0 };
-  for (const r of _hpPlanTeams) {
-    counts[r.return_status]++;
-    if (r.is_new_for_fall) counts.new++;
-  }
-  if (summaryEl) {
-    summaryEl.textContent = _hpPlanTeams.length + ' teams · '
-      + counts.yes + ' returning · ' + counts.no + ' not returning · '
-      + counts.unknown + ' unknown · ' + counts.new + ' new';
-  }
-  const filter = document.getElementById('hpRosterFilter').value;
-  const q      = (document.getElementById('hpRosterSearch').value || '').trim().toLowerCase();
-  const rows = _hpPlanTeams.filter(r => {
-    if (filter === 'new')     { if (!r.is_new_for_fall) return false; }
-    else if (filter)          { if (r.return_status !== filter) return false; }
-    if (q) {
-      const hay = [r.team_name, r.summer_venue, r.spring_venue, r.captain_name, r.notes]
-                    .filter(Boolean).join(' ').toLowerCase();
-      if (!hay.includes(q)) return false;
-    }
-    return true;
+/* ── Division helpers ── */
+function hpDivisionsList() {
+  const divs = [...new Set(_hpPlanTeams.map(t => t.division_number).filter(Boolean))];
+  return divs.sort((a, b) => {
+    const na = HP_NIGHT_ORDER[(_hpDivMeta.get(a) || {}).night] ?? 9;
+    const nb = HP_NIGHT_ORDER[(_hpDivMeta.get(b) || {}).night] ?? 9;
+    return na - nb || a.localeCompare(b);
   });
-  if (!rows.length) {
-    el.innerHTML = '<p class="hint" style="margin:0">'
-      + (_hpPlanTeams.length ? 'No teams match the current filter.'
-                             : 'Nothing here yet. Click <strong>🔄 Sync from Summer + Spring</strong> to import from the parsed uploads.')
-      + '</p>';
-    return;
+}
+function hpDivLabel(div) {
+  const m = _hpDivMeta.get(div);
+  return m && m.name ? (div + ' · ' + m.name) : div;
+}
+function hpVenueById(id) { return _hpVenues.find(v => v.id === id) || null; }
+function hpVenueByName(name) {
+  if (!name) return null;
+  const key = String(name).toLowerCase().trim();
+  return _hpVenues.find(v => (v.name || '').toLowerCase().trim() === key) || null;
+}
+/* Effective venue for a team: operator placement wins; else Summer home,
+   else Spring home. Returns { name, venue } — venue null when the name
+   isn't in host_venues (unknown capacity). */
+function hpEffectiveVenue(t) {
+  if (t.placement_venue_id) {
+    const v = hpVenueById(t.placement_venue_id);
+    if (v) return { name: v.name, venue: v };
   }
-  const radio = (r, val, label) =>
-    '<label style="display:inline-flex;align-items:center;gap:4px;margin-right:8px;font-size:0.86rem">'
-    +   '<input type="radio" name="hpRet-' + r.id + '" value="' + val + '"'
-    +     (r.return_status === val ? ' checked' : '')
-    +     ' onchange="hpSetReturnStatus(' + r.id + ', \'' + val + '\')">'
-    +   esc(label)
-    + '</label>';
-  let html = '<table style="width:100%;border-collapse:collapse;font-size:0.88rem;background:#fff">'
-    + '<thead><tr style="background:#f9fafb;text-align:left">'
-    + '<th style="padding:6px;border-bottom:2px solid var(--border)">Team</th>'
-    + '<th style="padding:6px;border-bottom:2px solid var(--border)">Summer venue</th>'
-    + '<th style="padding:6px;border-bottom:2px solid var(--border)">Spring venue</th>'
-    + '<th style="padding:6px;border-bottom:2px solid var(--border);width:280px">Returning for Fall?</th>'
-    + '<th style="padding:6px;border-bottom:2px solid var(--border);width:36px"></th>'
-    + '</tr></thead><tbody>';
-  for (const r of rows) {
-    html += '<tr>'
-      + '<td style="padding:6px;border-bottom:1px solid #f1f1f1">'
-      +   '<strong>' + esc(r.team_name) + '</strong>'
-      +   (r.is_new_for_fall ? ' <span style="background:#0031a1;color:#fff;padding:1px 6px;border-radius:999px;font-size:0.68rem;font-weight:700">NEW</span>' : '')
-      +   (r.captain_name ? '<div class="hint" style="font-size:0.76rem">' + esc(r.captain_name) + '</div>' : '')
-      + '</td>'
-      + '<td style="padding:6px;border-bottom:1px solid #f1f1f1">' + esc(r.summer_venue || '—') + '</td>'
-      + '<td style="padding:6px;border-bottom:1px solid #f1f1f1">' + esc(r.spring_venue || '—') + '</td>'
-      + '<td style="padding:6px;border-bottom:1px solid #f1f1f1">'
-      +   radio(r, 'yes', 'Yes') + radio(r, 'no', 'No') + radio(r, 'unknown', 'Unknown')
-      + '</td>'
-      + '<td style="padding:6px;border-bottom:1px solid #f1f1f1">'
-      +   '<button class="btn btn-outline btn-sm" onclick="hpDeletePlanTeam(' + r.id + ')" title="Remove from roster">×</button>'
-      + '</td>'
-      + '</tr>';
+  const homeName = t.summer_venue || t.spring_venue || '';
+  return { name: homeName || '(no venue on file)', venue: hpVenueByName(homeName) };
+}
+
+/* Per-division fit stats — powers the nav badges. */
+function hpDivStats(div) {
+  const teams = _hpPlanTeams.filter(t => t.division_number === div);
+  const groups = new Map();
+  for (const t of teams) {
+    if (t.return_status === 'no') continue;
+    const eff = hpEffectiveVenue(t);
+    const key = eff.name.toLowerCase();
+    if (!groups.has(key)) groups.set(key, { venue: eff.venue, count: 0 });
+    groups.get(key).count++;
   }
-  html += '</tbody></table>';
+  let overBy = 0;
+  for (const g of groups.values()) {
+    const cap = g.venue ? 2 * (g.venue.num_tables || 0) : 0;
+    if (cap > 0 && g.count > cap) overBy += g.count - cap;
+  }
+  const undecided = teams.filter(t => t.return_status === 'unknown').length;
+  return { total: teams.length, overBy, undecided };
+}
+
+/* ── Renders ── */
+function hpRenderPlanner() {
+  hpRenderDivNav();
+  hpRenderDivPane();
+  hpPopulateModalDivisions();
+  const s = document.getElementById('hpPlanSummary');
+  if (s) {
+    const divs = hpDivisionsList();
+    const over = divs.filter(d => hpDivStats(d).overBy > 0).length;
+    s.textContent = _hpPlanTeams.length
+      ? divs.length + ' divisions · ' + _hpPlanTeams.length + ' teams · ' + over + ' division' + (over === 1 ? '' : 's') + ' over capacity'
+      : 'Nothing synced yet — click 🔄 Sync from Summer + Spring.';
+  }
+}
+
+function hpRenderDivNav() {
+  const el = document.getElementById('hpDivNav');
+  if (!el) return;
+  const divs = hpDivisionsList();
+  if (!divs.length) { el.innerHTML = ''; return; }
+  if (!_hpActiveDiv || !divs.includes(_hpActiveDiv)) _hpActiveDiv = divs[0];
+
+  /* Group chips under night headers so the nav reads like the week. */
+  const byNight = new Map();
+  for (const d of divs) {
+    const night = (_hpDivMeta.get(d) || {}).night || 'Other';
+    if (!byNight.has(night)) byNight.set(night, []);
+    byNight.get(night).push(d);
+  }
+  const nights = [...byNight.keys()].sort((a, b) => (HP_NIGHT_ORDER[a] ?? 9) - (HP_NIGHT_ORDER[b] ?? 9));
+  let html = '';
+  for (const night of nights) {
+    html += '<div style="margin-bottom:8px">'
+      + '<div style="font-size:0.72rem;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px">' + esc(night) + '</div>'
+      + '<div style="display:flex;gap:6px;flex-wrap:wrap">';
+    for (const d of byNight.get(night)) {
+      const st = hpDivStats(d);
+      const active = d === _hpActiveDiv;
+      const badge = st.overBy > 0
+        ? '<span style="background:#b91c1c;color:#fff;border-radius:999px;padding:0 6px;font-size:0.68rem;font-weight:700">+' + st.overBy + '</span>'
+        : (st.undecided === 0 && st.total > 0
+            ? '<span style="color:#0a6b3a;font-weight:700">✓</span>'
+            : '<span style="color:#9ca3af;font-size:0.7rem">' + st.undecided + '?</span>');
+      const m = _hpDivMeta.get(d);
+      html += '<button type="button" onclick="hpSelectDivision(\'' + esc(d) + '\')"'
+        + ' title="' + esc(m && m.name ? m.name : d) + '"'
+        + ' style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:8px;cursor:pointer;font-size:0.82rem;'
+        + (active
+            ? 'border:2px solid #0031a1;background:#eef3ff;font-weight:700'
+            : 'border:1px solid var(--border);background:#fff')
+        + '">'
+        + esc(m && m.name ? m.name : ('Division ' + d))
+        + ' <span style="color:#9ca3af;font-size:0.7rem">' + esc(d) + '</span> '
+        + badge
+        + '</button>';
+    }
+    html += '</div></div>';
+  }
   el.innerHTML = html;
 }
 
-async function hpSetReturnStatus(id, status) {
+function hpSelectDivision(div) {
+  _hpActiveDiv = div;
+  hpRenderDivNav();
+  hpRenderDivPane();
+}
+
+function hpRenderDivPane() {
+  const el = document.getElementById('hpDivPane');
+  if (!el) return;
+  if (!_hpActiveDiv) { el.innerHTML = ''; return; }
+  const div = _hpActiveDiv;
+  const meta = _hpDivMeta.get(div) || {};
+  const teams = _hpPlanTeams.filter(t => t.division_number === div);
+  if (!teams.length) {
+    el.innerHTML = '<p class="hint" style="margin:0">No teams in this division yet.</p>';
+    return;
+  }
+
+  /* Group by effective venue. */
+  const groups = new Map();   // lower(name) → { name, venue, teams: [] }
+  for (const t of teams) {
+    const eff = hpEffectiveVenue(t);
+    const key = eff.name.toLowerCase();
+    if (!groups.has(key)) groups.set(key, { name: eff.name, venue: eff.venue, teams: [] });
+    groups.get(key).teams.push(t);
+  }
+  const sorted = [...groups.values()].sort((a, b) => b.teams.length - a.teams.length || a.name.localeCompare(b.name));
+
+  const venueOptions = _hpVenues.slice().sort((a, b) => a.name.localeCompare(b.name))
+    .map(v => '<option value="' + v.id + '">' + esc(v.name) + '</option>').join('');
+
+  const statusBtn = (t, val, label, color) => {
+    const on = t.return_status === val;
+    return '<button type="button" onclick="hpSetReturnStatus(\'' + esc(t.team_number_full) + '\',\'' + val + '\')"'
+      + ' title="' + esc(label) + '"'
+      + ' style="padding:2px 8px;border-radius:6px;font-size:0.74rem;font-weight:700;cursor:pointer;'
+      + (on ? 'border:2px solid ' + color + ';background:' + color + ';color:#fff'
+            : 'border:1px solid var(--border);background:#fff;color:#666')
+      + '">' + esc(label) + '</button>';
+  };
+
+  let html = '<h3 style="margin:0 0 10px">' + esc(hpDivLabel(div))
+    + (meta.night ? ' <span class="hint" style="font-weight:400">· ' + esc(meta.night) + 's</span>' : '')
+    + '</h3>'
+    + '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px">';
+
+  for (const g of sorted) {
+    const counting = g.teams.filter(t => t.return_status !== 'no');
+    const cap = g.venue ? 2 * (g.venue.num_tables || 0) : 0;
+    let color, label;
+    if (!g.venue)                 { color = '#9ca3af'; label = 'venue not in host list'; }
+    else if (cap === 0)           { color = '#9ca3af'; label = 'no capacity set'; }
+    else if (counting.length > cap) { color = '#b91c1c'; label = 'OVER by ' + (counting.length - cap); }
+    else                          { color = '#0a6b3a'; label = 'fits · ' + (cap - counting.length) + ' open'; }
+
+    html += '<div style="background:#fff;border:1px solid var(--border);border-top:5px solid ' + color + ';border-radius:10px;padding:10px 12px">'
+      + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:2px">'
+      +   '<strong style="flex:1;font-size:0.95rem">' + esc(g.name) + '</strong>'
+      +   '<span style="background:' + color + ';color:#fff;padding:2px 9px;border-radius:999px;font-size:0.74rem;font-weight:700">'
+      +     counting.length + (cap ? ' / ' + cap : '') + '</span>'
+      + '</div>'
+      + '<div class="hint" style="font-size:0.72rem;margin-bottom:8px">' + esc(label) + '</div>';
+
+    for (const t of g.teams.slice().sort((a, b) => (a.team_name || '').localeCompare(b.team_name || ''))) {
+      const faded = t.return_status === 'no';
+      html += '<div style="display:flex;align-items:center;gap:6px;padding:5px 0;border-top:1px solid #f3f3f3'
+        + (faded ? ';opacity:0.45' : '') + '">'
+        + '<span style="font-family:ui-monospace,Menlo,monospace;font-size:0.72rem;color:#9ca3af;min-width:42px">' + esc(t.team_number_full) + '</span>'
+        + '<span style="flex:1;font-size:0.86rem;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(t.team_name) + '">'
+        +   esc(t.team_name)
+        +   (t.in_summer ? ' <span style="background:#0031a1;color:#fff;border-radius:4px;padding:0 4px;font-size:0.62rem;font-weight:700" title="Played Summer 2026">SU</span>' : '')
+        +   (t.in_spring ? ' <span style="background:#7c3aed;color:#fff;border-radius:4px;padding:0 4px;font-size:0.62rem;font-weight:700" title="Played Spring 2026">SP</span>' : '')
+        +   (t.is_new_for_fall ? ' <span style="background:#0a6b3a;color:#fff;border-radius:4px;padding:0 4px;font-size:0.62rem;font-weight:700">NEW</span>' : '')
+        + '</span>'
+        + statusBtn(t, 'yes', 'Yes', '#0a6b3a')
+        + statusBtn(t, 'no', 'No', '#b91c1c')
+        + statusBtn(t, 'unknown', '?', '#6b7280')
+        + '<select onchange="hpMoveTeam(\'' + esc(t.team_number_full) + '\', this.value)"'
+        +   ' title="Move this team to a different venue"'
+        +   ' style="max-width:120px;padding:2px 4px;border:1px solid var(--border);border-radius:6px;font-size:0.74rem">'
+        +   '<option value="">(home)</option>'
+        +   (t.placement_venue_id
+              ? venueOptions.replace('value="' + t.placement_venue_id + '"', 'value="' + t.placement_venue_id + '" selected')
+              : venueOptions)
+        + '</select>'
+        + '</div>';
+    }
+    html += '</div>';
+  }
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+/* ── Mutations ── */
+async function hpSetReturnStatus(teamNumberFull, status) {
   try {
-    await sb('PATCH', 'host_plan_teams?id=eq.' + id,
+    await sb('PATCH', 'host_plan_teams?target_session=eq.' + encodeURIComponent(HP_TARGET_SESSION)
+      + '&team_number_full=eq.' + encodeURIComponent(teamNumberFull),
       { return_status: status, updated_by: getDeviceId() });
-    const row = _hpPlanTeams.find(r => r.id === id);
+    const row = _hpPlanTeams.find(t => t.team_number_full === teamNumberFull);
     if (row) row.return_status = status;
-    hpRenderRoster();
-    hpRenderPlacement();
-    hpRenderCapacity();
+    hpRenderPlanner();
   } catch (e) { alert('Save failed: ' + e.message); }
 }
 
-async function hpDeletePlanTeam(id) {
-  const row = _hpPlanTeams.find(r => r.id === id);
-  if (!row) return;
-  if (!confirm('Remove "' + row.team_name + '" from the Fall roster? (This does not delete their Summer / Spring history.)')) return;
+async function hpMoveTeam(teamNumberFull, venueIdRaw) {
+  const venueId = venueIdRaw ? parseInt(venueIdRaw, 10) : null;
   try {
-    await sb('DELETE', 'host_plan_teams?id=eq.' + id);
-    _hpPlanTeams = _hpPlanTeams.filter(r => r.id !== id);
-    hpRenderRoster();
-    hpRenderPlacement();
-    hpRenderCapacity();
-  } catch (e) { alert('Delete failed: ' + e.message); }
+    await sb('PATCH', 'host_plan_teams?target_session=eq.' + encodeURIComponent(HP_TARGET_SESSION)
+      + '&team_number_full=eq.' + encodeURIComponent(teamNumberFull),
+      { placement_venue_id: venueId,
+        placement_status: venueId ? 'placed' : 'unassigned',
+        updated_by: getDeviceId() });
+    const row = _hpPlanTeams.find(t => t.team_number_full === teamNumberFull);
+    if (row) { row.placement_venue_id = venueId; row.placement_status = venueId ? 'placed' : 'unassigned'; }
+    hpRenderPlanner();
+  } catch (e) { alert('Save failed: ' + e.message); }
 }
 
+/* ── New-team modal ── */
 let _hpModalEscHandler = null;
+function hpPopulateModalDivisions() {
+  const sel = document.getElementById('hpNewDivision');
+  if (!sel) return;
+  const divs = hpDivisionsList();
+  sel.innerHTML = '<option value="">— pick —</option>'
+    + divs.map(d => '<option value="' + esc(d) + '">' + esc(hpDivLabel(d)) + '</option>').join('');
+}
 function hpOpenNewTeamModal() {
   document.getElementById('hpNewTeamName').value = '';
   document.getElementById('hpNewCaptain').value = '';
-  document.getElementById('hpNewNight').value = '';
   document.getElementById('hpNewNotes').value = '';
   document.getElementById('hpNewTeamStatus').textContent = '';
+  hpPopulateModalDivisions();
+  if (_hpActiveDiv) document.getElementById('hpNewDivision').value = _hpActiveDiv;
   document.getElementById('hpNewTeamModal').style.display = 'flex';
-  /* Document-level ESC listener so pressing Escape anywhere closes the modal. */
   _hpModalEscHandler = e => { if (e.key === 'Escape') hpCloseNewTeamModal(); };
   document.addEventListener('keydown', _hpModalEscHandler);
-  /* Move focus into the modal for keyboard users. */
   setTimeout(() => document.getElementById('hpNewTeamName').focus(), 0);
 }
 function hpCloseNewTeamModal() {
@@ -22498,244 +22618,90 @@ function hpCloseNewTeamModal() {
   }
 }
 async function hpSaveNewTeam() {
-  const name    = hpNormalizeName(document.getElementById('hpNewTeamName').value);
+  const name = hpNormalizeName(document.getElementById('hpNewTeamName').value);
+  const div  = document.getElementById('hpNewDivision').value;
   const captain = document.getElementById('hpNewCaptain').value.trim();
-  const night   = document.getElementById('hpNewNight').value;
   const notes   = document.getElementById('hpNewNotes').value.trim();
   const stat = document.getElementById('hpNewTeamStatus');
   if (!name) { stat.textContent = 'Team name is required.'; stat.className = 'status-line err'; return; }
-  const clash = _hpPlanTeams.find(r => hpNormalizeName(r.team_name).toLowerCase() === name.toLowerCase());
-  if (clash) {
-    stat.textContent = 'A team named "' + name + '" is already on the Fall roster.';
-    stat.className = 'status-line err';
-    return;
-  }
+  if (!div)  { stat.textContent = 'Pick a division.';        stat.className = 'status-line err'; return; }
+  /* Synthetic team number for new teams: <div>N<seq>. Real numbers come
+     from TMS later; the operator can resync then. */
+  let seq = 1;
+  while (_hpPlanTeams.some(t => t.team_number_full === div + 'N' + seq)) seq++;
+  const tn = div + 'N' + seq;
   try {
     await sb('POST', 'host_plan_teams', {
       target_session:   HP_TARGET_SESSION,
+      team_number_full: tn,
+      division_number:  div,
       team_name:        name,
       captain_name:     captain || null,
-      night_of_play:    night || null,
       notes:            notes || null,
-      return_status:    'yes',   // new teams are implicitly returning
+      return_status:    'yes',
       is_new_for_fall:  true,
+      in_summer:        false,
+      in_spring:        false,
+      placement_status: 'unassigned',
       updated_by:       getDeviceId()
     });
     hpCloseNewTeamModal();
     await hpLoadPlanTeams();
-    hpRenderRoster();
-    hpRenderPlacement();
-    hpRenderCapacity();
+    _hpActiveDiv = div;
+    hpRenderPlanner();
   } catch (e) {
     stat.textContent = 'Save failed: ' + e.message; stat.className = 'status-line err';
   }
 }
 
-/* Placement — dropdown of venues per team. Suggestion picks the Summer
-   venue if it still exists in host_venues, otherwise the Spring venue. */
-function hpVenueByName(name) {
-  if (!name) return null;
-  const key = name.toLowerCase().trim();
-  return _hpVenues.find(v => (v.name || '').toLowerCase().trim() === key) || null;
-}
-
-function hpSuggestedVenueId(row) {
-  const summer = hpVenueByName(row.summer_venue);
-  if (summer) return summer.id;
-  const spring = hpVenueByName(row.spring_venue);
-  if (spring) return spring.id;
-  return null;
-}
-
-function hpRenderPlacement() {
-  const el = document.getElementById('hpPlacementList');
-  if (!el) return;
-  const rows = _hpPlanTeams.filter(r => r.return_status === 'yes' || r.is_new_for_fall);
-  const summaryEl = document.getElementById('hpPlacementSummary');
-  const placed = rows.filter(r => r.placement_venue_id).length;
-  if (summaryEl) summaryEl.textContent = rows.length + ' teams to place · ' + placed + ' placed · ' + (rows.length - placed) + ' unassigned';
-  if (!rows.length) {
-    el.innerHTML = '<p class="hint" style="margin:0">Mark at least one team <strong>Returning</strong> in section 3 to see the placement list.</p>';
-    return;
-  }
-  const venueOptions = _hpVenues.slice().sort((a, b) => a.name.localeCompare(b.name))
-    .map(v => '<option value="' + v.id + '">' + esc(v.name) + '</option>').join('');
-  let html = '<table style="width:100%;border-collapse:collapse;font-size:0.88rem;background:#fff">'
-    + '<thead><tr style="background:#f9fafb;text-align:left">'
-    + '<th style="padding:6px;border-bottom:2px solid var(--border)">Team</th>'
-    + '<th style="padding:6px;border-bottom:2px solid var(--border)">Suggested</th>'
-    + '<th style="padding:6px;border-bottom:2px solid var(--border);width:220px">Fall placement</th>'
-    + '<th style="padding:6px;border-bottom:2px solid var(--border);width:120px">Status</th>'
-    + '<th style="padding:6px;border-bottom:2px solid var(--border);width:60px"></th>'
-    + '</tr></thead><tbody>';
-  for (const r of rows) {
-    const suggestedId = hpSuggestedVenueId(r);
-    const suggested   = suggestedId ? _hpVenues.find(v => v.id === suggestedId) : null;
-    const currentId   = r.placement_venue_id;
-    const matchesSuggested = suggestedId && currentId === suggestedId;
-    html += '<tr>'
-      + '<td style="padding:6px;border-bottom:1px solid #f1f1f1">'
-      +   '<strong>' + esc(r.team_name) + '</strong>'
-      +   (r.is_new_for_fall ? ' <span style="background:#0031a1;color:#fff;padding:1px 6px;border-radius:999px;font-size:0.68rem;font-weight:700">NEW</span>' : '')
-      + '</td>'
-      + '<td style="padding:6px;border-bottom:1px solid #f1f1f1;color:#666">'
-      +   (suggested ? esc(suggested.name) : (r.summer_venue || r.spring_venue || '—'))
-      +   (suggested && !currentId ? ' <button class="btn btn-outline btn-sm" onclick="hpSetPlacement(' + r.id + ',' + suggested.id + ',true)">Accept</button>' : '')
-      + '</td>'
-      + '<td style="padding:6px;border-bottom:1px solid #f1f1f1">'
-      +   '<select onchange="hpSetPlacement(' + r.id + ', this.value ? +this.value : null, true)"'
-      +     ' style="width:100%;padding:4px 6px;border:1px solid var(--border);border-radius:4px">'
-      +     '<option value="">— unplaced —</option>'
-      +     venueOptions.replace('value="' + currentId + '"', 'value="' + currentId + '" selected')
-      +   '</select>'
-      + '</td>'
-      + '<td style="padding:6px;border-bottom:1px solid #f1f1f1">'
-      +   hpPlacementBadge(r.placement_status)
-      + '</td>'
-      + '<td style="padding:6px;border-bottom:1px solid #f1f1f1">'
-      +   (r.placement_venue_id
-          ? '<button class="btn btn-outline btn-sm" onclick="hpConfirmPlacement(' + r.id + ')" title="Mark this placement as confirmed">' + (r.placement_status === 'confirmed' ? '↺' : '✓') + '</button>'
-          : '')
-      + '</td>'
-      + '</tr>';
-  }
-  html += '</tbody></table>';
-  el.innerHTML = html;
-}
-
-function hpPlacementBadge(status) {
-  const map = {
-    unassigned: { text: 'Unassigned', bg: '#e5e7eb', fg: '#374151' },
-    placed:     { text: 'Placed',     bg: '#0031a1', fg: '#fff' },
-    confirmed:  { text: 'Confirmed',  bg: '#0a6b3a', fg: '#fff' }
-  };
-  const s = map[status] || map.unassigned;
-  return '<span style="background:' + s.bg + ';color:' + s.fg + ';padding:2px 8px;border-radius:999px;font-weight:700;font-size:0.72rem">'
-    + esc(s.text) + '</span>';
-}
-
-/* Placement setter — also updates the DJ twin when auto-sync is on. */
-async function hpSetPlacement(id, venueId, syncDj) {
-  const row = _hpPlanTeams.find(r => r.id === id);
+/* Remove a plan row (parse junk / duplicates). Not-returning teams should
+   use the No status instead so they stay visible. */
+async function hpDeletePlanTeam(teamNumberFull) {
+  const row = _hpPlanTeams.find(t => t.team_number_full === teamNumberFull);
   if (!row) return;
-  const status = venueId ? 'placed' : 'unassigned';
-  const patch = { placement_venue_id: venueId, placement_status: status, updated_by: getDeviceId() };
+  if (!confirm('Remove "' + row.team_name + '" (' + teamNumberFull + ') from the plan?')) return;
   try {
-    await sb('PATCH', 'host_plan_teams?id=eq.' + id, patch);
-    row.placement_venue_id = venueId;
-    row.placement_status = status;
-    if (syncDj && document.getElementById('hpAutoSyncDj')?.checked) {
-      const twin = _hpPlanTeams.find(t =>
-        t.id !== id
-        && (t.return_status === 'yes' || t.is_new_for_fall)
-        && hpBaseName(t.team_name).toLowerCase() === hpBaseName(row.team_name).toLowerCase());
-      if (twin && twin.placement_venue_id !== venueId) {
-        await sb('PATCH', 'host_plan_teams?id=eq.' + twin.id, {
-          placement_venue_id: venueId, placement_status: status, updated_by: getDeviceId()
-        });
-        twin.placement_venue_id = venueId;
-        twin.placement_status = status;
-      }
-    }
-    hpRenderPlacement();
-    hpRenderCapacity();
-  } catch (e) { alert('Save failed: ' + e.message); }
+    await sb('DELETE', 'host_plan_teams?target_session=eq.' + encodeURIComponent(HP_TARGET_SESSION)
+      + '&team_number_full=eq.' + encodeURIComponent(teamNumberFull));
+    _hpPlanTeams = _hpPlanTeams.filter(t => t.team_number_full !== teamNumberFull);
+    hpRenderPlanner();
+  } catch (e) { alert('Delete failed: ' + e.message); }
 }
 
-async function hpConfirmPlacement(id) {
-  const row = _hpPlanTeams.find(r => r.id === id);
-  if (!row) return;
-  const next = row.placement_status === 'confirmed' ? 'placed' : 'confirmed';
-  try {
-    await sb('PATCH', 'host_plan_teams?id=eq.' + id, { placement_status: next, updated_by: getDeviceId() });
-    row.placement_status = next;
-    hpRenderPlacement();
-  } catch (e) { alert('Save failed: ' + e.message); }
-}
-
-/* Capacity overview — per venue: cap vs load, over-capacity warning,
-   list of teams. Unplaced teams surface at the bottom. */
-function hpRenderCapacity() {
-  const el = document.getElementById('hpCapacityList');
-  const unplacedEl = document.getElementById('hpUnplacedList');
-  if (!el) return;
-  const relevant = _hpPlanTeams.filter(r => r.return_status === 'yes' || r.is_new_for_fall);
-  const byVenue = new Map();
-  const unplaced = [];
-  for (const r of relevant) {
-    if (r.placement_venue_id) {
-      if (!byVenue.has(r.placement_venue_id)) byVenue.set(r.placement_venue_id, []);
-      byVenue.get(r.placement_venue_id).push(r);
-    } else {
-      unplaced.push(r);
-    }
-  }
-  let over = 0, at = 0, under = 0;
-  const cards = [];
-  for (const v of _hpVenues.slice().sort((a, b) => a.name.localeCompare(b.name))) {
-    const cap = 2 * (v.num_tables || 0);
-    const load = (byVenue.get(v.id) || []).length;
-    const teams = (byVenue.get(v.id) || []).slice().sort((a, b) => a.team_name.localeCompare(b.team_name));
-    let color, label;
-    if (cap === 0)         { color = '#9ca3af'; label = 'no cap set'; }
-    else if (load > cap)   { color = '#b91c1c'; label = 'over cap'; over++; }
-    else if (load === cap) { color = '#0a6b3a'; label = 'at cap';    at++; }
-    else                   { color = '#0031a1'; label = (cap - load) + ' open'; under++; }
-    cards.push(
-      '<div style="flex:1;min-width:220px;background:#fff;border:1px solid var(--border);border-left:6px solid ' + color + ';border-radius:10px;padding:10px 12px">'
-      + '<div style="display:flex;align-items:center;gap:8px">'
-      +   '<strong style="font-size:0.95rem;flex:1">' + esc(v.name) + '</strong>'
-      +   '<span style="background:' + color + ';color:#fff;padding:2px 9px;border-radius:999px;font-size:0.72rem;font-weight:700">' + load + ' / ' + cap + '</span>'
-      + '</div>'
-      + '<div class="hint" style="font-size:0.72rem;margin-bottom:6px">' + esc(label) + '</div>'
-      + (teams.length
-          ? '<ul style="margin:0;padding-left:16px;font-size:0.82rem">'
-              + teams.map(t => '<li>' + esc(t.team_name)
-                  + (t.placement_status === 'confirmed' ? ' <span style="color:#0a6b3a;font-weight:700">✓</span>' : '')
-                  + '</li>').join('')
-              + '</ul>'
-          : '<div class="hint" style="font-size:0.76rem;font-style:italic">no teams placed</div>')
-      + '</div>'
-    );
-  }
-  el.innerHTML = '<div style="display:flex;gap:10px;flex-wrap:wrap">' + cards.join('') + '</div>';
-  const cs = document.getElementById('hpCapSummary');
-  if (cs) cs.textContent = _hpVenues.length + ' venues · ' + over + ' over · ' + at + ' at · ' + under + ' under';
-
-  if (unplacedEl) {
-    if (unplaced.length) {
-      unplacedEl.innerHTML = '<div style="border:1px solid #e8a0a8;background:#fff5f5;border-radius:10px;padding:10px 12px">'
-        + '<strong style="color:#b91c1c">' + unplaced.length + ' team' + (unplaced.length === 1 ? '' : 's') + ' still unplaced</strong>'
-        + '<ul style="margin:6px 0 0;padding-left:20px;font-size:0.86rem">'
-        + unplaced.slice().sort((a, b) => a.team_name.localeCompare(b.team_name))
-            .map(r => '<li>' + esc(r.team_name)
-              + (r.summer_venue ? ' <span class="hint" style="font-size:0.76rem">(Summer: ' + esc(r.summer_venue) + ')</span>' : '')
-              + '</li>').join('')
-        + '</ul></div>';
-    } else {
-      unplacedEl.innerHTML = '<p class="hint" style="margin:0;color:#0a6b3a;font-weight:700">✓ Every Fall team has been placed.</p>';
-    }
-  }
-}
-
+/* ── CSV export — one row per team, grouped by division/venue. ── */
 function hpExportPlanCsv() {
-  const rows = _hpPlanTeams.filter(r => r.return_status === 'yes' || r.is_new_for_fall);
-  if (!rows.length) { alert('No teams to export.'); return; }
-  const byId = new Map(_hpVenues.map(v => [v.id, v.name]));
-  const cols = ['team_name','captain_name','summer_venue','spring_venue','night_of_play','placement_venue','placement_status','is_new_for_fall','notes'];
-  const header = ['Team','Captain','Summer venue','Spring venue','Night','Fall placement','Status','New for Fall','Notes'];
+  if (!_hpPlanTeams.length) { alert('Nothing to export yet.'); return; }
   const esc2 = v => { if (v == null) return ''; const s = String(v).replace(/"/g, '""'); return /[",\r\n]/.test(s) ? '"' + s + '"' : s; };
+  const header = ['Division','Division name','Night','Team #','Team','Sessions','Returning','Venue','Fits'];
   const out = [header.join(',')];
-  for (const r of rows.slice().sort((a, b) => a.team_name.localeCompare(b.team_name))) {
-    out.push(cols.map(c => {
-      if (c === 'placement_venue') return esc2(byId.get(r.placement_venue_id) || '');
-      return esc2(r[c]);
-    }).join(','));
+  for (const div of hpDivisionsList()) {
+    const meta = _hpDivMeta.get(div) || {};
+    const teams = _hpPlanTeams.filter(t => t.division_number === div);
+    /* recompute per-venue fit within the division for the Fits column */
+    const counts = new Map();
+    for (const t of teams) {
+      if (t.return_status === 'no') continue;
+      const eff = hpEffectiveVenue(t);
+      const k = eff.name.toLowerCase();
+      counts.set(k, (counts.get(k) || 0) + 1);
+    }
+    for (const t of teams.slice().sort((a, b) => a.team_number_full.localeCompare(b.team_number_full))) {
+      const eff = hpEffectiveVenue(t);
+      const cap = eff.venue ? 2 * (eff.venue.num_tables || 0) : 0;
+      const n = counts.get(eff.name.toLowerCase()) || 0;
+      const fits = t.return_status === 'no' ? '' : (!cap ? 'no cap' : (n <= cap ? 'yes' : 'OVER'));
+      out.push([
+        div, meta.name || '', meta.night || '',
+        t.team_number_full, t.team_name,
+        [t.in_summer ? 'SU' : '', t.in_spring ? 'SP' : '', t.is_new_for_fall ? 'NEW' : ''].filter(Boolean).join('+'),
+        t.return_status, eff.name, fits
+      ].map(esc2).join(','));
+    }
   }
   const blob = new Blob(['﻿' + out.join('\r\n')], { type: 'text/csv;charset=utf-8' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'host-plan-' + HP_TARGET_SESSION.replace(/\s+/g, '-').toLowerCase() + '-' + new Date().toISOString().slice(0,10) + '.csv';
+  a.download = 'host-plan-' + HP_TARGET_SESSION.replace(/\s+/g, '-').toLowerCase() + '-' + new Date().toISOString().slice(0, 10) + '.csv';
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 500);
 }
@@ -22748,16 +22714,16 @@ window.hpDeleteVenue        = hpDeleteVenue;
 window.hpAutoExtractClick   = hpAutoExtractClick;
 window.hpRefresh            = hpRefresh;
 window.hpSyncFromUploads    = hpSyncFromUploads;
-window.hpRenderRoster       = hpRenderRoster;
+window.hpRenderPlanner      = hpRenderPlanner;
+window.hpSelectDivision     = hpSelectDivision;
 window.hpSetReturnStatus    = hpSetReturnStatus;
+window.hpMoveTeam           = hpMoveTeam;
 window.hpDeletePlanTeam     = hpDeletePlanTeam;
 window.hpOpenNewTeamModal   = hpOpenNewTeamModal;
 window.hpCloseNewTeamModal  = hpCloseNewTeamModal;
 window.hpSaveNewTeam        = hpSaveNewTeam;
-window.hpRenderPlacement    = hpRenderPlacement;
-window.hpSetPlacement       = hpSetPlacement;
-window.hpConfirmPlacement   = hpConfirmPlacement;
 window.hpExportPlanCsv      = hpExportPlanCsv;
+
 
 // (Session loading is triggered by switchTab('certs') → certsAdminInit(),
 //  matching how every other Slate tab lazy-loads its data. The earlier
