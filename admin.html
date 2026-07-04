@@ -3132,7 +3132,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.182';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.183';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -8899,6 +8899,49 @@ async function gcSync(dryRun) {
 }
 window.gcSync = gcSync;
 
+/* ── Add ONE person to Google Contacts (3.183) ────────────────────────
+   Outreach-card button. Outreach people are mostly lapsed / never-played
+   — outside contacts_sync's roster scope — so this is the only path that
+   gets them into the phone. Same group + APA#-key as the bulk sync; the
+   GAS side refuses to overwrite an existing contact (returns 'already'). */
+async function otAddContact(mn, btn) {
+  const c = _otState.candidates.find(x => x.member_number === mn);
+  if (!c) return;
+  const orig = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '⏳ Adding…';
+  try {
+    const r = await fetch(OPTOUT_CONFIRM_MAILER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action: 'contact_add',
+        admin_key: SB_KEY,
+        person: {
+          apa_number: c.member_number,
+          first_name: c.first_name || '',
+          nickname:   (c.nickname && c.nickname !== c.first_name) ? c.nickname : '',
+          last_name:  c.last_name || '',
+          email:      c.email || '',
+          cell_phone: otIsRealPhone(c.cell_phone) ? c.cell_phone : '',
+          home_phone: otIsRealPhone(c.home_phone) ? c.home_phone : '',
+          work_phone: otIsRealPhone(c.work_phone) ? c.work_phone : '',
+          alt_phone:  otIsRealPhone(c.alt_phone)  ? c.alt_phone  : ''
+        }
+      }),
+      redirect: 'follow'
+    });
+    const res = JSON.parse(await r.text());
+    if (!res.ok) throw new Error(res.error || 'add failed');
+    btn.textContent = res.result === 'already' ? '✓ Already in contacts' : '✓ Added';
+    btn.classList.add('done');
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = orig;
+    alert('Add contact failed: ' + e.message);
+  }
+}
+
 /* Manual re-send of the opt-out confirmation email for a specific member.
    Used to back-fill emails for players who opted out before the auto-email
    feature went live, or when a re-send is needed for any reason. Uses the
@@ -14560,6 +14603,7 @@ function otCardHtml(c) {
         ${otQuickTouchBtn(s, 'email', 'Emailed', '📧')}
         ${otQuickTouchBtn(s, 'text',  'Texted',  '💬')}
         ${otQuickTouchBtn(s, 'call',  'Called',  '📞')}
+        <button type="button" class="ot-qt-btn" data-add-contact title="Add to Google Contacts (SPM APA group, soldans@)">👤 Add contact</button>
         ${otFmtLastAction(s) ? '<span class="hint" style="align-self:center; font-size:0.74rem">' + esc(otFmtLastAction(s)) + '</span>' : ''}
       </div>
       ${followUpHtml}
@@ -15021,6 +15065,9 @@ function otWireCard(cardEl) {
   cardEl.querySelectorAll('[data-touch]').forEach(btn => {
     btn.addEventListener('click', () => otQuickTouch(mn, btn.dataset.touch, btn));
   });
+  /* Add-to-Google-Contacts (3.183) */
+  const acBtn = cardEl.querySelector('[data-add-contact]');
+  if (acBtn) acBtn.addEventListener('click', () => otAddContact(mn, acBtn));
   /* Free-text notes — save on blur (no Save button — auto-persist). */
   const notesInput = cardEl.querySelector('[data-notes-input]');
   if (notesInput) {
