@@ -1022,6 +1022,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="playoffs">Playoffs</button>
       <button class="tab" data-tab="certs">Certs</button>
       <button class="tab" data-tab="dolphin">Dolphin</button>
+      <button class="tab" data-tab="contacts">Contacts</button>
     </div>
 
     <div id="globalStatus" class="status-line"></div>
@@ -3077,6 +3078,38 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
     </div>
     <!-- ════════════════ /Dolphin ════════════════ -->
 
+    <!-- ══════════════════════════════════════════════════════════════
+         TAB: CONTACTS — sync SPM players into soldans@'s Google
+         Contacts via the apa-mailer GAS (People API). Idempotent,
+         keyed on APA# in each contact's SPM_APA field; all contacts
+         land in the 'SPM APA' contact group. Never deletes.
+         ══════════════════════════════════════════════════════════════ -->
+    <div id="tab-contacts" class="tab-panel">
+      <div class="card">
+        <h2 style="margin:0 0 6px">Google Contacts sync</h2>
+        <p class="hint" style="margin:0 0 12px">
+          Pushes every player on a <strong>Summer or Spring 2026 SPM roster</strong>
+          (~1,000 people) into <code>soldans@southportlandmetroapa.com</code>'s Google
+          Contacts. Contacts are named <em>First Nickname Last</em>, carry all phones
+          on file + email, and get the APA number + team names in the notes. Everything
+          lands in the <strong>SPM APA</strong> contact group. Re-running updates changed
+          numbers and adds new players — it never duplicates and never deletes, so
+          lapsed players stay until you prune the group by hand.
+        </p>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+          <button class="btn btn-outline" onclick="gcSync(true)" title="Compute what WOULD change without writing anything">🔍 Dry run</button>
+          <button class="btn btn-primary" onclick="gcSync(false)">🔄 Sync to Google Contacts</button>
+          <span id="gcStatus" class="status-line" style="flex:1" role="status" aria-live="polite"></span>
+        </div>
+        <div id="gcResults" style="display:none;padding:12px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:0.9rem"></div>
+        <p class="hint" style="margin:12px 0 0;font-size:0.78rem;color:#888">
+          Scope: SPM only (operator 1). Runs through the apa-mailer GAS as soldans@ —
+          no extra sign-in needed here. A sync of ~1,000 new contacts takes under a minute.
+        </p>
+      </div>
+    </div>
+    <!-- ════════════════ /Contacts ════════════════ -->
+
   </div>
 
   <div class="footer" id="appFooter">Slate v0.1 · Phase 1 · Supabase-backed</div>
@@ -3099,7 +3132,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.181';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.182';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -4788,7 +4821,8 @@ const TAB_LABEL = {
   rolodex:       'Rolodex',
   playoffs:      'Playoffs',
   hostplan:      'Host Plan',
-  dolphin:       'Dolphin'
+  dolphin:       'Dolphin',
+  contacts:      'Contacts'
 };
 
 function switchTab(name) {
@@ -8817,6 +8851,53 @@ async function mailerQuotaCheck() {
   }
 }
 window.mailerQuotaCheck = mailerQuotaCheck;
+
+/* ── Google Contacts sync (3.182) ─────────────────────────────────────
+   Calls the apa-mailer GAS contacts_sync action. Dry-run computes the
+   diff without writing. Real runs create/update contacts in soldans@'s
+   account — idempotent (keyed on APA#), additive-only. */
+async function gcSync(dryRun) {
+  const stat = document.getElementById('gcStatus');
+  const box  = document.getElementById('gcResults');
+  stat.textContent = dryRun ? 'Computing diff (no writes)…' : 'Syncing… this can take a minute on first run.';
+  stat.className = 'status-line';
+  box.style.display = 'none';
+  try {
+    const r = await fetch(OPTOUT_CONFIRM_MAILER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'contacts_sync', admin_key: SB_KEY, dry_run: !!dryRun }),
+      redirect: 'follow'
+    });
+    const txt = await r.text();
+    let res = null;
+    try { res = JSON.parse(txt); } catch (_) { res = { ok: false, error: 'bad gateway: ' + txt.slice(0, 160) }; }
+    if (!res.ok && res.error) {
+      stat.textContent = '✗ ' + res.error;
+      stat.className = 'status-line err';
+      return;
+    }
+    stat.textContent = dryRun ? '✓ Dry run complete — nothing was written.' : (res.ok ? '✓ Sync complete.' : '⚠ Sync finished with errors.');
+    stat.className = res.ok ? 'status-line ok' : 'status-line err';
+    const row = (label, val, color) =>
+      '<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f3f3f3">'
+      + '<span>' + label + '</span><strong style="color:' + (color || '#1a1a1a') + '">' + val + '</strong></div>';
+    box.innerHTML =
+      row('Roster size', res.roster ?? '—')
+      + (dryRun
+          ? row('Would create', res.would_create ?? 0, '#0031a1') + row('Would update', res.would_update ?? 0, '#a76c00')
+          : row('Created', res.created ?? 0, '#0a6b3a') + row('Updated', res.updated ?? 0, '#0031a1'))
+      + row('Unchanged', res.unchanged ?? 0, '#6b7280')
+      + ((res.errors && res.errors.length)
+          ? '<div style="margin-top:8px;color:#b91c1c;font-size:0.8rem">' + res.errors.map(e => esc(e)).join('<br>') + '</div>'
+          : '');
+    box.style.display = 'block';
+  } catch (e) {
+    stat.textContent = '✗ ' + e.message;
+    stat.className = 'status-line err';
+  }
+}
+window.gcSync = gcSync;
 
 /* Manual re-send of the opt-out confirmation email for a specific member.
    Used to back-fill emails for players who opted out before the auto-email
