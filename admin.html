@@ -3107,6 +3107,25 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           no extra sign-in needed here. A sync of ~1,000 new contacts takes under a minute.
         </p>
       </div>
+      <div class="card">
+        <h2 style="margin:0 0 6px">Duplicates</h2>
+        <p class="hint" style="margin:0 0 12px">
+          Finds sync-created contacts that duplicate one you already had (matched by
+          shared phone or email). <strong>Safe matches</strong> (same last name, same or
+          prefix-matching first name, exactly one candidate) can be merged in bulk: your
+          original contact keeps everything it has, gains the APA number and any missing
+          numbers, and the duplicate is deleted (recoverable from Google Contacts trash
+          for 30 days). <strong>Needs-review pairs</strong> — shared numbers with different
+          names, usually spouses or ambiguous matches — are listed below with a per-pair
+          Merge button. Merged contacts are never touched by future syncs.
+        </p>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+          <button class="btn btn-outline" onclick="gcDedup(true)" title="Scan and report — no writes">🔍 Scan for duplicates</button>
+          <button class="btn btn-primary" onclick="gcDedup(false)" title="Merge all safe matches; review pairs stay listed">🧹 Merge safe matches</button>
+          <span id="gcDedupStatus" class="status-line" style="flex:1" role="status" aria-live="polite"></span>
+        </div>
+        <div id="gcDedupResults" style="display:none;padding:12px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:0.9rem"></div>
+      </div>
     </div>
     <!-- ════════════════ /Contacts ════════════════ -->
 
@@ -3132,7 +3151,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.183';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.184';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -8888,6 +8907,8 @@ async function gcSync(dryRun) {
           ? row('Would create', res.would_create ?? 0, '#0031a1') + row('Would update', res.would_update ?? 0, '#a76c00')
           : row('Created', res.created ?? 0, '#0a6b3a') + row('Updated', res.updated ?? 0, '#0031a1'))
       + row('Unchanged', res.unchanged ?? 0, '#6b7280')
+      + (res.merged_skipped ? row('Merged with your own contact — left alone', res.merged_skipped, '#6b7280') : '')
+      + (res.custom_skipped ? row('Has hand-added numbers — left alone', res.custom_skipped, '#a76c00') : '')
       + ((res.errors && res.errors.length)
           ? '<div style="margin-top:8px;color:#b91c1c;font-size:0.8rem">' + res.errors.map(e => esc(e)).join('<br>') + '</div>'
           : '');
@@ -8898,6 +8919,79 @@ async function gcSync(dryRun) {
   }
 }
 window.gcSync = gcSync;
+
+/* ── Duplicate scan / merge (3.184) ───────────────────────────────────
+   contacts_dedup finds sync-created contacts duplicating a pre-existing
+   one (shared phone/email). Safe tier merges in bulk; review tier
+   renders per-pair Merge buttons → contacts_merge_pair. */
+async function gcDedup(dryRun) {
+  const stat = document.getElementById('gcDedupStatus');
+  const box  = document.getElementById('gcDedupResults');
+  stat.textContent = dryRun ? 'Scanning… (no writes)' : 'Merging safe matches…';
+  stat.className = 'status-line';
+  try {
+    const r = await fetch(OPTOUT_CONFIRM_MAILER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'contacts_dedup', admin_key: SB_KEY, dry_run: !!dryRun }),
+      redirect: 'follow'
+    });
+    const res = JSON.parse(await r.text());
+    if (!res.ok && res.error) { stat.textContent = '✗ ' + res.error; stat.className = 'status-line err'; return; }
+    stat.textContent = dryRun
+      ? `✓ Scan done — ${ (res.auto || []).length } safe, ${ (res.review || []).length } need review.`
+      : `✓ Merged ${res.merged ?? 0}, deleted ${res.deleted ?? 0} duplicate${(res.deleted ?? 0) === 1 ? '' : 's'}. ${ (res.review || []).length } still need review.`;
+    stat.className = res.ok ? 'status-line ok' : 'status-line err';
+    const pairRow = (p, withBtn) =>
+      '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #f3f3f3">'
+      + '<span style="flex:1;min-width:0"><b>' + esc(p.s_name) + '</b> <span class="hint">(synced)</span>'
+      + ' ⇄ <b>' + esc(p.p_name) + '</b> <span class="hint">(yours)</span>'
+      + ' <span class="hint">via ' + esc(p.via) + '</span></span>'
+      + (withBtn ? `<button class="btn btn-outline btn-sm" onclick="gcMergePair('${esc(p.s_res)}','${esc(p.p_res)}',this)">Merge</button>` : '')
+      + '</div>';
+    box.innerHTML =
+      ((res.auto || []).length
+        ? '<div style="font-weight:700;margin-bottom:4px">Safe matches' + (dryRun ? ' (would merge)' : ' (merged)') + '</div>'
+          + res.auto.map(p => pairRow(p, false)).join('')
+        : '')
+      + ((res.review || []).length
+        ? '<div style="font-weight:700;margin:10px 0 4px">Needs review — merge only if it\'s really the same person</div>'
+          + res.review.map(p => pairRow(p, true)).join('')
+        : '')
+      + (!(res.auto || []).length && !(res.review || []).length
+        ? '<div class="hint">No duplicates found. 🎉</div>' : '')
+      + ((res.errors && res.errors.length)
+        ? '<div style="margin-top:8px;color:#b91c1c;font-size:0.8rem">' + res.errors.map(e => esc(e)).join('<br>') + '</div>'
+        : '');
+    box.style.display = 'block';
+  } catch (e) {
+    stat.textContent = '✗ ' + e.message;
+    stat.className = 'status-line err';
+  }
+}
+window.gcDedup = gcDedup;
+
+async function gcMergePair(sRes, pRes, btn) {
+  btn.disabled = true;
+  const orig = btn.textContent;
+  btn.textContent = '⏳';
+  try {
+    const r = await fetch(OPTOUT_CONFIRM_MAILER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'contacts_merge_pair', admin_key: SB_KEY, s_res: sRes, p_res: pRes }),
+      redirect: 'follow'
+    });
+    const res = JSON.parse(await r.text());
+    if (!res.ok) throw new Error(res.error || 'merge failed');
+    btn.textContent = '✓ Merged';
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = orig;
+    alert('Merge failed: ' + e.message);
+  }
+}
+window.gcMergePair = gcMergePair;
 
 /* ── Add ONE person to Google Contacts (3.183) ────────────────────────
    Outreach-card button. Outreach people are mostly lapsed / never-played
