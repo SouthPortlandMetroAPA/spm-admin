@@ -1955,6 +1955,9 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
                   style="align-self:flex-end; padding:6px 12px;">
             ↶ Undo <span id="otUndoCount" style="color:var(--muted)"></span>
           </button>
+          <button class="btn btn-outline btn-sm" id="otAddAllBtn"
+                  title="Add every person in the current filtered list to Google Contacts (SPM APA group, soldans@). People already in contacts are skipped — never duplicated."
+                  style="align-self:flex-end; padding:6px 12px;">👤 Add filtered to contacts</button>
           <span id="otStatusLine" class="hint" style="align-self:center"></span>
         </div>
 
@@ -3151,7 +3154,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.184';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.185';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -8993,6 +8996,55 @@ async function gcMergePair(sRes, pRes, btn) {
 }
 window.gcMergePair = gcMergePair;
 
+/* ── Bulk add: every currently-filtered Outreach person (3.185) ───────
+   One GAS call (contacts_add_bulk): a single existing-contacts scan,
+   then batch-creates only the people not already there (APA#-keyed, so
+   never a duplicate — merged survivors count as already-present). Uses
+   otFilteredCandidates() so the set is exactly what the list shows. */
+async function otAddAllContacts() {
+  const btn = document.getElementById('otAddAllBtn');
+  const stat = document.getElementById('otStatusLine');
+  const people = otFilteredCandidates().visible;
+  if (!people.length) { stat.textContent = 'Nothing in the filtered list.'; return; }
+  if (!confirm(`Add ${people.length} filtered ${people.length === 1 ? 'person' : 'people'} to Google Contacts?\n\nAnyone already in contacts is skipped — no duplicates.`)) return;
+  const persons = people.map(c => ({
+    apa_number: c.member_number,
+    first_name: c.first_name || '',
+    nickname:   (c.nickname && c.nickname !== c.first_name) ? c.nickname : '',
+    last_name:  c.last_name || '',
+    email:      c.email || '',
+    cell_phone: otIsRealPhone(c.cell_phone) ? c.cell_phone : '',
+    home_phone: otIsRealPhone(c.home_phone) ? c.home_phone : '',
+    work_phone: otIsRealPhone(c.work_phone) ? c.work_phone : '',
+    alt_phone:  otIsRealPhone(c.alt_phone)  ? c.alt_phone  : ''
+  }));
+  btn.disabled = true;
+  const orig = btn.textContent;
+  btn.textContent = `⏳ Adding ${persons.length}…`;
+  stat.textContent = '';
+  window.slateBulkBusy = true;
+  try {
+    const r = await fetch(OPTOUT_CONFIRM_MAILER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'contacts_add_bulk', admin_key: SB_KEY, persons }),
+      redirect: 'follow'
+    });
+    const res = JSON.parse(await r.text());
+    if (!res.ok && res.error) throw new Error(res.error);
+    stat.textContent = `✓ Added ${res.created ?? 0} new · ${res.already ?? 0} already in contacts`
+      + (res.skipped ? ` · ${res.skipped} skipped (no name/APA #)` : '');
+    if (res.errors && res.errors.length) alert('Some batches failed:\n' + res.errors.join('\n'));
+  } catch (e) {
+    stat.textContent = '';
+    alert('Bulk add failed: ' + e.message);
+  } finally {
+    window.slateBulkBusy = false;
+    btn.disabled = false;
+    btn.textContent = orig;
+  }
+}
+
 /* ── Add ONE person to Google Contacts (3.183) ────────────────────────
    Outreach-card button. Outreach people are mostly lapsed / never-played
    — outside contacts_sync's roster scope — so this is the only path that
@@ -13922,6 +13974,9 @@ async function otInit() {
     otRenderSlPills();
   });
 
+  /* Bulk add-to-contacts (3.185) — operates on the current filtered list. */
+  document.getElementById('otAddAllBtn').addEventListener('click', otAddAllContacts);
+
   /* Undo button + Ctrl/⌘-Z hotkey. Hotkey fires only when the Outreach
      tab is the active tab — otherwise we'd hijack normal Ctrl-Z in
      other tabs' inputs. */
@@ -14532,8 +14587,11 @@ function otRenderStats() {
   });
 }
 
-function otRenderList() {
-  const list = document.getElementById('otCardList');
+/* The one source of truth for "what the list shows" — status pills,
+   touch filters, and search all applied. Bulk actions (Add filtered to
+   contacts, 3.185) MUST use this too, never a re-implementation, so the
+   button always operates on exactly what's on screen. */
+function otFilteredCandidates() {
   const f = _otState.filter;
   const touchSet    = f.touch    || new Set();
   const touchNotSet = f.touchNot || new Set();
@@ -14555,7 +14613,13 @@ function otRenderList() {
     if (touchNotSet.has('call')  && s.last_called_at)  return false;
     return true;
   });
-  const visible = allEligible.filter(c => otMatchesSearch(c, f.search));
+  return { allEligible, visible: allEligible.filter(c => otMatchesSearch(c, f.search)) };
+}
+
+function otRenderList() {
+  const list = document.getElementById('otCardList');
+  const f = _otState.filter;
+  const { allEligible, visible } = otFilteredCandidates();
 
   /* Result counter for the search box — shows "showing X of Y" when
      a search is active, plain count otherwise. Fixes B6 from validation. */
