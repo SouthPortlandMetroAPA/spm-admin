@@ -1956,7 +1956,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             ↶ Undo <span id="otUndoCount" style="color:var(--muted)"></span>
           </button>
           <button class="btn btn-outline btn-sm" id="otAddAllBtn"
-                  title="Add every person in the current filtered list to Google Contacts (SPM APA group, soldans@). People already in contacts are skipped — never duplicated."
+                  title="Add every person in the current filtered list to Google Contacts (SPM APA group, soldans@). Already-added people are skipped; if a number matches one of your own contacts it's updated in place (league data wins); shared-number spouses become a combined household contact."
                   style="align-self:flex-end; padding:6px 12px;">👤 Add filtered to contacts</button>
           <span id="otStatusLine" class="hint" style="align-self:center"></span>
         </div>
@@ -3097,7 +3097,11 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           on file + email, and get the APA number + team names in the notes. Everything
           lands in the <strong>SPM APA</strong> contact group. Re-running updates changed
           numbers and adds new players — it never duplicates and never deletes, so
-          lapsed players stay until you prune the group by hand.
+          lapsed players stay until you prune the group by hand. If a new player's
+          number already lives on one of your own contacts, that contact is
+          <strong>updated in place</strong> (league data wins, your extras are kept);
+          a shared number with a clearly different name becomes a combined
+          household contact (e.g. <em>Kevin/Karen Blodgett</em>).
         </p>
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
           <button class="btn btn-outline" onclick="gcSync(true)" title="Compute what WOULD change without writing anything">🔍 Dry run</button>
@@ -3154,7 +3158,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.185';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.186';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -8912,6 +8916,12 @@ async function gcSync(dryRun) {
       + row('Unchanged', res.unchanged ?? 0, '#6b7280')
       + (res.merged_skipped ? row('Merged with your own contact — left alone', res.merged_skipped, '#6b7280') : '')
       + (res.custom_skipped ? row('Has hand-added numbers — left alone', res.custom_skipped, '#a76c00') : '')
+      + (dryRun
+          ? (res.would_match_update ? row('Number matches your contact — would update it', res.would_match_update, '#0031a1') : '')
+            + (res.would_match_combine ? row('Shared number, different name — would combine household', res.would_match_combine, '#a76c00') : '')
+          : (res.matched_updated ? row('Updated your matching contact (league data won)', res.matched_updated, '#0031a1') : '')
+            + (res.matched_combined ? row('Combined into household contact', res.matched_combined, '#a76c00') : ''))
+      + (res.ambiguous ? row('Number matches several contacts — skipped, resolve by hand', res.ambiguous, '#b91c1c') : '')
       + ((res.errors && res.errors.length)
           ? '<div style="margin-top:8px;color:#b91c1c;font-size:0.8rem">' + res.errors.map(e => esc(e)).join('<br>') + '</div>'
           : '');
@@ -9032,8 +9042,15 @@ async function otAddAllContacts() {
     });
     const res = JSON.parse(await r.text());
     if (!res.ok && res.error) throw new Error(res.error);
-    stat.textContent = `✓ Added ${res.created ?? 0} new · ${res.already ?? 0} already in contacts`
-      + (res.skipped ? ` · ${res.skipped} skipped (no name/APA #)` : '');
+    stat.textContent = `✓ Added ${res.created ?? 0} new`
+      + (res.updated ? ` · updated ${res.updated}` : '')
+      + (res.combined ? ` · combined ${res.combined} household${res.combined === 1 ? '' : 's'}` : '')
+      + ` · ${res.already ?? 0} already in contacts`
+      + (res.skipped ? ` · ${res.skipped} skipped (no name/APA #)` : '')
+      + ((res.ambiguous && res.ambiguous.length) ? ` · ${res.ambiguous.length} ambiguous` : '');
+    if (res.ambiguous && res.ambiguous.length) {
+      alert('These matched a number on SEVERAL of your contacts — resolve by hand:\n\n' + res.ambiguous.join('\n'));
+    }
     if (res.errors && res.errors.length) alert('Some batches failed:\n' + res.errors.join('\n'));
   } catch (e) {
     stat.textContent = '';
@@ -9079,7 +9096,10 @@ async function otAddContact(mn, btn) {
     });
     const res = JSON.parse(await r.text());
     if (!res.ok) throw new Error(res.error || 'add failed');
-    btn.textContent = res.result === 'already' ? '✓ Already in contacts' : '✓ Added';
+    btn.textContent = res.result === 'already' ? '✓ Already in contacts'
+                    : res.result === 'updated' ? '✓ Updated your contact'
+                    : res.result === 'combined' ? '✓ Combined household'
+                    : '✓ Added';
     btn.classList.add('done');
   } catch (e) {
     btn.disabled = false;
