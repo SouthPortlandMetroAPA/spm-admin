@@ -1961,6 +1961,17 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <span id="otStatusLine" class="hint" style="align-self:center"></span>
         </div>
 
+        <!-- Add-to-contacts progress (3.187): otAddProgress(pct, subtext)
+             drives this, fed by polling the GAS job cache while an add is
+             in flight. Same look/behavior as RackTime's upload bar —
+             hidden until first call, fades ~2s after completion. -->
+        <div id="otAddProgress" style="display:none;margin:2px 0 12px">
+          <div style="height:10px;background:#e5e7eb;border-radius:999px;overflow:hidden">
+            <div id="otAddBar" style="height:100%;width:0%;background:var(--spm-accent,#0031a8);transition:width 0.3s ease"></div>
+          </div>
+          <div id="otAddSub" class="hint" style="font-size:0.78rem;margin-top:4px;text-align:center"></div>
+        </div>
+
         <!-- Skill-level multi-select (3.83+). Two independent pill rows:
              8-ball SLs (0-7) and 9-ball SLs (0-9). 0 = unrated. None
              selected = no filter for that format. Both rows AND together
@@ -3158,7 +3169,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.186';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.187';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -9006,6 +9017,55 @@ async function gcMergePair(sRes, pRes, btn) {
 }
 window.gcMergePair = gcMergePair;
 
+/* ── Add-to-contacts progress bar (3.187) ─────────────────────────────
+   GAS can't stream, but its executions run concurrently: the add call
+   writes {phase, done, total} to the script cache under a job id, and
+   we poll contacts_progress every 1.5s while the call is in flight.
+   Bar semantics mirror RackTime's rolProgress: hidden until first call,
+   fades ~2s after hitting 100. */
+function otAddProgress(pct, sub) {
+  const wrap = document.getElementById('otAddProgress');
+  const bar  = document.getElementById('otAddBar');
+  const s    = document.getElementById('otAddSub');
+  wrap.style.display = 'block';
+  bar.style.width = Math.max(0, Math.min(100, pct)) + '%';
+  s.textContent = sub || '';
+  if (pct >= 100) setTimeout(() => { wrap.style.display = 'none'; bar.style.width = '0%'; }, 2000);
+}
+function otNewJobId() {
+  return 'j' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+/* Starts polling; returns a stop() function. Polls are best-effort —
+   a failed poll never affects the add itself. */
+function otPollProgress(jobId) {
+  let stopped = false;
+  const tick = async () => {
+    if (stopped) return;
+    try {
+      const r = await fetch(OPTOUT_CONFIRM_MAILER_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'contacts_progress', admin_key: SB_KEY, job_id: jobId }),
+        redirect: 'follow'
+      });
+      const p = JSON.parse(await r.text());
+      if (stopped) return;
+      if (p.phase === 'scan' || p.phase === 'pending') {
+        otAddProgress(6, 'Scanning your existing contacts…');
+      } else if (p.phase === 'work') {
+        otAddProgress(10 + 80 * ((p.done || 0) / (p.total || 1)), `Processing ${p.done || 0} / ${p.total || '?'}…`);
+      } else if (p.phase === 'create') {
+        otAddProgress(90 + 9 * ((p.done || 0) / (p.total || 1)), `Creating new contacts — ${p.done || 0} / ${p.total}…`);
+      } else if (p.phase === 'done') {
+        otAddProgress(99, 'Finishing up…');
+      }
+    } catch (_) { /* best-effort */ }
+    if (!stopped) setTimeout(tick, 1500);
+  };
+  tick();
+  return () => { stopped = true; };
+}
+
 /* ── Bulk add: every currently-filtered Outreach person (3.185) ───────
    One GAS call (contacts_add_bulk): a single existing-contacts scan,
    then batch-creates only the people not already there (APA#-keyed, so
@@ -9033,15 +9093,19 @@ async function otAddAllContacts() {
   btn.textContent = `⏳ Adding ${persons.length}…`;
   stat.textContent = '';
   window.slateBulkBusy = true;
+  const jobId = otNewJobId();
+  const stopPoll = otPollProgress(jobId);
   try {
     const r = await fetch(OPTOUT_CONFIRM_MAILER_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action: 'contacts_add_bulk', admin_key: SB_KEY, persons }),
+      body: JSON.stringify({ action: 'contacts_add_bulk', admin_key: SB_KEY, persons, job_id: jobId }),
       redirect: 'follow'
     });
     const res = JSON.parse(await r.text());
     if (!res.ok && res.error) throw new Error(res.error);
+    stopPoll();
+    otAddProgress(100, `Done — ${res.created ?? 0} added, ${res.updated ?? 0} updated, ${res.combined ?? 0} combined, ${res.already ?? 0} already there.`);
     stat.textContent = `✓ Added ${res.created ?? 0} new`
       + (res.updated ? ` · updated ${res.updated}` : '')
       + (res.combined ? ` · combined ${res.combined} household${res.combined === 1 ? '' : 's'}` : '')
@@ -9054,8 +9118,10 @@ async function otAddAllContacts() {
     if (res.errors && res.errors.length) alert('Some batches failed:\n' + res.errors.join('\n'));
   } catch (e) {
     stat.textContent = '';
+    otAddProgress(100, '✗ ' + e.message);
     alert('Bulk add failed: ' + e.message);
   } finally {
+    stopPoll();
     window.slateBulkBusy = false;
     btn.disabled = false;
     btn.textContent = orig;
@@ -9073,6 +9139,8 @@ async function otAddContact(mn, btn) {
   const orig = btn.textContent;
   btn.disabled = true;
   btn.textContent = '⏳ Adding…';
+  const jobId = otNewJobId();
+  const stopPoll = otPollProgress(jobId);
   try {
     const r = await fetch(OPTOUT_CONFIRM_MAILER_URL, {
       method: 'POST',
@@ -9080,6 +9148,7 @@ async function otAddContact(mn, btn) {
       body: JSON.stringify({
         action: 'contact_add',
         admin_key: SB_KEY,
+        job_id: jobId,
         person: {
           apa_number: c.member_number,
           first_name: c.first_name || '',
@@ -9101,10 +9170,14 @@ async function otAddContact(mn, btn) {
                     : res.result === 'combined' ? '✓ Combined household'
                     : '✓ Added';
     btn.classList.add('done');
+    otAddProgress(100, btn.textContent.replace(/^✓\s*/, 'Done — '));
   } catch (e) {
     btn.disabled = false;
     btn.textContent = orig;
+    otAddProgress(100, '✗ ' + e.message);
     alert('Add contact failed: ' + e.message);
+  } finally {
+    stopPoll();
   }
 }
 
