@@ -1900,11 +1900,13 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
               <span class="hint" style="color:var(--muted)">days ago</span>
             </div>
           </div>
-          <div class="field-mini">
-            <label for="otCounty">County</label>
-            <select id="otCounty" style="min-width:200px">
-              <option value="" selected>All counties</option>
-              <!-- Populated by otLoadCounties() on first init -->
+          <div class="field-mini" title="Ctrl/⌘-click to select multiple counties. Leave all unselected to include every county.">
+            <label for="otCounty">
+              County <span class="hint" style="font-weight:500;font-size:0.7rem">(multi · Ctrl-click)</span>
+            </label>
+            <select id="otCounty" multiple size="4" style="min-width:200px; padding:4px 6px;">
+              <!-- Populated by otLoadCounties() on init. No "All counties"
+                   sentinel in a multi-select — nothing selected = all. -->
             </select>
           </div>
           <div class="field-mini" title="Ctrl/⌘-click to select multiple cities. Leave all unselected to include every city.">
@@ -3169,7 +3171,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.187';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.188';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -14056,8 +14058,8 @@ async function otInit() {
      only cities in that county. Preserve the city selection if the
      newly-loaded list still contains it; reset to "All cities" if not. */
   document.getElementById('otCounty').addEventListener('change', () => {
-    const county = document.getElementById('otCounty').value || null;
-    otLoadCities(county).catch(e => console.error('cities reload failed', e));
+    const counties = [...document.getElementById('otCounty').selectedOptions].map(o => o.value);
+    otLoadCities(counties).catch(e => console.error('cities reload failed', e));
   });
 
   /* Initial SL pill render. */
@@ -14145,13 +14147,15 @@ async function otLoadCounties() {
    "All counties", Portland stays selected because it's still in the
    full list. Switching to a county that doesn't contain Portland
    resets to "All cities". */
-async function otLoadCities(county) {
+async function otLoadCities(counties) {
   const sel = document.getElementById('otCity');
   if (!sel) return;
   /* Preserve the prior set of selections (multi-select). */
   const prevSelections = new Set([...sel.selectedOptions].map(o => o.value));
+  /* 3.188: counties is now an array (multi-select) — empty/null = all. */
+  const list = Array.isArray(counties) ? counties : (counties ? [counties] : []);
   const rows = await sb('POST', 'rpc/outreach_cities',
-    { p_counties: county ? [county] : null },
+    { p_counties: list.length ? list : null },
     { 'Accept-Profile': 'slate', 'Content-Profile': 'slate' });
   /* Rebuild options. No sentinel — empty multi-select selection means
      "all cities" by convention (see otRun). */
@@ -14395,7 +14399,9 @@ async function otRun() {
      0 / 365 = anyone who played in the last year. */
   const daysMin = Math.max(0, parseInt(document.getElementById('otLastPlayedDaysMin').value, 10) || 0);
   const daysMax = Math.max(daysMin, parseInt(document.getElementById('otLastPlayedDaysMax').value, 10) || 365);
-  const county = document.getElementById('otCounty').value.trim() || null;
+  /* Multi-select counties (3.188). Empty selection = all counties. */
+  const counties = [...document.getElementById('otCounty').selectedOptions].map(o => o.value);
+  const pCounties = counties.length ? counties : null;
   /* Multi-select cities. Empty selection = "all cities" (NULL → server-
      side filter no-ops). */
   const citiesEl = document.getElementById('otCity');
@@ -14428,7 +14434,7 @@ async function otRun() {
     if (source === 'lapsed' || source === 'both') {
       const lapsed = await sb('POST', 'rpc/recruit_lapsed_players', {
         p_sl9_max: 9,
-        p_county: county,
+        p_counties: pCounties,
         p_cities: cities.length ? cities : null,
         p_last_played_days: daysMax,
         p_last_played_days_min: daysMin,
@@ -14447,7 +14453,7 @@ async function otRun() {
 
     if (source === 'new' || source === 'both') {
       const fresh = await sb('POST', 'rpc/outreach_new_members', {
-        p_county: county,
+        p_counties: pCounties,
         p_cities: cities.length ? cities : null,
         p_sl_8ball_in: sl8Arr,
         p_sl_9ball_in: sl9Arr
@@ -14457,7 +14463,7 @@ async function otRun() {
 
     if (source === 'playing') {
       const playing = await sb('POST', 'rpc/outreach_currently_playing', {
-        p_county: county,
+        p_counties: pCounties,
         p_cities: cities.length ? cities : null,
         p_min_teams: minTeams,
         p_max_teams: maxTeams,
