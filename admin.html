@@ -2065,6 +2065,13 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             <input type="text" id="sbSearch" placeholder="🔍 name, team#, captain…"
                    style="width:100%; padding:8px 10px; border:1px solid var(--border); border-radius:6px; font-size:0.9rem;">
           </div>
+          <!-- 3.190: union the immediately-prior session, mirroring Email
+               HQ's checkbox (3.93). Default-off; persists in localStorage.
+               Prior-session divisions list AFTER current ones, badged. -->
+          <label style="display:inline-flex;align-items:center;gap:8px;font-size:0.78rem;color:var(--muted);font-weight:600;cursor:pointer;align-self:flex-end;padding-bottom:8px">
+            <input type="checkbox" id="sbIncludePrior" onchange="sbOnIncludePriorToggle()" style="width:16px;height:16px;cursor:pointer">
+            + prior session
+          </label>
           <button type="button" class="btn btn-outline btn-sm" id="sbResetBtn"
                   style="padding:6px 12px; align-self:flex-end;">Reset</button>
           <button type="button" class="btn btn-outline btn-sm" id="sbTemplatesBtn"
@@ -3171,7 +3178,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.189';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.190';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -15792,6 +15799,20 @@ const _sbState = {
   selectedTeams: new Set()                     // team.id (number)
 };
 
+/* 3.190: include the immediately-prior session — same mechanism, same
+   semantics as Email HQ's checkbox (3.93). Reuses _findPriorSession.
+   Default OFF; persists in localStorage. */
+const SB_INCLUDE_PRIOR_LS = 'sb.includePrior.v1';
+let _sbIncludePrior = (() => { try { return localStorage.getItem(SB_INCLUDE_PRIOR_LS) === '1'; } catch (e) { return false; } })();
+
+async function sbOnIncludePriorToggle() {
+  const cb = document.getElementById('sbIncludePrior');
+  _sbIncludePrior = !!(cb && cb.checked);
+  try { localStorage.setItem(SB_INCLUDE_PRIOR_LS, _sbIncludePrior ? '1' : '0'); } catch (_) {}
+  await sbLoad();
+}
+window.sbOnIncludePriorToggle = sbOnIncludePriorToggle;
+
 async function sbInit() {
   if (sbInit._wired) {
     /* Already loaded once — let user click Reset to re-fetch; otherwise
@@ -15838,17 +15859,32 @@ async function sbLoad() {
     status.textContent = 'No current session.';
     return;
   }
+  const inclCb = document.getElementById('sbIncludePrior');
+  if (inclCb) inclCb.checked = _sbIncludePrior;
   try {
     /* Mirror Email HQ's graph fetch + add cell_phone. */
-    const url =
+    const SB_SELECT =
       'divisions?select=' +
       'id,division_number,name,format,night_of_play,operator_id,' +
       'teams(id,team_number,team_name,' +
         'memberships:team_memberships(role,name_raw,player:players(member_number,first_name,nickname,last_name,email,cell_phone,home_phone,work_phone,alt_phone,city,county,state,sl_8ball,sl_9ball,last_played_8,last_played_9,date_started,member_status))' +
-      ')' +
-      '&session_id=eq.' + currentSession.id +
-      '&order=division_number.asc';
-    _sbState.data = await sb('GET', url);
+      ')';
+    const currentDivs = await sb('GET',
+      SB_SELECT + '&session_id=eq.' + currentSession.id + '&order=division_number.asc') || [];
+    for (const d of currentDivs) { d._priorSession = false; d._sessionLabel = currentSession.name; }
+
+    /* 3.190: prior-session union — current divisions first, then prior,
+       badged in the division header (same ordering rationale as Email
+       HQ: identical division numbers across sessions must be tellable
+       apart at a glance). */
+    let priorDivs = [];
+    const priorSession = _sbIncludePrior ? _findPriorSession(currentSession) : null;
+    if (priorSession) {
+      priorDivs = await sb('GET',
+        SB_SELECT + '&session_id=eq.' + priorSession.id + '&order=division_number.asc') || [];
+      for (const d of priorDivs) { d._priorSession = true; d._sessionLabel = priorSession.name; }
+    }
+    _sbState.data = [...currentDivs, ...priorDivs];
     /* Also ensure templates are loaded — Outreach loads them on its
        init, but Switchboard might be entered first. */
     if (typeof otLoadTemplates === 'function' &&
@@ -15996,9 +16032,12 @@ function sbRender() {
   }
   let html = '';
   for (const d of visible) {
+    const priorBadge = d._priorSession
+      ? `<span style="margin-left:6px;padding:1px 8px;background:#fef3c7;color:#92400e;border-radius:999px;font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.04em">${esc(d._sessionLabel || 'prior session')}</span>`
+      : '';
     html += `<div class="sb-div-head">
       <span class="sb-team-num">${esc(d.division_number)}</span>
-      ${esc(d.name)}
+      ${esc(d.name)}${priorBadge}
       <span class="sb-div-meta">· ${esc(d.format || '')} · ${esc(d.night_of_play || '')}</span>
     </div>`;
     for (const t of d.teams) {
@@ -16070,7 +16109,9 @@ function sbWireTeamCards() {
    open a group thread on iOS / Android. */
 function sbBuildSmsUrl(recipients, candidateForBody) {
   if (!recipients.length) return '#';
-  const digits = recipients.map(r => r.phone_digits).filter(Boolean);
+  /* Dedupe by digits (3.190) — with the prior session unioned in, the
+     same person can captain teams in both sessions; one text, not two. */
+  const digits = [...new Set(recipients.map(r => r.phone_digits).filter(Boolean))];
   const number = digits.join(',');
   /* Template substitution uses the first recipient's player record. */
   const tplBody = _otTemplates.text.body || '';
