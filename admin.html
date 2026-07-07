@@ -3171,7 +3171,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.188';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.189';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -14492,6 +14492,47 @@ async function otRun() {
     }
     let deduped = [...byMember.values()];
 
+    /* 3.189: the STATUS UNIVERSE — every person in the whole DB with real
+       outreach state (status pill set, DNC, or any touch timestamp),
+       fetched via one jsonb RPC so PostgREST's 1000-row cap can't
+       truncate it. Two jobs:
+       1. People you've touched/marked who fell outside the capped
+          candidate window get hydrated and appended, so the status and
+          touch filters operate on the ENTIRE database, not the cap.
+       2. It replaces the old chunked per-candidate status join.
+       Appended people still respect the location / SL / member-status
+       filters (applied client-side below) but deliberately IGNORE the
+       source and last-played window — once you've engaged someone, the
+       pills must always be able to find them. */
+    const universe = await sb('POST', 'rpc/outreach_status_universe', {},
+      { 'Accept-Profile': 'slate', 'Content-Profile': 'slate' }) || [];
+    const statusByMember = {};
+    for (const u of universe) {
+      if (u.status) statusByMember[u.status.member_number] = u.status;
+    }
+    {
+      const have = new Set(deduped.map(r => r.member_number));
+      const citySet = new Set(cities);
+      for (const u of universe) {
+        const p = u.player;
+        if (!p || have.has(p.member_number)) continue;
+        if (pCounties && !pCounties.includes(p.county)) continue;
+        if (cities.length && !citySet.has(p.city)) continue;
+        if (activeOnly && (p.member_status || '').toLowerCase() !== 'active') continue;
+        if (sl8Arr && !sl8Arr.includes(p.sl_8ball)) continue;
+        if (sl9Arr && !sl9Arr.includes(p.sl_9ball)) continue;
+        have.add(p.member_number);
+        /* last_any: RPC rows carry it for the last-played sort; compute
+           an ISO-ish equivalent from the MM/DD/YY player dates. */
+        const t = Math.max(otParseDate(p.last_played_8) || 0, otParseDate(p.last_played_9) || 0);
+        deduped.push({
+          ...p,
+          last_any: t ? new Date(t).toISOString().slice(0, 10) : null,
+          _source: (p.last_played_8 || p.last_played_9) ? 'lapsed' : 'new'
+        });
+      }
+    }
+
     /* Joined-within filter (client-side; RPC doesn't support a date_started
        window yet). Blank = no filter. Per user direction in v0.3. */
     const joinedWithinRaw = document.getElementById('otJoinedWithin').value;
@@ -14523,23 +14564,10 @@ async function otRun() {
                 : /* default */                 cmpJoinedDesc;
     deduped.sort(sortFn);
 
-    /* Join with outreach_status — one batch query */
-    const memberNumbers = deduped.map(r => r.member_number);
-    let statusRows = [];
-    if (memberNumbers.length) {
-      /* Chunk the IN-list to keep URL under typical 8KB limit. 200 at a
-         time is comfortable: 200 × 9 chars/member ≈ 1.8 KB. */
-      const CHUNK = 200;
-      for (let i = 0; i < memberNumbers.length; i += CHUNK) {
-        const slice = memberNumbers.slice(i, i + CHUNK);
-        const r = await sb('GET',
-          'outreach_status?member_number=in.(' + slice.join(',') + ')&select=*',
-          null, { 'Accept-Profile': 'slate' });
-        statusRows = statusRows.concat(r || []);
-      }
-    }
-    const statusByMember = Object.fromEntries(statusRows.map(s => [s.member_number, s]));
-
+    /* Join with outreach_status — statusByMember was built above from the
+       full status universe, so no per-candidate fetches are needed. The
+       universe only carries rows with real state; everyone else defaults
+       to 'new' below, which is exactly what those rows would have said. */
     const candidates = deduped.map(r => {
       const s = statusByMember[r.member_number] || { status: 'new', do_not_contact: false };
       return { ...r, _status: s };
