@@ -3263,7 +3263,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.200';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.201';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -23900,21 +23900,14 @@ function hpRenderWorksheet() {
   if (sc && prevScroll) sc.scrollTop = prevScroll;
 }
 
-/* Distinct nights present across the plan, week-ordered. */
-function hpNightsList() {
-  const nights = new Set();
-  for (const t of _hpPlanTeams) { const n = hpTeamNight(t); if (n) nights.add(n); }
-  return [...nights].sort((a, b) => (HP_NIGHT_ORDER[a] ?? 9) - (HP_NIGHT_ORDER[b] ?? 9));
-}
-
+/* ── Capacity board: one block per venue, full name, only nights that
+   have teams (confirmed + defaulted). cap = 2 × tables per night. ── */
 function hpRenderCapacityBoard() {
   const el = document.getElementById('hpCapacityBoard');
   if (!el) return;
-  const nights = hpNightsList();
   const venues = _hpVenues.slice().sort((a, b) => a.name.localeCompare(b.name));
-  /* used: venue_id \u2192 (night \u2192 {c: confirmed, d: defaulted}).
-     Defaulted teams count as-if-returning to their last venue. DJ counts
-     double by construction: a DJ pair is two plan rows. */
+  /* used: venue_id → (night → {c: confirmed, d: defaulted}). Defaulted
+     teams count as-if-returning. DJ pairs are two plan rows = count 2. */
   const used = new Map();
   let confTotal = 0, defTotal = 0;
   for (const t of _hpPlanTeams) {
@@ -23928,31 +23921,42 @@ function hpRenderCapacityBoard() {
     else { m.get(night).d++; defTotal++; }
   }
   let html = '<div style="border:1px solid var(--border);border-radius:8px;padding:10px;background:#fafbfc">'
-    + '<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px">'
+    + '<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px;flex-wrap:wrap">'
     + '<strong style="font-size:0.9rem">Venue capacity</strong>'
     + '<span class="hint" style="font-size:0.72rem">cap = 2 × tables per night · ' + confTotal + ' confirmed + ' + defTotal + ' default</span></div>';
   if (!venues.length) html += '<p class="hint" style="margin:0">No venues yet — add them in section 1.</p>';
   for (const v of venues) {
     const cap = 2 * (v.num_tables || 0);
     const m = used.get(v.id) || new Map();
-    let cells = '';
-    for (const night of nights) {
-      const cell = m.get(night) || { c: 0, d: 0 };
-      const n = cell.c + cell.d;
-      const bg = n === 0 ? '#f3f4f6' : (n < cap ? '#dcfce7' : (n === cap ? '#fef3c7' : '#fee2e2'));
-      const fg = n === 0 ? '#9ca3af' : (n < cap ? '#166534' : (n === cap ? '#92400e' : '#b91c1c'));
-      const title = v.name + ' \u00b7 ' + night + ' \u2014 ' + n + ' of ' + cap
-        + ' (' + cell.c + ' confirmed + ' + cell.d + ' default)'
-        + (n > cap ? ' \u00b7 OVERBOOKED by ' + (n - cap) : (n === cap && cap > 0 ? ' \u00b7 at capacity' : ''));
-      cells += '<span title="' + esc(title) + '" style="display:inline-flex;flex-direction:column;align-items:center;min-width:36px;padding:2px 4px;border-radius:6px;background:' + bg + ';color:' + fg + '">'
-        + '<span style="font-size:0.6rem;font-weight:700">' + esc(night.slice(0, 3)) + '</span>'
-        + '<span style="font-size:0.74rem;font-weight:700">' + n + '/' + cap + '</span></span>';
-    }
-    html += '<div style="display:flex;align-items:center;gap:6px;padding:6px 0;border-top:1px solid #eef2f7">'
-      + '<span style="flex:1;font-size:0.8rem;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(v.name) + '">' + esc(v.name) + '</span>'
-      + '<span class="hint" style="font-size:0.68rem;white-space:nowrap">' + (v.num_tables || 0) + 't</span>'
-      + '<div style="display:flex;gap:3px;flex-wrap:wrap;justify-content:flex-end">' + cells + '</div>'
+    const nights = [...m.keys()].filter(n => (m.get(n).c + m.get(n).d) > 0)
+      .sort((a, b) => (HP_NIGHT_ORDER[a] ?? 9) - (HP_NIGHT_ORDER[b] ?? 9));
+    html += '<div style="padding:8px 0;border-top:1px solid #eef2f7">'
+      + '<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">'
+      +   '<strong style="font-size:0.82rem">' + esc(v.name) + '</strong>'
+      +   '<span class="hint" style="font-size:0.68rem;white-space:nowrap">' + (v.num_tables || 0) + ' tables · cap ' + cap + '/night</span>'
       + '</div>';
+    if (!nights.length) {
+      html += '<div class="hint" style="font-size:0.72rem;margin-top:3px;color:#9ca3af">no teams — ' + cap + ' open every night</div>';
+    } else {
+      html += '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:5px">';
+      for (const night of nights) {
+        const cell = m.get(night);
+        const n = cell.c + cell.d;
+        const open = cap - n;
+        const bg = n < cap ? '#dcfce7' : (n === cap ? '#fef3c7' : '#fee2e2');
+        const fg = n < cap ? '#166534' : (n === cap ? '#92400e' : '#b91c1c');
+        const title = v.name + ' · ' + night + ' — ' + n + ' of ' + cap
+          + ' (' + cell.c + ' confirmed + ' + cell.d + ' default) · '
+          + (open > 0 ? open + ' open' : (open === 0 ? 'at capacity' : 'OVERBOOKED by ' + (-open)));
+        html += '<span title="' + esc(title) + '" style="display:inline-flex;align-items:baseline;gap:4px;padding:3px 8px;border-radius:6px;background:' + bg + ';color:' + fg + ';font-size:0.76rem;font-weight:700">'
+          + esc(night.slice(0, 3)) + ' ' + n + '/' + cap
+          + (open < 0 ? ' <span style="font-size:0.64rem">+' + (-open) + ' over</span>'
+                      : (open === 0 ? '' : ' <span style="font-size:0.64rem;font-weight:400">' + open + ' open</span>'))
+          + '</span>';
+      }
+      html += '</div>';
+    }
+    html += '</div>';
   }
   html += '</div>';
   el.innerHTML = html;
