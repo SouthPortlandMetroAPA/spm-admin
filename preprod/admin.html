@@ -3264,7 +3264,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.204';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.205';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -24000,11 +24000,20 @@ function hpRenderCapacityBoard() {
     + '<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px;flex-wrap:wrap">'
     + '<strong style="font-size:0.9rem">Venue capacity' + (selNight ? ' \u2014 ' + esc(selNight) + 's' : '') + '</strong>'
     + '<span class="hint" style="font-size:0.72rem">'
-    + (selNight ? 'all teams that night, any division \u00b7 most open first'
+    + (selNight ? 'this division\u2019s venues \u00b7 counts include all teams that night \u00b7 most open first'
                 : 'cap = 2 \u00d7 tables per night \u00b7 ' + confTotal + ' confirmed + ' + defTotal + ' default')
     + '</span></div>';
   if (!venues.length) html += '<p class="hint" style="margin:0">No venues yet \u2014 add them in section 1.</p>';
   if (selNight) {
+    /* Only venues this division's teams effectively sit at (confirmed or
+       defaulted). Cell counts remain whole-night across all divisions. */
+    const divVenueIds = new Set();
+    for (const t of _hpPlanTeams) {
+      if (t.division_number !== _hpWs.div) continue;
+      const eff = hpEffectivePlacement(t);
+      if (eff.venue) divVenueIds.add(eff.venue.id);
+    }
+    venues = venues.filter(v => divVenueIds.has(v.id));
     venues = venues.slice().sort((a, b) => {
       const openOf = v => 2 * (v.num_tables || 0)
         - ((used.get(v.id) || new Map()).get(selNight) || { c: 0, d: 0 }).c
