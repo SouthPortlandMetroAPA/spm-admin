@@ -1298,6 +1298,15 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             <input type="checkbox" id="ehqIncludePrior" onchange="ehqOnIncludePriorToggle()" style="width:16px;height:16px;cursor:pointer">
             + prior session
           </label>
+          <!-- 3.195: LAPSED-ONLY mode — recipients come solely from
+               prior-session divisions, minus anyone rostered in the
+               current session (scoped to the lit Operator pills).
+               "Played last session but not this one." -->
+          <label style="display:inline-flex;align-items:center;gap:8px;font-size:0.78rem;color:var(--muted);font-weight:600;cursor:pointer"
+                 title="Collect emails ONLY from prior-session divisions, excluding anyone who is on a current-session roster (for the selected operators). Auto-enables + prior session.">
+            <input type="checkbox" id="ehqLapsedOnly" onchange="ehqOnLapsedOnlyToggle()" style="width:16px;height:16px;cursor:pointer">
+            lapsed only (prior, not current)
+          </label>
         </div>
       </div>
 
@@ -3251,7 +3260,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.194';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.195';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -6273,6 +6282,32 @@ let _ehqHideEmpty = (() => {
 const EHQ_INCLUDE_PRIOR_LS = 'ehq.includePrior.v1';
 let _ehqIncludePrior = (() => { try { return localStorage.getItem(EHQ_INCLUDE_PRIOR_LS) === '1'; } catch (e) { return false; } })();
 
+// 3.195: LAPSED-ONLY mode — "played last session but not this one."
+// Collect takes cells from PRIOR-session divisions only, then subtracts
+// anyone rostered in the current session (scoped to the lit Operator
+// pills; none lit = any operator). Exclusion keys on member_number, not
+// email — spouses share addresses, and the lapsed husband must stay
+// reachable at the shared inbox even though the wife still plays.
+const EHQ_LAPSED_ONLY_LS = 'ehq.lapsedOnly.v1';
+let _ehqLapsedOnly = (() => { try { return localStorage.getItem(EHQ_LAPSED_ONLY_LS) === '1'; } catch (e) { return false; } })();
+
+async function ehqOnLapsedOnlyToggle() {
+  const cb = document.getElementById('ehqLapsedOnly');
+  _ehqLapsedOnly = !!(cb && cb.checked);
+  try { localStorage.setItem(EHQ_LAPSED_ONLY_LS, _ehqLapsedOnly ? '1' : '0'); } catch (_) {}
+  if (_ehqLapsedOnly && !_ehqIncludePrior) {
+    /* Lapsed-only is meaningless without the prior session in the data
+       set — auto-enable it (full reload brings the divisions in). */
+    _ehqIncludePrior = true;
+    try { localStorage.setItem(EHQ_INCLUDE_PRIOR_LS, '1'); } catch (_) {}
+    const ip = document.getElementById('ehqIncludePrior');
+    if (ip) ip.checked = true;
+    await loadEmailHQ();
+    return;
+  }
+  _updateEhqCount();
+}
+
 /* 3.93+: locate the session immediately preceding `current` by (year, season)
    ordering. Returns null if no prior session exists or sessions aren't loaded
    yet. Season ordering is hard-coded since the value is a free-text column. */
@@ -6322,6 +6357,8 @@ async function loadEmailHQ() {
   if (_hideEmptyCb) _hideEmptyCb.checked = _ehqHideEmpty;
   const _inclPriorCb = document.getElementById('ehqIncludePrior');
   if (_inclPriorCb) _inclPriorCb.checked = _ehqIncludePrior;
+  const _lapsedCb = document.getElementById('ehqLapsedOnly');
+  if (_lapsedCb) _lapsedCb.checked = _ehqLapsedOnly;
   out.innerHTML = '<p class="hint" style="padding:16px">Loading…</p>';
 
   try {
@@ -6879,13 +6916,37 @@ const EHQ_GROUP_SIZE = 450;
 
 function _ehqCollectEmails() {
   if (!_emailData) return [];
+
+  /* Lapsed-only (3.195): recipients come ONLY from prior-session
+     divisions, minus anyone rostered in the CURRENT session for the lit
+     Operator pills (none lit = any operator). Exclusion is keyed on
+     member_number, NOT email — spouses share addresses, and the lapsed
+     half of a household must stay reachable at the shared inbox even
+     though the other half still plays. Role/format/night pills and
+     manual checks apply to the prior divisions exactly as always. */
+  let currentMembers = null;
+  if (_ehqLapsedOnly) {
+    currentMembers = new Set();
+    for (const d of _emailData) {
+      if (d._priorSession) continue;
+      if (!_ehqWildcardOrMatch('operator', String(d.operator_id))) continue;
+      for (const t of (d.teams || [])) {
+        for (const m of (t.memberships || [])) {
+          if (m.player && m.player.member_number) currentMembers.add(m.player.member_number);
+        }
+      }
+    }
+  }
+
   const emails = new Set();
   for (const d of _emailData) {
     if (_ehqDivIsHiddenCRA(d)) continue;
+    if (_ehqLapsedOnly && !d._priorSession) continue;
     for (const t of (d.teams || [])) {
       for (const m of (t.memberships || [])) {
         if (!m.player || !m.player.email) continue;
         if (!_ehqCellSelected(d, t.id, m.role, true)) continue;
+        if (currentMembers && m.player.member_number && currentMembers.has(m.player.member_number)) continue;
         const em = m.player.email.trim().toLowerCase();
         if (!em) continue;
         emails.add(em);
