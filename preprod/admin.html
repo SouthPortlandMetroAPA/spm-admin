@@ -2882,8 +2882,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         <!-- target session + control bar -->
         <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:14px;padding:10px;border:1px solid var(--border);border-radius:8px;background:#fafbfc">
           <label style="font-size:0.9rem">
-            Planning for session:
-            <select id="hpTargetSession" style="margin-left:6px;padding:6px;border:1px solid var(--border);border-radius:6px"></select>
+            Planning for: <strong>Fall 2026</strong>
           </label>
           <button class="btn btn-outline btn-sm" onclick="hpRefresh()">Refresh</button>
         </div>
@@ -3264,7 +3263,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.199';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.200';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -22977,7 +22976,6 @@ let _hpVenues = [];                            // slate.host_venues rows
 let _hpUploads = { spring: null, summer: null }; // parsed PDF rows per session
 
 async function hpInit() {
-  await hpPopulateSessions();
   await hpLoadVenues();
   await hpLoadUploads();
   await hpLoadPlanTeams();
@@ -22987,6 +22985,7 @@ async function hpInit() {
   hpRenderTeamsByVenue();
   hpRenderPlanner();
   hpWireDropZones();
+  hpStartLivePoll();
 }
 
 /* Auto-extract unique venue names from the most-recent uploaded PDFs
@@ -23037,17 +23036,6 @@ function hpAggregateLatestTeamsByVenue() {
     arr.sort((a, b) => String(a.team_number).localeCompare(String(b.team_number)));
   }
   return byVenue;
-}
-
-async function hpPopulateSessions() {
-  const sel = document.getElementById('hpTargetSession');
-  if (!sel) return;
-  /* Pull all sessions; let the user choose the planning target. Future
-     sessions might not exist yet (Fall 26 hasn't been created) so we
-     also offer the most-recent name as a string label. */
-  const sessions = await sb('GET', 'sessions?select=id,name&order=id.asc');
-  sel.innerHTML = sessions.map(s =>
-    '<option value="' + s.id + '">' + esc(s.name) + '</option>').join('');
 }
 
 /* ── Activity 1: host venues ────────────────────────────────────── */
@@ -23591,15 +23579,31 @@ function hpTeamNight(t) {
   return (m && m.night) || '';
 }
 
-/* Fall disposition: Not playing (return_status 'no') beats placement. */
+/* Default fall venue: last venue played — Summer beats Spring. Null
+   when the name isn't in host_venues (capacity unknowable). */
+function hpDefaultVenue(t) {
+  const name = t.summer_venue || t.spring_venue || '';
+  return name ? hpVenueByName(name) : null;
+}
+
+/* Effective fall placement. States:
+   not_playing > confirmed (explicit pick) > defaulted (last-played
+   venue, counts toward capacity as-if-returning) > unplaced. */
+function hpEffectivePlacement(t) {
+  if (t.return_status === 'no') return { venue: null, state: 'not_playing' };
+  if (t.placement_venue_id) return { venue: hpVenueById(t.placement_venue_id), state: 'confirmed' };
+  const dv = hpDefaultVenue(t);
+  return dv ? { venue: dv, state: 'defaulted' } : { venue: null, state: 'unplaced' };
+}
+
+/* Back-compat disposition used by filters/summary. */
 function hpFallState(t) {
-  if (t.return_status === 'no') return 'not_playing';
-  if (t.placement_venue_id) return 'placed';
-  return 'unassigned';
+  const st = hpEffectivePlacement(t).state;
+  return st === 'confirmed' ? 'placed' : (st === 'not_playing' ? 'not_playing' : 'unassigned');
 }
 
 const HP_WS_FILTERS = [
-  ['all', 'All'], ['unassigned', 'Unassigned'], ['placed', 'Placed'],
+  ['all', 'All'], ['unassigned', 'Unconfirmed'], ['placed', 'Confirmed'],
   ['not_playing', 'Not playing'], ['both', 'Both sessions'],
   ['spring_only', 'Spring only'], ['summer_only', 'Summer only'],
   ['new', 'New for Fall'],
@@ -23716,6 +23720,7 @@ async function hpLinkTeams(springTn, summerTn) {
     in_spring: true,
     spring_venue: sp.spring_venue || null,
     spring_team_number: sp.team_number_full,
+    spring_team_name: sp.team_name || null,
     updated_by: getDeviceId()
   };
   if (!su.captain_name && sp.captain_name) patch.captain_name = sp.captain_name;
@@ -23741,7 +23746,7 @@ async function hpUnlinkTeam(summerTn) {
     target_session: HP_TARGET_SESSION,
     team_number_full: springTn,
     division_number: springTn.slice(0, 3),
-    team_name: su.team_name,
+    team_name: su.spring_team_name || su.team_name,
     spring_venue: su.spring_venue,
     in_spring: true, in_summer: false,
     return_status: 'unknown', is_new_for_fall: false,
@@ -23752,8 +23757,8 @@ async function hpUnlinkTeam(summerTn) {
     await sb('POST', 'host_plan_teams', springRow);
     await sb('PATCH', 'host_plan_teams?target_session=eq.' + encodeURIComponent(HP_TARGET_SESSION)
       + '&team_number_full=eq.' + encodeURIComponent(summerTn),
-      { in_spring: false, spring_venue: null, spring_team_number: null, updated_by: getDeviceId() });
-    su.in_spring = false; su.spring_venue = null; su.spring_team_number = null;
+      { in_spring: false, spring_venue: null, spring_team_number: null, spring_team_name: null, updated_by: getDeviceId() });
+    su.in_spring = false; su.spring_venue = null; su.spring_team_number = null; su.spring_team_name = null;
     _hpPlanTeams.push(springRow);
     hpRenderPlanner();
   } catch (e) { alert('Unlink failed: ' + e.message); }
@@ -23775,10 +23780,14 @@ function hpRenderPlanner() {
   const s = document.getElementById('hpPlanSummary');
   if (s) {
     const n = _hpPlanTeams.length;
-    const un = _hpPlanTeams.filter(t => hpFallState(t) === 'unassigned').length;
-    const np = _hpPlanTeams.filter(t => hpFallState(t) === 'not_playing').length;
+    let conf = 0, def = 0, unp = 0, np = 0;
+    for (const t of _hpPlanTeams) {
+      const st = hpEffectivePlacement(t).state;
+      if (st === 'confirmed') conf++; else if (st === 'defaulted') def++;
+      else if (st === 'unplaced') unp++; else np++;
+    }
     s.textContent = n
-      ? n + ' teams · ' + un + ' unassigned · ' + (n - un - np) + ' placed · ' + np + ' not playing'
+      ? n + ' teams · ' + conf + ' confirmed · ' + def + ' default · ' + unp + ' no venue · ' + np + ' not playing'
       : 'Nothing synced yet — click 🔄 Sync from Summer + Spring.';
   }
 }
@@ -23809,49 +23818,80 @@ function hpRenderWorksheet() {
   const prevScroll = (document.getElementById('hpWsScroll') || {}).scrollTop || 0;
   const venueOpts = _hpVenues.slice().sort((a, b) => a.name.localeCompare(b.name));
   const NIGHTS = Object.keys(HP_NIGHT_ORDER);
+
+  /* Group by division, ordered by night then division number. */
+  const byDiv = new Map();
+  for (const t of rows) {
+    const d = t.division_number || '(none)';
+    if (!byDiv.has(d)) byDiv.set(d, []);
+    byDiv.get(d).push(t);
+  }
+  const divs = [...byDiv.keys()].sort((a, b) => {
+    const na = HP_NIGHT_ORDER[(_hpDivMeta.get(a) || {}).night] ?? 9;
+    const nb = HP_NIGHT_ORDER[(_hpDivMeta.get(b) || {}).night] ?? 9;
+    return na - nb || String(a).localeCompare(String(b));
+  });
+
   let html = '<div id="hpWsScroll" style="border:1px solid var(--border);border-radius:8px;overflow:auto;max-height:78vh">'
     + '<table style="width:100%;border-collapse:collapse;font-size:0.85rem">'
     + '<thead><tr>'
     + ['Team', 'Spring', 'Summer', 'Night', 'Fall placement']
         .map(h => '<th style="position:sticky;top:0;background:#f8fafc;z-index:1;text-align:left;padding:8px 10px;border-bottom:2px solid var(--border);font-size:0.72rem;text-transform:uppercase;letter-spacing:0.04em;color:#6b7280">' + h + '</th>').join('')
     + '</tr></thead><tbody>';
-  for (const t of rows) {
-    const st = hpFallState(t);
-    const np = st === 'not_playing';
-    const effNight = hpTeamNight(t);
-    const venueSel = '<select onchange="hpMoveTeam(\'' + esc(t.team_number_full) + '\', this.value)"'
-      + ' title="Fall venue \u2014 picking one for a Not-playing team flips it back to playing"'
-      + ' style="max-width:160px;padding:3px 5px;border:1px solid var(--border);border-radius:6px;font-size:0.78rem;background:#fff">'
-      + '<option value="">\u2014 venue \u2014</option>'
-      + venueOpts.map(v => '<option value="' + v.id + '"' + (t.placement_venue_id === v.id ? ' selected' : '') + '>' + esc(v.name) + '</option>').join('')
-      + '</select>';
-    const nightSel = '<select onchange="hpSetNight(\'' + esc(t.team_number_full) + '\', this.value)"'
-      + ' title="Play night \u2014 defaults from the team\u2019s division"'
-      + ' style="max-width:110px;padding:3px 5px;border:1px solid var(--border);border-radius:6px;font-size:0.78rem;background:#fff">'
-      + '<option value=""' + (effNight ? '' : ' selected') + '>\u2014</option>'
-      + NIGHTS.map(n => '<option value="' + n + '"' + (effNight === n ? ' selected' : '') + '>' + n + '</option>').join('')
-      + '</select>';
-    const npBtn = '<button type="button" onclick="hpToggleNotPlaying(\'' + esc(t.team_number_full) + '\')"'
-      + ' title="Toggle Not playing Fall"'
-      + ' style="padding:3px 8px;border-radius:6px;font-size:0.74rem;font-weight:700;cursor:pointer;white-space:nowrap;'
-      + (np ? 'border:2px solid #b91c1c;background:#b91c1c;color:#fff'
-            : 'border:1px solid var(--border);background:#fff;color:#6b7280')
-      + '">Not playing</button>';
-    html += '<tr style="border-bottom:1px solid #f1f5f9' + (np ? ';opacity:0.55' : '') + '">'
-      + '<td style="padding:7px 10px;min-width:190px">'
-      +   '<div style="font-weight:600">' + esc(t.team_name) + hpWsBadges(t) + '</div>'
-      +   '<div style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:#9ca3af">' + esc(t.team_number_full)
-      +   (t.spring_team_number
-            ? ' \u00b7 SP ' + esc(t.spring_team_number)
-              + ' <button type="button" onclick="hpUnlinkTeam(\'' + esc(t.team_number_full) + '\')" title="Unlink \u2014 split the Spring row back out" style="border:1px solid var(--border);background:#fff;border-radius:5px;font-size:0.62rem;cursor:pointer;padding:0 4px;color:#6b7280">unlink</button>'
-            : '')
-      +   '</div>'
-      + '</td>'
-      + '<td style="padding:7px 10px">' + (t.in_spring ? esc(t.spring_venue || '?') : '<span style="color:#d1d5db">\u2014</span>') + '</td>'
-      + '<td style="padding:7px 10px">' + (t.in_summer ? esc(t.summer_venue || '?') : '<span style="color:#d1d5db">\u2014</span>') + '</td>'
-      + '<td style="padding:7px 10px;white-space:nowrap">' + nightSel + '</td>'
-      + '<td style="padding:7px 10px"><div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">' + venueSel + npBtn + '</div></td>'
-      + '</tr>';
+
+  for (const d of divs) {
+    const meta = _hpDivMeta.get(d) || {};
+    const teams = byDiv.get(d).slice().sort((a, b) => (a.team_name || '').localeCompare(b.team_name || ''));
+    const conf = teams.filter(t => hpEffectivePlacement(t).state === 'confirmed').length;
+    html += '<tr><td colspan="5" style="padding:9px 10px;background:#eef3ff;border-top:2px solid #c7d6f5;font-weight:700;font-size:0.82rem">'
+      + esc(meta.name ? (d + ' \u00b7 ' + meta.name) : ('Division ' + d))
+      + (meta.night ? ' <span style="font-weight:400;color:#6b7280">\u00b7 ' + esc(meta.night) + 's</span>' : '')
+      + ' <span style="font-weight:400;color:#6b7280;font-size:0.72rem">\u00b7 ' + teams.length + ' team' + (teams.length === 1 ? '' : 's') + ' \u00b7 ' + conf + ' confirmed</span>'
+      + '</td></tr>';
+    for (const t of teams) {
+      const eff = hpEffectivePlacement(t);
+      const np = eff.state === 'not_playing';
+      const effNight = hpTeamNight(t);
+      const defV = hpDefaultVenue(t);
+      const emptyLabel = np ? '\u2014' : (defV ? 'default: ' + defV.name : '\u2014 no venue \u2014');
+      const venueSel = '<select onchange="hpMoveTeam(\'' + esc(t.team_number_full) + '\', this.value)"'
+        + ' title="Fall venue \u2014 unpicked teams default to their last-played venue and count toward its capacity; picking confirms. Picking a venue for a Not-playing team flips it back to playing."'
+        + ' style="max-width:190px;padding:3px 5px;border:1px solid var(--border);border-radius:6px;font-size:0.78rem;'
+        + (eff.state === 'defaulted' ? 'background:#fffbeb;color:#92400e;font-style:italic' : 'background:#fff')
+        + '">'
+        + '<option value=""' + (t.placement_venue_id ? '' : ' selected') + '>' + esc(emptyLabel) + '</option>'
+        + venueOpts.map(v => '<option value="' + v.id + '"' + (t.placement_venue_id === v.id ? ' selected' : '') + '>' + esc(v.name) + '</option>').join('')
+        + '</select>';
+      const nightSel = '<select onchange="hpSetNight(\'' + esc(t.team_number_full) + '\', this.value)"'
+        + ' title="Play night \u2014 defaults from the team\u2019s division"'
+        + ' style="max-width:110px;padding:3px 5px;border:1px solid var(--border);border-radius:6px;font-size:0.78rem;background:#fff">'
+        + '<option value=""' + (effNight ? '' : ' selected') + '>\u2014</option>'
+        + NIGHTS.map(n => '<option value="' + n + '"' + (effNight === n ? ' selected' : '') + '>' + n + '</option>').join('')
+        + '</select>';
+      const npBtn = '<button type="button" onclick="hpToggleNotPlaying(\'' + esc(t.team_number_full) + '\')"'
+        + ' title="Toggle Not playing Fall"'
+        + ' style="padding:3px 8px;border-radius:6px;font-size:0.74rem;font-weight:700;cursor:pointer;white-space:nowrap;'
+        + (np ? 'border:2px solid #b91c1c;background:#b91c1c;color:#fff'
+              : 'border:1px solid var(--border);background:#fff;color:#6b7280')
+        + '">Not playing</button>';
+      const stateChip = eff.state === 'confirmed'
+        ? '<span style="color:#0a6b3a;font-weight:700;font-size:0.68rem">\u2713</span>' : '';
+      html += '<tr style="border-bottom:1px solid #f1f5f9' + (np ? ';opacity:0.55' : '') + '">'
+        + '<td style="padding:7px 10px;min-width:190px">'
+        +   '<div style="font-weight:600">' + esc(t.team_name) + hpWsBadges(t) + '</div>'
+        +   '<div style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:#9ca3af">' + esc(t.team_number_full)
+        +   (t.spring_team_number
+              ? ' \u00b7 SP ' + esc(t.spring_team_number)
+                + ' <button type="button" onclick="hpUnlinkTeam(\'' + esc(t.team_number_full) + '\')" title="Unlink \u2014 split the Spring row back out" style="border:1px solid var(--border);background:#fff;border-radius:5px;font-size:0.62rem;cursor:pointer;padding:0 4px;color:#6b7280">unlink</button>'
+              : '')
+        +   '</div>'
+        + '</td>'
+        + '<td style="padding:7px 10px">' + (t.in_spring ? esc(t.spring_venue || '?') : '<span style="color:#d1d5db">\u2014</span>') + '</td>'
+        + '<td style="padding:7px 10px">' + (t.in_summer ? esc(t.summer_venue || '?') : '<span style="color:#d1d5db">\u2014</span>') + '</td>'
+        + '<td style="padding:7px 10px;white-space:nowrap">' + nightSel + '</td>'
+        + '<td style="padding:7px 10px"><div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">' + venueSel + stateChip + npBtn + '</div></td>'
+        + '</tr>';
+    }
   }
   html += '</tbody></table></div>'
     + '<p class="hint" style="margin:6px 0 0">' + rows.length + ' of ' + _hpPlanTeams.length + ' teams shown</p>';
@@ -23872,33 +23912,38 @@ function hpRenderCapacityBoard() {
   if (!el) return;
   const nights = hpNightsList();
   const venues = _hpVenues.slice().sort((a, b) => a.name.localeCompare(b.name));
-  /* used: venue_id → (night → counting placed teams). DJ counts double
-     by construction: a DJ pair is two plan rows. */
+  /* used: venue_id \u2192 (night \u2192 {c: confirmed, d: defaulted}).
+     Defaulted teams count as-if-returning to their last venue. DJ counts
+     double by construction: a DJ pair is two plan rows. */
   const used = new Map();
-  let placedTotal = 0;
+  let confTotal = 0, defTotal = 0;
   for (const t of _hpPlanTeams) {
-    if (hpFallState(t) !== 'placed') continue;
-    placedTotal++;
+    const eff = hpEffectivePlacement(t);
+    if (!eff.venue) continue;
     const night = hpTeamNight(t) || '(no night)';
-    if (!used.has(t.placement_venue_id)) used.set(t.placement_venue_id, new Map());
-    const m = used.get(t.placement_venue_id);
-    m.set(night, (m.get(night) || 0) + 1);
+    if (!used.has(eff.venue.id)) used.set(eff.venue.id, new Map());
+    const m = used.get(eff.venue.id);
+    if (!m.has(night)) m.set(night, { c: 0, d: 0 });
+    if (eff.state === 'confirmed') { m.get(night).c++; confTotal++; }
+    else { m.get(night).d++; defTotal++; }
   }
   let html = '<div style="border:1px solid var(--border);border-radius:8px;padding:10px;background:#fafbfc">'
     + '<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px">'
     + '<strong style="font-size:0.9rem">Venue capacity</strong>'
-    + '<span class="hint" style="font-size:0.72rem">cap = 2 × tables per night · ' + placedTotal + ' placed</span></div>';
+    + '<span class="hint" style="font-size:0.72rem">cap = 2 × tables per night · ' + confTotal + ' confirmed + ' + defTotal + ' default</span></div>';
   if (!venues.length) html += '<p class="hint" style="margin:0">No venues yet — add them in section 1.</p>';
   for (const v of venues) {
     const cap = 2 * (v.num_tables || 0);
     const m = used.get(v.id) || new Map();
     let cells = '';
     for (const night of nights) {
-      const n = m.get(night) || 0;
+      const cell = m.get(night) || { c: 0, d: 0 };
+      const n = cell.c + cell.d;
       const bg = n === 0 ? '#f3f4f6' : (n < cap ? '#dcfce7' : (n === cap ? '#fef3c7' : '#fee2e2'));
       const fg = n === 0 ? '#9ca3af' : (n < cap ? '#166534' : (n === cap ? '#92400e' : '#b91c1c'));
-      const title = v.name + ' · ' + night + ' — ' + n + ' of ' + cap
-        + (n > cap ? ' · OVERBOOKED by ' + (n - cap) : (n === cap && cap > 0 ? ' · at capacity' : ''));
+      const title = v.name + ' \u00b7 ' + night + ' \u2014 ' + n + ' of ' + cap
+        + ' (' + cell.c + ' confirmed + ' + cell.d + ' default)'
+        + (n > cap ? ' \u00b7 OVERBOOKED by ' + (n - cap) : (n === cap && cap > 0 ? ' \u00b7 at capacity' : ''));
       cells += '<span title="' + esc(title) + '" style="display:inline-flex;flex-direction:column;align-items:center;min-width:36px;padding:2px 4px;border-radius:6px;background:' + bg + ';color:' + fg + '">'
         + '<span style="font-size:0.6rem;font-weight:700">' + esc(night.slice(0, 3)) + '</span>'
         + '<span style="font-size:0.74rem;font-weight:700">' + n + '/' + cap + '</span></span>';
@@ -24036,6 +24081,30 @@ async function hpDeletePlanTeam(teamNumberFull) {
     _hpPlanTeams = _hpPlanTeams.filter(t => t.team_number_full !== teamNumberFull);
     hpRenderPlanner();
   } catch (e) { alert('Delete failed: ' + e.message); }
+}
+
+/* ── Live-data poll (house rule): re-fetch plan + venues every 20s
+   while the tab is visible and the operator isn't mid-interaction, so
+   a second device's assignments appear without manual refresh. The
+   idempotent render preserves scroll; skipped while a select/input
+   inside the tab has focus or the new-team modal is open. */
+let _hpPollTimer = null;
+function hpStartLivePoll() {
+  if (_hpPollTimer) return;
+  _hpPollTimer = setInterval(async () => {
+    const tab = document.getElementById('tab-hostplan');
+    if (!tab || tab.offsetParent === null) return;
+    const modal = document.getElementById('hpNewTeamModal');
+    if (modal && modal.style.display !== 'none') return;
+    const ae = document.activeElement;
+    if (ae && (ae.tagName === 'SELECT' || ae.tagName === 'INPUT') && tab.contains(ae)) return;
+    try {
+      await hpLoadVenues();
+      await hpLoadPlanTeams();
+      hpRenderVenues();
+      hpRenderPlanner();
+    } catch (e) { console.warn('[hostplan] live poll failed', e); }
+  }, 20000);
 }
 
 window.hpInit               = hpInit;
