@@ -2993,6 +2993,36 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           </div>
         </details>
 
+        <!-- Add-new-division modal -->
+        <div class="modal-backdrop" id="hpNewDivModal" style="display:none" role="dialog" aria-modal="true" onkeydown="if(event.key==='Escape'){hpCloseNewDivModal();}">
+          <div class="modal" style="max-width:420px">
+            <h3 style="margin:0 0 10px">New Fall division</h3>
+            <p class="hint" style="margin-top:0;margin-bottom:10px">
+              A division is a name + play night. Teams moved into it snap to
+              its night.
+            </p>
+            <div class="form-row">
+              <div>
+                <label>Name <span style="color:#b91c1c">*</span></label>
+                <input type="text" id="hpNewDivName" class="form-input" required maxlength="120">
+              </div>
+              <div>
+                <label>Play night <span style="color:#b91c1c">*</span></label>
+                <select id="hpNewDivNight" class="form-input">
+                  <option value="">\u2014 pick \u2014</option>
+                  <option>Monday</option><option>Tuesday</option><option>Wednesday</option>
+                  <option>Thursday</option><option>Friday</option><option>Saturday</option><option>Sunday</option>
+                </select>
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+              <button class="btn btn-outline" onclick="hpCloseNewDivModal()">Cancel</button>
+              <button class="btn btn-primary" onclick="hpSaveNewDiv()">Create</button>
+            </div>
+            <div class="status-line" id="hpNewDivStatus"></div>
+          </div>
+        </div>
+
         <!-- Add-new-team modal -->
         <div class="modal-backdrop" id="hpNewTeamModal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="hpNewTeamModalTitle" onkeydown="if(event.key==='Escape'){hpCloseNewTeamModal();}">
           <div class="modal" style="max-width:520px">
@@ -3264,7 +3294,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.205';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.206';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -23398,15 +23428,32 @@ let _hpDivMeta   = new Map();   // division_number → { name, night }
 
 const HP_NIGHT_ORDER = { Monday:0, Tuesday:1, Wednesday:2, Thursday:3, Friday:4, Saturday:5, Sunday:6 };
 
+let _hpPlanDivs = [];
+let _hpPlanDivById = new Map();
 async function hpLoadPlanTeams() {
   try {
     _hpPlanTeams = await sb('GET',
       'host_plan_teams?target_session=eq.' + encodeURIComponent(HP_TARGET_SESSION)
-      + '&select=*&order=team_number_full.asc');
+      + '&select=*&order=team_name.asc');
   } catch (e) {
     _hpPlanTeams = [];
     console.warn('[hostplan] plan teams load failed', e);
   }
+  try {
+    _hpPlanDivs = await sb('GET',
+      'host_plan_divisions?target_session=eq.' + encodeURIComponent(HP_TARGET_SESSION)
+      + '&select=*&order=name.asc');
+    _hpPlanDivById = new Map(_hpPlanDivs.map(d => [d.id, d]));
+  } catch (e) {
+    _hpPlanDivs = [];
+    _hpPlanDivById = new Map();
+    console.warn('[hostplan] plan divisions load failed', e);
+  }
+}
+
+function hpDivIdForSource(sourceDiv) {
+  const d = _hpPlanDivs.find(x => x.source_division_number === sourceDiv);
+  return d ? d.id : null;
 }
 
 /* Division names + nights from slate.divisions. Spring first so Summer
@@ -23492,6 +23539,7 @@ async function hpSyncFromUploads() {
   for (const r of _hpPlanTeams) existing.set((r.division_number || '') + '|' + hpMatchKey(r.team_name), r);
 
   const toInsert = [], toPatch = [], seen = new Set();
+  const divBySource = new Map(_hpPlanDivs.filter(d => d.source_division_number).map(d => [d.source_division_number, d.id]));
   su.forEach((s, si) => {
     const spI = attach.has(si) ? sp[attach.get(si)] : null;
     const key = s.div + '|' + s.k;
@@ -23501,6 +23549,7 @@ async function hpSyncFromUploads() {
     if (!prior) {
       toInsert.push({
         target_session: HP_TARGET_SESSION, team_number_full: s.tn, division_number: s.div,
+        plan_division_id: divBySource.get(s.div) || null,
         team_name: s.name, summer_team_number: s.tn, summer_venue: s.venue, in_summer: true,
         in_spring: !!spI, spring_venue: spI ? spI.venue : null,
         spring_team_number: spI ? spI.tn : null, spring_team_name: spI ? spI.name : null,
@@ -23528,6 +23577,7 @@ async function hpSyncFromUploads() {
     if (!prior) {
       toInsert.push({
         target_session: HP_TARGET_SESSION, team_number_full: r.tn, division_number: r.div,
+        plan_division_id: divBySource.get(r.div) || null,
         team_name: r.name, spring_team_number: r.tn, spring_venue: r.venue,
         in_spring: true, in_summer: false,
         return_status: 'unknown', is_new_for_fall: false, placement_status: 'unassigned',
@@ -23602,6 +23652,8 @@ let _hpWs = { filter: 'all', q: '', div: '' };
    night from slate.divisions meta (Summer wins over Spring upstream). */
 function hpTeamNight(t) {
   if (t.night_of_play) return t.night_of_play;
+  const pd = _hpPlanDivById.get(t.plan_division_id);
+  if (pd && pd.night) return pd.night;
   const m = _hpDivMeta.get(t.division_number);
   return (m && m.night) || '';
 }
@@ -23653,7 +23705,7 @@ function hpWsFiltered() {
   const q = _hpWs.q.toLowerCase().trim();
   return _hpPlanTeams
     .filter(t => hpWsMatches(t, _hpWs.filter))
-    .filter(t => !_hpWs.div || t.division_number === _hpWs.div)
+    .filter(t => !_hpWs.div || String(t.plan_division_id) === _hpWs.div)
     .filter(t => !q
       || (t.team_name || '').toLowerCase().includes(q)
       || (t.summer_venue || '').toLowerCase().includes(q)
@@ -23703,12 +23755,8 @@ function hpMatchSuggestions() {
 function hpRenderDivChips() {
   const el = document.getElementById('hpDivChips');
   if (!el) return;
-  const divs = [...new Set(_hpPlanTeams.map(t => t.division_number).filter(Boolean))].sort((a, b) => {
-    const na = HP_NIGHT_ORDER[(_hpDivMeta.get(a) || {}).night] ?? 9;
-    const nb = HP_NIGHT_ORDER[(_hpDivMeta.get(b) || {}).night] ?? 9;
-    return na - nb || String(a).localeCompare(String(b));
-  });
-  if (divs.length < 2) { el.innerHTML = ''; return; }
+  const divs = _hpPlanDivs.slice().sort((a, b) =>
+    ((HP_NIGHT_ORDER[a.night] ?? 9) - (HP_NIGHT_ORDER[b.night] ?? 9)) || a.name.localeCompare(b.name));
   const chip = (val, label, sub, active) =>
     '<button type="button" onclick="hpWsSetDiv(\'' + esc(val) + '\')"'
     + ' style="display:inline-flex;align-items:baseline;gap:5px;padding:4px 9px;border-radius:8px;cursor:pointer;font-size:0.76rem;'
@@ -23718,10 +23766,9 @@ function hpRenderDivChips() {
     + (sub ? ' <span style="color:#9ca3af;font-size:0.64rem">' + esc(sub) + '</span>' : '')
     + '</button>';
   let html = chip('', 'All divisions', '', !_hpWs.div);
-  for (const d of divs) {
-    const m = _hpDivMeta.get(d) || {};
-    html += chip(d, m.name || ('Division ' + d), m.night ? m.night.slice(0, 3) : '', _hpWs.div === d);
-  }
+  for (const d of divs) html += chip(String(d.id), d.name, d.night ? d.night.slice(0, 3) : '', _hpWs.div === String(d.id));
+  html += '<button type="button" onclick="hpOpenNewDivModal()"'
+    + ' style="padding:4px 9px;border-radius:8px;cursor:pointer;font-size:0.76rem;border:1px dashed var(--border);background:#fff;color:#6b7280">+ New division</button>';
   el.innerHTML = html;
 }
 
@@ -23803,6 +23850,7 @@ async function hpUnlinkTeam(summerId) {
     target_session: HP_TARGET_SESSION,
     team_number_full: su.spring_team_number || ('SP' + su.id),
     division_number: su.spring_team_number ? su.spring_team_number.slice(0, 3) : su.division_number,
+    plan_division_id: su.spring_team_number ? hpDivIdForSource(su.spring_team_number.slice(0, 3)) : su.plan_division_id,
     team_name: su.spring_team_name,
     spring_team_number: su.spring_team_number || null,
     spring_venue: su.spring_venue,
@@ -23876,34 +23924,39 @@ function hpRenderWorksheet() {
   const prevScroll = (document.getElementById('hpWsScroll') || {}).scrollTop || 0;
   const venueOpts = _hpVenues.slice().sort((a, b) => a.name.localeCompare(b.name));
   const NIGHTS = Object.keys(HP_NIGHT_ORDER);
+  const divsSorted = _hpPlanDivs.slice().sort((a, b) =>
+    ((HP_NIGHT_ORDER[a.night] ?? 9) - (HP_NIGHT_ORDER[b.night] ?? 9)) || a.name.localeCompare(b.name));
+  const divOpts = divsSorted.map(d =>
+    '<option value="' + d.id + '">' + esc(d.name) + (d.night ? ' (' + esc(d.night.slice(0, 3)) + ')' : '') + '</option>').join('');
 
-  /* Group by division, ordered by night then division number. */
+  /* Group by plan division (unmapped rows under "(no division)"). */
   const byDiv = new Map();
   for (const t of rows) {
-    const d = t.division_number || '(none)';
-    if (!byDiv.has(d)) byDiv.set(d, []);
-    byDiv.get(d).push(t);
+    const k = t.plan_division_id || 0;
+    if (!byDiv.has(k)) byDiv.set(k, []);
+    byDiv.get(k).push(t);
   }
-  const divs = [...byDiv.keys()].sort((a, b) => {
-    const na = HP_NIGHT_ORDER[(_hpDivMeta.get(a) || {}).night] ?? 9;
-    const nb = HP_NIGHT_ORDER[(_hpDivMeta.get(b) || {}).night] ?? 9;
-    return na - nb || String(a).localeCompare(String(b));
+  const groupOrder = [...byDiv.keys()].sort((a, b) => {
+    const da = _hpPlanDivById.get(a), db = _hpPlanDivById.get(b);
+    const na = da ? (HP_NIGHT_ORDER[da.night] ?? 9) : 99;
+    const nb = db ? (HP_NIGHT_ORDER[db.night] ?? 9) : 99;
+    return na - nb || String(da ? da.name : 'zzz').localeCompare(String(db ? db.name : 'zzz'));
   });
 
   let html = '<div id="hpWsScroll" style="border:1px solid var(--border);border-radius:8px;overflow:auto;max-height:78vh">'
     + '<table style="width:100%;border-collapse:collapse;font-size:0.85rem">'
     + '<thead><tr>'
-    + ['Team', 'Spring', 'Summer', 'Night', 'Fall placement']
+    + ['Team', 'Spring', 'Summer', 'Division / Night', 'Fall placement']
         .map(h => '<th style="position:sticky;top:0;background:#f8fafc;z-index:1;text-align:left;padding:8px 10px;border-bottom:2px solid var(--border);font-size:0.72rem;text-transform:uppercase;letter-spacing:0.04em;color:#6b7280">' + h + '</th>').join('')
     + '</tr></thead><tbody>';
 
-  for (const d of divs) {
-    const meta = _hpDivMeta.get(d) || {};
-    const teams = byDiv.get(d).slice().sort((a, b) => (a.team_name || '').localeCompare(b.team_name || ''));
+  for (const gk of groupOrder) {
+    const d = _hpPlanDivById.get(gk);
+    const teams = byDiv.get(gk).slice().sort((a, b) => (a.team_name || '').localeCompare(b.team_name || ''));
     const conf = teams.filter(t => hpEffectivePlacement(t).state === 'confirmed').length;
     html += '<tr><td colspan="5" style="padding:9px 10px;background:#eef3ff;border-top:2px solid #c7d6f5;font-weight:700;font-size:0.82rem">'
-      + esc(meta.name ? (d + ' \u00b7 ' + meta.name) : ('Division ' + d))
-      + (meta.night ? ' <span style="font-weight:400;color:#6b7280">\u00b7 ' + esc(meta.night) + 's</span>' : '')
+      + esc(d ? d.name : '(no division)')
+      + (d && d.night ? ' <span style="font-weight:400;color:#6b7280">\u00b7 ' + esc(d.night) + 's</span>' : '')
       + ' <span style="font-weight:400;color:#6b7280;font-size:0.72rem">\u00b7 ' + teams.length + ' team' + (teams.length === 1 ? '' : 's') + ' \u00b7 ' + conf + ' confirmed</span>'
       + '</td></tr>';
     for (const t of teams) {
@@ -23912,16 +23965,15 @@ function hpRenderWorksheet() {
       const effNight = hpTeamNight(t);
       const defV = hpDefaultVenue(t);
       const emptyLabel = np ? '\u2014' : (defV ? 'default: ' + defV.name : '\u2014 no venue \u2014');
-      const venueSel = '<select onchange="hpMoveTeam(' + t.id + ', this.value)"'
-        + ' title="Fall venue \u2014 unpicked teams default to their last-played venue and count toward its capacity; picking confirms. Picking a venue for a Not-playing team flips it back to playing."'
-        + ' style="max-width:190px;padding:3px 5px;border:1px solid var(--border);border-radius:6px;font-size:0.78rem;'
-        + (eff.state === 'defaulted' ? 'background:#fffbeb;color:#92400e;font-style:italic' : 'background:#fff')
-        + '">'
-        + '<option value=""' + (t.placement_venue_id ? '' : ' selected') + '>' + esc(emptyLabel) + '</option>'
-        + venueOpts.map(v => '<option value="' + v.id + '"' + (t.placement_venue_id === v.id ? ' selected' : '') + '>' + esc(v.name) + '</option>').join('')
+      const divSel = '<select onchange="hpMoveDivision(' + t.id + ', this.value)"'
+        + ' title="Move to a different Fall division \u2014 the team\u2019s night snaps to the division\u2019s night"'
+        + ' style="max-width:170px;padding:3px 5px;border:1px solid var(--border);border-radius:6px;font-size:0.76rem;background:#fff;margin-bottom:3px">'
+        + '<option value=""' + (t.plan_division_id ? '' : ' selected') + '>\u2014 division \u2014</option>'
+        + divsSorted.map(dd => '<option value="' + dd.id + '"' + (t.plan_division_id === dd.id ? ' selected' : '') + '>'
+            + esc(dd.name) + (dd.night ? ' (' + esc(dd.night.slice(0, 3)) + ')' : '') + '</option>').join('')
         + '</select>';
       const nightSel = '<select onchange="hpSetNight(' + t.id + ', this.value)"'
-        + ' title="Play night \u2014 defaults from the team\u2019s division"'
+        + ' title="Play night \u2014 defaults from the division"'
         + ' style="max-width:110px;padding:3px 5px;border:1px solid var(--border);border-radius:6px;font-size:0.78rem;background:#fff">'
         + '<option value=""' + (effNight ? '' : ' selected') + '>\u2014</option>'
         + NIGHTS.map(n => '<option value="' + n + '"' + (effNight === n ? ' selected' : '') + '>' + n + '</option>').join('')
@@ -23932,6 +23984,14 @@ function hpRenderWorksheet() {
         + (np ? 'border:2px solid #b91c1c;background:#b91c1c;color:#fff'
               : 'border:1px solid var(--border);background:#fff;color:#6b7280')
         + '">Not playing</button>';
+      const venueSel = '<select onchange="hpMoveTeam(' + t.id + ', this.value)"'
+        + ' title="Fall venue \u2014 unpicked teams default to their last-played venue and count toward its capacity; picking confirms. Picking a venue for a Not-playing team flips it back to playing."'
+        + ' style="max-width:190px;padding:3px 5px;border:1px solid var(--border);border-radius:6px;font-size:0.78rem;'
+        + (eff.state === 'defaulted' ? 'background:#fffbeb;color:#92400e;font-style:italic' : 'background:#fff')
+        + '">'
+        + '<option value=""' + (t.placement_venue_id ? '' : ' selected') + '>' + esc(emptyLabel) + '</option>'
+        + venueOpts.map(v => '<option value="' + v.id + '"' + (t.placement_venue_id === v.id ? ' selected' : '') + '>' + esc(v.name) + '</option>').join('')
+        + '</select>';
       const stateChip = eff.state === 'confirmed'
         ? '<span style="color:#0a6b3a;font-weight:700;font-size:0.68rem">\u2713</span>' : '';
       html += '<tr style="border-bottom:1px solid #f1f5f9' + (np ? ';opacity:0.55' : '') + '">'
@@ -23947,7 +24007,7 @@ function hpRenderWorksheet() {
         + '</td>'
         + '<td style="padding:7px 10px">' + (t.in_spring ? esc(t.spring_venue || '?') : '<span style="color:#d1d5db">\u2014</span>') + '</td>'
         + '<td style="padding:7px 10px">' + (t.in_summer ? esc(t.summer_venue || '?') : '<span style="color:#d1d5db">\u2014</span>') + '</td>'
-        + '<td style="padding:7px 10px;white-space:nowrap">' + nightSel + '</td>'
+        + '<td style="padding:7px 10px;white-space:nowrap">' + divSel + '<br>' + nightSel + '</td>'
         + '<td style="padding:7px 10px"><div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">' + venueSel + stateChip + npBtn + '</div></td>'
         + '</tr>';
     }
@@ -23980,7 +24040,7 @@ function hpRenderCapacityBoard() {
     if (eff.state === 'confirmed') { m.get(night).c++; confTotal++; }
     else { m.get(night).d++; defTotal++; }
   }
-  const selMeta = _hpWs.div ? (_hpDivMeta.get(_hpWs.div) || {}) : null;
+  const selMeta = _hpWs.div ? (_hpPlanDivById.get(Number(_hpWs.div)) || {}) : null;
   const selNight = selMeta ? (selMeta.night || '') : '';
   const cellChip = (v, night, cell, cap) => {
     const n = cell.c + cell.d;
@@ -24009,7 +24069,7 @@ function hpRenderCapacityBoard() {
        defaulted). Cell counts remain whole-night across all divisions. */
     const divVenueIds = new Set();
     for (const t of _hpPlanTeams) {
-      if (t.division_number !== _hpWs.div) continue;
+      if (String(t.plan_division_id) !== _hpWs.div) continue;
       const eff = hpEffectivePlacement(t);
       if (eff.venue) divVenueIds.add(eff.venue.id);
     }
@@ -24099,14 +24159,62 @@ async function hpToggleNotPlaying(id) {
   await hpSetReturnStatus(id, row.return_status === 'no' ? 'unknown' : 'no');
 }
 
+/* Move a team to a different Fall division — night snaps to the
+   division's night (per-team night stays editable afterwards). */
+async function hpMoveDivision(id, divIdRaw) {
+  const divId = divIdRaw ? parseInt(divIdRaw, 10) : null;
+  const row = _hpPlanTeams.find(t => t.id === Number(id));
+  const d = divId ? _hpPlanDivById.get(divId) : null;
+  const patch = {
+    plan_division_id: divId,
+    division_number: d ? (d.source_division_number || (row ? row.division_number : null)) : (row ? row.division_number : null),
+    night_of_play: d ? (d.night || null) : (row ? row.night_of_play : null),
+    updated_by: getDeviceId()
+  };
+  try {
+    await sb('PATCH', 'host_plan_teams?id=eq.' + Number(id), patch);
+    if (row) Object.assign(row, patch);
+    hpRenderPlanner();
+  } catch (e) { alert('Save failed: ' + e.message); }
+}
+
+/* ── New-division modal ── */
+function hpOpenNewDivModal() {
+  document.getElementById('hpNewDivName').value = '';
+  document.getElementById('hpNewDivNight').value = '';
+  document.getElementById('hpNewDivStatus').textContent = '';
+  document.getElementById('hpNewDivModal').style.display = 'flex';
+  setTimeout(() => document.getElementById('hpNewDivName').focus(), 0);
+}
+function hpCloseNewDivModal() {
+  document.getElementById('hpNewDivModal').style.display = 'none';
+}
+async function hpSaveNewDiv() {
+  const name = hpNormalizeName(document.getElementById('hpNewDivName').value);
+  const night = document.getElementById('hpNewDivNight').value;
+  const stat = document.getElementById('hpNewDivStatus');
+  if (!name) { stat.textContent = 'Division name is required.'; stat.className = 'status-line err'; return; }
+  if (!night) { stat.textContent = 'Pick a play night.'; stat.className = 'status-line err'; return; }
+  try {
+    await sb('POST', 'host_plan_divisions',
+      { target_session: HP_TARGET_SESSION, name: name, night: night });
+    hpCloseNewDivModal();
+    await hpLoadPlanTeams();
+    hpRenderPlanner();
+  } catch (e) {
+    stat.textContent = 'Save failed: ' + e.message; stat.className = 'status-line err';
+  }
+}
+
 /* ── New-team modal ── */
 let _hpModalEscHandler = null;
 function hpPopulateModalDivisions() {
   const sel = document.getElementById('hpNewDivision');
   if (!sel) return;
-  const divs = hpDivisionsList();
-  sel.innerHTML = '<option value="">— pick —</option>'
-    + divs.map(d => '<option value="' + esc(d) + '">' + esc(hpDivLabel(d)) + '</option>').join('');
+  const divs = _hpPlanDivs.slice().sort((a, b) =>
+    ((HP_NIGHT_ORDER[a.night] ?? 9) - (HP_NIGHT_ORDER[b.night] ?? 9)) || a.name.localeCompare(b.name));
+  sel.innerHTML = '<option value="">\u2014 pick \u2014</option>'
+    + divs.map(d => '<option value="' + d.id + '">' + esc(d.name) + (d.night ? ' (' + esc(d.night.slice(0, 3)) + ')' : '') + '</option>').join('');
 }
 function hpOpenNewTeamModal() {
   document.getElementById('hpNewTeamName').value = '';
@@ -24128,31 +24236,31 @@ function hpCloseNewTeamModal() {
 }
 async function hpSaveNewTeam() {
   const name = hpNormalizeName(document.getElementById('hpNewTeamName').value);
-  const div  = document.getElementById('hpNewDivision').value;
+  const divId = parseInt(document.getElementById('hpNewDivision').value || '', 10) || null;
   const captain = document.getElementById('hpNewCaptain').value.trim();
-  const notes   = document.getElementById('hpNewNotes').value.trim();
+  const notes = document.getElementById('hpNewNotes').value.trim();
   const stat = document.getElementById('hpNewTeamStatus');
   if (!name) { stat.textContent = 'Team name is required.'; stat.className = 'status-line err'; return; }
-  if (!div)  { stat.textContent = 'Pick a division.';        stat.className = 'status-line err'; return; }
-  /* Synthetic team number for new teams: <div>N<seq>. Real numbers come
-     from TMS later; the operator can resync then. */
+  if (!divId) { stat.textContent = 'Pick a division.'; stat.className = 'status-line err'; return; }
+  const d = _hpPlanDivById.get(divId) || {};
+  const srcDiv = d.source_division_number || ('P' + divId);
   let seq = 1;
-  while (_hpPlanTeams.some(t => t.team_number_full === div + 'N' + seq)) seq++;
-  const tn = div + 'N' + seq;
+  while (_hpPlanTeams.some(t => t.team_number_full === srcDiv + 'N' + seq)) seq++;
   try {
     await sb('POST', 'host_plan_teams', {
-      target_session:   HP_TARGET_SESSION,
-      team_number_full: tn,
-      division_number:  div,
-      team_name:        name,
-      captain_name:     captain || null,
-      notes:            notes || null,
-      return_status:    'yes',
-      is_new_for_fall:  true,
-      in_summer:        false,
-      in_spring:        false,
+      target_session: HP_TARGET_SESSION,
+      team_number_full: srcDiv + 'N' + seq,
+      division_number: srcDiv,
+      plan_division_id: divId,
+      team_name: name,
+      captain_name: captain || null,
+      notes: notes || null,
+      return_status: 'yes',
+      is_new_for_fall: true,
+      in_summer: false,
+      in_spring: false,
       placement_status: 'unassigned',
-      updated_by:       getDeviceId()
+      updated_by: getDeviceId()
     });
     hpCloseNewTeamModal();
     await hpLoadPlanTeams();
@@ -24211,6 +24319,10 @@ window.hpRenderPlanner      = hpRenderPlanner;
 window.hpWsSetFilter        = hpWsSetFilter;
 window.hpWsSearchInput      = hpWsSearchInput;
 window.hpWsSetDiv           = hpWsSetDiv;
+window.hpMoveDivision       = hpMoveDivision;
+window.hpOpenNewDivModal    = hpOpenNewDivModal;
+window.hpCloseNewDivModal   = hpCloseNewDivModal;
+window.hpSaveNewDiv         = hpSaveNewDiv;
 window.hpLinkTeams          = hpLinkTeams;
 window.hpUnlinkTeam         = hpUnlinkTeam;
 window.hpManualLink         = hpManualLink;
