@@ -3260,7 +3260,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.196';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.197';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -15182,7 +15182,13 @@ async function otRun() {
         deduped.push({
           ...p,
           last_any: t ? new Date(t).toISOString().slice(0, 10) : null,
-          _source: (p.last_played_8 || p.last_played_9) ? 'lapsed' : 'new'
+          _source: (p.last_played_8 || p.last_played_9) ? 'lapsed' : 'new',
+          /* 3.197: universe extras participate ONLY when an engagement
+             filter is active (status pill or positive touch filter) —
+             they must never pollute the source browse view. See
+             otFilteredCandidates. Repro that forced this: a texted
+             current-roster player appeared under "Never played". */
+          _universeExtra: true
         });
       }
     }
@@ -15237,8 +15243,10 @@ async function otRun() {
     const capWarning = lapsedCappedAt1000
       ? ' ⚠ Results capped at 1000 — tighten the date window for full coverage.'
       : '';
-    status.textContent = candidates.length + ' candidates loaded' +
+    const extraCount = candidates.filter(c => c._universeExtra).length;
+    status.textContent = (candidates.length - extraCount) + ' candidates loaded' +
       (source === 'both' ? ' (' + lapsedCount + ' lapsed · ' + newCount + ' never-played)' : '') +
+      (extraCount ? ' · +' + extraCount.toLocaleString() + ' engaged people reachable via status/touch pills' : '') +
       '.' + capWarning;
   } catch (e) {
     status.textContent = 'Failed: ' + e.message;
@@ -15249,11 +15257,18 @@ async function otRun() {
 function otRenderStats() {
   /* 3.82: "joined" stat pill removed (it never showed valid data since
      'joined' isn't producible from this UI). "Returning" pill added. */
-  const counts = { all: 0, new: 0, working: 0, follow_up: 0, returning: 0, not_interested: 0, dnc: 0 };
+  /* 3.197: every pill's COUNT must match what CLICKING it shows.
+     All/New browse the source scope → count non-extras only.
+     Engagement pills (Working…DNC) search DB-wide → count the full
+     pool including universe extras. */
+  const counts = { all: 0, new: 0, working: 0, follow_up: 0, returning: 0, not_interested: 0, dnc: 0, _nonExtraDnc: 0 };
   for (const c of _otState.candidates) {
-    counts.all++;
-    if (c._status.do_not_contact) { counts.dnc++; continue; }
-    if (counts[c._status.status] !== undefined) counts[c._status.status]++;
+    const extra = !!c._universeExtra;
+    if (!extra) counts.all++;
+    if (c._status.do_not_contact) { counts.dnc++; if (!extra) counts._nonExtraDnc++; continue; }
+    const st = c._status.status;
+    if (st === 'new') { if (!extra) counts.new++; }
+    else if (counts[st] !== undefined) counts[st]++;
   }
   const wrap = document.getElementById('otStatsRow');
   const f = _otState.filter.status;
@@ -15266,16 +15281,20 @@ function otRenderStats() {
      not emailed or texted," "texted but not called," etc.
      Counts respect the do-not-contact exclusion (same as status pills).
      "None" = no email/text/call timestamps set. */
+  /* 3.197 scope split: positive touch counters are engagement filters
+     (DB-wide, extras included); negative counters + None browse the
+     source scope (non-extras only) — matching what clicking each shows. */
   const touchCounts    = { email:0, text:0, call:0 };
   const touchNotCounts = { email:0, text:0, call:0 };
   let noneCount = 0;
   for (const c of _otState.candidates) {
     if (c._status.do_not_contact) continue;
     const s = c._status;
-    if (s.last_emailed_at) touchCounts.email++;   else touchNotCounts.email++;
-    if (s.last_texted_at)  touchCounts.text++;    else touchNotCounts.text++;
-    if (s.last_called_at)  touchCounts.call++;    else touchNotCounts.call++;
-    if (!s.last_emailed_at && !s.last_texted_at && !s.last_called_at) noneCount++;
+    const extra = !!c._universeExtra;
+    if (s.last_emailed_at) touchCounts.email++;   else if (!extra) touchNotCounts.email++;
+    if (s.last_texted_at)  touchCounts.text++;    else if (!extra) touchNotCounts.text++;
+    if (s.last_called_at)  touchCounts.call++;    else if (!extra) touchNotCounts.call++;
+    if (!extra && !s.last_emailed_at && !s.last_texted_at && !s.last_called_at) noneCount++;
   }
   const tFilter    = _otState.filter.touch    || new Set();
   const tNotFilter = _otState.filter.touchNot || new Set();
@@ -15287,7 +15306,7 @@ function otRenderStats() {
   const noneBtn = `<span class="ot-stat s-touch-none ${noneActive?'active':''}" data-touch-none>🚫 None: <strong>${noneCount}</strong></span>`;
 
   wrap.innerHTML =
-    `<span class="ot-stat ${f==='all'?'active':''}" data-filter="all">All: <strong>${counts.all - counts.dnc}</strong></span>` +
+    `<span class="ot-stat ${f==='all'?'active':''}" data-filter="all">All: <strong>${counts.all - counts._nonExtraDnc}</strong></span>` +
     mk('new', 'New') +
     mk('working', 'Working') +
     mk('follow_up', 'Follow up') +
@@ -15372,11 +15391,27 @@ function otRenderStats() {
    touch filters, and search all applied. Bulk actions (Add filtered to
    contacts, 3.185) MUST use this too, never a re-implementation, so the
    button always operates on exactly what's on screen. */
+/* 3.197: an "engagement filter" is a status pill beyond All/New or any
+   positive touch filter — the filters whose whole point (3.189) is to
+   search EVERYONE you've engaged, DB-wide. Universe extras participate
+   only then; otherwise the Source dropdown remains a hard scope.
+   (Repro: a texted current-roster player showed under "Never played",
+   and bulk Add-to-contacts under "All" would have swept ~4.6k engaged
+   people into a never-played-only add.) */
+function otEngagementFilterActive() {
+  const f = _otState.filter;
+  return ['working', 'follow_up', 'returning', 'not_interested', 'dnc'].includes(f.status)
+      || ((f.touch || new Set()).size > 0);
+}
+
 function otFilteredCandidates() {
   const f = _otState.filter;
   const touchSet    = f.touch    || new Set();
   const touchNotSet = f.touchNot || new Set();
-  const allEligible = _otState.candidates.filter(c => {
+  const pool = otEngagementFilterActive()
+    ? _otState.candidates
+    : _otState.candidates.filter(c => !c._universeExtra);
+  const allEligible = pool.filter(c => {
     const isDnc = c._status.do_not_contact;
     if (f.status === 'dnc') return isDnc;
     if (f.status === 'all') return !isDnc;
