@@ -2983,7 +2983,8 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
                      oninput="hpWsSearchInput(this.value)"
                      style="flex:1;min-width:200px;max-width:320px;padding:7px 10px;border:1px solid var(--border);border-radius:8px">
             </div>
-            <div id="hpWsChips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px"></div>
+            <div id="hpWsChips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"></div>
+            <div id="hpDivChips" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:12px"></div>
             <div id="hpMatchPanel"></div>
             <div style="display:grid;grid-template-columns:minmax(0,1fr) 350px;gap:14px;align-items:start">
               <div id="hpWorksheet" style="min-width:0"></div>
@@ -3263,7 +3264,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.202';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.204';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -23486,7 +23487,7 @@ async function hpSyncFromUploads() {
   });
 
   /* Manual links claim spring NAMES — re-syncs must not resurrect them. */
-  const claimed = new Set(_hpPlanTeams.map(r => r.spring_team_name ? hpMatchKey(r.spring_team_name) : null).filter(Boolean));
+  const claimed = new Set(_hpPlanTeams.filter(r => r.spring_team_name).map(r => hpMatchKey(r.spring_team_name) + '|' + (r.spring_team_number ? String(r.spring_team_number).slice(0, 3) : '')));
   const existing = new Map();
   for (const r of _hpPlanTeams) existing.set((r.division_number || '') + '|' + hpMatchKey(r.team_name), r);
 
@@ -23519,7 +23520,7 @@ async function hpSyncFromUploads() {
   });
   for (const i of spLeft) {
     const r = sp[i];
-    if (claimed.has(r.k)) continue;
+    if (claimed.has(r.k + '|' + r.div) || claimed.has(r.k + '|')) continue;
     const key = r.div + '|' + r.k;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -23595,7 +23596,7 @@ function hpEffectiveVenue(t) {
  * hpMoveTeam / hpSetReturnStatus below. Never blocks: capacity states
  * are display-only (gray empty / green under / amber at / red over).
  */
-let _hpWs = { filter: 'all', q: '' };
+let _hpWs = { filter: 'all', q: '', div: '' };
 
 /* A team's play night: explicit night_of_play wins, else its division's
    night from slate.divisions meta (Summer wins over Spring upstream). */
@@ -23652,6 +23653,7 @@ function hpWsFiltered() {
   const q = _hpWs.q.toLowerCase().trim();
   return _hpPlanTeams
     .filter(t => hpWsMatches(t, _hpWs.filter))
+    .filter(t => !_hpWs.div || t.division_number === _hpWs.div)
     .filter(t => !q
       || (t.team_name || '').toLowerCase().includes(q)
       || (t.summer_venue || '').toLowerCase().includes(q)
@@ -23694,6 +23696,40 @@ function hpMatchSuggestions() {
     for (const su of (byName.get(hpMatchKey(sp.team_name)) || [])) out.push({ spring: sp, summer: su });
   }
   return out;
+}
+
+/* ── Division chips: drive ledger AND board (board shows the
+   division's night). Ordered by night then division number. ── */
+function hpRenderDivChips() {
+  const el = document.getElementById('hpDivChips');
+  if (!el) return;
+  const divs = [...new Set(_hpPlanTeams.map(t => t.division_number).filter(Boolean))].sort((a, b) => {
+    const na = HP_NIGHT_ORDER[(_hpDivMeta.get(a) || {}).night] ?? 9;
+    const nb = HP_NIGHT_ORDER[(_hpDivMeta.get(b) || {}).night] ?? 9;
+    return na - nb || String(a).localeCompare(String(b));
+  });
+  if (divs.length < 2) { el.innerHTML = ''; return; }
+  const chip = (val, label, sub, active) =>
+    '<button type="button" onclick="hpWsSetDiv(\'' + esc(val) + '\')"'
+    + ' style="display:inline-flex;align-items:baseline;gap:5px;padding:4px 9px;border-radius:8px;cursor:pointer;font-size:0.76rem;'
+    + (active ? 'border:2px solid #7c3aed;background:#f5f3ff;font-weight:700'
+              : 'border:1px solid var(--border);background:#fff')
+    + '">' + esc(label)
+    + (sub ? ' <span style="color:#9ca3af;font-size:0.64rem">' + esc(sub) + '</span>' : '')
+    + '</button>';
+  let html = chip('', 'All divisions', '', !_hpWs.div);
+  for (const d of divs) {
+    const m = _hpDivMeta.get(d) || {};
+    html += chip(d, m.name || ('Division ' + d), m.night ? m.night.slice(0, 3) : '', _hpWs.div === d);
+  }
+  el.innerHTML = html;
+}
+
+function hpWsSetDiv(d) {
+  _hpWs.div = d || '';
+  hpRenderDivChips();
+  hpRenderWorksheet();
+  hpRenderCapacityBoard();
 }
 
 function hpRenderMatchPanel() {
@@ -23794,6 +23830,7 @@ function hpManualLink() {
 
 function hpRenderPlanner() {
   hpRenderWsChips();
+  hpRenderDivChips();
   hpRenderMatchPanel();
   hpRenderWorksheet();
   hpRenderCapacityBoard();
@@ -23922,14 +23959,15 @@ function hpRenderWorksheet() {
   if (sc && prevScroll) sc.scrollTop = prevScroll;
 }
 
-/* ── Capacity board: one block per venue, full name, only nights that
-   have teams (confirmed + defaulted). cap = 2 × tables per night. ── */
+/* ── Capacity board. All-divisions view: one block per venue, only
+   nights with teams. Division-selected view: ONE cell per venue for
+   that division's night (counts include every division sharing the
+   night — capacity truth), empty venues shown as open, sorted
+   most-open-first. ── */
 function hpRenderCapacityBoard() {
   const el = document.getElementById('hpCapacityBoard');
   if (!el) return;
-  const venues = _hpVenues.slice().sort((a, b) => a.name.localeCompare(b.name));
-  /* used: venue_id → (night → {c: confirmed, d: defaulted}). Defaulted
-     teams count as-if-returning. DJ pairs are two plan rows = count 2. */
+  let venues = _hpVenues.slice().sort((a, b) => a.name.localeCompare(b.name));
   const used = new Map();
   let confTotal = 0, defTotal = 0;
   for (const t of _hpPlanTeams) {
@@ -23942,43 +23980,66 @@ function hpRenderCapacityBoard() {
     if (eff.state === 'confirmed') { m.get(night).c++; confTotal++; }
     else { m.get(night).d++; defTotal++; }
   }
+  const selMeta = _hpWs.div ? (_hpDivMeta.get(_hpWs.div) || {}) : null;
+  const selNight = selMeta ? (selMeta.night || '') : '';
+  const cellChip = (v, night, cell, cap) => {
+    const n = cell.c + cell.d;
+    const open = cap - n;
+    const bg = n === 0 ? '#f0fdf4' : (n < cap ? '#dcfce7' : (n === cap ? '#fef3c7' : '#fee2e2'));
+    const fg = n === 0 ? '#4d7c0f' : (n < cap ? '#166534' : (n === cap ? '#92400e' : '#b91c1c'));
+    const title = v.name + ' \u00b7 ' + night + ' \u2014 ' + n + ' of ' + cap
+      + ' (' + cell.c + ' confirmed + ' + cell.d + ' default) \u00b7 '
+      + (open > 0 ? open + ' open' : (open === 0 ? 'at capacity' : 'OVERBOOKED by ' + (-open)));
+    return '<span title="' + esc(title) + '" style="display:inline-flex;align-items:baseline;gap:4px;padding:3px 8px;border-radius:6px;background:' + bg + ';color:' + fg + ';font-size:0.76rem;font-weight:700">'
+      + esc(night.slice(0, 3)) + ' ' + n + '/' + cap
+      + (open < 0 ? ' <span style="font-size:0.64rem">+' + (-open) + ' over</span>'
+                  : (open === 0 ? '' : ' <span style="font-size:0.64rem;font-weight:400">' + open + ' open</span>'))
+      + '</span>';
+  };
   let html = '<div style="border:1px solid var(--border);border-radius:8px;padding:10px;background:#fafbfc">'
     + '<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px;flex-wrap:wrap">'
-    + '<strong style="font-size:0.9rem">Venue capacity</strong>'
-    + '<span class="hint" style="font-size:0.72rem">cap = 2 × tables per night · ' + confTotal + ' confirmed + ' + defTotal + ' default</span></div>';
-  if (!venues.length) html += '<p class="hint" style="margin:0">No venues yet — add them in section 1.</p>';
-  for (const v of venues) {
-    const cap = 2 * (v.num_tables || 0);
-    const m = used.get(v.id) || new Map();
-    const nights = [...m.keys()].filter(n => (m.get(n).c + m.get(n).d) > 0)
-      .sort((a, b) => (HP_NIGHT_ORDER[a] ?? 9) - (HP_NIGHT_ORDER[b] ?? 9));
-    html += '<div style="padding:8px 0;border-top:1px solid #eef2f7">'
-      + '<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">'
-      +   '<strong style="font-size:0.82rem">' + esc(v.name) + '</strong>'
-      +   '<span class="hint" style="font-size:0.68rem;white-space:nowrap">' + (v.num_tables || 0) + ' tables · cap ' + cap + '/night</span>'
-      + '</div>';
-    if (!nights.length) {
-      html += '<div class="hint" style="font-size:0.72rem;margin-top:3px;color:#9ca3af">no teams — ' + cap + ' open every night</div>';
-    } else {
-      html += '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:5px">';
-      for (const night of nights) {
-        const cell = m.get(night);
-        const n = cell.c + cell.d;
-        const open = cap - n;
-        const bg = n < cap ? '#dcfce7' : (n === cap ? '#fef3c7' : '#fee2e2');
-        const fg = n < cap ? '#166534' : (n === cap ? '#92400e' : '#b91c1c');
-        const title = v.name + ' · ' + night + ' — ' + n + ' of ' + cap
-          + ' (' + cell.c + ' confirmed + ' + cell.d + ' default) · '
-          + (open > 0 ? open + ' open' : (open === 0 ? 'at capacity' : 'OVERBOOKED by ' + (-open)));
-        html += '<span title="' + esc(title) + '" style="display:inline-flex;align-items:baseline;gap:4px;padding:3px 8px;border-radius:6px;background:' + bg + ';color:' + fg + ';font-size:0.76rem;font-weight:700">'
-          + esc(night.slice(0, 3)) + ' ' + n + '/' + cap
-          + (open < 0 ? ' <span style="font-size:0.64rem">+' + (-open) + ' over</span>'
-                      : (open === 0 ? '' : ' <span style="font-size:0.64rem;font-weight:400">' + open + ' open</span>'))
-          + '</span>';
+    + '<strong style="font-size:0.9rem">Venue capacity' + (selNight ? ' \u2014 ' + esc(selNight) + 's' : '') + '</strong>'
+    + '<span class="hint" style="font-size:0.72rem">'
+    + (selNight ? 'all teams that night, any division \u00b7 most open first'
+                : 'cap = 2 \u00d7 tables per night \u00b7 ' + confTotal + ' confirmed + ' + defTotal + ' default')
+    + '</span></div>';
+  if (!venues.length) html += '<p class="hint" style="margin:0">No venues yet \u2014 add them in section 1.</p>';
+  if (selNight) {
+    venues = venues.slice().sort((a, b) => {
+      const openOf = v => 2 * (v.num_tables || 0)
+        - ((used.get(v.id) || new Map()).get(selNight) || { c: 0, d: 0 }).c
+        - ((used.get(v.id) || new Map()).get(selNight) || { c: 0, d: 0 }).d;
+      return openOf(b) - openOf(a) || a.name.localeCompare(b.name);
+    });
+    for (const v of venues) {
+      const cap = 2 * (v.num_tables || 0);
+      const cell = (used.get(v.id) || new Map()).get(selNight) || { c: 0, d: 0 };
+      html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid #eef2f7">'
+        + '<span style="flex:1;font-size:0.82rem;font-weight:600;min-width:0">' + esc(v.name) + '</span>'
+        + '<span class="hint" style="font-size:0.66rem;white-space:nowrap">' + (v.num_tables || 0) + 't</span>'
+        + cellChip(v, selNight, cell, cap)
+        + '</div>';
+    }
+  } else {
+    for (const v of venues) {
+      const cap = 2 * (v.num_tables || 0);
+      const m = used.get(v.id) || new Map();
+      const nights = [...m.keys()].filter(n => (m.get(n).c + m.get(n).d) > 0)
+        .sort((a, b) => (HP_NIGHT_ORDER[a] ?? 9) - (HP_NIGHT_ORDER[b] ?? 9));
+      html += '<div style="padding:8px 0;border-top:1px solid #eef2f7">'
+        + '<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">'
+        +   '<strong style="font-size:0.82rem">' + esc(v.name) + '</strong>'
+        +   '<span class="hint" style="font-size:0.68rem;white-space:nowrap">' + (v.num_tables || 0) + ' tables \u00b7 cap ' + cap + '/night</span>'
+        + '</div>';
+      if (!nights.length) {
+        html += '<div class="hint" style="font-size:0.72rem;margin-top:3px;color:#9ca3af">no teams \u2014 ' + cap + ' open every night</div>';
+      } else {
+        html += '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:5px">';
+        for (const night of nights) html += cellChip(v, night, m.get(night), cap);
+        html += '</div>';
       }
       html += '</div>';
     }
-    html += '</div>';
   }
   html += '</div>';
   el.innerHTML = html;
@@ -24140,6 +24201,7 @@ window.hpSyncFromUploads    = hpSyncFromUploads;
 window.hpRenderPlanner      = hpRenderPlanner;
 window.hpWsSetFilter        = hpWsSetFilter;
 window.hpWsSearchInput      = hpWsSearchInput;
+window.hpWsSetDiv           = hpWsSetDiv;
 window.hpLinkTeams          = hpLinkTeams;
 window.hpUnlinkTeam         = hpUnlinkTeam;
 window.hpManualLink         = hpManualLink;
