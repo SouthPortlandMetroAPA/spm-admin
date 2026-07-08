@@ -3263,7 +3263,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.201';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.202';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -23440,6 +23440,11 @@ function hpNormalizeName(name) {
    Existing rows keep operator edits (return_status, placement, notes);
    sync only fills blank source fields and session flags. */
 async function hpSyncFromUploads() {
+  /* Merge Summer + Spring uploads into one entity per TEAM. Team numbers
+     are reassigned every session (2026-07-08: 197/215 number matches were
+     different teams) — identity is (division, normalized name), with a
+     name-only second pass for unambiguous division-movers. Numbers are
+     stored as provenance only. All writes key on the row id. */
   const summer = (_hpUploads.summer && Array.isArray(_hpUploads.summer.parsed_json))
     ? _hpUploads.summer.parsed_json : [];
   const spring = (_hpUploads.spring && Array.isArray(_hpUploads.spring.parsed_json))
@@ -23448,67 +23453,89 @@ async function hpSyncFromUploads() {
     alert('No parsed uploads found. Upload the Summer + Spring Team Screen PDFs in section 2 first.');
     return;
   }
-  const existing = new Map();
-  for (const r of _hpPlanTeams) existing.set(r.team_number_full, r);
-  /* Spring numbers folded into a Summer row via Link — a re-sync must
-     not re-insert them as fresh Spring-only rows. */
-  const linkedSpring = new Set(_hpPlanTeams.map(r => r.spring_team_number).filter(Boolean));
-
-  const merged = new Map();   // team_number_full → record under construction
-  const takeRow = (t, which) => {
-    const tn = String(t.team_number || '').trim();
-    if (!/^\d{5}$/.test(tn)) return;              // skip malformed numbers
-    if (!hpIsSpmTeam(tn)) return;                 // CRA divisions stay out of the plan
-    let rec = merged.get(tn);
-    if (!rec) {
-      rec = { team_number_full: tn, division_number: tn.slice(0, 3),
-              team_name: '', summer_venue: null, spring_venue: null,
-              in_summer: false, in_spring: false };
-      merged.set(tn, rec);
+  const take = arr => {
+    const out = [];
+    for (const t of arr) {
+      const tn = String((t && t.team_number) || '').trim();
+      if (!/^\d{5}$/.test(tn)) continue;
+      if (!hpIsSpmTeam(tn)) continue;
+      const name = hpNormalizeName(t.team_name);
+      if (!name) continue;
+      out.push({ tn, div: tn.slice(0, 3), name, k: hpMatchKey(name), venue: t.venue || null });
     }
-    const name = hpNormalizeName(t.team_name);
-    if (which === 'summer') {
-      rec.in_summer = true;
-      rec.summer_venue = t.venue || rec.summer_venue;
-      if (name) rec.team_name = name;                       // summer name wins
-    } else {
-      rec.in_spring = true;
-      rec.spring_venue = t.venue || rec.spring_venue;
-      if (name && !rec.team_name) rec.team_name = name;     // spring fills gaps
-    }
+    return out;
   };
-  for (const t of summer) takeRow(t, 'summer');
-  for (const t of spring) takeRow(t, 'spring');
+  const su = take(summer), sp = take(spring);
 
-  const toInsert = [];
-  const toPatch  = [];
-  for (const [tn, rec] of merged) {
-    const prior = existing.get(tn);
-    if (!prior && linkedSpring.has(tn)) continue;   // folded into a Summer row
+  /* Pass 1: (name, division) exact. Pass 2: name-only when exactly one
+     leftover on each side (division-movers). */
+  const spLeft = new Set(sp.map((_, i) => i));
+  const byKD = new Map();
+  sp.forEach((r, i) => { const kk = r.k + '|' + r.div; if (!byKD.has(kk)) byKD.set(kk, []); byKD.get(kk).push(i); });
+  const attach = new Map();
+  su.forEach((s, si) => {
+    const list = (byKD.get(s.k + '|' + s.div) || []).filter(i => spLeft.has(i));
+    if (list.length === 1) { attach.set(si, list[0]); spLeft.delete(list[0]); }
+  });
+  const spByK = new Map();
+  for (const i of spLeft) { const k = sp[i].k; if (!spByK.has(k)) spByK.set(k, []); spByK.get(k).push(i); }
+  su.forEach((s, si) => {
+    if (attach.has(si)) return;
+    const cand = (spByK.get(s.k) || []).filter(i => spLeft.has(i));
+    if (cand.length === 1) { attach.set(si, cand[0]); spLeft.delete(cand[0]); }
+  });
+
+  /* Manual links claim spring NAMES — re-syncs must not resurrect them. */
+  const claimed = new Set(_hpPlanTeams.map(r => r.spring_team_name ? hpMatchKey(r.spring_team_name) : null).filter(Boolean));
+  const existing = new Map();
+  for (const r of _hpPlanTeams) existing.set((r.division_number || '') + '|' + hpMatchKey(r.team_name), r);
+
+  const toInsert = [], toPatch = [], seen = new Set();
+  su.forEach((s, si) => {
+    const spI = attach.has(si) ? sp[attach.get(si)] : null;
+    const key = s.div + '|' + s.k;
+    if (seen.has(key)) return;
+    seen.add(key);
+    const prior = existing.get(key);
     if (!prior) {
       toInsert.push({
-        target_session:   HP_TARGET_SESSION,
-        team_number_full: tn,
-        division_number:  rec.division_number,
-        team_name:        rec.team_name || ('Team ' + tn),
-        summer_team_number: rec.in_summer ? tn : null,
-        summer_venue:     rec.summer_venue,
-        spring_venue:     rec.spring_venue,
-        in_summer:        rec.in_summer,
-        in_spring:        rec.in_spring,
-        return_status:    'unknown',
-        is_new_for_fall:  false,
-        placement_status: 'unassigned',
-        updated_by:       getDeviceId()
+        target_session: HP_TARGET_SESSION, team_number_full: s.tn, division_number: s.div,
+        team_name: s.name, summer_team_number: s.tn, summer_venue: s.venue, in_summer: true,
+        in_spring: !!spI, spring_venue: spI ? spI.venue : null,
+        spring_team_number: spI ? spI.tn : null, spring_team_name: spI ? spI.name : null,
+        return_status: 'unknown', is_new_for_fall: false, placement_status: 'unassigned',
+        updated_by: getDeviceId()
       });
     } else {
       const patch = {};
-      if (!prior.summer_venue && rec.summer_venue) patch.summer_venue = rec.summer_venue;
-      if (!prior.spring_venue && rec.spring_venue) patch.spring_venue = rec.spring_venue;
-      if (!prior.division_number)                  patch.division_number = rec.division_number;
-      if (rec.in_summer && !prior.in_summer)       patch.in_summer = true;
-      if (rec.in_spring && !prior.in_spring)       patch.in_spring = true;
-      if (Object.keys(patch).length) toPatch.push({ tn, patch });
+      if (!prior.in_summer) { patch.in_summer = true; patch.summer_venue = s.venue; patch.summer_team_number = s.tn; }
+      else if (!prior.summer_venue && s.venue) patch.summer_venue = s.venue;
+      if (spI && !prior.in_spring) {
+        patch.in_spring = true; patch.spring_venue = spI.venue;
+        patch.spring_team_number = spI.tn; patch.spring_team_name = spI.name;
+      } else if (spI && !prior.spring_venue && spI.venue) patch.spring_venue = spI.venue;
+      if (Object.keys(patch).length) toPatch.push({ id: prior.id, patch });
+    }
+  });
+  for (const i of spLeft) {
+    const r = sp[i];
+    if (claimed.has(r.k)) continue;
+    const key = r.div + '|' + r.k;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const prior = existing.get(key);
+    if (!prior) {
+      toInsert.push({
+        target_session: HP_TARGET_SESSION, team_number_full: r.tn, division_number: r.div,
+        team_name: r.name, spring_team_number: r.tn, spring_venue: r.venue,
+        in_spring: true, in_summer: false,
+        return_status: 'unknown', is_new_for_fall: false, placement_status: 'unassigned',
+        updated_by: getDeviceId()
+      });
+    } else {
+      const patch = {};
+      if (!prior.in_spring) { patch.in_spring = true; patch.spring_venue = r.venue; patch.spring_team_number = r.tn; }
+      if (Object.keys(patch).length) toPatch.push({ id: prior.id, patch });
     }
   }
 
@@ -23519,8 +23546,7 @@ async function hpSyncFromUploads() {
       await sb('POST', 'host_plan_teams', toInsert.slice(i, i + CHUNK));
     }
     for (const p of toPatch) {
-      await sb('PATCH', 'host_plan_teams?target_session=eq.' + encodeURIComponent(HP_TARGET_SESSION)
-        + '&team_number_full=eq.' + encodeURIComponent(p.tn), p.patch);
+      await sb('PATCH', 'host_plan_teams?id=eq.' + p.id, p.patch);
     }
     await hpLoadPlanTeams();
     await hpLoadDivisionMeta();
@@ -23628,11 +23654,10 @@ function hpWsFiltered() {
     .filter(t => hpWsMatches(t, _hpWs.filter))
     .filter(t => !q
       || (t.team_name || '').toLowerCase().includes(q)
-      || String(t.team_number_full || '').includes(q)
       || (t.summer_venue || '').toLowerCase().includes(q)
       || (t.spring_venue || '').toLowerCase().includes(q))
     .sort((a, b) => (a.team_name || '').localeCompare(b.team_name || '')
-      || String(a.team_number_full).localeCompare(String(b.team_number_full)));
+      || ((a.id || 0) - (b.id || 0)));
 }
 
 function hpWsBadges(t) {
@@ -23678,9 +23703,8 @@ function hpRenderMatchPanel() {
   const summerOnly = hpSummerOnly();
   if (!springOnly.length || !summerOnly.length) { el.innerHTML = ''; return; }
   const sugg = hpMatchSuggestions();
-  const opt = t => '<option value="' + esc(t.team_number_full) + '">'
-    + esc(t.team_name) + ' (' + esc(t.team_number_full)
-    + ((t.spring_venue || t.summer_venue) ? ' \u00b7 ' + esc(t.spring_venue || t.summer_venue) : '') + ')</option>';
+  const opt = (t, venueField) => '<option value="' + t.id + '">'
+    + esc(t.team_name) + (t[venueField] ? ' (' + esc(t[venueField]) + ')' : '') + '</option>';
   let html = '<details' + (sugg.length ? ' open' : '') + ' style="margin-bottom:12px;border:1px solid var(--border);border-radius:8px;padding:10px;background:#fffbeb">'
     + '<summary style="cursor:pointer;font-weight:700;font-size:0.9rem">Same-team matching'
     + ' <span class="hint" style="font-weight:400">' + sugg.length + ' suggestion' + (sugg.length === 1 ? '' : 's')
@@ -23689,64 +23713,62 @@ function hpRenderMatchPanel() {
   for (const m of sugg.slice(0, 40)) {
     html += '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px solid #fde68a;font-size:0.84rem;flex-wrap:wrap">'
       + '<span style="min-width:0"><span style="background:#7c3aed;color:#fff;border-radius:4px;padding:0 4px;font-size:0.62rem;font-weight:700">SP</span> '
-      + esc(m.spring.team_name) + ' <span class="hint">(' + esc(m.spring.team_number_full) + ' \u00b7 ' + esc(m.spring.spring_venue || '?') + ')</span></span>'
+      + esc(m.spring.team_name) + ' <span class="hint">(' + esc(m.spring.spring_venue || '?') + ')</span></span>'
       + '<span style="color:#9ca3af">\u21c4</span>'
       + '<span style="min-width:0"><span style="background:#0031a1;color:#fff;border-radius:4px;padding:0 4px;font-size:0.62rem;font-weight:700">SU</span> '
-      + esc(m.summer.team_name) + ' <span class="hint">(' + esc(m.summer.team_number_full) + ' \u00b7 ' + esc(m.summer.summer_venue || '?') + ')</span></span>'
-      + '<button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="hpLinkTeams(\'' + esc(m.spring.team_number_full) + '\',\'' + esc(m.summer.team_number_full) + '\')">Link</button>'
+      + esc(m.summer.team_name) + ' <span class="hint">(' + esc(m.summer.summer_venue || '?') + ')</span></span>'
+      + '<button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="hpLinkTeams(' + m.spring.id + ',' + m.summer.id + ')">Link</button>'
       + '</div>';
   }
   if (sugg.length > 40) html += '<p class="hint">\u2026and ' + (sugg.length - 40) + ' more (link some to shorten the list).</p>';
   html += '<div style="display:flex;gap:8px;align-items:center;margin-top:10px;padding-top:8px;border-top:1px solid #fde68a;flex-wrap:wrap">'
     + '<span style="font-size:0.8rem;font-weight:600">Manual link:</span>'
     + '<select id="hpMlSpring" style="max-width:240px;padding:5px;border:1px solid var(--border);border-radius:6px;font-size:0.8rem">'
-    + '<option value="">\u2014 Spring-only team \u2014</option>' + springOnly.map(opt).join('') + '</select>'
+    + '<option value="">\u2014 Spring-only team \u2014</option>' + springOnly.map(t => opt(t, 'spring_venue')).join('') + '</select>'
     + '<span style="color:#9ca3af">\u21c4</span>'
     + '<select id="hpMlSummer" style="max-width:240px;padding:5px;border:1px solid var(--border);border-radius:6px;font-size:0.8rem">'
-    + '<option value="">\u2014 Summer-only team \u2014</option>' + summerOnly.map(opt).join('') + '</select>'
+    + '<option value="">\u2014 Summer-only team \u2014</option>' + summerOnly.map(t => opt(t, 'summer_venue')).join('') + '</select>'
     + '<button class="btn btn-outline btn-sm" onclick="hpManualLink()">Link</button>'
     + '</div></div></details>';
   el.innerHTML = html;
 }
 
-/* Fold the Spring row into the Summer row. Carries captain/notes the
-   Summer row lacks; Summer keeps its own return/placement state. */
-async function hpLinkTeams(springTn, summerTn) {
-  const sp = _hpPlanTeams.find(t => t.team_number_full === springTn);
-  const su = _hpPlanTeams.find(t => t.team_number_full === summerTn);
+/* Fold the Spring row into the Summer row (by row id). Carries
+   captain/notes the Summer row lacks; Summer keeps its own state.
+   spring_team_name is the identity the re-sync guard keys on. */
+async function hpLinkTeams(springId, summerId) {
+  const sp = _hpPlanTeams.find(t => t.id === Number(springId));
+  const su = _hpPlanTeams.find(t => t.id === Number(summerId));
   if (!sp || !su) { alert('Row not found \u2014 refresh and retry.'); return; }
   if (su.in_spring) { alert(su.team_name + ' already has Spring data.'); return; }
   const patch = {
     in_spring: true,
     spring_venue: sp.spring_venue || null,
-    spring_team_number: sp.team_number_full,
+    spring_team_number: sp.spring_team_number || sp.team_number_full || null,
     spring_team_name: sp.team_name || null,
     updated_by: getDeviceId()
   };
   if (!su.captain_name && sp.captain_name) patch.captain_name = sp.captain_name;
   if (sp.notes) patch.notes = (su.notes ? su.notes + ' \u00b7 ' : '') + sp.notes;
   try {
-    await sb('PATCH', 'host_plan_teams?target_session=eq.' + encodeURIComponent(HP_TARGET_SESSION)
-      + '&team_number_full=eq.' + encodeURIComponent(summerTn), patch);
-    await sb('DELETE', 'host_plan_teams?target_session=eq.' + encodeURIComponent(HP_TARGET_SESSION)
-      + '&team_number_full=eq.' + encodeURIComponent(springTn));
+    await sb('PATCH', 'host_plan_teams?id=eq.' + su.id, patch);
+    await sb('DELETE', 'host_plan_teams?id=eq.' + sp.id, null);
     Object.assign(su, patch);
-    _hpPlanTeams = _hpPlanTeams.filter(t => t.team_number_full !== springTn);
+    _hpPlanTeams = _hpPlanTeams.filter(t => t.id !== sp.id);
     hpRenderPlanner();
   } catch (e) { alert('Link failed: ' + e.message); }
 }
 
-/* Split a folded Spring row back out. The recreated row gets fresh
-   plan state (unknown/unassigned); disaster recovery = the snapshot. */
-async function hpUnlinkTeam(summerTn) {
-  const su = _hpPlanTeams.find(t => t.team_number_full === summerTn);
-  if (!su || !su.spring_team_number) return;
-  const springTn = su.spring_team_number;
+/* Split a folded Spring row back out (by summer row id). */
+async function hpUnlinkTeam(summerId) {
+  const su = _hpPlanTeams.find(t => t.id === Number(summerId));
+  if (!su || !su.spring_team_name) return;
   const springRow = {
     target_session: HP_TARGET_SESSION,
-    team_number_full: springTn,
-    division_number: springTn.slice(0, 3),
-    team_name: su.spring_team_name || su.team_name,
+    team_number_full: su.spring_team_number || ('SP' + su.id),
+    division_number: su.spring_team_number ? su.spring_team_number.slice(0, 3) : su.division_number,
+    team_name: su.spring_team_name,
+    spring_team_number: su.spring_team_number || null,
     spring_venue: su.spring_venue,
     in_spring: true, in_summer: false,
     return_status: 'unknown', is_new_for_fall: false,
@@ -23755,11 +23777,10 @@ async function hpUnlinkTeam(summerTn) {
   };
   try {
     await sb('POST', 'host_plan_teams', springRow);
-    await sb('PATCH', 'host_plan_teams?target_session=eq.' + encodeURIComponent(HP_TARGET_SESSION)
-      + '&team_number_full=eq.' + encodeURIComponent(summerTn),
+    await sb('PATCH', 'host_plan_teams?id=eq.' + su.id,
       { in_spring: false, spring_venue: null, spring_team_number: null, spring_team_name: null, updated_by: getDeviceId() });
     su.in_spring = false; su.spring_venue = null; su.spring_team_number = null; su.spring_team_name = null;
-    _hpPlanTeams.push(springRow);
+    await hpLoadPlanTeams();
     hpRenderPlanner();
   } catch (e) { alert('Unlink failed: ' + e.message); }
 }
@@ -23854,7 +23875,7 @@ function hpRenderWorksheet() {
       const effNight = hpTeamNight(t);
       const defV = hpDefaultVenue(t);
       const emptyLabel = np ? '\u2014' : (defV ? 'default: ' + defV.name : '\u2014 no venue \u2014');
-      const venueSel = '<select onchange="hpMoveTeam(\'' + esc(t.team_number_full) + '\', this.value)"'
+      const venueSel = '<select onchange="hpMoveTeam(' + t.id + ', this.value)"'
         + ' title="Fall venue \u2014 unpicked teams default to their last-played venue and count toward its capacity; picking confirms. Picking a venue for a Not-playing team flips it back to playing."'
         + ' style="max-width:190px;padding:3px 5px;border:1px solid var(--border);border-radius:6px;font-size:0.78rem;'
         + (eff.state === 'defaulted' ? 'background:#fffbeb;color:#92400e;font-style:italic' : 'background:#fff')
@@ -23862,13 +23883,13 @@ function hpRenderWorksheet() {
         + '<option value=""' + (t.placement_venue_id ? '' : ' selected') + '>' + esc(emptyLabel) + '</option>'
         + venueOpts.map(v => '<option value="' + v.id + '"' + (t.placement_venue_id === v.id ? ' selected' : '') + '>' + esc(v.name) + '</option>').join('')
         + '</select>';
-      const nightSel = '<select onchange="hpSetNight(\'' + esc(t.team_number_full) + '\', this.value)"'
+      const nightSel = '<select onchange="hpSetNight(' + t.id + ', this.value)"'
         + ' title="Play night \u2014 defaults from the team\u2019s division"'
         + ' style="max-width:110px;padding:3px 5px;border:1px solid var(--border);border-radius:6px;font-size:0.78rem;background:#fff">'
         + '<option value=""' + (effNight ? '' : ' selected') + '>\u2014</option>'
         + NIGHTS.map(n => '<option value="' + n + '"' + (effNight === n ? ' selected' : '') + '>' + n + '</option>').join('')
         + '</select>';
-      const npBtn = '<button type="button" onclick="hpToggleNotPlaying(\'' + esc(t.team_number_full) + '\')"'
+      const npBtn = '<button type="button" onclick="hpToggleNotPlaying(' + t.id + ')"'
         + ' title="Toggle Not playing Fall"'
         + ' style="padding:3px 8px;border-radius:6px;font-size:0.74rem;font-weight:700;cursor:pointer;white-space:nowrap;'
         + (np ? 'border:2px solid #b91c1c;background:#b91c1c;color:#fff'
@@ -23879,12 +23900,13 @@ function hpRenderWorksheet() {
       html += '<tr style="border-bottom:1px solid #f1f5f9' + (np ? ';opacity:0.55' : '') + '">'
         + '<td style="padding:7px 10px;min-width:190px">'
         +   '<div style="font-weight:600">' + esc(t.team_name) + hpWsBadges(t) + '</div>'
-        +   '<div style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:#9ca3af">' + esc(t.team_number_full)
-        +   (t.spring_team_number
-              ? ' \u00b7 SP ' + esc(t.spring_team_number)
-                + ' <button type="button" onclick="hpUnlinkTeam(\'' + esc(t.team_number_full) + '\')" title="Unlink \u2014 split the Spring row back out" style="border:1px solid var(--border);background:#fff;border-radius:5px;font-size:0.62rem;cursor:pointer;padding:0 4px;color:#6b7280">unlink</button>'
-              : '')
-        +   '</div>'
+        +   (t.spring_team_name && hpMatchKey(t.spring_team_name) !== hpMatchKey(t.team_name)
+              ? '<div style="font-size:0.7rem;color:#9ca3af">was ' + esc(t.spring_team_name) + ' in Spring '
+                + '<button type="button" onclick="hpUnlinkTeam(' + t.id + ')" title="Unlink \u2014 split the Spring row back out" style="border:1px solid var(--border);background:#fff;border-radius:5px;font-size:0.62rem;cursor:pointer;padding:0 4px;color:#6b7280">unlink</button></div>'
+              : (t.spring_team_name
+                  ? '<div style="font-size:0.7rem;color:#9ca3af">linked '
+                    + '<button type="button" onclick="hpUnlinkTeam(' + t.id + ')" title="Unlink \u2014 split the Spring row back out" style="border:1px solid var(--border);background:#fff;border-radius:5px;font-size:0.62rem;cursor:pointer;padding:0 4px;color:#6b7280">unlink</button></div>'
+                  : ''))
         + '</td>'
         + '<td style="padding:7px 10px">' + (t.in_spring ? esc(t.spring_venue || '?') : '<span style="color:#d1d5db">\u2014</span>') + '</td>'
         + '<td style="padding:7px 10px">' + (t.in_summer ? esc(t.summer_venue || '?') : '<span style="color:#d1d5db">\u2014</span>') + '</td>'
@@ -23966,48 +23988,45 @@ function hpWsSetFilter(f) { _hpWs.filter = f; hpRenderWsChips(); hpRenderWorkshe
 function hpWsSearchInput(v) { _hpWs.q = v || ''; hpRenderWorksheet(); }
 
 /* ── Mutations ── */
-async function hpSetReturnStatus(teamNumberFull, status) {
+async function hpSetReturnStatus(id, status) {
   try {
-    await sb('PATCH', 'host_plan_teams?target_session=eq.' + encodeURIComponent(HP_TARGET_SESSION)
-      + '&team_number_full=eq.' + encodeURIComponent(teamNumberFull),
+    await sb('PATCH', 'host_plan_teams?id=eq.' + Number(id),
       { return_status: status, updated_by: getDeviceId() });
-    const row = _hpPlanTeams.find(t => t.team_number_full === teamNumberFull);
+    const row = _hpPlanTeams.find(t => t.id === Number(id));
     if (row) row.return_status = status;
     hpRenderPlanner();
   } catch (e) { alert('Save failed: ' + e.message); }
 }
 
-async function hpMoveTeam(teamNumberFull, venueIdRaw) {
+async function hpMoveTeam(id, venueIdRaw) {
   const venueId = venueIdRaw ? parseInt(venueIdRaw, 10) : null;
-  const row = _hpPlanTeams.find(t => t.team_number_full === teamNumberFull);
+  const row = _hpPlanTeams.find(t => t.id === Number(id));
   const patch = { placement_venue_id: venueId,
                   placement_status: venueId ? 'placed' : 'unassigned',
                   updated_by: getDeviceId() };
   /* Assigning a venue to a Not-playing team implies it's playing again. */
   if (venueId && row && row.return_status === 'no') patch.return_status = 'unknown';
   try {
-    await sb('PATCH', 'host_plan_teams?target_session=eq.' + encodeURIComponent(HP_TARGET_SESSION)
-      + '&team_number_full=eq.' + encodeURIComponent(teamNumberFull), patch);
+    await sb('PATCH', 'host_plan_teams?id=eq.' + Number(id), patch);
     if (row) Object.assign(row, patch);
     hpRenderPlanner();
   } catch (e) { alert('Save failed: ' + e.message); }
 }
 
-async function hpSetNight(teamNumberFull, night) {
+async function hpSetNight(id, night) {
   try {
-    await sb('PATCH', 'host_plan_teams?target_session=eq.' + encodeURIComponent(HP_TARGET_SESSION)
-      + '&team_number_full=eq.' + encodeURIComponent(teamNumberFull),
+    await sb('PATCH', 'host_plan_teams?id=eq.' + Number(id),
       { night_of_play: night || null, updated_by: getDeviceId() });
-    const row = _hpPlanTeams.find(t => t.team_number_full === teamNumberFull);
+    const row = _hpPlanTeams.find(t => t.id === Number(id));
     if (row) row.night_of_play = night || null;
     hpRenderPlanner();
   } catch (e) { alert('Save failed: ' + e.message); }
 }
 
-async function hpToggleNotPlaying(teamNumberFull) {
-  const row = _hpPlanTeams.find(t => t.team_number_full === teamNumberFull);
+async function hpToggleNotPlaying(id) {
+  const row = _hpPlanTeams.find(t => t.id === Number(id));
   if (!row) return;
-  await hpSetReturnStatus(teamNumberFull, row.return_status === 'no' ? 'unknown' : 'no');
+  await hpSetReturnStatus(id, row.return_status === 'no' ? 'unknown' : 'no');
 }
 
 /* ── New-team modal ── */
@@ -24075,14 +24094,13 @@ async function hpSaveNewTeam() {
 
 /* Remove a plan row (parse junk / duplicates). Not-returning teams should
    use the No status instead so they stay visible. */
-async function hpDeletePlanTeam(teamNumberFull) {
-  const row = _hpPlanTeams.find(t => t.team_number_full === teamNumberFull);
+async function hpDeletePlanTeam(id) {
+  const row = _hpPlanTeams.find(t => t.id === Number(id));
   if (!row) return;
-  if (!confirm('Remove "' + row.team_name + '" (' + teamNumberFull + ') from the plan?')) return;
+  if (!confirm('Remove "' + row.team_name + '" from the plan?')) return;
   try {
-    await sb('DELETE', 'host_plan_teams?target_session=eq.' + encodeURIComponent(HP_TARGET_SESSION)
-      + '&team_number_full=eq.' + encodeURIComponent(teamNumberFull));
-    _hpPlanTeams = _hpPlanTeams.filter(t => t.team_number_full !== teamNumberFull);
+    await sb('DELETE', 'host_plan_teams?id=eq.' + Number(id), null);
+    _hpPlanTeams = _hpPlanTeams.filter(t => t.id !== Number(id));
     hpRenderPlanner();
   } catch (e) { alert('Delete failed: ' + e.message); }
 }
