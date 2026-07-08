@@ -1536,7 +1536,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <strong>mailing contacts</strong> (the person each envelope is addressed to)
           get their envelope count and each player's patches;
           <strong>players</strong> get their patch list and which mailing contact will hand it over.
-          Variables — contact: <code>{first_name} {team_numbers} {team_plural} {envelope_count} {envelope_plural} {patch_count} {patch_plural} {player_lines}</code>
+          Variables — contact: <code>{first_name} {team_numbers} {team_plural} {envelope_count} {envelope_plural} {patch_count} {patch_plural} {player_lines} {your_patches_section}</code>
           · player: <code>{first_name} {apa_number} {patch_count} {patch_plural} {patch_lines}</code>
         </p>
         <p class="hint" id="spNotifyBatchInfo" style="margin:0 0 10px;font-weight:600">Loading last mailing…</p>
@@ -1572,6 +1572,14 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <button type="button" class="btn btn-primary" id="spNotifySendBtn" onclick="spNotifySendAll()" disabled>📧 Email this mailing</button>
           <span id="spNotifyStatus" class="status-line" style="flex:1" role="status" aria-live="polite"></span>
         </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">
+          <input type="text" id="spNotifyPreviewApa" placeholder="APA # (5 or 8 digit)"
+                 style="width:180px;padding:8px 10px;border:1px solid var(--border);border-radius:6px"
+                 onkeydown="if(event.key==='Enter')spNotifyPreviewFor()">
+          <button type="button" class="btn btn-outline btn-sm" onclick="spNotifyPreviewFor()">👁 Preview this person's email(s)</button>
+          <span class="hint">Shows exactly what they'd receive — contact and/or player email.</span>
+        </div>
+        <div id="spNotifyEmailPreview" style="display:none;margin-top:10px"></div>
         <div id="spNotifyProgress" style="display:none;margin-top:8px">
           <div style="height:10px;background:#e5e7eb;border-radius:999px;overflow:hidden">
             <div id="spNotifyBar" style="height:100%;width:0%;background:var(--spm-accent,#0031a8);transition:width 0.3s ease"></div>
@@ -3243,7 +3251,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.192';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.193';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10288,7 +10296,7 @@ async function spNotifyBuild() {
     byContact.get(k).push(p);
   }
   const contacts = [], contactUnresolved = [], contactNoEmail = [];
-  const contactByKey = new Map();   // spContactKey → resolved member m5 (self-delivery detection)
+  const contactByKey = new Map();   // spContactKey → resolved member m5s (self-delivery detection)
   for (const [k, list] of byContact) {
     const teams = [...new Set(list.map(p => spNotifyTeamKey(p.team_number)))].sort();
     const contactName = (list[0].contact_name || '').trim();
@@ -10310,24 +10318,28 @@ async function spNotifyBuild() {
 
     /* Tier 1: this group's own team rosters. Tier 2 (3.192): any batch
        team's roster — a mailing contact may not play on the team whose
-       mail they receive. Both tiers: exact full-name match (never split
-       — names contain spaces by design), unique or reported. */
+       mail they receive. Exact full-name match (never split — names
+       contain spaces by design). MULTI-match on the same team (3.193,
+       Jr/Sr households — e.g. two same-named players, father and son):
+       the envelope is addressed to the household so print needs no
+       disambiguation, and the email goes to EVERY matched person
+       (deduped by address) rather than guessing which one. Zero matches
+       anywhere stays a reported manual case. */
     const nameEq = r => ((r.first_name || '') + ' ' + (r.last_name || '')).trim().toLowerCase()
                         === contactName.toLowerCase();
-    let uniq = [...new Map(teams.flatMap(tn => rosterByTeam.get(tn) || []).filter(nameEq)
+    let matched = [...new Map(teams.flatMap(tn => rosterByTeam.get(tn) || []).filter(nameEq)
       .map(r => [r.member_number, r])).values()];
-    if (contactName && uniq.length !== 1) {
+    if (contactName && !matched.length) {
       const wide = [...new Map(allRoster.filter(nameEq).map(r => [r.member_number, r])).values()];
-      if (wide.length === 1) uniq = wide;
+      if (wide.length === 1) matched = wide;
     }
-    if (!contactName || uniq.length !== 1) {
+    if (!contactName || !matched.length) {
       contactUnresolved.push(contactName ? (contactName + ' (teams ' + teams.join(', ') + ')') : ('(no contact) teams ' + teams.join(', ')));
       continue;
     }
-    const person = uniq[0];
-    contactByKey.set(k, { m5: spNotifyM5(person.member_number), name: contactName });
+    contactByKey.set(k, { m5s: new Set(matched.map(r => spNotifyM5(r.member_number))), name: contactName });
     const ctx = {
-      first_name: person.first_name || contactName.split(' ')[0],
+      first_name: matched[0].first_name || contactName.split(' ')[0],
       team_numbers: teams.join(', '),
       team_plural: teams.length === 1 ? '' : 's',
       envelope_count: envelopes,
@@ -10336,8 +10348,17 @@ async function spNotifyBuild() {
       patch_plural: list.length === 1 ? '' : 'es',
       player_lines: playerLines
     };
-    if (!person.email) { contactNoEmail.push(contactName + ' (teams ' + teams.join(', ') + ')'); continue; }
-    contacts.push({ member_number: person.member_number, name: contactName, email: person.email, ctx });
+    const seenEmails = new Set();
+    let anyEmail = false;
+    for (const person of matched) {
+      const em = String(person.email || '').trim().toLowerCase();
+      if (!em || seenEmails.has(em)) continue;
+      seenEmails.add(em);
+      anyEmail = true;
+      contacts.push({ member_number: person.member_number, name: contactName, email: person.email,
+                      ctx: { ...ctx, first_name: person.first_name || ctx.first_name } });
+    }
+    if (!anyEmail) contactNoEmail.push(contactName + ' (teams ' + teams.join(', ') + ')');
   }
 
   /* ── Player recipients ── */
@@ -10359,7 +10380,7 @@ async function spNotifyBuild() {
       if (!agg.has(key)) {
         agg.set(key, { n: 0, type: p.sp_type, team: spNotifyTeamKey(p.team_number),
                        contact: (p.contact_name || '(no contact on file)'),
-                       self: contactByKey.get(ck)?.m5 === spNotifyM5(p.member_number) });
+                       self: !!contactByKey.get(ck)?.m5s?.has(spNotifyM5(p.member_number)) });
       }
       agg.get(key).n++;
     }
@@ -10386,12 +10407,38 @@ async function spNotifyBuild() {
     });
   }
 
+  /* One person, one email (3.193): a contact recipient who ALSO earned
+     patches gets them inside the contact email ({your_patches_section})
+     instead of a second standalone player email. In shared-email
+     households only the entry matching the earner's member # gets the
+     section; if the earner has no contact entry of their own the player
+     email stays (it reaches the shared inbox anyway). */
+  const contactByM5 = new Map();
+  for (const c of contacts) {
+    const m5 = spNotifyM5(c.member_number);
+    if (!contactByM5.has(m5)) contactByM5.set(m5, []);
+    contactByM5.get(m5).push(c);
+  }
+  const mergedSelf = [];
+  for (let i = players.length - 1; i >= 0; i--) {
+    const pl = players[i];
+    const targets = contactByM5.get(spNotifyM5(pl.member_number));
+    if (!targets || !targets.length) continue;
+    for (const c of targets) {
+      c.ctx.your_patches_section =
+        '<p>Some of the patches in there are <strong>yours</strong>:</p>' + pl.ctx.patch_lines;
+    }
+    mergedSelf.push(pl.name);
+    players.splice(i, 1);
+  }
+  for (const c of contacts) if (!('your_patches_section' in c.ctx)) c.ctx.your_patches_section = '';
+
   /* Already-sent set for resume. */
   const sentRows = await sbGetAll('patch_notify_log?batch_id=eq.' + batchId
     + '&status=eq.sent&select=kind,member_number');
   const sent = new Set((sentRows || []).map(r => r.kind + '~' + r.member_number));
 
-  return { batchId, patches: patches.length, contacts, players,
+  return { batchId, patches: patches.length, contacts, players, mergedSelf,
            contactUnresolved, contactNoEmail, plyUnresolved, plyNoEmail, sent };
 }
 
@@ -10415,6 +10462,9 @@ async function spNotifyPreview() {
       + (m.sent.size ? ' (' + (m.contacts.length - conPend) + ' already sent — will skip)' : '') + '</div>'
       + '<div>Players: <strong>' + m.players.length + '</strong> ready to email'
       + (m.sent.size ? ' (' + (m.players.length - plyPend) + ' already sent — will skip)' : '') + '</div>'
+      + (m.mergedSelf.length
+          ? '<div class="hint">' + m.mergedSelf.length + ' mailing contact' + (m.mergedSelf.length === 1 ? ' also earned patches — their own patches ride' : 's also earned patches — their own patches ride') + ' inside their contact email (no second email).</div>'
+          : '')
       + li('Mailing contacts I could not resolve to a player record — handle by hand', m.contactUnresolved, '#b91c1c')
       + li('Mailing contacts with no email on file', m.contactNoEmail, '#a76c00')
       + li('Players I could not resolve', m.plyUnresolved, '#b91c1c')
@@ -10530,10 +10580,58 @@ async function spNotifySendAll() {
   }
 }
 
+/* Preview one person's rendered email(s) by APA # (3.193) — shows the
+   exact substituted subject+body for whichever kinds they'd receive:
+   contact email, player email, or a note that their patches were merged
+   into their contact email. */
+async function spNotifyPreviewFor() {
+  const stat = document.getElementById('spNotifyStatus');
+  const box = document.getElementById('spNotifyEmailPreview');
+  const raw = document.getElementById('spNotifyPreviewApa').value.trim();
+  if (!raw) { stat.textContent = 'Enter an APA number first.'; stat.className = 'status-line err'; return; }
+  const m5 = spNotifyM5(raw);
+  try {
+    await spNotifyLoadTemplates();
+    if (!_spNotify.model || _spNotify.builtForBatch !== _spLastBatch?.id) {
+      stat.textContent = 'Building recipient list…'; stat.className = 'status-line';
+      _spNotify.model = await spNotifyBuild();
+      _spNotify.builtForBatch = _spNotify.model.batchId;
+    }
+    const m = _spNotify.model;
+    const tplCon = { subject: document.getElementById('spNotifyCapSubject').value, body: document.getElementById('spNotifyCapBody').value };
+    const tplPly = { subject: document.getElementById('spNotifyPlySubject').value, body: document.getElementById('spNotifyPlyBody').value };
+    const hits = [];
+    for (const c of m.contacts.filter(c => spNotifyM5(c.member_number) === m5)) {
+      hits.push({ label: 'Mailing-contact email → ' + c.email, subject: spNotifySub(tplCon.subject, c.ctx), body: spNotifySub(tplCon.body, c.ctx) });
+    }
+    for (const p of m.players.filter(p => spNotifyM5(p.member_number) === m5)) {
+      hits.push({ label: 'Player email → ' + p.email, subject: spNotifySub(tplPly.subject, p.ctx), body: spNotifySub(tplPly.body, p.ctx) });
+    }
+    if (!hits.length) {
+      box.style.display = 'none';
+      stat.textContent = 'No pending email for #' + raw + ' in this mailing — they may be unresolved, without email, or not in the batch (check Preview recipients).';
+      stat.className = 'status-line err';
+      return;
+    }
+    box.innerHTML = hits.map(h =>
+      '<div style="border:1px solid var(--border);border-radius:8px;margin-bottom:10px;overflow:hidden">'
+      + '<div style="padding:8px 12px;background:#f6f6f4;font-size:0.8rem;font-weight:700">' + esc(h.label) + '</div>'
+      + '<div style="padding:8px 12px;border-bottom:1px solid var(--border);font-weight:700">Subject: ' + esc(h.subject) + '</div>'
+      + '<div style="padding:12px;background:#fff">' + h.body + '</div>'
+      + '</div>').join('');
+    box.style.display = 'block';
+    stat.textContent = '✓ Previewing ' + hits.length + ' email' + (hits.length === 1 ? '' : 's') + ' for #' + raw + '.';
+    stat.className = 'status-line ok';
+  } catch (e) {
+    stat.textContent = '✗ ' + e.message; stat.className = 'status-line err';
+  }
+}
+
 window.spNotifySaveTemplate = spNotifySaveTemplate;
 window.spNotifyTestSend = spNotifyTestSend;
 window.spNotifyPreview = spNotifyPreview;
 window.spNotifySendAll = spNotifySendAll;
+window.spNotifyPreviewFor = spNotifyPreviewFor;
 
 /* ════════════════════════════════════════════════════════════════════
    PRINT PACK — slips + envelopes (v3.0, Phase 5)
