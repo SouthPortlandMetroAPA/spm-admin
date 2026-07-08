@@ -1516,6 +1516,67 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         <div id="spPatchesList"></div>
       </div>
 
+      <!-- ── Mailing notification emails (3.191) ─────────────────────────
+           Emails everyone in the LAST ACTIVE MAIL BATCH after the operator
+           prints + mails the envelopes:
+             captains → what's coming: per-player patch list + envelope count
+             players  → their patches + which captain(s) will hand them over
+           Recipients derive from the batch's patches: captain grouping =
+           EXACTLY the envelope grouping (spContactKey + capacity split);
+           captain emails resolve contact_name against that team's roster
+           (never a global name lookup). Sends log to patch_notify_log per
+           (batch, kind, member) so a re-click resumes, never double-sends. -->
+      <div class="card" style="margin-bottom:14px;">
+        <h2 style="margin:0 0 6px;">Mailing notification emails</h2>
+        <p class="hint" style="margin:0 0 10px;">
+          After you print and mail a patch run, notify everyone in it:
+          <strong>captains</strong> get their envelope count and each player's patches;
+          <strong>players</strong> get their patch list and which captain will hand it over.
+          Variables — captain: <code>{first_name} {team_numbers} {team_plural} {envelope_count} {envelope_plural} {patch_count} {patch_plural} {player_lines}</code>
+          · player: <code>{first_name} {apa_number} {patch_count} {patch_plural} {patch_lines}</code>
+        </p>
+        <p class="hint" id="spNotifyBatchInfo" style="margin:0 0 10px;font-weight:600">Loading last mailing…</p>
+
+        <details style="margin-bottom:10px">
+          <summary style="cursor:pointer;font-weight:700">📝 Captain email template</summary>
+          <div style="padding:10px 0">
+            <input type="text" id="spNotifyCapSubject" placeholder="Subject" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px">
+            <textarea id="spNotifyCapBody" rows="8" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-family:ui-monospace,monospace;font-size:0.82rem"></textarea>
+            <div style="display:flex;gap:8px;margin-top:6px;align-items:center;flex-wrap:wrap">
+              <button type="button" class="btn btn-outline btn-sm" onclick="spNotifySaveTemplate('captain')">💾 Save</button>
+              <button type="button" class="btn btn-outline btn-sm" onclick="spNotifyTestSend('captain')">📤 Test send to me</button>
+              <span id="spNotifyCapStatus" class="status-line" style="flex:1"></span>
+            </div>
+          </div>
+        </details>
+
+        <details style="margin-bottom:10px">
+          <summary style="cursor:pointer;font-weight:700">📝 Player email template</summary>
+          <div style="padding:10px 0">
+            <input type="text" id="spNotifyPlySubject" placeholder="Subject" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px">
+            <textarea id="spNotifyPlyBody" rows="8" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-family:ui-monospace,monospace;font-size:0.82rem"></textarea>
+            <div style="display:flex;gap:8px;margin-top:6px;align-items:center;flex-wrap:wrap">
+              <button type="button" class="btn btn-outline btn-sm" onclick="spNotifySaveTemplate('player')">💾 Save</button>
+              <button type="button" class="btn btn-outline btn-sm" onclick="spNotifyTestSend('player')">📤 Test send to me</button>
+              <span id="spNotifyPlyStatus" class="status-line" style="flex:1"></span>
+            </div>
+          </div>
+        </details>
+
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <button type="button" class="btn btn-outline" id="spNotifyPreviewBtn" onclick="spNotifyPreview()">🔍 Preview recipients</button>
+          <button type="button" class="btn btn-primary" id="spNotifySendBtn" onclick="spNotifySendAll()" disabled>📧 Email this mailing</button>
+          <span id="spNotifyStatus" class="status-line" style="flex:1" role="status" aria-live="polite"></span>
+        </div>
+        <div id="spNotifyProgress" style="display:none;margin-top:8px">
+          <div style="height:10px;background:#e5e7eb;border-radius:999px;overflow:hidden">
+            <div id="spNotifyBar" style="height:100%;width:0%;background:var(--spm-accent,#0031a8);transition:width 0.3s ease"></div>
+          </div>
+          <div id="spNotifySub" class="hint" style="font-size:0.78rem;margin-top:4px;text-align:center"></div>
+        </div>
+        <div id="spNotifyResults" style="display:none;margin-top:10px;padding:12px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:0.88rem"></div>
+      </div>
+
       <!-- Ad-hoc envelope printing — pull addresses from slate.players -->
       <div class="card" style="margin-bottom:14px;">
         <h2 style="margin:0 0 6px;">Print envelopes by player number</h2>
@@ -3178,7 +3239,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.190';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.191';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -9376,6 +9437,7 @@ async function spLoadPatches() {
     _spLastBatch = null;
   }
   spRenderPatches();
+  if (typeof spNotifyRefreshBatchInfo === 'function') spNotifyRefreshBatchInfo();
 }
 
 async function spLoadDivisionMeta() {
@@ -10067,6 +10129,381 @@ async function spUndoLastMailing() {
 window.spComputePatches = spComputePatches;
 window.spMailPatches    = spMailPatches;
 window.spUndoLastMailing = spUndoLastMailing;
+
+/* ════════════════════════════════════════════════════════════════════
+   MAILING NOTIFICATION EMAILS (3.191)
+   ════════════════════════════════════════════════════════════════════
+   Emails everyone in the last ACTIVE mail batch (_spLastBatch):
+     captain kind → per-player patch list + envelope count to expect
+     player kind  → their patches + which captain(s) will deliver them
+   Recipient derivation rules (locked via interview 2026-07-07):
+     - captain grouping IS the envelope grouping: spContactKey + the
+       same ENVELOPE_CAPACITY ceil math spMailPatches stamps the batch
+       with — the number in the email always matches what was printed.
+     - captain email: contact_name resolved against THAT GROUP's team
+       rosters only (first+last exact, casefolded, never split, never a
+       global name lookup — the lower-id-wins bug class). No match or
+       multi-match → reported, never guessed.
+     - player email: patch member_number matched by last-5 digits to the
+       patch's own team roster first, then across batch team rosters.
+   Sends log to slate.patch_notify_log (batch, kind, member) — re-click
+   resumes, never double-sends. Undo + re-stamp = new batch = fresh log. */
+
+const PATCH_NOTIFY_MAILER_URL = OPTOUT_CONFIRM_MAILER_URL;
+let _spNotify = { templates: null, model: null, builtForBatch: null };
+
+function spNotifyRefreshBatchInfo() {
+  const el = document.getElementById('spNotifyBatchInfo');
+  if (!el) return;
+  /* Populate the template editors on first sight of the card — without
+     this they'd sit empty until the first Preview click. */
+  spNotifyLoadTemplates().catch(e => console.warn('[patch-notify] template load', e));
+  if (!_spLastBatch) {
+    el.textContent = 'No active mailing — stamp a batch with "Mail Patches" first.';
+    document.getElementById('spNotifySendBtn').disabled = true;
+    return;
+  }
+  el.textContent = 'Last mailing: ' + new Date(_spLastBatch.created_at).toLocaleString()
+    + ' — ' + _spLastBatch.patch_count + ' patches / ' + _spLastBatch.envelope_count + ' envelopes.';
+  /* New batch invalidates any previously built model. */
+  if (_spNotify.builtForBatch && _spNotify.builtForBatch !== _spLastBatch.id) {
+    _spNotify.model = null;
+    _spNotify.builtForBatch = null;
+    document.getElementById('spNotifySendBtn').disabled = true;
+  }
+}
+
+async function spNotifyLoadTemplates() {
+  if (_spNotify.templates) return _spNotify.templates;
+  const rows = await sb('GET', 'patch_notify_template?select=kind,subject,body_html',
+    null, { 'Accept-Profile': 'slate' });
+  const t = {};
+  for (const r of (rows || [])) t[r.kind] = { subject: r.subject, body_html: r.body_html };
+  _spNotify.templates = t;
+  const set = (id, v) => { const el = document.getElementById(id); if (el && !el.value) el.value = v; };
+  set('spNotifyCapSubject', t.captain?.subject || '');
+  set('spNotifyCapBody',    t.captain?.body_html || '');
+  set('spNotifyPlySubject', t.player?.subject || '');
+  set('spNotifyPlyBody',    t.player?.body_html || '');
+  return t;
+}
+
+async function spNotifySaveTemplate(kind) {
+  const cap = kind === 'captain';
+  const subject = document.getElementById(cap ? 'spNotifyCapSubject' : 'spNotifyPlySubject').value.trim();
+  const body_html = document.getElementById(cap ? 'spNotifyCapBody' : 'spNotifyPlyBody').value;
+  const stat = document.getElementById(cap ? 'spNotifyCapStatus' : 'spNotifyPlyStatus');
+  if (!subject || !body_html) { stat.textContent = 'Subject + body required.'; stat.className = 'status-line err'; return; }
+  try {
+    await sb('PATCH', 'patch_notify_template?kind=eq.' + kind,
+      { subject, body_html, updated_by: getDeviceId(), updated_at: new Date().toISOString() },
+      { 'Accept-Profile': 'slate', 'Content-Profile': 'slate' });
+    if (_spNotify.templates) _spNotify.templates[kind] = { subject, body_html };
+    stat.textContent = '✓ Saved.'; stat.className = 'status-line ok';
+    setTimeout(() => { stat.textContent = ''; }, 3000);
+  } catch (e) {
+    stat.textContent = 'Save failed: ' + e.message; stat.className = 'status-line err';
+  }
+}
+
+function spNotifySub(str, ctx) {
+  return String(str || '').replace(/\{(\w+)\}/g, (m, k) => (k in ctx ? String(ctx[k]) : m));
+}
+
+/* One patch descriptor: "8-Ball Break-and-Run (x)" with ×N when count>1 */
+function spNotifyPatchDesc(spType, count) {
+  const full = SP_FULL_NAME[spType] || spType;
+  const code = SP_DISPLAY[spType] || spType;
+  return esc(full + ' (' + code + ')') + (count > 1 ? ' ×' + count : '');
+}
+
+function spNotifyM5(mn) {
+  const d = String(mn || '').replace(/\D+/g, '');
+  return d.slice(-5).padStart(5, '0');
+}
+
+/* Team-number normalization — THE cross-app rule: String(parseInt(tn,10)),
+   never zero-pad. sp_patches stores '08202' while slate.teams stores
+   '8202'; without this only 5/57 teams in the 2026-07-07 batch resolved
+   (caught by the Cascade preview cross-check). */
+function spNotifyTeamKey(tn) {
+  const n = parseInt(String(tn || '').trim(), 10);
+  return Number.isFinite(n) ? String(n) : String(tn || '').trim();
+}
+
+/* Build the full recipient model for the active batch. */
+async function spNotifyBuild() {
+  if (!_spLastBatch) throw new Error('No active mailing batch.');
+  const batchId = _spLastBatch.id;
+  const patches = await sbGetAll('sp_patches_v?batch_id=eq.' + batchId + '&select=*&order=id.asc');
+  if (!patches.length) throw new Error('The last batch has no patches.');
+
+  /* Rosters for every team in the batch (current session), keyed by
+     NORMALIZED team number. */
+  const teamNums = [...new Set(patches.map(p => spNotifyTeamKey(p.team_number)).filter(Boolean))];
+  const rosterByTeam = new Map();
+  const TCH = 80;
+  for (let i = 0; i < teamNums.length; i += TCH) {
+    const rows = await sb('GET',
+      'teams?select=team_number,division:divisions!inner(session_id),'
+      + 'memberships:team_memberships(role,player:players(member_number,first_name,last_name,email))'
+      + '&division.session_id=eq.' + currentSession.id
+      + '&team_number=in.(' + teamNums.slice(i, i + TCH).map(encodeURIComponent).join(',') + ')',
+      null, { 'Accept-Profile': 'slate' });
+    for (const t of (rows || [])) {
+      rosterByTeam.set(spNotifyTeamKey(t.team_number),
+        (t.memberships || []).map(m => ({ role: m.role, ...(m.player || {}) })));
+    }
+  }
+  const allRoster = [...rosterByTeam.values()].flat();
+
+  /* Player identity: last-5 match, own team's roster first (never global-
+     first — the lower-id-wins-name-index rule applies to numbers too). */
+  const findPlayer = (p) => {
+    const m5 = spNotifyM5(p.member_number);
+    const own = (rosterByTeam.get(spNotifyTeamKey(p.team_number)) || []).filter(r => spNotifyM5(r.member_number) === m5);
+    if (own.length === 1) return own[0];
+    const global = allRoster.filter(r => spNotifyM5(r.member_number) === m5);
+    const uniq = [...new Map(global.map(r => [r.member_number, r])).values()];
+    return uniq.length === 1 ? uniq[0] : null;
+  };
+
+  /* ── Captain recipients — envelope grouping ── */
+  const byContact = new Map();
+  for (const p of patches) {
+    const k = spContactKey(p);
+    if (!byContact.has(k)) byContact.set(k, []);
+    byContact.get(k).push(p);
+  }
+  const captains = [], capUnresolved = [], capNoEmail = [];
+  for (const [k, list] of byContact) {
+    const teams = [...new Set(list.map(p => spNotifyTeamKey(p.team_number)))].sort();
+    const contactName = (list[0].contact_name || '').trim();
+    const weight = list.reduce((s, p) => s + (p.weight || 1), 0);
+    const envelopes = Math.max(1, Math.ceil(weight / ENVELOPE_CAPACITY));
+
+    /* Player lines: group by member, aggregate patch types with counts. */
+    const byMember = new Map();
+    for (const p of list) {
+      if (!byMember.has(p.member_number)) byMember.set(p.member_number, { name: p.member_name, types: new Map() });
+      const e = byMember.get(p.member_number);
+      e.types.set(p.sp_type, (e.types.get(p.sp_type) || 0) + 1);
+    }
+    const playerLines = '<ul>' + [...byMember.values()]
+      .sort((a, b) => String(a.name).localeCompare(String(b.name)))
+      .map(e => '<li><strong>' + esc(e.name || '(unknown)') + '</strong> — '
+        + [...e.types.entries()].map(([t, n]) => spNotifyPatchDesc(t, n)).join(', ') + '</li>')
+      .join('') + '</ul>';
+
+    /* Resolve the contact against THIS GROUP's team rosters only. */
+    const cand = teams.flatMap(tn => rosterByTeam.get(tn) || [])
+      .filter(r => ((r.first_name || '') + ' ' + (r.last_name || '')).trim().toLowerCase()
+                   === contactName.toLowerCase());
+    const uniq = [...new Map(cand.map(r => [r.member_number, r])).values()];
+    if (!contactName || uniq.length !== 1) {
+      capUnresolved.push(contactName ? (contactName + ' (teams ' + teams.join(', ') + ')') : ('(no contact) teams ' + teams.join(', ')));
+      continue;
+    }
+    const captain = uniq[0];
+    const ctx = {
+      first_name: captain.first_name || contactName.split(' ')[0],
+      team_numbers: teams.join(', '),
+      team_plural: teams.length === 1 ? '' : 's',
+      envelope_count: envelopes,
+      envelope_plural: envelopes === 1 ? '' : 's',
+      patch_count: list.length,
+      patch_plural: list.length === 1 ? '' : 'es',
+      player_lines: playerLines
+    };
+    if (!captain.email) { capNoEmail.push(contactName + ' (teams ' + teams.join(', ') + ')'); continue; }
+    captains.push({ member_number: captain.member_number, name: contactName, email: captain.email, ctx });
+  }
+
+  /* ── Player recipients ── */
+  const byPlayer = new Map();
+  for (const p of patches) {
+    if (!byPlayer.has(p.member_number)) byPlayer.set(p.member_number, []);
+    byPlayer.get(p.member_number).push(p);
+  }
+  const players = [], plyNoEmail = [], plyUnresolved = [];
+  for (const [mn, list] of byPlayer) {
+    /* Aggregate lines by (sp_type, contact, team) so a multi-team player
+       sees which captain hands over which patches. */
+    const agg = new Map();
+    for (const p of list) {
+      const key = p.sp_type + '~' + (p.contact_name || '?') + '~' + spNotifyTeamKey(p.team_number);
+      agg.set(key, (agg.get(key) || 0) + 1);
+    }
+    const patchLines = '<ul>' + [...agg.entries()].map(([key, n]) => {
+      const [t, contact, team] = key.split('~');
+      return '<li>' + spNotifyPatchDesc(t, n)
+        + ' — via captain <strong>' + esc(contact) + '</strong> (team ' + esc(team) + ')</li>';
+    }).join('') + '</ul>';
+
+    const who = findPlayer(list[0]);
+    const displayName = list[0].member_name || mn;
+    if (!who) { plyUnresolved.push(displayName + ' (#' + mn + ')'); continue; }
+    if (!who.email) { plyNoEmail.push(displayName + ' (#' + mn + ')'); continue; }
+    players.push({
+      member_number: mn, name: displayName, email: who.email,
+      ctx: {
+        first_name: who.first_name || String(displayName).split(' ')[0],
+        apa_number: mn,
+        patch_count: list.length,
+        patch_plural: list.length === 1 ? '' : 'es',
+        patch_lines: patchLines
+      }
+    });
+  }
+
+  /* Already-sent set for resume. */
+  const sentRows = await sbGetAll('patch_notify_log?batch_id=eq.' + batchId
+    + '&status=eq.sent&select=kind,member_number');
+  const sent = new Set((sentRows || []).map(r => r.kind + '~' + r.member_number));
+
+  return { batchId, patches: patches.length, captains, players,
+           capUnresolved, capNoEmail, plyUnresolved, plyNoEmail, sent };
+}
+
+async function spNotifyPreview() {
+  const stat = document.getElementById('spNotifyStatus');
+  const box = document.getElementById('spNotifyResults');
+  stat.textContent = 'Building recipient list…'; stat.className = 'status-line';
+  try {
+    await spNotifyLoadTemplates();
+    const m = await spNotifyBuild();
+    _spNotify.model = m;
+    _spNotify.builtForBatch = m.batchId;
+    const capPend = m.captains.filter(c => !m.sent.has('captain~' + c.member_number)).length;
+    const plyPend = m.players.filter(p => !m.sent.has('player~' + p.member_number)).length;
+    const li = (label, arr, color) => arr.length
+      ? '<div style="margin-top:6px;color:' + color + '"><strong>' + label + ' (' + arr.length + '):</strong> ' + arr.map(esc).join(' · ') + '</div>'
+      : '';
+    box.innerHTML =
+      '<div><strong>' + m.patches + '</strong> patches in this mailing.</div>'
+      + '<div style="margin-top:4px">Captains: <strong>' + m.captains.length + '</strong> ready to email'
+      + (m.sent.size ? ' (' + (m.captains.length - capPend) + ' already sent — will skip)' : '') + '</div>'
+      + '<div>Players: <strong>' + m.players.length + '</strong> ready to email'
+      + (m.sent.size ? ' (' + (m.players.length - plyPend) + ' already sent — will skip)' : '') + '</div>'
+      + li('Captains I could not resolve to a roster player — handle by hand', m.capUnresolved, '#b91c1c')
+      + li('Captains with no email on file', m.capNoEmail, '#a76c00')
+      + li('Players I could not resolve', m.plyUnresolved, '#b91c1c')
+      + li('Players with no email on file', m.plyNoEmail, '#a76c00');
+    box.style.display = 'block';
+    document.getElementById('spNotifySendBtn').disabled = (capPend + plyPend) === 0;
+    stat.textContent = (capPend + plyPend) ? '✓ Ready — ' + capPend + ' captain + ' + plyPend + ' player emails pending.' : 'Nothing left to send for this batch.';
+    stat.className = 'status-line ok';
+  } catch (e) {
+    stat.textContent = '✗ ' + e.message; stat.className = 'status-line err';
+  }
+}
+
+function spNotifyBar(pct, sub) {
+  const wrap = document.getElementById('spNotifyProgress');
+  wrap.style.display = 'block';
+  document.getElementById('spNotifyBar').style.width = Math.max(0, Math.min(100, pct)) + '%';
+  document.getElementById('spNotifySub').textContent = sub || '';
+  if (pct >= 100) setTimeout(() => { wrap.style.display = 'none'; }, 4000);
+}
+
+async function spNotifySendOne(kind, rec, tpl, isTest, toOverride) {
+  const r = await fetch(PATCH_NOTIFY_MAILER_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({
+      action: 'patch_notify_send',
+      admin_key: SB_KEY,
+      to: toOverride || rec.email,
+      subject: spNotifySub(tpl.subject, rec.ctx),
+      body_html: spNotifySub(tpl.body_html, rec.ctx),
+      batch_id: _spNotify.model.batchId,
+      kind: kind,
+      member_number: rec.member_number,
+      is_test: !!isTest
+    }),
+    redirect: 'follow',
+    keepalive: true
+  });
+  const res = JSON.parse(await r.text());
+  if (!res.ok) throw new Error(res.error || 'send failed');
+}
+
+async function spNotifyTestSend(kind) {
+  const stat = document.getElementById(kind === 'captain' ? 'spNotifyCapStatus' : 'spNotifyPlyStatus');
+  try {
+    await spNotifyLoadTemplates();
+    if (!_spNotify.model || _spNotify.builtForBatch !== _spLastBatch?.id) {
+      stat.textContent = 'Building sample…'; stat.className = 'status-line';
+      _spNotify.model = await spNotifyBuild();
+      _spNotify.builtForBatch = _spNotify.model.batchId;
+    }
+    const pool = kind === 'captain' ? _spNotify.model.captains : _spNotify.model.players;
+    if (!pool.length) { stat.textContent = 'No ' + kind + ' recipients in this batch to sample.'; stat.className = 'status-line err'; return; }
+    const to = prompt('Send the test (using ' + pool[0].name + '’s real data) to:', 'soldans@southportlandmetroapa.com');
+    if (!to) return;
+    stat.textContent = 'Sending test…'; stat.className = 'status-line';
+    const tpl = {
+      subject: document.getElementById(kind === 'captain' ? 'spNotifyCapSubject' : 'spNotifyPlySubject').value,
+      body_html: document.getElementById(kind === 'captain' ? 'spNotifyCapBody' : 'spNotifyPlyBody').value
+    };
+    await spNotifySendOne(kind, pool[0], tpl, true, to);
+    stat.textContent = '✓ Test sent to ' + to + '.'; stat.className = 'status-line ok';
+  } catch (e) {
+    stat.textContent = '✗ ' + e.message; stat.className = 'status-line err';
+  }
+}
+
+async function spNotifySendAll() {
+  const stat = document.getElementById('spNotifyStatus');
+  const m = _spNotify.model;
+  if (!m || _spNotify.builtForBatch !== _spLastBatch?.id) {
+    stat.textContent = 'Run Preview first — the recipient list must match the current batch.';
+    stat.className = 'status-line err';
+    return;
+  }
+  const capQ = m.captains.filter(c => !m.sent.has('captain~' + c.member_number));
+  const plyQ = m.players.filter(p => !m.sent.has('player~' + p.member_number));
+  const total = capQ.length + plyQ.length;
+  if (!total) { stat.textContent = 'Nothing to send.'; return; }
+  if (!confirm('Send ' + capQ.length + ' captain email' + (capQ.length === 1 ? '' : 's')
+    + ' and ' + plyQ.length + ' player email' + (plyQ.length === 1 ? '' : 's')
+    + ' for this mailing?\n\nAlready-sent recipients are skipped automatically.')) return;
+
+  const tplCap = { subject: document.getElementById('spNotifyCapSubject').value, body_html: document.getElementById('spNotifyCapBody').value };
+  const tplPly = { subject: document.getElementById('spNotifyPlySubject').value, body_html: document.getElementById('spNotifyPlyBody').value };
+  const btn = document.getElementById('spNotifySendBtn');
+  btn.disabled = true;
+  window.slateBulkBusy = true;
+  let done = 0, failed = 0;
+  try {
+    for (const [kind, queue, tpl] of [['captain', capQ, tplCap], ['player', plyQ, tplPly]]) {
+      for (const rec of queue) {
+        try {
+          await spNotifySendOne(kind, rec, tpl, false);
+          m.sent.add(kind + '~' + rec.member_number);
+        } catch (e) {
+          failed++;
+          console.error('[patch-notify] send failed', kind, rec.member_number, e);
+        }
+        done++;
+        spNotifyBar(100 * done / total, 'Sending ' + done + ' / ' + total + (failed ? ' (' + failed + ' failed)' : ''));
+      }
+    }
+    spNotifyBar(100, 'Done — ' + (done - failed) + ' sent' + (failed ? ', ' + failed + ' failed (re-click to retry just those)' : '') + '.');
+    stat.textContent = failed
+      ? '⚠ ' + (done - failed) + ' sent, ' + failed + ' failed — click Send again to retry the failures.'
+      : '✓ All ' + done + ' emails sent.';
+    stat.className = failed ? 'status-line err' : 'status-line ok';
+  } finally {
+    window.slateBulkBusy = false;
+    btn.disabled = false;
+  }
+}
+
+window.spNotifySaveTemplate = spNotifySaveTemplate;
+window.spNotifyTestSend = spNotifyTestSend;
+window.spNotifyPreview = spNotifyPreview;
+window.spNotifySendAll = spNotifySendAll;
 
 /* ════════════════════════════════════════════════════════════════════
    PRINT PACK — slips + envelopes (v3.0, Phase 5)
