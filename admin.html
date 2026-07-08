@@ -3260,7 +3260,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.195';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.196';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -14569,8 +14569,17 @@ const _otState = {
     touchNot: new Set()    /* must NOT have done: subset of {email,text,call} */
   },
   expanded: new Set(),
-  undoStack: []       // LIFO of { mn, name, description, prevStatus, at }; max OT_UNDO_MAX
+  undoStack: [],      // LIFO of { mn, name, description, prevStatus, at }; max OT_UNDO_MAX
+  renderLimit: 150,   // 3.196: DOM window size — see otRenderList chunking
+  _lastRenderSig: null
 };
+
+/* 3.196 speed Cascade: the status-universe RPC costs ~2s — cache it for
+   the tab session (5-min TTL). otUpsertStatus (the single write choke-
+   point for every status/touch/DNC/prefs mutation) invalidates it. */
+let _otUniverseCache = { data: null, at: 0 };
+const OT_UNIVERSE_TTL_MS = 5 * 60 * 1000;
+function otInvalidateUniverse() { _otUniverseCache.at = 0; }
 const OT_UNDO_MAX = 10;
 
 /* Undo support (3.85+) ─ session-local stack of the last 10 mutations.
@@ -15138,9 +15147,19 @@ async function otRun() {
        Appended people still respect the location / SL / member-status
        filters (applied client-side below) but deliberately IGNORE the
        source and last-played window — once you've engaged someone, the
-       pills must always be able to find them. */
-    const universe = await sb('POST', 'rpc/outreach_status_universe', {},
-      { 'Accept-Profile': 'slate', 'Content-Profile': 'slate' }) || [];
+       pills must always be able to find them.
+       3.196 (speed Cascade): the RPC costs ~2s, so the result is cached
+       for 5 minutes. Any status write from this tab goes through
+       otUpsertStatus, which invalidates the cache — a Refresh after an
+       edit refetches; untouched Refreshes reuse the cache. */
+    let universe;
+    if (_otUniverseCache.data && (Date.now() - _otUniverseCache.at) < OT_UNIVERSE_TTL_MS) {
+      universe = _otUniverseCache.data;
+    } else {
+      universe = await sb('POST', 'rpc/outreach_status_universe', {},
+        { 'Accept-Profile': 'slate', 'Content-Profile': 'slate' }) || [];
+      _otUniverseCache = { data: universe, at: Date.now() };
+    }
     const statusByMember = {};
     for (const u of universe) {
       if (u.status) statusByMember[u.status.member_number] = u.status;
@@ -15383,6 +15402,21 @@ function otRenderList() {
   const f = _otState.filter;
   const { allEligible, visible } = otFilteredCandidates();
 
+  /* 3.196 speed Cascade: the pool grew to ~5.5k with the status
+     universe (3.189), and rendering every visible card took ~4.6s per
+     pill click (75k+ event listeners). The DOM is now a WINDOW over the
+     filtered set: first 150 cards + a Show-more control. Every count,
+     stat pill, and filter still operates on the FULL pool — only what
+     hits the DOM is capped. The window resets when the filter signature
+     changes and is preserved across in-place re-renders (status edits),
+     keeping the idempotent-render rule (scroll position survives). */
+  const sig = f.status + '|' + [...(f.touch || [])].sort().join(',') + '|'
+    + [...(f.touchNot || [])].sort().join(',') + '|' + otNormalize(f.search);
+  if (sig !== _otState._lastRenderSig) {
+    _otState._lastRenderSig = sig;
+    _otState.renderLimit = 150;
+  }
+
   /* Result counter for the search box — shows "showing X of Y" when
      a search is active, plain count otherwise. Fixes B6 from validation. */
   const searchActive = !!otNormalize(f.search);
@@ -15397,8 +15431,27 @@ function otRenderList() {
       '</div>';
     return;
   }
-  list.innerHTML = hitsLine + visible.map(c => otCardHtml(c)).join('');
+  const shown = visible.slice(0, _otState.renderLimit);
+  const moreN = visible.length - shown.length;
+  const moreHtml = moreN > 0
+    ? `<div style="display:flex;gap:10px;justify-content:center;margin:14px 0">
+         <button type="button" class="btn btn-outline" data-ot-show-more>Show 500 more (${moreN.toLocaleString()} remaining)</button>
+         <button type="button" class="btn btn-outline btn-sm" data-ot-show-all title="Rendering thousands of cards takes a few seconds">Show all ${visible.length.toLocaleString()}</button>
+       </div>`
+    : '';
+  list.innerHTML = hitsLine
+    + `<div class="hint" style="margin-bottom:8px">Showing ${shown.length.toLocaleString()} of ${visible.length.toLocaleString()}</div>`
+    + shown.map(c => otCardHtml(c)).join('')
+    + moreHtml;
   list.querySelectorAll('.ot-card').forEach(otWireCard);
+  list.querySelector('[data-ot-show-more]')?.addEventListener('click', () => {
+    _otState.renderLimit += 500;
+    otRenderList();
+  });
+  list.querySelector('[data-ot-show-all]')?.addEventListener('click', () => {
+    _otState.renderLimit = visible.length;
+    otRenderList();
+  });
 }
 
 /* Render every real phone on a candidate as a clickable pill.
@@ -16283,6 +16336,9 @@ async function otUpsertStatus(memberNumber, patch) {
       'Prefer': 'resolution=merge-duplicates,return=minimal'
     }
   );
+  /* 3.196: every status write flows through here — the cached status
+     universe is now stale, so the next Refresh refetches it. */
+  otInvalidateUniverse();
 }
 
 async function otAppendLog(memberNumber, kind, detail) {
