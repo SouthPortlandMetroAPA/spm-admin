@@ -3251,7 +3251,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.193';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.194';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10226,11 +10226,13 @@ function spNotifySub(str, ctx) {
   return String(str || '').replace(/\{(\w+)\}/g, (m, k) => (k in ctx ? String(ctx[k]) : m));
 }
 
-/* One patch descriptor: "8-Ball Break-and-Run (x)" with ×N when count>1 */
+/* One patch descriptor: "8-Ball Break-and-Run" with ×N when count>1.
+   Full names ONLY in emails — the single-letter SP codes are an admin
+   convention (the display-rule memory applies to Slate's own UI);
+   recipients have no idea what "R" or "x" means (user, 2026-07-08). */
 function spNotifyPatchDesc(spType, count) {
   const full = SP_FULL_NAME[spType] || spType;
-  const code = SP_DISPLAY[spType] || spType;
-  return esc(full + ' (' + code + ')') + (count > 1 ? ' ×' + count : '');
+  return esc(full) + (count > 1 ? ' ×' + count : '');
 }
 
 function spNotifyM5(mn) {
