@@ -1626,7 +1626,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         <p class="hint" style="margin:0 0 10px;">
           For players who legally pocketed the 8 on the break&hellip; and scratched.
           Paste APA player numbers (5- or 8-digit, one per line). Certificates
-          print one per page (tri-fold into a #10 with the coin); envelopes use
+          print 3 per page (cut on the dashed lines); envelopes use
           the mailing address on file. Certificates print even for players
           without an address — envelopes require one.
         </p>
@@ -3316,7 +3316,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.207';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.208';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11364,43 +11364,46 @@ function spReportListIssues(r) {
 function spBuildOopsCertsHTML(names) {
   const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
   const cert = name => '<div class="cert">'
-    + '<div class="coin">OOPS</div>'
-    + '<div class="order">The Order of the OOPS</div>'
-    + '<div class="sub">South Portland Metro APA \u00b7 Commemorative Citation</div>'
-    + '<div class="body">Let it be recorded that</div>'
-    + '<div class="name">' + esc(name) + '</div>'
-    + '<div class="body">'
-    + 'did, upon the break, legally pocket the 8-ball \u2014 an act of precision '
-    + 'achieved by few and applauded by all \u2014 and did, in the very same stroke, '
-    + 'send the cue ball home as well, thereby converting instant victory into '
-    + 'instant defeat before a single opponent had lifted a cue.'
-    + '</div>'
-    + '<div class="body">'
-    + 'In recognition of this rare and spectacular reversal of fortune, and on '
-    + 'behalf of every player who has ever stood exactly where you stood, South '
-    + 'Portland Metro APA hereby confers the <strong>OOPS Coin</strong> \u2014 to be kept, '
-    + 'displayed, and produced whenever the story is told. And it will be told.'
-    + '</div>'
-    + '<div class="motto">We\u2019ve all been there.</div>'
-    + '<div class="foot">' + esc(today) + ' \u00b7 South Portland Metro APA</div>'
-    + '</div>';
-  return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>OOPS Coin certificates</title>'
+    + '<div class="coin"><span class="oops">Oops!</span><span class="eight">8</span></div>'
+    + '<div class="txt">'
+    + '<div class="order">The Order of the OOPS <span class="sub">\u00b7 South Portland Metro APA</span></div>'
+    + '<div class="body">Let it be recorded that <strong>' + esc(name) + '</strong> did, upon the break, '
+    + 'legally pocket the 8-ball \u2014 and, in the very same stroke, send the cue ball home as well, '
+    + 'converting instant victory into instant defeat before a single opponent had lifted a cue.</div>'
+    + '<div class="body">In honor of this rare and spectacular reversal of fortune, and on behalf of '
+    + 'everyone who has ever stood exactly there, the league confers the <strong>OOPS Coin</strong> \u2014 '
+    + 'to be kept, displayed, and produced whenever the story is told. And it will be told.</div>'
+    + '<div class="foot"><span class="motto">We\u2019ve all been there.</span> \u00b7 ' + esc(today) + '</div>'
+    + '</div></div>';
+  /* 3 per Letter sheet, dashed cut rules between. */
+  const sheets = [];
+  for (let i = 0; i < names.length; i += 3) {
+    sheets.push('<div class="sheet">' + names.slice(i, i + 3).map(cert).join('') + '</div>');
+  }
+  return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>OOPS Coin certs</title>'
     + '<style>'
-    + '@page { size: letter portrait; margin: 0.5in; }'
+    + '@page { size: letter portrait; margin: 0.4in; }'
     + 'body { margin: 0; font-family: Georgia, "Times New Roman", serif; color: #1f2430; }'
-    + '.cert { height: 6.3in; box-sizing: border-box; padding: 0.45in 0.6in; text-align: center;'
-    + '  border: 3px double #1f2430; border-radius: 4px; page-break-after: always; }'
-    + '.coin { width: 0.9in; height: 0.9in; margin: 0 auto 0.18in; border: 2.5px solid #1f2430;'
-    + '  border-radius: 50%; display: flex; align-items: center; justify-content: center;'
-    + '  font-weight: 700; letter-spacing: 0.08em; font-size: 0.95rem; }'
-    + '.order { font-size: 1.65rem; font-weight: 700; letter-spacing: 0.04em; }'
-    + '.sub { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.18em; color: #6b7280; margin: 4px 0 18px; }'
-    + '.body { font-size: 0.95rem; line-height: 1.5; margin: 10px auto; max-width: 6in; }'
-    + '.name { font-size: 1.5rem; font-weight: 700; margin: 8px 0 6px; }'
-    + '.motto { font-style: italic; font-size: 1.05rem; margin-top: 16px; }'
-    + '.foot { font-size: 0.72rem; color: #6b7280; margin-top: 18px; letter-spacing: 0.06em; }'
+    + '.sheet { page-break-after: always; }'
+    + '.cert { box-sizing: border-box; height: 3.2in; margin-bottom: 0.13in; padding: 0.22in 0.3in;'
+    + '  border: 3px double #1f2430; border-radius: 4px; display: flex; gap: 0.28in; align-items: center; }'
+    + '.cert + .cert { border-top: 3px double #1f2430; }'
+    + '.sheet .cert:not(:last-child) { position: relative; }'
+    + '.sheet .cert:not(:last-child)::after { content: ""; position: absolute; left: 0; right: 0;'
+    + '  bottom: -0.075in; border-bottom: 1px dashed #9ca3af; }'
+    + '.coin { flex: 0 0 1.35in; height: 1.35in; border: 3px solid #1f2430; border-radius: 50%;'
+    + '  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }'
+    + '.oops { font-family: "Comic Sans MS", "Segoe Print", cursive; font-weight: 700; font-size: 1.15rem; }'
+    + '.eight { width: 0.42in; height: 0.42in; border-radius: 50%; background: #1f2430; color: #fff;'
+    + '  display: flex; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: 700; }'
+    + '.txt { flex: 1; min-width: 0; }'
+    + '.order { font-size: 1.05rem; font-weight: 700; letter-spacing: 0.03em; margin-bottom: 6px; }'
+    + '.sub { font-size: 0.62rem; font-weight: 400; text-transform: uppercase; letter-spacing: 0.14em; color: #6b7280; }'
+    + '.body { font-size: 0.8rem; line-height: 1.42; margin: 5px 0; }'
+    + '.motto { font-style: italic; }'
+    + '.foot { font-size: 0.7rem; color: #6b7280; margin-top: 7px; letter-spacing: 0.04em; }'
     + '</style></head><body>'
-    + names.map(cert).join('')
+    + sheets.join('')
     + '<' + '/body></html>';
 }
 
