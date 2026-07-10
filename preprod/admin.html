@@ -1617,6 +1617,28 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         <div class="status-line" id="spAdhocStatus" style="margin-top:6px;"></div>
       </div>
 
+      <!-- ── OOPS Coin — certificates + envelopes (3.207) ─────────────
+           Commemorates the 8-on-the-break-with-a-scratch: instant win
+           turned instant loss. Tone: mock-formal, dry, respectful — the
+           joke is the situation, never the player. -->
+      <div class="card" style="margin-bottom:14px;" id="spOopsCard">
+        <h2 style="margin:0 0 6px;">OOPS Coin — certificates &amp; envelopes</h2>
+        <p class="hint" style="margin:0 0 10px;">
+          For players who legally pocketed the 8 on the break&hellip; and scratched.
+          Paste APA player numbers (5- or 8-digit, one per line). Certificates
+          print one per page (tri-fold into a #10 with the coin); envelopes use
+          the mailing address on file. Certificates print even for players
+          without an address — envelopes require one.
+        </p>
+        <textarea id="spOopsBox" class="ehq-paste-box" style="min-height:64px;"
+          placeholder="e.g.&#10;24779&#10;97223806"></textarea>
+        <div style="display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap;">
+          <button type="button" class="btn btn-primary" onclick="spOopsCerts()">Print certificates</button>
+          <button type="button" class="btn btn-outline" onclick="spOopsEnvelopes()">Print envelopes</button>
+        </div>
+        <div class="status-line" id="spOopsStatus" style="margin-top:6px;"></div>
+      </div>
+
       <!-- ── Opt-out slip printer (3.170+) ────────────────────────────
            Prints N "Too Awesome for More Patches?" QR-code slips, 3 per
            US Letter sheet, ready to cut and drop into envelopes. Lives
@@ -3294,7 +3316,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.206';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.207';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11232,128 +11254,200 @@ window.spPrintEnvelopes = spPrintEnvelopes;
    letterhead, same right-side patches logo, same cat — just with a
    custom note instead of teams + patch count on the meta line.
    ════════════════════════════════════════════════════════════════════ */
-async function spAdhocEnvelopes() {
-  const box     = document.getElementById('spAdhocBox');
-  const noteEl  = document.getElementById('spAdhocNote');
-  const note    = (noteEl && noteEl.value || '').trim();
-  const raw     = (box.value || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-  if (!raw.length) { setStatus('spAdhocStatus', 'Paste at least one number.', 'err'); return; }
-
-  /* Normalize: 5-digit → '972' + 5, 8-digit → as-is. Anything else
-     goes into the "invalid" bucket for the status message. */
-  const valid = new Map();      // 8-digit → first-seen raw line (for display)
+/* Resolve pasted player numbers to a mailing list. Shared by the
+   ad-hoc envelope printer and the OOPS Coin printers (extracted 3.207 —
+   second call site). Returns every bucket so callers can report loudly:
+   { resolved: [{mn, name, env|null}], invalid, notFound, noAddr }.
+   env is null when the player has no printable address. */
+async function spResolveMailingList(rawLines) {
+  const valid = new Map();
   const invalid = [];
-  for (const line of raw) {
+  for (const line of rawLines) {
     const digits = line.replace(/\D+/g, '');
     if (digits.length === 5)      { if (!valid.has('972' + digits)) valid.set('972' + digits, line); }
     else if (digits.length === 8) { if (!valid.has(digits))         valid.set(digits, line); }
     else                          invalid.push(line);
   }
-  if (!valid.size) {
-    setStatus('spAdhocStatus', 'No valid 5- or 8-digit numbers found.', 'err');
-    return;
-  }
   const memberNums = [...valid.keys()];
-  setStatus('spAdhocStatus', 'Looking up ' + memberNums.length + ' player(s)…', '');
+  const players = [];
+  for (let i = 0; i < memberNums.length; i += 100) {
+    const chunk = memberNums.slice(i, i + 100);
+    const rows = await sb('GET',
+      'players?member_number=in.(' + chunk.join(',') + ')'
+      + '&select=member_number,first_name,nickname,last_name,address1,address2,city,state,zip');
+    if (rows && rows.length) players.push(...rows);
+  }
+  const byMember = {};
+  for (const p of players) byMember[p.member_number] = p;
 
-  try {
-    /* Admin runs as service_role so this filtered read works against the
-       PII-locked slate.players. Chunked at 100 in case of large pastes. */
-    const players = [];
-    for (let i = 0; i < memberNums.length; i += 100) {
-      const chunk = memberNums.slice(i, i + 100);
-      const rows = await sb('GET',
-        'players?member_number=in.(' + chunk.join(',') + ')'
-        + '&select=member_number,first_name,nickname,last_name,address1,address2,city,state,zip');
-      if (rows && rows.length) players.push(...rows);
-    }
-    const byMember = {};
-    for (const p of players) byMember[p.member_number] = p;
-
-    const envs    = [];
-    const notFound = [];
-    const noAddr   = [];
-    for (const mn of memberNums) {
-      const p = byMember[mn];
-      if (!p) { notFound.push(valid.get(mn)); continue; }
-      /* Ad-hoc envelopes: never include the nickname. Matches the main
-         Print Envelopes path, which strips `"Nickname"` at render time. */
-      const f  = (p.first_name || '').trim();
-      const l  = (p.last_name  || '').trim();
-      const name = (f + ' ' + l).replace(/\s+/g, ' ').trim()
-                || ('Member ' + mn);
-      if (!p.address1 || !p.city) { noAddr.push({ mn, name }); continue; }
-      /* Strip the dangling "97123-____" zip pattern seen in some rows. */
+  const resolved = [];
+  const notFound = [];
+  const noAddr = [];
+  for (const mn of memberNums) {
+    const p = byMember[mn];
+    if (!p) { notFound.push(valid.get(mn)); continue; }
+    const f = (p.first_name || '').trim();
+    const l = (p.last_name || '').trim();
+    const name = (f + ' ' + l).replace(/\s+/g, ' ').trim() || ('Member ' + mn);
+    let env = null;
+    if (p.address1 && p.city) {
       const zip = (p.zip || '').replace(/[-_\s]+$/, '');
-      /* If either address line starts with "c/o …", route it to co_name so
-         it renders BETWEEN the recipient and the street (matching the main
-         SP Print Envelopes path). Otherwise it would land after the street
-         because address_line2 renders below address_line1. Handles: c/o,
-         C/O, c/o., co, C/o. */
-      let addr1  = p.address1;
-      let addr2  = p.address2 || null;
+      let addr1 = p.address1;
+      let addr2 = p.address2 || null;
       let coName = null;
       const coRe = /^\s*c\s*\/?\s*o\.?\s+/i;
       if (addr1 && coRe.test(addr1)) {
         coName = addr1.replace(coRe, '').trim();
-        addr1  = addr2 || '';
-        addr2  = null;
+        addr1 = addr2 || '';
+        addr2 = null;
       } else if (addr2 && coRe.test(addr2)) {
         coName = addr2.replace(coRe, '').trim();
-        addr2  = null;
+        addr2 = null;
       }
-      if (!addr1) { noAddr.push({ mn, name }); continue; }
-      envs.push({
-        contact_name:  name,
-        co_name:       coName,
-        address_line1: addr1,
-        address_line2: addr2,
-        city:          p.city,
-        state:         p.state || '',
-        zip:           zip,
-        teams:         [],
-        patches:       [],
-        note:          note
-      });
+      if (addr1) {
+        env = { contact_name: name, co_name: coName, address_line1: addr1,
+                address_line2: addr2, city: p.city, state: p.state || '',
+                zip: zip, teams: [], patches: [], note: '' };
+      }
     }
+    if (!env) noAddr.push({ mn, name });
+    resolved.push({ mn, name, env });
+  }
+  return { resolved, invalid, notFound, noAddr };
+}
 
+async function spAdhocEnvelopes() {
+  const box    = document.getElementById('spAdhocBox');
+  const noteEl = document.getElementById('spAdhocNote');
+  const note   = (noteEl && noteEl.value || '').trim();
+  const raw    = (box.value || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  if (!raw.length) { setStatus('spAdhocStatus', 'Paste at least one number.', 'err'); return; }
+  try {
+    const r = await spResolveMailingList(raw);
+    const envs = r.resolved.filter(x => x.env).map(x => ({ ...x.env, note: note }));
     if (!envs.length) {
       setStatus('spAdhocStatus', 'No printable envelopes — none of those players have an address on file.', 'err');
-      if (notFound.length || noAddr.length) {
-        alert('Nothing to print:\n\n'
-          + (notFound.length ? 'NOT FOUND:\n  ' + notFound.join('\n  ') + '\n\n' : '')
-          + (noAddr.length ? 'NO ADDRESS ON FILE:\n  ' + noAddr.map(x => x.mn + '  ' + x.name).join('\n  ') : ''));
-      }
+      spReportListIssues(r);
       return;
     }
-
     await spLoadOperatorProfile();
-    const op = _spOperatorProfile || {};
-    const html = spBuildEnvelopesHTML(envs, op);
+    const html = spBuildEnvelopesHTML(envs, _spOperatorProfile || {});
     spOpenPrintWindow(html, 'Ad-hoc envelopes (' + envs.length + ')');
-
-    /* Status summary + per-player issues popup. */
-    const issues = [];
-    if (invalid.length)  issues.push(invalid.length + ' invalid');
-    if (notFound.length) issues.push(notFound.length + ' not in players table');
-    if (noAddr.length)   issues.push(noAddr.length + ' no address on file');
-    setStatus('spAdhocStatus',
-      'Printed ' + envs.length + ' envelope' + (envs.length === 1 ? '' : 's')
-      + (issues.length ? ' · ' + issues.join(' · ') : '') + '.',
-      issues.length ? 'warn' : 'ok');
-    if (notFound.length || noAddr.length || invalid.length) {
-      const parts = [];
-      if (invalid.length)  parts.push('INVALID (not 5- or 8-digit):\n  ' + invalid.join('\n  '));
-      if (notFound.length) parts.push('NOT FOUND in slate.players:\n  ' + notFound.join('\n  '));
-      if (noAddr.length)   parts.push('NO ADDRESS ON FILE:\n  '
-        + noAddr.map(x => x.mn + '  ' + x.name).join('\n  '));
-      alert('Some inputs were skipped:\n\n' + parts.join('\n\n'));
-    }
+    spListStatus('spAdhocStatus', 'Printed ' + envs.length + ' envelope' + (envs.length === 1 ? '' : 's'), r);
   } catch (e) {
     setStatus('spAdhocStatus', 'Failed: ' + e.message, 'err');
   }
 }
+
+/* Shared loud reporting for list resolution — nothing silently dropped. */
+function spListStatus(statusId, didWhat, r) {
+  const issues = [];
+  if (r.invalid.length)  issues.push(r.invalid.length + ' invalid');
+  if (r.notFound.length) issues.push(r.notFound.length + ' not in players table');
+  if (r.noAddr.length)   issues.push(r.noAddr.length + ' no address on file');
+  setStatus(statusId, didWhat + (issues.length ? ' · ' + issues.join(' · ') : '') + '.',
+    issues.length ? 'warn' : 'ok');
+  if (issues.length) spReportListIssues(r);
+}
+function spReportListIssues(r) {
+  const parts = [];
+  if (r.invalid.length)  parts.push('INVALID (not 5- or 8-digit):\n  ' + r.invalid.join('\n  '));
+  if (r.notFound.length) parts.push('NOT FOUND in slate.players:\n  ' + r.notFound.join('\n  '));
+  if (r.noAddr.length)   parts.push('NO ADDRESS ON FILE:\n  ' + r.noAddr.map(x => x.mn + '  ' + x.name).join('\n  '));
+  if (parts.length) alert('Some inputs were skipped or incomplete:\n\n' + parts.join('\n\n'));
+}
+
+/* ── OOPS Coin (3.207) ─────────────────────────────────────────────
+   Mock-formal insert certificate. The joke is the situation — the
+   copy honors the player. One cert per Letter page, content in the
+   top two-thirds so it tri-folds into a #10 with the coin. */
+function spBuildOopsCertsHTML(names) {
+  const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  const cert = name => '<div class="cert">'
+    + '<div class="coin">OOPS</div>'
+    + '<div class="order">The Order of the OOPS</div>'
+    + '<div class="sub">South Portland Metro APA \u00b7 Commemorative Citation</div>'
+    + '<div class="body">Let it be recorded that</div>'
+    + '<div class="name">' + esc(name) + '</div>'
+    + '<div class="body">'
+    + 'did, upon the break, legally pocket the 8-ball \u2014 an act of precision '
+    + 'achieved by few and applauded by all \u2014 and did, in the very same stroke, '
+    + 'send the cue ball home as well, thereby converting instant victory into '
+    + 'instant defeat before a single opponent had lifted a cue.'
+    + '</div>'
+    + '<div class="body">'
+    + 'In recognition of this rare and spectacular reversal of fortune, and on '
+    + 'behalf of every player who has ever stood exactly where you stood, South '
+    + 'Portland Metro APA hereby confers the <strong>OOPS Coin</strong> \u2014 to be kept, '
+    + 'displayed, and produced whenever the story is told. And it will be told.'
+    + '</div>'
+    + '<div class="motto">We\u2019ve all been there.</div>'
+    + '<div class="foot">' + esc(today) + ' \u00b7 South Portland Metro APA</div>'
+    + '</div>';
+  return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>OOPS Coin certificates</title>'
+    + '<style>'
+    + '@page { size: letter portrait; margin: 0.5in; }'
+    + 'body { margin: 0; font-family: Georgia, "Times New Roman", serif; color: #1f2430; }'
+    + '.cert { height: 6.3in; box-sizing: border-box; padding: 0.45in 0.6in; text-align: center;'
+    + '  border: 3px double #1f2430; border-radius: 4px; page-break-after: always; }'
+    + '.coin { width: 0.9in; height: 0.9in; margin: 0 auto 0.18in; border: 2.5px solid #1f2430;'
+    + '  border-radius: 50%; display: flex; align-items: center; justify-content: center;'
+    + '  font-weight: 700; letter-spacing: 0.08em; font-size: 0.95rem; }'
+    + '.order { font-size: 1.65rem; font-weight: 700; letter-spacing: 0.04em; }'
+    + '.sub { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.18em; color: #6b7280; margin: 4px 0 18px; }'
+    + '.body { font-size: 0.95rem; line-height: 1.5; margin: 10px auto; max-width: 6in; }'
+    + '.name { font-size: 1.5rem; font-weight: 700; margin: 8px 0 6px; }'
+    + '.motto { font-style: italic; font-size: 1.05rem; margin-top: 16px; }'
+    + '.foot { font-size: 0.72rem; color: #6b7280; margin-top: 18px; letter-spacing: 0.06em; }'
+    + '</style></head><body>'
+    + names.map(cert).join('')
+    + '<' + '/body></html>';
+}
+
+async function spOopsCerts() {
+  const raw = ((document.getElementById('spOopsBox') || {}).value || '')
+    .split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  if (!raw.length) { setStatus('spOopsStatus', 'Paste at least one number.', 'err'); return; }
+  try {
+    const r = await spResolveMailingList(raw);
+    const names = r.resolved.map(x => x.name);
+    if (!names.length) {
+      setStatus('spOopsStatus', 'No players resolved.', 'err');
+      spReportListIssues(r);
+      return;
+    }
+    spOpenPrintWindow(spBuildOopsCertsHTML(names), 'OOPS Coin certs: ' + names.length);
+    spListStatus('spOopsStatus', 'Printed ' + names.length + ' certificate' + (names.length === 1 ? '' : 's'),
+      { invalid: r.invalid, notFound: r.notFound, noAddr: [] });
+  } catch (e) {
+    setStatus('spOopsStatus', 'Failed: ' + e.message, 'err');
+  }
+}
+
+async function spOopsEnvelopes() {
+  const raw = ((document.getElementById('spOopsBox') || {}).value || '')
+    .split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  if (!raw.length) { setStatus('spOopsStatus', 'Paste at least one number.', 'err'); return; }
+  try {
+    const r = await spResolveMailingList(raw);
+    const envs = r.resolved.filter(x => x.env).map(x => ({ ...x.env, note: 'OOPS Coin' }));
+    if (!envs.length) {
+      setStatus('spOopsStatus', 'No printable envelopes — none of those players have an address on file.', 'err');
+      spReportListIssues(r);
+      return;
+    }
+    await spLoadOperatorProfile();
+    const html = spBuildEnvelopesHTML(envs, _spOperatorProfile || {});
+    spOpenPrintWindow(html, 'OOPS envelopes (' + envs.length + ')');
+    spListStatus('spOopsStatus', 'Printed ' + envs.length + ' envelope' + (envs.length === 1 ? '' : 's'), r);
+  } catch (e) {
+    setStatus('spOopsStatus', 'Failed: ' + e.message, 'err');
+  }
+}
+
 window.spAdhocEnvelopes = spAdhocEnvelopes;
+window.spOopsCerts      = spOopsCerts;
+window.spOopsEnvelopes  = spOopsEnvelopes;
 
 /* ════════════════════════════════════════════════════════════════════
    OPERATOR PROFILE — minimal Phase 3 (return address only)
