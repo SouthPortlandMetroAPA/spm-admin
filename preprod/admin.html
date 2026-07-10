@@ -3321,7 +3321,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.214';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.215';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11464,6 +11464,18 @@ function spBuildOopsCertsHTML(names) {
     + '<path d="M 162 58 l 2 4.6 4.6 2 -4.6 2 -2 4.6 -2 -4.6 -4.6 -2 4.6 -2 z"/>'
     + '</g>'
     + '</svg>';
+  /* Pristine 8-ball for the right flank - the ball as it stood before
+     the break. Twin medallion = the cert's bilateral balance. */
+  const ballSvg = i => '<svg viewBox="0 0 200 200" class="ballsvg" aria-hidden="true">'
+    + '<defs><radialGradient id="oopsPristine' + i + '" cx="36%" cy="28%" r="80%">'
+    + '<stop offset="0%" stop-color="#63636d"/><stop offset="42%" stop-color="#26262e"/><stop offset="100%" stop-color="#0a0a0f"/>'
+    + '</radialGradient></defs>'
+    + '<rect width="200" height="200" fill="#fff"/>'
+    + '<circle cx="100" cy="100" r="97" fill="url(#oopsPristine' + i + ')"/>'
+    + '<ellipse cx="66" cy="54" rx="24" ry="13" fill="#ffffff" opacity="0.3" transform="rotate(-28 66 54)"/>'
+    + '<circle cx="100" cy="100" r="30" fill="#fffdf7"/>'
+    + '<text x="100" y="112" text-anchor="middle" font-family="Georgia, serif" font-size="36" font-weight="700" fill="#0d0d12">8</text>'
+    + '</svg>';
   const corner = rot => '<svg viewBox="0 0 60 60" class="corner ' + rot + '" aria-hidden="true">'
     + '<path d="M 6 56 L 6 18 Q 6 6 18 6 L 56 6" fill="none" stroke="#b08d2f" stroke-width="2.5"/>'
     + '<path d="M 56 6 q -2 8 -10 9 q 5 2 8 -1" fill="none" stroke="#b08d2f" stroke-width="1.6"/>'
@@ -11471,13 +11483,8 @@ function spBuildOopsCertsHTML(names) {
     + '<path d="M 12 50 L 12 20 Q 12 12 20 12 L 50 12" fill="none" stroke="#0b3d2e" stroke-width="1.1"/>'
     + '<circle cx="19" cy="19" r="2.6" fill="#b08d2f"/>'
     + '</svg>';
-  const watermark = '<svg viewBox="0 0 100 100" class="wm" aria-hidden="true">'
-    + '<circle cx="50" cy="50" r="48" fill="#0b3d2e"/>'
-    + '<circle cx="50" cy="42" r="17" fill="#ffffff"/>'
-    + '<text x="50" y="49" text-anchor="middle" font-family="Georgia, serif" font-size="20" font-weight="700" fill="#0b3d2e">8</text>'
-    + '</svg>';
   const cert = (name, i) => '<div class="cert">'
-    + corner('c1') + corner('c2') + corner('c3') + corner('c4') + watermark
+    + corner('c1') + corner('c2') + corner('c3') + corner('c4')
     + '<div class="coinwrap">' + (_spOopsCoinImg
         ? '<span class="coinclip"><img class="coinimg" src="' + _spOopsCoinImg + '" alt="OOPS Coin"></span>'
         : coinSvg(i)) + '</div>'
@@ -11496,7 +11503,9 @@ function spBuildOopsCertsHTML(names) {
     + '<span class="motto">Few have ever been there. You have.</span>'
     + '<span class="datesig">' + esc(today) + ' \u00b7 South Portland Metro APA</span>'
     + '</div>'
-    + '</div></div>';
+    + '</div>'
+    + '<div class="coinwrap"><span class="coinclip">' + ballSvg(i) + '</span></div>'
+    + '</div>';
   const sheets = [];
   let n = 0;
   for (let i = 0; i < names.length; i += 3) {
@@ -11508,8 +11517,8 @@ function spBuildOopsCertsHTML(names) {
     + '* { -webkit-print-color-adjust: exact; print-color-adjust: exact; }'
     + 'body { margin: 0; background: #fff; font-family: Georgia, "Times New Roman", serif; color: #22262e; }'
     + '.sheet { page-break-after: always; }'
-    + '.cert { box-sizing: border-box; position: relative; overflow: hidden; height: 3.2in;'
-    + '  margin-bottom: 0; padding: 0.24in 0.34in; display: flex; gap: 0.3in; align-items: center;'
+    + '.cert { box-sizing: border-box; position: relative; overflow: hidden; height: 3.3in;'
+    + '  margin-bottom: 0; padding: 0.19in 0.3in; display: flex; gap: 0.26in; align-items: center;'
     + '  background: #fbf8f0; border: 3px solid #0b3d2e; outline: 1px solid #b08d2f; outline-offset: -7px;'
     + '  border-radius: 3px; }'
     + '.cut { border-bottom: 1px dashed #9ca3af; margin: 0.055in 0; }'
@@ -11518,32 +11527,36 @@ function spBuildOopsCertsHTML(names) {
     + '.corner.c2 { top: 0.1in; right: 0.1in; transform: rotate(90deg); }'
     + '.corner.c3 { bottom: 0.1in; right: 0.1in; transform: rotate(180deg); }'
     + '.corner.c4 { bottom: 0.1in; left: 0.1in; transform: rotate(270deg); }'
-    + '.wm { position: absolute; right: -0.35in; bottom: -0.5in; width: 2.4in; height: 2.4in; opacity: 0.06; }'
-    + '.coinwrap { flex: 0 0 1.75in; position: relative; z-index: 1; }'
-    + '.coinclip { width: 1.75in; height: 1.75in; display: block; border-radius: 50%;'
+    + '.coinwrap { flex: 0 0 1.45in; position: relative; z-index: 1; }'
+    + '.coinclip { width: 1.45in; height: 1.45in; display: block; border-radius: 50%;'
     + '  overflow: hidden; background: #fff; border: 3px solid #0b3d2e; box-sizing: border-box;'
     + '  box-shadow: 0.02in 0.03in 0.05in rgba(20,25,35,0.35); }'
     + '.coinimg { width: 100%; height: 100%; display: block; }'
-    + '.coinsvg { width: 1.55in; height: 1.55in; display: block;'
+    + '.ballsvg { width: 100%; height: 100%; display: block; }'
+    + '.coinsvg { width: 1.45in; height: 1.45in; display: block;'
     + '  filter: drop-shadow(0.02in 0.03in 0.03in rgba(20,25,35,0.35)); }'
     + '.txt { flex: 1; min-width: 0; position: relative; z-index: 1; text-align: center; }'
-    + '.order { font-size: 1.22rem; font-weight: 700; letter-spacing: 0.02em; color: #0b3d2e; }'
+    + '.order { font-size: 1.18rem; font-weight: 700; letter-spacing: 0.02em; color: #0b3d2e; }'
     + '.oopsword { letter-spacing: 0.12em; }'
     + '.sub { font-size: 0.55rem; text-transform: uppercase; letter-spacing: 0.11em; color: #b08d2f;'
-    + '  font-weight: 700; margin: 2px 0 8px; }'
-    + '.namerow { margin: 6px 0 8px; }'
-    + '.name { display: inline-block; font-variant: small-caps; font-size: 1.62rem; font-weight: 700;'
+    + '  font-weight: 700; margin: 2px 0 4px; }'
+    + '.namerow { margin: 3px 0 3px; }'
+    + '.name { display: inline-block; white-space: nowrap; font-variant: small-caps; font-size: 1.62rem; font-weight: 700;'
     + '  letter-spacing: 0.05em; line-height: 1.1; border-bottom: 3px solid #b08d2f;'
-    + '  padding: 0 0.3in 2px; }'
-    + '.body { font-size: 0.82rem; line-height: 1.52; margin: 5px auto; max-width: 5.1in; }'
+    + '  padding: 0 0.15in 2px; }'
+    + '.body { font-size: 0.78rem; line-height: 1.42; margin: 2px auto; max-width: 5.1in; }'
     + '.lede { font-variant: small-caps; font-weight: 700; letter-spacing: 0.06em; color: #0b3d2e; }'
-    + '.footrow { max-width: 5.1in; margin: 8px auto 0; border-top: 1px solid #d8cfae;'
-    + '  padding-top: 5px; text-align: center; }'
+    + '.footrow { max-width: 5.1in; margin: 4px auto 0; border-top: 1px solid #d8cfae;'
+    + '  padding-top: 3px; text-align: center; }'
     + '.datesig { display: block; margin-top: 2px; }'
     + '.motto { font-style: italic; font-size: 0.92rem; font-weight: 700; color: #0b3d2e; white-space: nowrap; }'
     + '.datesig { font-size: 0.56rem; color: #9ca3af; letter-spacing: 0.04em; text-transform: uppercase; white-space: nowrap; }'
     + '</style></head><body>'
     + sheets.join('')
+    + '<script>document.querySelectorAll(".name").forEach(function(n){'
+    + 'var f=parseFloat(getComputedStyle(n).fontSize);'
+    + 'while(n.scrollWidth>n.parentElement.clientWidth&&f>11){f-=0.5;n.style.fontSize=f+"px";}'
+    + '});<' + '/script>'
     + '<' + '/body></html>';
 }
 
