@@ -3316,7 +3316,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.208';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.209';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11363,45 +11363,101 @@ function spReportListIssues(r) {
    top two-thirds so it tri-folds into a #10 with the coin. */
 function spBuildOopsCertsHTML(names) {
   const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-  const cert = name => '<div class="cert">'
-    + '<div class="coin"><span class="oops">Oops!</span><span class="eight">8</span></div>'
+  /* SVG coin — arc "Oops!", cracked 8-ball with highlight + chips,
+     gold sparkles. Unique ids per instance (ids are document-global). */
+  const coinSvg = i => '<svg viewBox="0 0 200 200" class="coinsvg" aria-hidden="true">'
+    + '<defs>'
+    + '<radialGradient id="oopsBall' + i + '" cx="38%" cy="30%" r="75%">'
+    + '<stop offset="0%" stop-color="#5a5a64"/><stop offset="45%" stop-color="#26262e"/><stop offset="100%" stop-color="#0d0d12"/>'
+    + '</radialGradient>'
+    + '<path id="oopsArc' + i + '" d="M 28 108 A 72 72 0 0 1 172 108" fill="none"/>'
+    + '</defs>'
+    + '<circle cx="100" cy="100" r="95" fill="#fffdf7" stroke="#1f2430" stroke-width="5"/>'
+    + '<circle cx="100" cy="100" r="86" fill="none" stroke="#b08d2f" stroke-width="2.5" stroke-dasharray="3.5 5"/>'
+    + '<text font-family="Comic Sans MS, Segoe Print, cursive" font-size="34" font-weight="700" fill="#1f2430">'
+    + '<textPath href="#oopsArc' + i + '" startOffset="50%" text-anchor="middle">Oops!</textPath></text>'
+    + '<g transform="translate(100 126)">'
+    + '<circle r="47" fill="url(#oopsBall' + i + ')" stroke="#0a0a0e" stroke-width="1.5"/>'
+    + '<ellipse cx="-16" cy="-22" rx="16" ry="9" fill="#ffffff" opacity="0.16" transform="rotate(-28 -16 -22)"/>'
+    + '<path d="M -8 -46 L -2 -30 L -12 -22 L -4 -12" fill="none" stroke="#c9c9d1" stroke-width="1.6" stroke-linejoin="round" opacity="0.8"/>'
+    + '<path d="M 18 -42 L 14 -30 L 24 -24" fill="none" stroke="#a9a9b1" stroke-width="1.3" opacity="0.7"/>'
+    + '<circle cy="-6" r="16.5" fill="#fffdf7"/>'
+    + '<text y="1" text-anchor="middle" font-family="Georgia, serif" font-size="21" font-weight="700" fill="#0d0d12">8</text>'
+    + '</g>'
+    + '<path d="M 52 172 l 7 -3 5 5 -8 3 z" fill="#8a8a94"/>'
+    + '<path d="M 140 176 l 6 -4 6 3 -7 4 z" fill="#a3a3ac"/>'
+    + '<g fill="#b08d2f">'
+    + '<path d="M 36 62 l 2.6 6 6 2.6 -6 2.6 -2.6 6 -2.6 -6 -6 -2.6 6 -2.6 z"/>'
+    + '<path d="M 162 58 l 2 4.6 4.6 2 -4.6 2 -2 4.6 -2 -4.6 -4.6 -2 4.6 -2 z"/>'
+    + '</g>'
+    + '</svg>';
+  const corner = rot => '<svg viewBox="0 0 60 60" class="corner ' + rot + '" aria-hidden="true">'
+    + '<path d="M 4 56 L 4 16 Q 4 4 16 4 L 56 4" fill="none" stroke="#b08d2f" stroke-width="2.5"/>'
+    + '<path d="M 10 50 L 10 20 Q 10 10 20 10 L 50 10" fill="none" stroke="#0b3d2e" stroke-width="1.2"/>'
+    + '<circle cx="16" cy="16" r="3" fill="#b08d2f"/>'
+    + '</svg>';
+  const watermark = '<svg viewBox="0 0 100 100" class="wm" aria-hidden="true">'
+    + '<circle cx="50" cy="50" r="48" fill="#0b3d2e"/>'
+    + '<circle cx="50" cy="42" r="17" fill="#ffffff"/>'
+    + '<text x="50" y="49" text-anchor="middle" font-family="Georgia, serif" font-size="20" font-weight="700" fill="#0b3d2e">8</text>'
+    + '</svg>';
+  const cert = (name, i) => '<div class="cert">'
+    + corner('c1') + corner('c2') + corner('c3') + corner('c4') + watermark
+    + '<div class="coinwrap">' + coinSvg(i) + '</div>'
     + '<div class="txt">'
-    + '<div class="order">The Order of the OOPS <span class="sub">\u00b7 South Portland Metro APA</span></div>'
-    + '<div class="body">Let it be recorded that <strong>' + esc(name) + '</strong> did, upon the break, '
+    + '<div class="order">The Order of the <span class="oopsword">OOPS</span></div>'
+    + '<div class="sub">South Portland Metro APA \u00b7 Commemorative Citation</div>'
+    + '<div class="namerow"><span class="name">' + esc(name) + '</span></div>'
+    + '<div class="body">Let it be recorded that the above-named player did, upon the break, '
     + 'legally pocket the 8-ball \u2014 and, in the very same stroke, send the cue ball home as well, '
     + 'converting instant victory into instant defeat before a single opponent had lifted a cue.</div>'
     + '<div class="body">In honor of this rare and spectacular reversal of fortune, and on behalf of '
     + 'everyone who has ever stood exactly there, the league confers the <strong>OOPS Coin</strong> \u2014 '
     + 'to be kept, displayed, and produced whenever the story is told. And it will be told.</div>'
-    + '<div class="foot"><span class="motto">We\u2019ve all been there.</span> \u00b7 ' + esc(today) + '</div>'
+    + '<div class="footrow">'
+    + '<span class="motto">We\u2019ve all been there.</span>'
+    + '<span class="datesig">' + esc(today) + ' \u00b7 South Portland Metro APA</span>'
+    + '</div>'
     + '</div></div>';
-  /* 3 per Letter sheet, dashed cut rules between. */
   const sheets = [];
+  let n = 0;
   for (let i = 0; i < names.length; i += 3) {
-    sheets.push('<div class="sheet">' + names.slice(i, i + 3).map(cert).join('') + '</div>');
+    sheets.push('<div class="sheet">' + names.slice(i, i + 3).map(nm => cert(nm, n++)).join('') + '</div>');
   }
   return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>OOPS Coin certs</title>'
     + '<style>'
     + '@page { size: letter portrait; margin: 0.4in; }'
-    + 'body { margin: 0; font-family: Georgia, "Times New Roman", serif; color: #1f2430; }'
+    + '* { -webkit-print-color-adjust: exact; print-color-adjust: exact; }'
+    + 'body { margin: 0; font-family: Georgia, "Times New Roman", serif; color: #22262e; }'
     + '.sheet { page-break-after: always; }'
-    + '.cert { box-sizing: border-box; height: 3.2in; margin-bottom: 0.13in; padding: 0.22in 0.3in;'
-    + '  border: 3px double #1f2430; border-radius: 4px; display: flex; gap: 0.28in; align-items: center; }'
-    + '.cert + .cert { border-top: 3px double #1f2430; }'
-    + '.sheet .cert:not(:last-child) { position: relative; }'
-    + '.sheet .cert:not(:last-child)::after { content: ""; position: absolute; left: 0; right: 0;'
-    + '  bottom: -0.075in; border-bottom: 1px dashed #9ca3af; }'
-    + '.coin { flex: 0 0 1.35in; height: 1.35in; border: 3px solid #1f2430; border-radius: 50%;'
-    + '  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }'
-    + '.oops { font-family: "Comic Sans MS", "Segoe Print", cursive; font-weight: 700; font-size: 1.15rem; }'
-    + '.eight { width: 0.42in; height: 0.42in; border-radius: 50%; background: #1f2430; color: #fff;'
-    + '  display: flex; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: 700; }'
-    + '.txt { flex: 1; min-width: 0; }'
-    + '.order { font-size: 1.05rem; font-weight: 700; letter-spacing: 0.03em; margin-bottom: 6px; }'
-    + '.sub { font-size: 0.62rem; font-weight: 400; text-transform: uppercase; letter-spacing: 0.14em; color: #6b7280; }'
-    + '.body { font-size: 0.8rem; line-height: 1.42; margin: 5px 0; }'
-    + '.motto { font-style: italic; }'
-    + '.foot { font-size: 0.7rem; color: #6b7280; margin-top: 7px; letter-spacing: 0.04em; }'
+    + '.cert { box-sizing: border-box; position: relative; overflow: hidden; height: 3.2in;'
+    + '  margin-bottom: 0.13in; padding: 0.24in 0.34in; display: flex; gap: 0.3in; align-items: center;'
+    + '  background: #fbf8f0; border: 3px solid #0b3d2e; outline: 1px solid #b08d2f; outline-offset: -7px;'
+    + '  border-radius: 3px; }'
+    + '.sheet .cert:not(:last-child)::before { content: ""; position: absolute; left: 0; right: 0;'
+    + '  bottom: -0.078in; border-bottom: 1px dashed #9ca3af; }'
+    + '.corner { position: absolute; width: 0.42in; height: 0.42in; }'
+    + '.corner.c1 { top: 0.1in; left: 0.1in; }'
+    + '.corner.c2 { top: 0.1in; right: 0.1in; transform: rotate(90deg); }'
+    + '.corner.c3 { bottom: 0.1in; right: 0.1in; transform: rotate(180deg); }'
+    + '.corner.c4 { bottom: 0.1in; left: 0.1in; transform: rotate(270deg); }'
+    + '.wm { position: absolute; right: -0.35in; bottom: -0.5in; width: 2.4in; height: 2.4in; opacity: 0.06; }'
+    + '.coinwrap { flex: 0 0 1.55in; position: relative; z-index: 1; }'
+    + '.coinsvg { width: 1.55in; height: 1.55in; display: block;'
+    + '  filter: drop-shadow(0.02in 0.03in 0.03in rgba(20,25,35,0.35)); }'
+    + '.txt { flex: 1; min-width: 0; position: relative; z-index: 1; }'
+    + '.order { font-size: 1.22rem; font-weight: 700; letter-spacing: 0.02em; color: #0b3d2e; }'
+    + '.oopsword { letter-spacing: 0.12em; }'
+    + '.sub { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.22em; color: #b08d2f;'
+    + '  font-weight: 700; margin: 2px 0 7px; }'
+    + '.namerow { margin: 2px 0 7px; }'
+    + '.name { font-variant: small-caps; font-size: 1.28rem; font-weight: 700; letter-spacing: 0.05em;'
+    + '  border-bottom: 2px solid #b08d2f; padding: 0 0.35in 1px; }'
+    + '.body { font-size: 0.78rem; line-height: 1.42; margin: 4px 0; }'
+    + '.footrow { display: flex; justify-content: space-between; align-items: baseline; gap: 12px;'
+    + '  margin-top: 8px; border-top: 1px solid #d8cfae; padding-top: 5px; }'
+    + '.motto { font-style: italic; font-size: 0.86rem; color: #0b3d2e; }'
+    + '.datesig { font-size: 0.66rem; color: #6b7280; letter-spacing: 0.06em; text-transform: uppercase; }'
     + '</style></head><body>'
     + sheets.join('')
     + '<' + '/body></html>';
