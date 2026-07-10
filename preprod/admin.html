@@ -1523,6 +1523,26 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         </div>
         <div id="spPatchesBlocker" class="status-line"></div>
         <div id="spPatchesList"></div>
+        <!-- Re-mail a lost patch: clear one patch's mailed stamp so it
+             rides the next batch (to the updated mailing contact). -->
+        <div style="border-top:1px solid var(--border,#e5e7eb); margin-top:12px; padding-top:10px;">
+          <h3 style="margin:0 0 4px; font-size:0.95rem;">Re-mail a lost patch</h3>
+          <p class="hint" style="margin:0 0 8px;">
+            Clears the mailed stamp on ONE patch so it re-enters the next
+            "Mail Patches" batch &mdash; use after fixing the mailing contact.
+            The patch record and past batch stay intact.
+          </p>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+            <input type="text" id="spRemailMember" placeholder="Member # (5 or 8 digits)"
+                   style="width:180px;" autocomplete="off">
+            <select id="spRemailCode" style="width:230px;"></select>
+            <input type="text" id="spRemailTeam" placeholder="Team #"
+                   style="width:110px;" autocomplete="off">
+            <button type="button" class="btn btn-outline" id="spRemailFindBtn">Find mailing</button>
+          </div>
+          <div id="spRemailStatus" class="status-line"></div>
+          <div id="spRemailResults"></div>
+        </div>
       </div>
 
       <!-- ── Mailing notification emails (3.191) ─────────────────────────
@@ -3321,7 +3341,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.219';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.220';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -8756,6 +8776,8 @@ function spOnEnterTab() {
     // Patches buttons
     document.getElementById('spComputePatchesBtn').addEventListener('click', spComputePatches);
     document.getElementById('spMailPatchesBtn').addEventListener('click', spMailPatches);
+    document.getElementById('spRemailFindBtn').addEventListener('click', spRemailFind);
+    spRemailPopulateCodes();
     document.getElementById('spUndoMailBtn').addEventListener('click', spUndoLastMailing);
     document.getElementById('spPrintSlipsBtn').addEventListener('click', spPrintSlips);
     document.getElementById('spPrintEnvBtn1').addEventListener('click', () => spPrintEnvelopes(1));
@@ -10259,6 +10281,101 @@ async function spUndoLastMailing() {
     if (btn) btn.disabled = false;
   }
 }
+
+/* ── Re-mail a lost patch ──────────────────────────────────────────
+   Find MAILED sp_patches rows for (member, sp_type, team) and clear
+   mailed_at + batch_id on the chosen row id — the spUndoLastMailing
+   mechanism scoped to one patch. team_number is stored zero-padded
+   ('08202'), so matching uses spNotifyTeamKey on both sides. */
+/* sp_patches stores the 5-digit LOCAL member number (all 2240 rows as
+   of 2026-07-10), not the 8-digit APA form. Accept either; store-side
+   form is the last 5 digits. */
+function spRemailNormMember(raw) {
+  const digits = String(raw || '').replace(/\D+/g, '');
+  if (digits.length === 5) return digits;
+  if (digits.length === 8) return digits.slice(-5);
+  return null;
+}
+function spRemailPopulateCodes() {
+  const sel = document.getElementById('spRemailCode');
+  if (!sel || sel.options.length) return;
+  sel.innerHTML = '<option value="">Patch code\u2026</option>'
+    + Object.keys(SP_FULL_NAME).map(c =>
+        '<option value="' + c + '">' + esc(SP_DISPLAY[c] + ' \u2014 ' + SP_FULL_NAME[c]) + '</option>').join('');
+}
+let _spRemailRows = [];
+async function spRemailFind() {
+  const st = 'spRemailStatus';
+  const out = document.getElementById('spRemailResults');
+  out.innerHTML = '';
+  _spRemailRows = [];
+  const mn = spRemailNormMember(document.getElementById('spRemailMember').value);
+  const code = document.getElementById('spRemailCode').value;
+  const teamKey = spNotifyTeamKey(document.getElementById('spRemailTeam').value);
+  if (!mn)   { setStatus(st, 'Member number must be 5 or 8 digits.', 'err'); return; }
+  if (!code) { setStatus(st, 'Pick a patch code.', 'err'); return; }
+  if (!teamKey || !/^\d+$/.test(teamKey)) { setStatus(st, 'Team number must be digits.', 'err'); return; }
+  setStatus(st, 'Searching\u2026', '');
+  try {
+    const rows = await sb('GET', 'sp_patches?member_number=eq.' + mn
+      + '&sp_type=eq.' + encodeURIComponent(code) + '&select=*&order=id.asc');
+    const match = (rows || []).filter(r => spNotifyTeamKey(r.team_number) === teamKey);
+    if (!match.length) {
+      setStatus(st, 'No patch found for ' + mn + ' / ' + code + ' / team ' + teamKey + '.', 'err');
+      return;
+    }
+    const mailed = match.filter(r => r.mailed_at);
+    const queued = match.filter(r => !r.mailed_at);
+    if (!mailed.length) {
+      setStatus(st, 'Found ' + match.length + ' patch(es) but none are marked mailed \u2014 '
+        + (queued.length ? 'already queued for the next batch.' : 'nothing to clear.'), 'ok');
+      return;
+    }
+    _spRemailRows = mailed;
+    const curSess = currentSession && currentSession.id;
+    const curOp = _spOperatorFilter !== 'ALL' ? SP_OPERATOR_SHORTS[_spOperatorFilter] : null;
+    const inScope = r => r.session_id === curSess && (curOp == null || r.operator_id === curOp);
+    out.innerHTML = mailed.map((r, i) =>
+      '<div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding:6px 0; border-bottom:1px dashed #e5e7eb;">'
+      + '<span><strong>' + esc(SP_DISPLAY[r.sp_type] || r.sp_type) + '</strong> \u2014 '
+      + esc(r.member_name || r.member_number) + ' \u00b7 team ' + esc(spNotifyTeamKey(r.team_number))
+      + (r.division_number ? ' \u00b7 div ' + esc(String(r.division_number)) : '')
+      + ' \u00b7 mailed ' + esc(String(r.mailed_at).slice(0, 10)) + ' (batch ' + esc(String(r.batch_id)) + ')'
+      + (inScope(r) ? ''
+         : ' \u00b7 <strong style="color:#b45309;">other session/operator \u2014 will NOT enter the current batch</strong>')
+      + '</span>'
+      + '<button type="button" class="btn btn-outline" onclick="spRemailClear(' + i + ')">Queue for re-mail</button>'
+      + '</div>').join('');
+    setStatus(st, mailed.length + ' mailed patch(es) found' + (queued.length ? ' (+' + queued.length + ' already queued)' : '') + '.', 'ok');
+  } catch (e) {
+    console.error('[remail] find failed:', e);
+    setStatus(st, 'Search failed: ' + e.message, 'err');
+  }
+}
+async function spRemailClear(i) {
+  const r = _spRemailRows[i];
+  if (!r) return;
+  const st = 'spRemailStatus';
+  if (!confirm('Clear the mailed stamp on this patch?\n\n'
+    + (SP_FULL_NAME[r.sp_type] || r.sp_type) + ' \u2014 ' + (r.member_name || r.member_number)
+    + ', team ' + spNotifyTeamKey(r.team_number)
+    + '\nMailed ' + String(r.mailed_at).slice(0, 10) + ' in batch ' + r.batch_id
+    + '\n\nIt will ride the NEXT Mail Patches batch.')) return;
+  setStatus(st, 'Clearing\u2026', '');
+  try {
+    await sb('PATCH', 'sp_patches?id=eq.' + r.id, { mailed_at: null, batch_id: null });
+    setStatus(st, 'Queued for re-mail \u2014 was mailed ' + String(r.mailed_at).slice(0, 10)
+      + ' in batch ' + r.batch_id + '. It will ship with the next Mail Patches run.', 'ok');
+    console.log('[remail] cleared sp_patches id=' + r.id, { was_mailed_at: r.mailed_at, was_batch_id: r.batch_id });
+    _spRemailRows = [];
+    document.getElementById('spRemailResults').innerHTML = '';
+    await spLoadPatches();
+  } catch (e) {
+    console.error('[remail] clear failed:', e);
+    setStatus(st, 'Clear failed: ' + e.message, 'err');
+  }
+}
+window.spRemailClear = spRemailClear;
 
 window.spComputePatches = spComputePatches;
 window.spMailPatches    = spMailPatches;
