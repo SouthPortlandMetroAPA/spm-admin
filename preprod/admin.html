@@ -3321,7 +3321,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.215';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.216';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11544,7 +11544,7 @@ function spBuildOopsCertsHTML(names) {
     + '.name { display: inline-block; white-space: nowrap; font-variant: small-caps; font-size: 1.62rem; font-weight: 700;'
     + '  letter-spacing: 0.05em; line-height: 1.1; border-bottom: 3px solid #b08d2f;'
     + '  padding: 0 0.15in 2px; }'
-    + '.body { font-size: 0.78rem; line-height: 1.42; margin: 2px auto; max-width: 5.1in; }'
+    + '.body { font-size: 0.78rem; line-height: 1.42; margin: 2px auto; max-width: 5.1in; text-wrap: balance; }'
     + '.lede { font-variant: small-caps; font-weight: 700; letter-spacing: 0.06em; color: #0b3d2e; }'
     + '.footrow { max-width: 5.1in; margin: 4px auto 0; border-top: 1px solid #d8cfae;'
     + '  padding-top: 3px; text-align: center; }'
