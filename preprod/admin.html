@@ -1635,6 +1635,11 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         <div style="display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap;">
           <button type="button" class="btn btn-primary" onclick="spOopsCerts()">Print certificates</button>
           <button type="button" class="btn btn-outline" onclick="spOopsEnvelopes()">Print envelopes</button>
+          <label style="display:inline-flex;align-items:center;gap:6px;font-size:0.8rem;color:#6b7280;cursor:pointer;">
+            Coin artwork:
+            <input type="file" id="spOopsCoinFile" accept="image/*" onchange="spOopsCoinPick(this)" style="font-size:0.75rem;max-width:210px;">
+          </label>
+          <span class="hint" id="spOopsCoinState" style="font-size:0.72rem;"></span>
         </div>
         <div class="status-line" id="spOopsStatus" style="margin-top:6px;"></div>
       </div>
@@ -3316,7 +3321,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.209';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.210';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11361,6 +11366,29 @@ function spReportListIssues(r) {
    Mock-formal insert certificate. The joke is the situation — the
    copy honors the player. One cert per Letter page, content in the
    top two-thirds so it tri-folds into a #10 with the coin. */
+/* Coin artwork: a photo/scan of the real coin beats any drawing.
+   Stored as a data-URI in localStorage (guarded — big files stay
+   in-memory for the session only). SVG drawing remains the fallback. */
+let _spOopsCoinImg = '';
+try { _spOopsCoinImg = localStorage.getItem('spOopsCoinImg') || ''; } catch (e) {}
+function spOopsCoinState() {
+  const el = document.getElementById('spOopsCoinState');
+  if (el) el.textContent = _spOopsCoinImg ? 'using uploaded coin artwork' : 'no artwork — using built-in drawing';
+}
+function spOopsCoinPick(input) {
+  const f = input.files && input.files[0];
+  if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    _spOopsCoinImg = rd.result;
+    try {
+      if (_spOopsCoinImg.length < 1400000) localStorage.setItem('spOopsCoinImg', _spOopsCoinImg);
+    } catch (e) { /* too big for localStorage — session-only is fine */ }
+    spOopsCoinState();
+  };
+  rd.readAsDataURL(f);
+}
+
 function spBuildOopsCertsHTML(names) {
   const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
   /* SVG coin — arc "Oops!", cracked 8-ball with highlight + chips,
@@ -11403,7 +11431,9 @@ function spBuildOopsCertsHTML(names) {
     + '</svg>';
   const cert = (name, i) => '<div class="cert">'
     + corner('c1') + corner('c2') + corner('c3') + corner('c4') + watermark
-    + '<div class="coinwrap">' + coinSvg(i) + '</div>'
+    + '<div class="coinwrap">' + (_spOopsCoinImg
+        ? '<img class="coinimg" src="' + _spOopsCoinImg + '" alt="OOPS Coin">'
+        : coinSvg(i)) + '</div>'
     + '<div class="txt">'
     + '<div class="order">The Order of the <span class="oopsword">OOPS</span></div>'
     + '<div class="sub">South Portland Metro APA \u00b7 Commemorative Citation</div>'
@@ -11412,10 +11442,10 @@ function spBuildOopsCertsHTML(names) {
     + 'legally pocket the 8-ball \u2014 and, in the very same stroke, send the cue ball home as well, '
     + 'converting instant victory into instant defeat before a single opponent had lifted a cue.</div>'
     + '<div class="body">In honor of this rare and spectacular reversal of fortune, and on behalf of '
-    + 'everyone who has ever stood exactly there, the league confers the <strong>OOPS Coin</strong> \u2014 '
+    + 'the unlucky few who have stood exactly there, the league confers the <strong>OOPS Coin</strong> \u2014 '
     + 'to be kept, displayed, and produced whenever the story is told. And it will be told.</div>'
     + '<div class="footrow">'
-    + '<span class="motto">We\u2019ve all been there.</span>'
+    + '<span class="motto">Few have ever been there. You have.</span>'
     + '<span class="datesig">' + esc(today) + ' \u00b7 South Portland Metro APA</span>'
     + '</div>'
     + '</div></div>';
@@ -11443,6 +11473,8 @@ function spBuildOopsCertsHTML(names) {
     + '.corner.c4 { bottom: 0.1in; left: 0.1in; transform: rotate(270deg); }'
     + '.wm { position: absolute; right: -0.35in; bottom: -0.5in; width: 2.4in; height: 2.4in; opacity: 0.06; }'
     + '.coinwrap { flex: 0 0 1.55in; position: relative; z-index: 1; }'
+    + '.coinimg { width: 1.55in; height: 1.55in; display: block; border-radius: 50%;'
+    + '  object-fit: cover; border: 3px solid #0b3d2e; box-shadow: 0.02in 0.03in 0.05in rgba(20,25,35,0.35); }'
     + '.coinsvg { width: 1.55in; height: 1.55in; display: block;'
     + '  filter: drop-shadow(0.02in 0.03in 0.03in rgba(20,25,35,0.35)); }'
     + '.txt { flex: 1; min-width: 0; position: relative; z-index: 1; }'
@@ -11506,6 +11538,8 @@ async function spOopsEnvelopes() {
 
 window.spAdhocEnvelopes = spAdhocEnvelopes;
 window.spOopsCerts      = spOopsCerts;
+window.spOopsCoinPick   = spOopsCoinPick;
+setTimeout(spOopsCoinState, 0);
 window.spOopsEnvelopes  = spOopsEnvelopes;
 
 /* ════════════════════════════════════════════════════════════════════
