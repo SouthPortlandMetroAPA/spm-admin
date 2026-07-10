@@ -1642,7 +1642,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
            turned instant loss. Tone: mock-formal, dry, respectful — the
            joke is the situation, never the player. -->
       <div class="card" style="margin-bottom:14px;" id="spOopsCard">
-        <h2 style="margin:0 0 6px;">OOPS Coin — certificates &amp; envelopes</h2>
+        <h2 style="margin:0 0 6px;">OOPS Coin — certificates, envelopes &amp; email</h2>
         <p class="hint" style="margin:0 0 10px;">
           For players who legally pocketed the 8 on the break&hellip; and scratched.
           Paste APA player numbers (5- or 8-digit, one per line). Certificates
@@ -1662,6 +1662,28 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <span class="hint" id="spOopsCoinState" style="font-size:0.72rem;"></span>
         </div>
         <div class="status-line" id="spOopsStatus" style="margin-top:6px;"></div>
+        <!-- Dispatch-notice email: players get told their coin is in the
+             mail, the exact address, and the one-stamp reimbursement
+             promise. Template kind='oops' in slate.patch_notify_template;
+             sends+log ride the patch_notify_send GAS action. -->
+        <details style="margin-top:10px" ontoggle="if(this.open)spOopsNotifyLoadTemplate()">
+          <summary style="cursor:pointer;font-weight:700">📝 Coin dispatch email template</summary>
+          <div style="padding:10px 0">
+            <p class="hint" style="margin:0 0 6px">Variables: <code>{first_name}</code> <code>{full_name}</code> <code>{address_block}</code></p>
+            <input type="text" id="spOopsNotifySubject" placeholder="Subject" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px">
+            <textarea id="spOopsNotifyBody" rows="9" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-family:ui-monospace,monospace;font-size:0.82rem"></textarea>
+            <div style="display:flex;gap:8px;margin-top:6px;align-items:center;flex-wrap:wrap">
+              <button type="button" class="btn btn-outline btn-sm" onclick="spOopsNotifySaveTemplate()">💾 Save</button>
+              <span class="status-line" id="spOopsNotifyTplStatus" style="margin:0"></span>
+            </div>
+          </div>
+        </details>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">
+          <button type="button" class="btn btn-primary" onclick="spOopsNotifyOpen()">✉️ Email recipients</button>
+          <span class="hint">Tells each player their coin is in the mail — to the same address the envelope prints.</span>
+        </div>
+        <div class="status-line" id="spOopsNotifyStatus" style="margin-top:6px;"></div>
+        <div id="spOopsNotifyPreflight"></div>
       </div>
 
       <!-- ── Opt-out slip printer (3.170+) ────────────────────────────
@@ -3341,7 +3363,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.220';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.221';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11724,6 +11746,206 @@ window.spAdhocEnvelopes = spAdhocEnvelopes;
 window.spOopsCerts      = spOopsCerts;
 window.spOopsCoinPick   = spOopsCoinPick;
 setTimeout(spOopsCoinState, 0);
+/* ── OOPS Coin dispatch-notice email (3.221, T1) ────────────────────
+   Recipients = the pasted numbers, resolved to the PLAYER's own
+   mailing address (same resolver the envelopes print from) + their
+   email. Preflight lists everyone with checkboxes; players already
+   emailed (patch_notify_log kind='oops', status='sent') default
+   UNCHECKED. Test-send probes the operator inbox before any real
+   send. batch_id groups log rows per mailing day. */
+let _spOopsNotify = { tplLoaded: false, model: null };
+
+async function spOopsNotifyLoadTemplate(force) {
+  if (_spOopsNotify.tplLoaded && !force) return;
+  try {
+    const rows = await sb('GET', 'patch_notify_template?kind=eq.oops&select=subject,body_html');
+    if (rows && rows.length) {
+      document.getElementById('spOopsNotifySubject').value = rows[0].subject;
+      document.getElementById('spOopsNotifyBody').value    = rows[0].body_html;
+      _spOopsNotify.tplLoaded = true;
+    }
+  } catch (e) { console.warn('[oops-notify] template load', e); }
+}
+
+async function spOopsNotifySaveTemplate() {
+  const stat = document.getElementById('spOopsNotifyTplStatus');
+  const subject = document.getElementById('spOopsNotifySubject').value.trim();
+  const body_html = document.getElementById('spOopsNotifyBody').value;
+  if (!subject || !body_html) { stat.textContent = 'Subject + body required.'; stat.className = 'status-line err'; return; }
+  try {
+    await sb('PATCH', 'patch_notify_template?kind=eq.oops',
+      { subject, body_html, updated_by: getDeviceId(), updated_at: new Date().toISOString() });
+    stat.textContent = '\u2713 Saved.'; stat.className = 'status-line ok';
+    setTimeout(() => { stat.textContent = ''; stat.className = 'status-line'; }, 3000);
+  } catch (e) { stat.textContent = 'Save failed: ' + e.message; stat.className = 'status-line err'; }
+}
+
+async function spOopsNotifyBuild() {
+  const raw = ((document.getElementById('spOopsBox') || {}).value || '')
+    .split(/\r?\n/).map(t => t.trim()).filter(Boolean);
+  if (!raw.length) throw new Error('Paste at least one player number first.');
+  const r = await spResolveMailingList(raw);
+  const withAddr = r.resolved.filter(x => x.env);
+  const emailRows = withAddr.length
+    ? await sb('POST', 'rpc/lookup_emails_by_number', { p_nums: withAddr.map(x => x.mn) })
+    : [];
+  const emailByInput = new Map();
+  for (const row of (emailRows || [])) emailByInput.set(String(row.input_number), (row.email || '').trim());
+  const recips = [], noEmail = [];
+  for (const x of withAddr) {
+    const lines = [];
+    if (x.env.co_name) lines.push('c/o ' + x.env.co_name);
+    lines.push(x.env.address_line1);
+    if (x.env.address_line2) lines.push(x.env.address_line2);
+    lines.push(x.env.city + ', ' + x.env.state + ' ' + x.env.zip);
+    const email = emailByInput.get(x.mn) || '';
+    if (!email) { noEmail.push(x.name + ' (#' + x.mn.slice(-5) + ')'); continue; }
+    recips.push({
+      member_number: x.mn.slice(-5), name: x.name, email,
+      addrText: lines.join(', '),
+      ctx: { first_name: x.name.split(' ')[0], full_name: x.name,
+             address_block: lines.map(esc).join('<br>') },
+      _checked: true, _prior: false, _sentNow: false
+    });
+  }
+  if (recips.length) {
+    try {
+      const logRows = await sb('GET', 'patch_notify_log?kind=eq.oops&status=eq.sent'
+        + '&member_number=in.(' + recips.map(x => x.member_number).join(',') + ')&select=member_number');
+      const prior = new Set((logRows || []).map(lr => lr.member_number));
+      for (const rr of recips) if (prior.has(rr.member_number)) { rr._prior = true; rr._checked = false; }
+    } catch (e) { console.warn('[oops-notify] prior-sent load failed \u2014 no dedup', e); }
+  }
+  return { recips, invalid: r.invalid, notFound: r.notFound,
+           noAddr: r.noAddr.map(x => x.name + ' (#' + String(x.mn).slice(-5) + ')'), noEmail };
+}
+
+function spOopsNotifyRender() {
+  const m = _spOopsNotify.model;
+  const box = document.getElementById('spOopsNotifyPreflight');
+  if (!m) { box.innerHTML = ''; return; }
+  const li = (label, arr, color) => arr.length
+    ? '<div style="margin-top:4px;color:' + color + ';font-size:0.82rem"><strong>' + esc(label) + ' (' + arr.length + '):</strong> ' + arr.map(esc).join(', ') + '</div>'
+    : '';
+  const n = m.recips.filter(x => x._checked).length;
+  box.innerHTML =
+    '<div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-top:8px">'
+    + (m.recips.length
+        ? m.recips.map((x, i) =>
+            '<div style="display:flex;gap:8px;align-items:center;padding:4px 0;border-bottom:1px dashed #e5e7eb;font-size:0.86rem;flex-wrap:wrap">'
+            + '<label style="display:flex;gap:6px;align-items:center;cursor:pointer;min-width:0">'
+            + '<input type="checkbox" ' + (x._checked ? 'checked' : '') + ' onchange="spOopsNotifyToggle(' + i + ',this.checked)">'
+            + '<strong>' + esc(x.name) + '</strong></label>'
+            + '<span class="hint">' + esc(x.email) + '</span>'
+            + '<span class="hint" style="min-width:0">' + esc(x.addrText) + '</span>'
+            + (x._sentNow ? '<span style="background:#0a6b3a;color:#fff;padding:1px 6px;border-radius:999px;font-size:0.7rem;font-weight:700">SENT</span>'
+               : x._prior ? '<span style="background:#6b7280;color:#fff;padding:1px 6px;border-radius:999px;font-size:0.7rem;font-weight:700">SENT BEFORE</span>' : '')
+            + '</div>').join('')
+        : '<div class="hint">No emailable recipients.</div>')
+    + li('Invalid numbers', m.invalid, '#b91c1c')
+    + li('Not found', m.notFound, '#b91c1c')
+    + li('No address on file (no coin envelope either)', m.noAddr, '#b91c1c')
+    + li('No email on file \u2014 coin still mails, they just don\u2019t get the note', m.noEmail, '#a76c00')
+    + '<div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap">'
+    + '<button type="button" class="btn btn-outline btn-sm" onclick="spOopsNotifyTest()">\ud83d\udce4 Test send to me</button>'
+    + '<button type="button" class="btn btn-primary btn-sm" onclick="spOopsNotifySendAll()">Send ' + n + ' email' + (n === 1 ? '' : 's') + '</button>'
+    + '</div></div>';
+}
+
+function spOopsNotifyToggle(i, on) {
+  if (_spOopsNotify.model && _spOopsNotify.model.recips[i]) {
+    _spOopsNotify.model.recips[i]._checked = on;
+    spOopsNotifyRender();
+  }
+}
+
+async function spOopsNotifyOpen() {
+  const stat = 'spOopsNotifyStatus';
+  setStatus(stat, 'Resolving recipients\u2026', '');
+  try {
+    await spOopsNotifyLoadTemplate();
+    _spOopsNotify.model = await spOopsNotifyBuild();
+    const m = _spOopsNotify.model;
+    setStatus(stat, m.recips.length + ' emailable recipient' + (m.recips.length === 1 ? '' : 's') + ' \u2014 review below, then send.', m.recips.length ? 'ok' : 'err');
+    spOopsNotifyRender();
+  } catch (e) {
+    setStatus(stat, e.message, 'err');
+    _spOopsNotify.model = null; spOopsNotifyRender();
+  }
+}
+
+async function spOopsNotifySendOne(rec, tpl, isTest, toOverride, batchId) {
+  const r = await fetch(PATCH_NOTIFY_MAILER_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({
+      action: 'patch_notify_send',
+      admin_key: SB_KEY,
+      to: toOverride || rec.email,
+      subject: spNotifySub(tpl.subject, rec.ctx),
+      body_html: spNotifySub(tpl.body_html, rec.ctx),
+      batch_id: batchId,
+      kind: 'oops',
+      member_number: rec.member_number,
+      is_test: !!isTest
+    }),
+    redirect: 'follow',
+    keepalive: true
+  });
+  const res = JSON.parse(await r.text());
+  if (!res.ok) throw new Error(res.error || 'send failed');
+}
+
+function spOopsNotifyTpl() {
+  return {
+    subject: document.getElementById('spOopsNotifySubject').value,
+    body_html: document.getElementById('spOopsNotifyBody').value
+  };
+}
+
+async function spOopsNotifyTest() {
+  const stat = 'spOopsNotifyStatus';
+  const m = _spOopsNotify.model;
+  if (!m || !m.recips.length) { setStatus(stat, 'Nothing to sample \u2014 run Email recipients first.', 'err'); return; }
+  const sample = m.recips.find(x => x._checked) || m.recips[0];
+  const to = prompt('Send the test (using ' + sample.name + '\u2019s real data) to:', 'soldans@southportlandmetroapa.com');
+  if (!to) return;
+  setStatus(stat, 'Sending test\u2026', '');
+  try {
+    await spOopsNotifySendOne(sample, spOopsNotifyTpl(), true, to, crypto.randomUUID());
+    setStatus(stat, '\u2713 Test sent to ' + to + ' \u2014 check the address block renders before sending for real.', 'ok');
+  } catch (e) { setStatus(stat, '\u2717 ' + e.message, 'err'); }
+}
+
+async function spOopsNotifySendAll() {
+  const stat = 'spOopsNotifyStatus';
+  const m = _spOopsNotify.model;
+  if (!m) { setStatus(stat, 'Run Email recipients first.', 'err'); return; }
+  const queue = m.recips.filter(x => x._checked);
+  if (!queue.length) { setStatus(stat, 'Nothing checked.', 'err'); return; }
+  if (!confirm('Send the coin dispatch email to ' + queue.length + ' player' + (queue.length === 1 ? '' : 's') + '?\n\nEach email states the mailing address on file and the one-stamp reimbursement promise.')) return;
+  const tpl = spOopsNotifyTpl();
+  const batchId = crypto.randomUUID();
+  let sent = 0, failed = [];
+  for (const rec of queue) {
+    setStatus(stat, 'Sending ' + (sent + failed.length + 1) + '/' + queue.length + ' \u2014 ' + rec.name + '\u2026', '');
+    try {
+      await spOopsNotifySendOne(rec, tpl, false, null, batchId);
+      rec._sentNow = true; rec._prior = true; rec._checked = false; sent++;
+    } catch (e) {
+      failed.push(rec.name + ' (' + e.message + ')');
+    }
+    spOopsNotifyRender();
+  }
+  setStatus(stat, 'Done \u2014 ' + sent + ' sent' + (failed.length ? ', ' + failed.length + ' FAILED: ' + failed.join('; ') : '') + '. Log: patch_notify_log kind=oops batch ' + batchId + '.', failed.length ? 'err' : 'ok');
+}
+window.spOopsNotifyOpen = spOopsNotifyOpen;
+window.spOopsNotifyTest = spOopsNotifyTest;
+window.spOopsNotifySendAll = spOopsNotifySendAll;
+window.spOopsNotifyToggle = spOopsNotifyToggle;
+window.spOopsNotifyLoadTemplate = spOopsNotifyLoadTemplate;
+window.spOopsNotifySaveTemplate = spOopsNotifySaveTemplate;
+
 window.spOopsEnvelopes  = spOopsEnvelopes;
 
 /* ════════════════════════════════════════════════════════════════════
