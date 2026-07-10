@@ -1674,6 +1674,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             <textarea id="spOopsNotifyBody" rows="9" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-family:ui-monospace,monospace;font-size:0.82rem"></textarea>
             <div style="display:flex;gap:8px;margin-top:6px;align-items:center;flex-wrap:wrap">
               <button type="button" class="btn btn-outline btn-sm" onclick="spOopsNotifySaveTemplate()">💾 Save</button>
+              <button type="button" class="btn btn-outline btn-sm" onclick="spOopsNotifyResetTemplate()">↩ Back to default</button>
               <span class="status-line" id="spOopsNotifyTplStatus" style="margin:0"></span>
             </div>
           </div>
@@ -3363,7 +3364,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.221';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.222';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11753,6 +11754,18 @@ setTimeout(spOopsCoinState, 0);
    emailed (patch_notify_log kind='oops', status='sent') default
    UNCHECKED. Test-send probes the operator inbox before any real
    send. batch_id groups log rows per mailing day. */
+/* Single source of truth for the default dispatch-notice copy - the
+   "Back to default" button and any manual DB reset both use this. */
+const SP_OOPS_NOTIFY_DEFAULT = {
+  subject: 'Your OOPS Coin is on its way',
+  body_html: '<p>Hi {first_name},</p>'
+    + '<p>It is our duty \u2014 and frankly our honor \u2014 to report that your OOPS Coin and its commemorative citation have been dispatched by mail to:</p>'
+    + '<p style="margin-left:20px"><strong>{address_block}</strong></p>'
+    + '<p>If that address is wrong, reply to this email and we\u2019ll redirect the evidence.</p>'
+    + '<p>One practical note: we\u2019re certain this will sail through the post office just fine with one stamp. If the post office somehow charges you more, we\u2019ll reimburse you \u2014 just reply and let us know.</p>'
+    + '<p><em>Few have ever been there. You have.</em></p>'
+    + '<p>\u2014 South Portland Metro APA</p>'
+};
 let _spOopsNotify = { tplLoaded: false, model: null };
 
 async function spOopsNotifyLoadTemplate(force) {
@@ -11779,6 +11792,14 @@ async function spOopsNotifySaveTemplate() {
     setTimeout(() => { stat.textContent = ''; stat.className = 'status-line'; }, 3000);
   } catch (e) { stat.textContent = 'Save failed: ' + e.message; stat.className = 'status-line err'; }
 }
+
+async function spOopsNotifyResetTemplate() {
+  if (!confirm('Replace the current email template with the built-in default?\n\nYour current edits will be overwritten and the default saved.')) return;
+  document.getElementById('spOopsNotifySubject').value = SP_OOPS_NOTIFY_DEFAULT.subject;
+  document.getElementById('spOopsNotifyBody').value    = SP_OOPS_NOTIFY_DEFAULT.body_html;
+  await spOopsNotifySaveTemplate();
+}
+window.spOopsNotifyResetTemplate = spOopsNotifyResetTemplate;
 
 async function spOopsNotifyBuild() {
   const raw = ((document.getElementById('spOopsBox') || {}).value || '')
