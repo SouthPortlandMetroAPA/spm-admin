@@ -3321,7 +3321,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.218';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.219';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11513,17 +11513,16 @@ function spBuildOopsCertsHTML(names) {
   }
   return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>OOPS Coin certs</title>'
     + '<style>'
-    + '@page { size: letter portrait; margin: 0.4in; }'
+    + '@page { size: letter portrait; margin: 0.18in 0.4in; }'
     + '* { -webkit-print-color-adjust: exact; print-color-adjust: exact; }'
     + 'body { margin: 0; background: #fff; font-family: Georgia, "Times New Roman", serif; color: #22262e; }'
-    + '.sheet { page-break-after: always; height: 10.18in; display: flex;'
-    + '  flex-direction: column; justify-content: center; }'
+    + '.sheet { page-break-after: always; }'
     + '.sheet:last-child { page-break-after: auto; }'
     + '.cert { box-sizing: border-box; position: relative; overflow: hidden; height: 3.3in;'
     + '  margin-bottom: 0; padding: 0.19in 0.3in; display: flex; gap: 0.26in; align-items: center;'
     + '  background: #fbf8f0; border: 3px solid #0b3d2e; outline: 1px solid #b08d2f; outline-offset: -7px;'
     + '  border-radius: 3px; }'
-    + '.cut { border-bottom: 1px dashed #9ca3af; margin: 0.055in 0; }'
+    + '.cut { border-bottom: 1px dashed #9ca3af; margin: 0.18in 0; }'
     + '.corner { position: absolute; width: 0.42in; height: 0.42in; }'
     + '.corner.c1 { top: 0.1in; left: 0.1in; }'
     + '.corner.c2 { top: 0.1in; right: 0.1in; transform: rotate(90deg); }'
