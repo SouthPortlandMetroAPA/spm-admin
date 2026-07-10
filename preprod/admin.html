@@ -3321,7 +3321,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.212';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.213';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11434,7 +11434,7 @@ function spBuildOopsCertsHTML(names) {
   const cert = (name, i) => '<div class="cert">'
     + corner('c1') + corner('c2') + corner('c3') + corner('c4') + watermark
     + '<div class="coinwrap">' + (_spOopsCoinImg
-        ? '<img class="coinimg" src="' + _spOopsCoinImg + '" alt="OOPS Coin">'
+        ? '<span class="coinclip"><img class="coinimg" src="' + _spOopsCoinImg + '" alt="OOPS Coin"></span>'
         : coinSvg(i)) + '</div>'
     + '<div class="txt">'
     + '<div class="order">The Order of the <span class="oopsword">OOPS</span></div>'
@@ -11474,13 +11474,14 @@ function spBuildOopsCertsHTML(names) {
     + '.corner.c3 { bottom: 0.1in; right: 0.1in; transform: rotate(180deg); }'
     + '.corner.c4 { bottom: 0.1in; left: 0.1in; transform: rotate(270deg); }'
     + '.wm { position: absolute; right: -0.35in; bottom: -0.5in; width: 2.4in; height: 2.4in; opacity: 0.06; }'
-    + '.coinwrap { flex: 0 0 1.55in; position: relative; z-index: 1; }'
-    + '.coinimg { width: 1.55in; height: 1.55in; display: block; border-radius: 50%;'
-    + '  object-fit: contain; background: #fff; padding: 0.07in; box-sizing: border-box;'
-    + '  border: 3px solid #0b3d2e; box-shadow: 0.02in 0.03in 0.05in rgba(20,25,35,0.35); }'
+    + '.coinwrap { flex: 0 0 1.75in; position: relative; z-index: 1; }'
+    + '.coinclip { width: 1.75in; height: 1.75in; display: block; border-radius: 50%;'
+    + '  overflow: hidden; background: #fff; border: 3px solid #0b3d2e; box-sizing: border-box;'
+    + '  box-shadow: 0.02in 0.03in 0.05in rgba(20,25,35,0.35); }'
+    + '.coinimg { width: 134%; height: 134%; margin: -17%; display: block; }'
     + '.coinsvg { width: 1.55in; height: 1.55in; display: block;'
     + '  filter: drop-shadow(0.02in 0.03in 0.03in rgba(20,25,35,0.35)); }'
-    + '.txt { flex: 1; min-width: 0; position: relative; z-index: 1; }'
+    + '.txt { flex: 1; min-width: 0; position: relative; z-index: 1; text-align: center; }'
     + '.order { font-size: 1.22rem; font-weight: 700; letter-spacing: 0.02em; color: #0b3d2e; }'
     + '.oopsword { letter-spacing: 0.12em; }'
     + '.sub { font-size: 0.55rem; text-transform: uppercase; letter-spacing: 0.11em; color: #b08d2f;'
@@ -11488,11 +11489,12 @@ function spBuildOopsCertsHTML(names) {
     + '.namerow { margin: 6px 0 8px; }'
     + '.name { display: inline-block; font-variant: small-caps; font-size: 1.62rem; font-weight: 700;'
     + '  letter-spacing: 0.05em; line-height: 1.1; border-bottom: 3px solid #b08d2f;'
-    + '  padding: 0 0.3in 2px 0; }'
-    + '.body { font-size: 0.82rem; line-height: 1.52; margin: 5px 0; max-width: 5.1in; }'
+    + '  padding: 0 0.3in 2px; }'
+    + '.body { font-size: 0.82rem; line-height: 1.52; margin: 5px auto; max-width: 5.1in; }'
     + '.lede { font-variant: small-caps; font-weight: 700; letter-spacing: 0.06em; color: #0b3d2e; }'
-    + '.footrow { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; max-width: 5.1in;'
-    + '  margin-top: 8px; border-top: 1px solid #d8cfae; padding-top: 5px; }'
+    + '.footrow { max-width: 5.1in; margin: 8px auto 0; border-top: 1px solid #d8cfae;'
+    + '  padding-top: 5px; text-align: center; }'
+    + '.datesig { display: block; margin-top: 2px; }'
     + '.motto { font-style: italic; font-size: 0.92rem; font-weight: 700; color: #0b3d2e; white-space: nowrap; }'
     + '.datesig { font-size: 0.56rem; color: #9ca3af; letter-spacing: 0.04em; text-transform: uppercase; white-space: nowrap; }'
     + '</style></head><body>'
