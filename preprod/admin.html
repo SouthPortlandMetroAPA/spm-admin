@@ -3321,7 +3321,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.210';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.211';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11420,9 +11420,11 @@ function spBuildOopsCertsHTML(names) {
     + '</g>'
     + '</svg>';
   const corner = rot => '<svg viewBox="0 0 60 60" class="corner ' + rot + '" aria-hidden="true">'
-    + '<path d="M 4 56 L 4 16 Q 4 4 16 4 L 56 4" fill="none" stroke="#b08d2f" stroke-width="2.5"/>'
-    + '<path d="M 10 50 L 10 20 Q 10 10 20 10 L 50 10" fill="none" stroke="#0b3d2e" stroke-width="1.2"/>'
-    + '<circle cx="16" cy="16" r="3" fill="#b08d2f"/>'
+    + '<path d="M 6 56 L 6 18 Q 6 6 18 6 L 56 6" fill="none" stroke="#b08d2f" stroke-width="2.5"/>'
+    + '<path d="M 56 6 q -2 8 -10 9 q 5 2 8 -1" fill="none" stroke="#b08d2f" stroke-width="1.6"/>'
+    + '<path d="M 6 56 q 8 -2 9 -10 q 2 5 -1 8" fill="none" stroke="#b08d2f" stroke-width="1.6"/>'
+    + '<path d="M 12 50 L 12 20 Q 12 12 20 12 L 50 12" fill="none" stroke="#0b3d2e" stroke-width="1.1"/>'
+    + '<circle cx="19" cy="19" r="2.6" fill="#b08d2f"/>'
     + '</svg>';
   const watermark = '<svg viewBox="0 0 100 100" class="wm" aria-hidden="true">'
     + '<circle cx="50" cy="50" r="48" fill="#0b3d2e"/>'
@@ -11438,9 +11440,10 @@ function spBuildOopsCertsHTML(names) {
     + '<div class="order">The Order of the <span class="oopsword">OOPS</span></div>'
     + '<div class="sub">South Portland Metro APA \u00b7 Commemorative Citation</div>'
     + '<div class="namerow"><span class="name">' + esc(name) + '</span></div>'
-    + '<div class="body">Let it be recorded that the above-named player did, upon the break, '
-    + 'legally pocket the 8-ball \u2014 and, in the very same stroke, send the cue ball home as well, '
-    + 'converting instant victory into instant defeat before a single opponent had lifted a cue.</div>'
+    + '<div class="body"><span class="lede">Let it be recorded</span> that this player, being of steady '
+    + 'hand and sound stroke, did upon the break legally pocket the 8-ball \u2014 and, in the very same '
+    + 'stroke, send the cue ball home as well, converting instant victory into instant defeat before a '
+    + 'single opponent had lifted a cue.</div>'
     + '<div class="body">In honor of this rare and spectacular reversal of fortune, and on behalf of '
     + 'the unlucky few who have stood exactly there, the league confers the <strong>OOPS Coin</strong> \u2014 '
     + 'to be kept, displayed, and produced whenever the story is told. And it will be told.</div>'
@@ -11474,22 +11477,25 @@ function spBuildOopsCertsHTML(names) {
     + '.wm { position: absolute; right: -0.35in; bottom: -0.5in; width: 2.4in; height: 2.4in; opacity: 0.06; }'
     + '.coinwrap { flex: 0 0 1.55in; position: relative; z-index: 1; }'
     + '.coinimg { width: 1.55in; height: 1.55in; display: block; border-radius: 50%;'
-    + '  object-fit: cover; border: 3px solid #0b3d2e; box-shadow: 0.02in 0.03in 0.05in rgba(20,25,35,0.35); }'
+    + '  object-fit: contain; background: #fff; padding: 0.07in; box-sizing: border-box;'
+    + '  border: 3px solid #0b3d2e; box-shadow: 0.02in 0.03in 0.05in rgba(20,25,35,0.35); }'
     + '.coinsvg { width: 1.55in; height: 1.55in; display: block;'
     + '  filter: drop-shadow(0.02in 0.03in 0.03in rgba(20,25,35,0.35)); }'
     + '.txt { flex: 1; min-width: 0; position: relative; z-index: 1; }'
     + '.order { font-size: 1.22rem; font-weight: 700; letter-spacing: 0.02em; color: #0b3d2e; }'
     + '.oopsword { letter-spacing: 0.12em; }'
-    + '.sub { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.22em; color: #b08d2f;'
-    + '  font-weight: 700; margin: 2px 0 7px; }'
+    + '.sub { font-size: 0.55rem; text-transform: uppercase; letter-spacing: 0.11em; color: #b08d2f;'
+    + '  font-weight: 700; margin: 2px 0 8px; }'
     + '.namerow { margin: 2px 0 7px; }'
-    + '.name { font-variant: small-caps; font-size: 1.28rem; font-weight: 700; letter-spacing: 0.05em;'
-    + '  border-bottom: 2px solid #b08d2f; padding: 0 0.35in 1px; }'
-    + '.body { font-size: 0.78rem; line-height: 1.42; margin: 4px 0; }'
+    + '.name { display: inline-block; font-variant: small-caps; font-size: 1.62rem; font-weight: 700;'
+    + '  letter-spacing: 0.05em; line-height: 1.1; border-bottom: 3px solid #b08d2f;'
+    + '  padding: 0 0.3in 2px; }'
+    + '.body { font-size: 0.82rem; line-height: 1.52; margin: 5px 0; max-width: 5.1in; }'
+    + '.lede { font-variant: small-caps; font-weight: 700; letter-spacing: 0.06em; color: #0b3d2e; }'
     + '.footrow { display: flex; justify-content: space-between; align-items: baseline; gap: 12px;'
     + '  margin-top: 8px; border-top: 1px solid #d8cfae; padding-top: 5px; }'
-    + '.motto { font-style: italic; font-size: 0.86rem; color: #0b3d2e; }'
-    + '.datesig { font-size: 0.66rem; color: #6b7280; letter-spacing: 0.06em; text-transform: uppercase; }'
+    + '.motto { font-style: italic; font-size: 0.98rem; font-weight: 700; color: #0b3d2e; }'
+    + '.datesig { font-size: 0.58rem; color: #9ca3af; letter-spacing: 0.05em; text-transform: uppercase; }'
     + '</style></head><body>'
     + sheets.join('')
     + '<' + '/body></html>';
