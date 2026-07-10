@@ -3321,7 +3321,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.213';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.214';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11371,21 +11371,66 @@ function spReportListIssues(r) {
    in-memory for the session only). SVG drawing remains the fallback. */
 let _spOopsCoinImg = '';
 try { _spOopsCoinImg = localStorage.getItem('spOopsCoinImg') || ''; } catch (e) {}
+if (_spOopsCoinImg) setTimeout(() => spOopsStoreCoinArt(_spOopsCoinImg), 0);
 function spOopsCoinState() {
   const el = document.getElementById('spOopsCoinState');
   if (el) el.textContent = _spOopsCoinImg ? 'using uploaded coin artwork' : 'no artwork — using built-in drawing';
+}
+/* Measure the artwork's real extent and crop to its content circle.
+   Content-based (not frame-based), so any padding amount works and
+   re-running on already-fitted art converges to the same margin. */
+function spOopsFitCoinArt(dataUri) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const cap = 1200;
+        const sc = Math.min(1, cap / Math.max(img.naturalWidth, img.naturalHeight));
+        const w = Math.max(1, Math.round(img.naturalWidth * sc));
+        const h = Math.max(1, Math.round(img.naturalHeight * sc));
+        const cv = document.createElement('canvas');
+        cv.width = w; cv.height = h;
+        const g = cv.getContext('2d', { willReadFrequently: true });
+        g.fillStyle = '#fff'; g.fillRect(0, 0, w, h);
+        g.drawImage(img, 0, 0, w, h);
+        const d = g.getImageData(0, 0, w, h).data;
+        const ink = p => d[p + 3] > 16 && !(d[p] > 244 && d[p + 1] > 244 && d[p + 2] > 244);
+        let x0 = w, y0 = h, x1 = -1, y1 = -1;
+        for (let y = 0; y < h; y++) for (let x = 0; x < w; x++)
+          if (ink((y * w + x) * 4)) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+        if (x1 < 0) { resolve(dataUri); return; }
+        const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+        let r2 = 0;
+        for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++)
+          if (ink((y * w + x) * 4)) { const q = (x - cx) * (x - cx) + (y - cy) * (y - cy); if (q > r2) r2 = q; }
+        const r = Math.sqrt(r2) * 1.07 + 2;
+        const OUT = 640;
+        const out = document.createElement('canvas');
+        out.width = OUT; out.height = OUT;
+        const og = out.getContext('2d');
+        og.fillStyle = '#fff'; og.fillRect(0, 0, OUT, OUT);
+        og.drawImage(cv, cx - r, cy - r, 2 * r, 2 * r, 0, 0, OUT, OUT);
+        resolve(out.toDataURL('image/png'));
+      } catch (e) { resolve(dataUri); }
+    };
+    img.onerror = () => resolve(dataUri);
+    img.src = dataUri;
+  });
+}
+function spOopsStoreCoinArt(uri) {
+  spOopsFitCoinArt(uri).then(fitted => {
+    _spOopsCoinImg = fitted;
+    try {
+      if (fitted.length < 1400000) localStorage.setItem('spOopsCoinImg', fitted);
+    } catch (e) { /* too big for localStorage \u2014 session-only is fine */ }
+    spOopsCoinState();
+  });
 }
 function spOopsCoinPick(input) {
   const f = input.files && input.files[0];
   if (!f) return;
   const rd = new FileReader();
-  rd.onload = () => {
-    _spOopsCoinImg = rd.result;
-    try {
-      if (_spOopsCoinImg.length < 1400000) localStorage.setItem('spOopsCoinImg', _spOopsCoinImg);
-    } catch (e) { /* too big for localStorage — session-only is fine */ }
-    spOopsCoinState();
-  };
+  rd.onload = () => spOopsStoreCoinArt(String(rd.result));
   rd.readAsDataURL(f);
 }
 
@@ -11478,7 +11523,7 @@ function spBuildOopsCertsHTML(names) {
     + '.coinclip { width: 1.75in; height: 1.75in; display: block; border-radius: 50%;'
     + '  overflow: hidden; background: #fff; border: 3px solid #0b3d2e; box-sizing: border-box;'
     + '  box-shadow: 0.02in 0.03in 0.05in rgba(20,25,35,0.35); }'
-    + '.coinimg { width: 134%; height: 134%; margin: -17%; display: block; }'
+    + '.coinimg { width: 100%; height: 100%; display: block; }'
     + '.coinsvg { width: 1.55in; height: 1.55in; display: block;'
     + '  filter: drop-shadow(0.02in 0.03in 0.03in rgba(20,25,35,0.35)); }'
     + '.txt { flex: 1; min-width: 0; position: relative; z-index: 1; text-align: center; }'
