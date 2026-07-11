@@ -3313,6 +3313,19 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           Co-Captain &middot; Registered Playing &middot; Registered Not Playing. Both
           &ldquo;No&rdquo; = unanswered. Re-pasting updates in place.
         </p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin:0 0 10px">
+          <div class="upload-zone" id="nrTsZonePrev" style="flex:1;min-width:240px;border:2px dashed var(--border);border-radius:10px;padding:14px;text-align:center;cursor:pointer;background:#fafafa">
+            <div style="font-weight:700" id="nrTsZonePrevLabel">Drop PRIOR-session Team Screen PDF</div>
+            <div class="hint" style="font-size:0.75rem">writes teams + rosters into the prior session</div>
+            <input type="file" accept="application/pdf" style="display:none">
+          </div>
+          <div class="upload-zone" id="nrTsZoneCur" style="flex:1;min-width:240px;border:2px dashed var(--border);border-radius:10px;padding:14px;text-align:center;cursor:pointer;background:#fafafa">
+            <div style="font-weight:700" id="nrTsZoneCurLabel">Drop CURRENT-session Team Screen PDF</div>
+            <div class="hint" style="font-size:0.75rem">same import as the Uploads tab</div>
+            <input type="file" accept="application/pdf" style="display:none">
+          </div>
+        </div>
+        <div class="status-line" id="nrTsStatus" style="margin:0 0 10px"></div>
         <textarea id="nrPasteBox" class="ehq-paste-box" style="min-height:90px"
           placeholder="Paste the Nexus report here (tab-separated, straight from the copy)"></textarea>
         <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;align-items:center">
@@ -3419,7 +3432,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.228';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.229';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -3544,11 +3557,12 @@ function detectReport(headers) {
 /* Helper: stamp a successful import in slate.report_uploads. Swallows
  * errors silently — tracking failures shouldn't fail user-facing
  * imports. */
-async function logReportUpload(reportKey, rowCount, summary) {
+async function logReportUpload(reportKey, rowCount, summary, sessionId) {
+  const sid = sessionId || (currentSession && currentSession.id);
   if (!currentSession) return;
   try {
     await sb('POST', 'report_uploads', {
-      session_id: currentSession.id,
+      session_id: sid,
       report_key: reportKey,
       row_count: rowCount == null ? null : rowCount,
       summary: summary || null
@@ -4140,10 +4154,16 @@ async function parseTeamScreenPdf(pdf, onProgress) {
 
 /** Orchestration: parse the chosen PDF, upsert teams, rebuild Member rows.
  *  Called by handleFileDrop when it detects a Team Screen PDF. */
-async function runTeamScreenImport(file, pdf) {
-  hideStatus('pdfProgress');
-  if (!currentSession) {
-    return setStatus('pdfProgress', 'No current session. Create one on the Sessions tab first.', 'err');
+/* v3.229: session-parameterized so the Next Session tab can import
+   Team Screens for the PRIOR session without flipping the header
+   pill. opts = { session, statusId }; defaults preserve the Uploads
+   tab behavior exactly. */
+async function runTeamScreenImport(file, pdf, opts) {
+  const sess = (opts && opts.session) || currentSession;
+  const stId = (opts && opts.statusId) || 'pdfProgress';
+  hideStatus(stId);
+  if (!sess) {
+    return setStatus(stId, 'No current session. Create one on the Sessions tab first.', 'err');
   }
 
   try {
@@ -4154,19 +4174,19 @@ async function runTeamScreenImport(file, pdf) {
     }
 
     // 1. Parse the PDF page by page.
-    setStatus('pdfProgress', 'Loading PDF…', 'progress');
+    setStatus(stId, 'Loading PDF…', 'progress');
     const teams = await parseTeamScreenPdf(pdf, (i, total) => {
-      setStatus('pdfProgress', 'Parsing page ' + i + ' / ' + total + '…', 'progress');
+      setStatus(stId, 'Parsing page ' + i + ' / ' + total + '…', 'progress');
     });
     if (!teams.length) {
-      return setStatus('pdfProgress',
+      return setStatus(stId,
         'No team pages detected. Is this the Team Screen report? Header should read "Team Screen for:".', 'err');
     }
 
     // 2. Load every division in the current session so we can map team → division.
-    setStatus('pdfProgress', 'Looking up ' + teams.length + ' teams against session divisions…', 'progress');
+    setStatus(stId, 'Looking up ' + teams.length + ' teams against session divisions…', 'progress');
     const divs = await sb('GET',
-      'divisions?select=id,division_number&session_id=eq.' + currentSession.id + '&order=division_number.asc');
+      'divisions?select=id,division_number&session_id=eq.' + sess.id + '&order=division_number.asc');
     const divByNum = new Map();
     for (const d of divs) divByNum.set(String(parseInt(d.division_number, 10)), d);
 
@@ -4193,7 +4213,7 @@ async function runTeamScreenImport(file, pdf) {
     }
     if (!teamUpserts.length) {
       const totalSkipped = [...missingDivsMap.values()].reduce((s, a) => s + a.length, 0);
-      return setStatus('pdfProgress',
+      return setStatus(stId,
         'No teams matched any division in the current session. '
         + totalSkipped + ' team(s) across ' + missingDivsMap.size
         + ' missing division(s) skipped. Division numbers: '
@@ -4201,7 +4221,7 @@ async function runTeamScreenImport(file, pdf) {
     }
 
     // 4. Upsert teams in 500-row batches.
-    setStatus('pdfProgress', 'Upserting ' + teamUpserts.length + ' teams…', 'progress');
+    setStatus(stId, 'Upserting ' + teamUpserts.length + ' teams…', 'progress');
     for (let i = 0; i < teamUpserts.length; i += 500) {
       await sb('POST', 'teams?on_conflict=division_id,team_number',
         teamUpserts.slice(i, i + 500),
@@ -4227,7 +4247,7 @@ async function runTeamScreenImport(file, pdf) {
     const CHECK_BATCH = 200;
     for (let i = 0; i < allMembers.length; i += CHECK_BATCH) {
       const chunk = allMembers.slice(i, i + CHECK_BATCH);
-      setStatus('pdfProgress',
+      setStatus(stId,
         'Checking ' + Math.min(i + CHECK_BATCH, allMembers.length) + ' / ' + allMembers.length + ' player member#s…',
         'progress');
       const rows = await sb('GET',
@@ -4247,7 +4267,7 @@ async function runTeamScreenImport(file, pdf) {
     const teamIds = [...teamIdByKey.values()];
     const _tsSnapshotMembers = [];
     const _tsSnapshotCaptains = [];
-    setStatus('pdfProgress', 'Snapshotting current rosters for atomic rollback…', 'progress');
+    setStatus(stId, 'Snapshotting current rosters for atomic rollback…', 'progress');
     for (let i = 0; i < teamIds.length; i += 100) {
       const chunk = teamIds.slice(i, i + 100);
       const got = await sb('GET',
@@ -4258,7 +4278,7 @@ async function runTeamScreenImport(file, pdf) {
         else _tsSnapshotCaptains.push(r);
       }
     }
-    setStatus('pdfProgress', 'Clearing old Member rows on ' + teamIds.length + ' teams…', 'progress');
+    setStatus(stId, 'Clearing old Member rows on ' + teamIds.length + ' teams…', 'progress');
     for (let i = 0; i < teamIds.length; i += 100) {
       const chunk = teamIds.slice(i, i + 100);
       await sb('DELETE',
@@ -4324,7 +4344,7 @@ async function runTeamScreenImport(file, pdf) {
     const unmatched = unmatchedList.length;
 
     // 9. Batch-insert memberships.
-    setStatus('pdfProgress', 'Inserting ' + membershipRows.length + ' memberships…', 'progress');
+    setStatus(stId, 'Inserting ' + membershipRows.length + ' memberships…', 'progress');
     for (let i = 0; i < membershipRows.length; i += 500) {
       await sb('POST', 'team_memberships',
         membershipRows.slice(i, i + 500),
@@ -4335,7 +4355,7 @@ async function runTeamScreenImport(file, pdf) {
     //      no longer in the team roster (Team Screen import may have removed
     //      the player). Match captain.name_raw against the new roster's
     //      "First Last" strings. Hard error -> rollback the import.
-    setStatus('pdfProgress', 'Re-resolving captain/co-captain rows against new rosters…', 'progress');
+    setStatus(stId, 'Re-resolving captain/co-captain rows against new rosters…', 'progress');
     // Build a per-team set of valid member_numbers (after Step 9 inserts).
     const _tsRosterMnByTeam = new Map();         // team_id -> Set(member_number)
     const _tsRosterEntriesByTeam = new Map();    // team_id -> [{member_number,name_raw,player:{first_name,last_name}}]
@@ -4428,7 +4448,7 @@ async function runTeamScreenImport(file, pdf) {
     // Apply captain patches: delete the stale captain row, insert a new
     // one with the resolved member_number.
     if (_tsCaptainPatches.length) {
-      setStatus('pdfProgress', 'Updating ' + _tsCaptainPatches.length + ' captain mn re-resolution(s)…', 'progress');
+      setStatus(stId, 'Updating ' + _tsCaptainPatches.length + ' captain mn re-resolution(s)…', 'progress');
       for (const p of _tsCaptainPatches) {
         try {
           await sb('DELETE',
@@ -4535,14 +4555,14 @@ async function runTeamScreenImport(file, pdf) {
         + '</details></div>';
     }
 
-    setStatus('pdfProgress', msg, 'ok');
+    setStatus(stId, msg, 'ok');
     await logReportUpload('Team Screen', teamUpserts.length,
       teamUpserts.length + ' team(s), ' + matched + ' members matched, '
-      + unmatched + ' stored as name-only');
+      + unmatched + ' stored as name-only', sess.id);
     await refreshCounts();
     await loadReportStatus();
   } catch (e) {
-    setStatus('pdfProgress', 'Import failed: ' + esc(e.message), 'err');
+    setStatus(stId, 'Import failed: ' + esc(e.message), 'err');
   }
 }
 window.runTeamScreenImport = runTeamScreenImport;
@@ -5120,6 +5140,8 @@ async function nrInit() {
   if (!_nr.inited) {
     document.getElementById('nrParseBtn').addEventListener('click', nrPreview);
     document.getElementById('nrComputeLinksBtn').addEventListener('click', nrComputeLinks);
+    nrWireTeamScreenZone('nrTsZonePrev', () => nrPrevSession());
+    nrWireTeamScreenZone('nrTsZoneCur',  () => currentSession);
     document.getElementById('nrSaveBtn').addEventListener('click', nrSave);
     sel.onchange = () => { _nr.targetId = Number(sel.value); nrLoadTracker(); };
     _nr.inited = true;
@@ -5130,6 +5152,11 @@ async function nrInit() {
   const future = (sessions || []).filter(x => !x.is_current && cur && cur.start_date && x.start_date > cur.start_date)
     .sort((a, b) => (a.start_date < b.start_date ? -1 : 1));
   const opts = future.length ? future : (sessions || []).filter(x => !x.is_current);
+  const prevS = nrPrevSession();
+  const lp = document.getElementById('nrTsZonePrevLabel');
+  const lc = document.getElementById('nrTsZoneCurLabel');
+  if (lp && prevS) lp.textContent = 'Drop ' + prevS.name + ' Team Screen PDF';
+  if (lc && currentSession) lc.textContent = 'Drop ' + currentSession.name + ' Team Screen PDF';
   sel.innerHTML = opts.map(x => '<option value="' + x.id + '">' + esc(x.name) + '</option>').join('');
   if (!_nr.targetId && opts.length) _nr.targetId = opts[0].id;
   if (_nr.targetId) sel.value = String(_nr.targetId);
@@ -5149,6 +5176,34 @@ function nrPrevSession() {
     .sort((a, b) => (a.start_date > b.start_date ? -1 : 1));
   return prior[0] || null;
 }
+/* Team Screen drop zones — reuse the Uploads-tab import engine with an
+   explicit target session; refresh everything the rosters feed. */
+function nrWireTeamScreenZone(zoneId, sessGetter) {
+  const zone = document.getElementById(zoneId);
+  if (!zone) return;
+  const input = zone.querySelector('input[type=file]');
+  const go = async (file) => {
+    const sess = sessGetter();
+    if (!sess) { setStatus('nrTsStatus', 'Session not loaded yet.', 'err'); return; }
+    if (!file) return;
+    await runTeamScreenImport(file, null, { session: sess, statusId: 'nrTsStatus' });
+    _nr.rosterByTeam = null;              // rosters changed — recompute on next link run
+    await nrLoadTeams();
+    await nrLoadLinks();
+    await nrLoadTracker();
+    nrRenderLinks();
+  };
+  zone.addEventListener('click', () => input.click());
+  input.addEventListener('change', () => { go(input.files[0]); input.value = ''; });
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.style.background = '#eef2ff'; });
+  zone.addEventListener('dragleave', () => { zone.style.background = '#fafafa'; });
+  zone.addEventListener('drop', e => {
+    e.preventDefault(); zone.style.background = '#fafafa';
+    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    go(f);
+  });
+}
+
 async function nrLoadTeams() {
   if (!currentSession) return;
   const prev = nrPrevSession();
