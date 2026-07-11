@@ -1523,6 +1523,26 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         </div>
         <div id="spPatchesBlocker" class="status-line"></div>
         <div id="spPatchesList"></div>
+        <!-- Re-mail a lost patch: clear one patch's mailed stamp so it
+             rides the next batch (to the updated mailing contact). -->
+        <div style="border-top:1px solid var(--border,#e5e7eb); margin-top:12px; padding-top:10px;">
+          <h3 style="margin:0 0 4px; font-size:0.95rem;">Re-mail a lost patch</h3>
+          <p class="hint" style="margin:0 0 8px;">
+            Clears the mailed stamp on ONE patch so it re-enters the next
+            "Mail Patches" batch &mdash; use after fixing the mailing contact.
+            The patch record and past batch stay intact.
+          </p>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+            <input type="text" id="spRemailMember" placeholder="Member # (5 or 8 digits)"
+                   style="width:180px;" autocomplete="off">
+            <select id="spRemailCode" style="width:230px;"></select>
+            <input type="text" id="spRemailTeam" placeholder="Team #"
+                   style="width:110px;" autocomplete="off">
+            <button type="button" class="btn btn-outline" id="spRemailFindBtn">Find mailing</button>
+          </div>
+          <div id="spRemailStatus" class="status-line"></div>
+          <div id="spRemailResults"></div>
+        </div>
       </div>
 
       <!-- ── Mailing notification emails (3.191) ─────────────────────────
@@ -1615,6 +1635,56 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <button type="button" class="btn btn-primary" onclick="spAdhocEnvelopes()">Print envelopes</button>
         </div>
         <div class="status-line" id="spAdhocStatus" style="margin-top:6px;"></div>
+      </div>
+
+      <!-- ── OOPS Coin — certificates + envelopes (3.207) ─────────────
+           Commemorates the 8-on-the-break-with-a-scratch: instant win
+           turned instant loss. Tone: mock-formal, dry, respectful — the
+           joke is the situation, never the player. -->
+      <div class="card" style="margin-bottom:14px;" id="spOopsCard">
+        <h2 style="margin:0 0 6px;">OOPS Coin — certificates, envelopes &amp; email</h2>
+        <p class="hint" style="margin:0 0 10px;">
+          For players who legally pocketed the 8 on the break&hellip; and scratched.
+          Paste APA player numbers (5- or 8-digit, one per line). Certificates
+          print 3 per page (cut on the dashed lines); envelopes use
+          the mailing address on file. Certificates print even for players
+          without an address — envelopes require one.
+        </p>
+        <textarea id="spOopsBox" class="ehq-paste-box" style="min-height:64px;"
+          placeholder="e.g.&#10;24779&#10;97223806"></textarea>
+        <div style="display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap;">
+          <button type="button" class="btn btn-primary" onclick="spOopsCerts()">Print certificates</button>
+          <button type="button" class="btn btn-outline" onclick="spOopsEnvelopes()">Print envelopes</button>
+          <label style="display:inline-flex;align-items:center;gap:6px;font-size:0.8rem;color:#6b7280;cursor:pointer;">
+            Coin artwork:
+            <input type="file" id="spOopsCoinFile" accept="image/*" onchange="spOopsCoinPick(this)" style="font-size:0.75rem;max-width:210px;">
+          </label>
+          <span class="hint" id="spOopsCoinState" style="font-size:0.72rem;"></span>
+        </div>
+        <div class="status-line" id="spOopsStatus" style="margin-top:6px;"></div>
+        <!-- Dispatch-notice email: players get told their coin is in the
+             mail, the exact address, and the one-stamp reimbursement
+             promise. Template kind='oops' in slate.patch_notify_template;
+             sends+log ride the patch_notify_send GAS action. -->
+        <details style="margin-top:10px" ontoggle="if(this.open)spOopsNotifyLoadTemplate()">
+          <summary style="cursor:pointer;font-weight:700">📝 Coin dispatch email template</summary>
+          <div style="padding:10px 0">
+            <p class="hint" style="margin:0 0 6px">Variables: <code>{first_name}</code> <code>{full_name}</code> <code>{address_block}</code></p>
+            <input type="text" id="spOopsNotifySubject" placeholder="Subject" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px">
+            <textarea id="spOopsNotifyBody" rows="9" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-family:ui-monospace,monospace;font-size:0.82rem"></textarea>
+            <div style="display:flex;gap:8px;margin-top:6px;align-items:center;flex-wrap:wrap">
+              <button type="button" class="btn btn-outline btn-sm" onclick="spOopsNotifySaveTemplate()">💾 Save</button>
+              <button type="button" class="btn btn-outline btn-sm" onclick="spOopsNotifyResetTemplate()">↩ Back to default</button>
+              <span class="status-line" id="spOopsNotifyTplStatus" style="margin:0"></span>
+            </div>
+          </div>
+        </details>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">
+          <button type="button" class="btn btn-primary" onclick="spOopsNotifyOpen()">✉️ Email recipients</button>
+          <span class="hint">Tells each player their coin is in the mail — to the same address the envelope prints.</span>
+        </div>
+        <div class="status-line" id="spOopsNotifyStatus" style="margin-top:6px;"></div>
+        <div id="spOopsNotifyPreflight"></div>
       </div>
 
       <!-- ── Opt-out slip printer (3.170+) ────────────────────────────
@@ -2875,14 +2945,14 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         <p class="hint" style="margin-top:0;margin-bottom:14px">
           Plan Fall host placements one division at a time. Set up venues (1),
           upload the Spring + Summer Team Screen PDFs (2), then work the
-          Division planner (3): every venue card shows whether its teams fit.
+          Fall placement worksheet (3): every team from both sessions gets a
+          Fall venue + night, or Not playing — capacity warns, never blocks.
         </p>
 
         <!-- target session + control bar -->
         <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:14px;padding:10px;border:1px solid var(--border);border-radius:8px;background:#fafbfc">
           <label style="font-size:0.9rem">
-            Planning for session:
-            <select id="hpTargetSession" style="margin-left:6px;padding:6px;border:1px solid var(--border);border-radius:6px"></select>
+            Planning for: <strong>Fall 2026</strong>
           </label>
           <button class="btn btn-outline btn-sm" onclick="hpRefresh()">Refresh</button>
         </div>
@@ -2955,26 +3025,23 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           </div>
         </details>
 
-        <!-- ── Activity 3: Division planner (3.181 rebuild) ──────────
-             Division-by-division workflow. Pick a division; see its host
-             venues as cards; each card shows the Spring + Summer teams
-             whose home is that venue and whether they all FIT within the
-             venue's capacity. Capacity resets per division — divisions
-             play on different nights, so the same venue's full capacity
-             is available in every division independently. -->
+        <!-- ── Activity 3: Fall placement worksheet (3.199 rebuild) ──────
+             One ledger row per team-entity across Spring + Summer (DJ pairs
+             are two rows by TMS construction, so capacity math counts them
+             twice for free). Assign each team a Fall (venue, night) or mark
+             it Not playing. Capacity = 2 × tables per (venue, night) —
+             at-capacity/overbooked are loud warnings and NEVER block. -->
         <details open style="margin-bottom:14px;border:1px solid var(--border);border-radius:8px;padding:12px">
           <summary style="cursor:pointer;font-weight:700;font-size:1.05rem">
-            3. Division planner
+            3. Fall placement worksheet
             <span class="hint" id="hpPlanSummary" style="font-weight:400;margin-left:8px"></span>
           </summary>
           <div style="margin-top:12px">
             <p class="hint" style="margin-top:0">
-              Work one division at a time. Each card is a host venue showing the
-              <strong>Spring + Summer teams</strong> based there in this division and whether
-              they all fit the venue's capacity. Capacity is the venue's full capacity —
-              it resets for every division (different nights). Teams marked
-              <strong>No</strong> stop counting against capacity. Use the venue dropdown on a
-              team row to move it; counts update live.
+              Every team from both sessions, where it played each session, and
+              its Fall placement. The capacity board (right) updates live as
+              you assign — amber = at capacity, red = overbooked; nothing
+              ever blocks an assignment.
             </p>
             <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
               <button class="btn btn-primary btn-sm" onclick="hpSyncFromUploads()"
@@ -2982,12 +3049,49 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
                 🔄 Sync from Summer + Spring
               </button>
               <button class="btn btn-outline btn-sm" onclick="hpOpenNewTeamModal()">+ Add new Fall team</button>
-              <button class="btn btn-outline btn-sm" onclick="hpExportPlanCsv()">📥 Plan CSV</button>
+              <input type="search" id="hpWsSearch" placeholder="Search team / number / venue…"
+                     oninput="hpWsSearchInput(this.value)"
+                     style="flex:1;min-width:200px;max-width:320px;padding:7px 10px;border:1px solid var(--border);border-radius:8px">
             </div>
-            <div id="hpDivNav" style="margin-bottom:12px"></div>
-            <div id="hpDivPane"></div>
+            <div id="hpWsChips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"></div>
+            <div id="hpDivChips" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:12px"></div>
+            <div id="hpMatchPanel"></div>
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) 350px;gap:14px;align-items:start">
+              <div id="hpWorksheet" style="min-width:0"></div>
+              <div id="hpCapacityBoard" style="position:sticky;top:8px;max-height:82vh;overflow:auto"></div>
+            </div>
           </div>
         </details>
+
+        <!-- Add-new-division modal -->
+        <div class="modal-backdrop" id="hpNewDivModal" style="display:none" role="dialog" aria-modal="true" onkeydown="if(event.key==='Escape'){hpCloseNewDivModal();}">
+          <div class="modal" style="max-width:420px">
+            <h3 style="margin:0 0 10px">New Fall division</h3>
+            <p class="hint" style="margin-top:0;margin-bottom:10px">
+              A division is a name + play night. Teams moved into it snap to
+              its night.
+            </p>
+            <div class="form-row">
+              <div>
+                <label>Name <span style="color:#b91c1c">*</span></label>
+                <input type="text" id="hpNewDivName" class="form-input" required maxlength="120">
+              </div>
+              <div>
+                <label>Play night <span style="color:#b91c1c">*</span></label>
+                <select id="hpNewDivNight" class="form-input">
+                  <option value="">\u2014 pick \u2014</option>
+                  <option>Monday</option><option>Tuesday</option><option>Wednesday</option>
+                  <option>Thursday</option><option>Friday</option><option>Saturday</option><option>Sunday</option>
+                </select>
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+              <button class="btn btn-outline" onclick="hpCloseNewDivModal()">Cancel</button>
+              <button class="btn btn-primary" onclick="hpSaveNewDiv()">Create</button>
+            </div>
+            <div class="status-line" id="hpNewDivStatus"></div>
+          </div>
+        </div>
 
         <!-- Add-new-team modal -->
         <div class="modal-backdrop" id="hpNewTeamModal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="hpNewTeamModalTitle" onkeydown="if(event.key==='Escape'){hpCloseNewTeamModal();}">
@@ -3260,7 +3364,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.198';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.223';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -8695,6 +8799,8 @@ function spOnEnterTab() {
     // Patches buttons
     document.getElementById('spComputePatchesBtn').addEventListener('click', spComputePatches);
     document.getElementById('spMailPatchesBtn').addEventListener('click', spMailPatches);
+    document.getElementById('spRemailFindBtn').addEventListener('click', spRemailFind);
+    spRemailPopulateCodes();
     document.getElementById('spUndoMailBtn').addEventListener('click', spUndoLastMailing);
     document.getElementById('spPrintSlipsBtn').addEventListener('click', spPrintSlips);
     document.getElementById('spPrintEnvBtn1').addEventListener('click', () => spPrintEnvelopes(1));
@@ -10199,6 +10305,101 @@ async function spUndoLastMailing() {
   }
 }
 
+/* ── Re-mail a lost patch ──────────────────────────────────────────
+   Find MAILED sp_patches rows for (member, sp_type, team) and clear
+   mailed_at + batch_id on the chosen row id — the spUndoLastMailing
+   mechanism scoped to one patch. team_number is stored zero-padded
+   ('08202'), so matching uses spNotifyTeamKey on both sides. */
+/* sp_patches stores the 5-digit LOCAL member number (all 2240 rows as
+   of 2026-07-10), not the 8-digit APA form. Accept either; store-side
+   form is the last 5 digits. */
+function spRemailNormMember(raw) {
+  const digits = String(raw || '').replace(/\D+/g, '');
+  if (digits.length === 5) return digits;
+  if (digits.length === 8) return digits.slice(-5);
+  return null;
+}
+function spRemailPopulateCodes() {
+  const sel = document.getElementById('spRemailCode');
+  if (!sel || sel.options.length) return;
+  sel.innerHTML = '<option value="">Patch code\u2026</option>'
+    + Object.keys(SP_FULL_NAME).map(c =>
+        '<option value="' + c + '">' + esc(SP_DISPLAY[c] + ' \u2014 ' + SP_FULL_NAME[c]) + '</option>').join('');
+}
+let _spRemailRows = [];
+async function spRemailFind() {
+  const st = 'spRemailStatus';
+  const out = document.getElementById('spRemailResults');
+  out.innerHTML = '';
+  _spRemailRows = [];
+  const mn = spRemailNormMember(document.getElementById('spRemailMember').value);
+  const code = document.getElementById('spRemailCode').value;
+  const teamKey = spNotifyTeamKey(document.getElementById('spRemailTeam').value);
+  if (!mn)   { setStatus(st, 'Member number must be 5 or 8 digits.', 'err'); return; }
+  if (!code) { setStatus(st, 'Pick a patch code.', 'err'); return; }
+  if (!teamKey || !/^\d+$/.test(teamKey)) { setStatus(st, 'Team number must be digits.', 'err'); return; }
+  setStatus(st, 'Searching\u2026', '');
+  try {
+    const rows = await sb('GET', 'sp_patches?member_number=eq.' + mn
+      + '&sp_type=eq.' + encodeURIComponent(code) + '&select=*&order=id.asc');
+    const match = (rows || []).filter(r => spNotifyTeamKey(r.team_number) === teamKey);
+    if (!match.length) {
+      setStatus(st, 'No patch found for ' + mn + ' / ' + code + ' / team ' + teamKey + '.', 'err');
+      return;
+    }
+    const mailed = match.filter(r => r.mailed_at);
+    const queued = match.filter(r => !r.mailed_at);
+    if (!mailed.length) {
+      setStatus(st, 'Found ' + match.length + ' patch(es) but none are marked mailed \u2014 '
+        + (queued.length ? 'already queued for the next batch.' : 'nothing to clear.'), 'ok');
+      return;
+    }
+    _spRemailRows = mailed;
+    const curSess = currentSession && currentSession.id;
+    const curOp = _spOperatorFilter !== 'ALL' ? SP_OPERATOR_SHORTS[_spOperatorFilter] : null;
+    const inScope = r => r.session_id === curSess && (curOp == null || r.operator_id === curOp);
+    out.innerHTML = mailed.map((r, i) =>
+      '<div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding:6px 0; border-bottom:1px dashed #e5e7eb;">'
+      + '<span><strong>' + esc(SP_DISPLAY[r.sp_type] || r.sp_type) + '</strong> \u2014 '
+      + esc(r.member_name || r.member_number) + ' \u00b7 team ' + esc(spNotifyTeamKey(r.team_number))
+      + (r.division_number ? ' \u00b7 div ' + esc(String(r.division_number)) : '')
+      + ' \u00b7 mailed ' + esc(String(r.mailed_at).slice(0, 10)) + ' (batch ' + esc(String(r.batch_id)) + ')'
+      + (inScope(r) ? ''
+         : ' \u00b7 <strong style="color:#b45309;">other session/operator \u2014 will NOT enter the current batch</strong>')
+      + '</span>'
+      + '<button type="button" class="btn btn-outline" onclick="spRemailClear(' + i + ')">Queue for re-mail</button>'
+      + '</div>').join('');
+    setStatus(st, mailed.length + ' mailed patch(es) found' + (queued.length ? ' (+' + queued.length + ' already queued)' : '') + '.', 'ok');
+  } catch (e) {
+    console.error('[remail] find failed:', e);
+    setStatus(st, 'Search failed: ' + e.message, 'err');
+  }
+}
+async function spRemailClear(i) {
+  const r = _spRemailRows[i];
+  if (!r) return;
+  const st = 'spRemailStatus';
+  if (!confirm('Clear the mailed stamp on this patch?\n\n'
+    + (SP_FULL_NAME[r.sp_type] || r.sp_type) + ' \u2014 ' + (r.member_name || r.member_number)
+    + ', team ' + spNotifyTeamKey(r.team_number)
+    + '\nMailed ' + String(r.mailed_at).slice(0, 10) + ' in batch ' + r.batch_id
+    + '\n\nIt will ride the NEXT Mail Patches batch.')) return;
+  setStatus(st, 'Clearing\u2026', '');
+  try {
+    await sb('PATCH', 'sp_patches?id=eq.' + r.id, { mailed_at: null, batch_id: null });
+    setStatus(st, 'Queued for re-mail \u2014 was mailed ' + String(r.mailed_at).slice(0, 10)
+      + ' in batch ' + r.batch_id + '. It will ship with the next Mail Patches run.', 'ok');
+    console.log('[remail] cleared sp_patches id=' + r.id, { was_mailed_at: r.mailed_at, was_batch_id: r.batch_id });
+    _spRemailRows = [];
+    document.getElementById('spRemailResults').innerHTML = '';
+    await spLoadPatches();
+  } catch (e) {
+    console.error('[remail] clear failed:', e);
+    setStatus(st, 'Clear failed: ' + e.message, 'err');
+  }
+}
+window.spRemailClear = spRemailClear;
+
 window.spComputePatches = spComputePatches;
 window.spMailPatches    = spMailPatches;
 window.spUndoLastMailing = spUndoLastMailing;
@@ -11198,128 +11399,604 @@ window.spPrintEnvelopes = spPrintEnvelopes;
    letterhead, same right-side patches logo, same cat — just with a
    custom note instead of teams + patch count on the meta line.
    ════════════════════════════════════════════════════════════════════ */
-async function spAdhocEnvelopes() {
-  const box     = document.getElementById('spAdhocBox');
-  const noteEl  = document.getElementById('spAdhocNote');
-  const note    = (noteEl && noteEl.value || '').trim();
-  const raw     = (box.value || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-  if (!raw.length) { setStatus('spAdhocStatus', 'Paste at least one number.', 'err'); return; }
-
-  /* Normalize: 5-digit → '972' + 5, 8-digit → as-is. Anything else
-     goes into the "invalid" bucket for the status message. */
-  const valid = new Map();      // 8-digit → first-seen raw line (for display)
+/* Resolve pasted player numbers to a mailing list. Shared by the
+   ad-hoc envelope printer and the OOPS Coin printers (extracted 3.207 —
+   second call site). Returns every bucket so callers can report loudly:
+   { resolved: [{mn, name, env|null}], invalid, notFound, noAddr }.
+   env is null when the player has no printable address. */
+async function spResolveMailingList(rawLines) {
+  const valid = new Map();
   const invalid = [];
-  for (const line of raw) {
+  for (const line of rawLines) {
     const digits = line.replace(/\D+/g, '');
     if (digits.length === 5)      { if (!valid.has('972' + digits)) valid.set('972' + digits, line); }
     else if (digits.length === 8) { if (!valid.has(digits))         valid.set(digits, line); }
     else                          invalid.push(line);
   }
-  if (!valid.size) {
-    setStatus('spAdhocStatus', 'No valid 5- or 8-digit numbers found.', 'err');
-    return;
-  }
   const memberNums = [...valid.keys()];
-  setStatus('spAdhocStatus', 'Looking up ' + memberNums.length + ' player(s)…', '');
+  const players = [];
+  for (let i = 0; i < memberNums.length; i += 100) {
+    const chunk = memberNums.slice(i, i + 100);
+    const rows = await sb('GET',
+      'players?member_number=in.(' + chunk.join(',') + ')'
+      + '&select=member_number,first_name,nickname,last_name,address1,address2,city,state,zip');
+    if (rows && rows.length) players.push(...rows);
+  }
+  const byMember = {};
+  for (const p of players) byMember[p.member_number] = p;
 
-  try {
-    /* Admin runs as service_role so this filtered read works against the
-       PII-locked slate.players. Chunked at 100 in case of large pastes. */
-    const players = [];
-    for (let i = 0; i < memberNums.length; i += 100) {
-      const chunk = memberNums.slice(i, i + 100);
-      const rows = await sb('GET',
-        'players?member_number=in.(' + chunk.join(',') + ')'
-        + '&select=member_number,first_name,nickname,last_name,address1,address2,city,state,zip');
-      if (rows && rows.length) players.push(...rows);
-    }
-    const byMember = {};
-    for (const p of players) byMember[p.member_number] = p;
-
-    const envs    = [];
-    const notFound = [];
-    const noAddr   = [];
-    for (const mn of memberNums) {
-      const p = byMember[mn];
-      if (!p) { notFound.push(valid.get(mn)); continue; }
-      /* Ad-hoc envelopes: never include the nickname. Matches the main
-         Print Envelopes path, which strips `"Nickname"` at render time. */
-      const f  = (p.first_name || '').trim();
-      const l  = (p.last_name  || '').trim();
-      const name = (f + ' ' + l).replace(/\s+/g, ' ').trim()
-                || ('Member ' + mn);
-      if (!p.address1 || !p.city) { noAddr.push({ mn, name }); continue; }
-      /* Strip the dangling "97123-____" zip pattern seen in some rows. */
+  const resolved = [];
+  const notFound = [];
+  const noAddr = [];
+  for (const mn of memberNums) {
+    const p = byMember[mn];
+    if (!p) { notFound.push(valid.get(mn)); continue; }
+    const f = (p.first_name || '').trim();
+    const l = (p.last_name || '').trim();
+    const name = (f + ' ' + l).replace(/\s+/g, ' ').trim() || ('Member ' + mn);
+    let env = null;
+    if (p.address1 && p.city) {
       const zip = (p.zip || '').replace(/[-_\s]+$/, '');
-      /* If either address line starts with "c/o …", route it to co_name so
-         it renders BETWEEN the recipient and the street (matching the main
-         SP Print Envelopes path). Otherwise it would land after the street
-         because address_line2 renders below address_line1. Handles: c/o,
-         C/O, c/o., co, C/o. */
-      let addr1  = p.address1;
-      let addr2  = p.address2 || null;
+      let addr1 = p.address1;
+      let addr2 = p.address2 || null;
       let coName = null;
       const coRe = /^\s*c\s*\/?\s*o\.?\s+/i;
       if (addr1 && coRe.test(addr1)) {
         coName = addr1.replace(coRe, '').trim();
-        addr1  = addr2 || '';
-        addr2  = null;
+        addr1 = addr2 || '';
+        addr2 = null;
       } else if (addr2 && coRe.test(addr2)) {
         coName = addr2.replace(coRe, '').trim();
-        addr2  = null;
+        addr2 = null;
       }
-      if (!addr1) { noAddr.push({ mn, name }); continue; }
-      envs.push({
-        contact_name:  name,
-        co_name:       coName,
-        address_line1: addr1,
-        address_line2: addr2,
-        city:          p.city,
-        state:         p.state || '',
-        zip:           zip,
-        teams:         [],
-        patches:       [],
-        note:          note
-      });
+      if (addr1) {
+        env = { contact_name: name, co_name: coName, address_line1: addr1,
+                address_line2: addr2, city: p.city, state: p.state || '',
+                zip: zip, teams: [], patches: [], note: '' };
+      }
     }
+    if (!env) noAddr.push({ mn, name });
+    resolved.push({ mn, name, env });
+  }
+  return { resolved, invalid, notFound, noAddr };
+}
 
+async function spAdhocEnvelopes() {
+  const box    = document.getElementById('spAdhocBox');
+  const noteEl = document.getElementById('spAdhocNote');
+  const note   = (noteEl && noteEl.value || '').trim();
+  const raw    = (box.value || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  if (!raw.length) { setStatus('spAdhocStatus', 'Paste at least one number.', 'err'); return; }
+  try {
+    const r = await spResolveMailingList(raw);
+    const envs = r.resolved.filter(x => x.env).map(x => ({ ...x.env, note: note }));
     if (!envs.length) {
       setStatus('spAdhocStatus', 'No printable envelopes — none of those players have an address on file.', 'err');
-      if (notFound.length || noAddr.length) {
-        alert('Nothing to print:\n\n'
-          + (notFound.length ? 'NOT FOUND:\n  ' + notFound.join('\n  ') + '\n\n' : '')
-          + (noAddr.length ? 'NO ADDRESS ON FILE:\n  ' + noAddr.map(x => x.mn + '  ' + x.name).join('\n  ') : ''));
-      }
+      spReportListIssues(r);
       return;
     }
-
     await spLoadOperatorProfile();
-    const op = _spOperatorProfile || {};
-    const html = spBuildEnvelopesHTML(envs, op);
+    const html = spBuildEnvelopesHTML(envs, _spOperatorProfile || {});
     spOpenPrintWindow(html, 'Ad-hoc envelopes (' + envs.length + ')');
-
-    /* Status summary + per-player issues popup. */
-    const issues = [];
-    if (invalid.length)  issues.push(invalid.length + ' invalid');
-    if (notFound.length) issues.push(notFound.length + ' not in players table');
-    if (noAddr.length)   issues.push(noAddr.length + ' no address on file');
-    setStatus('spAdhocStatus',
-      'Printed ' + envs.length + ' envelope' + (envs.length === 1 ? '' : 's')
-      + (issues.length ? ' · ' + issues.join(' · ') : '') + '.',
-      issues.length ? 'warn' : 'ok');
-    if (notFound.length || noAddr.length || invalid.length) {
-      const parts = [];
-      if (invalid.length)  parts.push('INVALID (not 5- or 8-digit):\n  ' + invalid.join('\n  '));
-      if (notFound.length) parts.push('NOT FOUND in slate.players:\n  ' + notFound.join('\n  '));
-      if (noAddr.length)   parts.push('NO ADDRESS ON FILE:\n  '
-        + noAddr.map(x => x.mn + '  ' + x.name).join('\n  '));
-      alert('Some inputs were skipped:\n\n' + parts.join('\n\n'));
-    }
+    spListStatus('spAdhocStatus', 'Printed ' + envs.length + ' envelope' + (envs.length === 1 ? '' : 's'), r);
   } catch (e) {
     setStatus('spAdhocStatus', 'Failed: ' + e.message, 'err');
   }
 }
+
+/* Shared loud reporting for list resolution — nothing silently dropped. */
+function spListStatus(statusId, didWhat, r) {
+  const issues = [];
+  if (r.invalid.length)  issues.push(r.invalid.length + ' invalid');
+  if (r.notFound.length) issues.push(r.notFound.length + ' not in players table');
+  if (r.noAddr.length)   issues.push(r.noAddr.length + ' no address on file');
+  setStatus(statusId, didWhat + (issues.length ? ' · ' + issues.join(' · ') : '') + '.',
+    issues.length ? 'warn' : 'ok');
+  if (issues.length) spReportListIssues(r);
+}
+function spReportListIssues(r) {
+  const parts = [];
+  if (r.invalid.length)  parts.push('INVALID (not 5- or 8-digit):\n  ' + r.invalid.join('\n  '));
+  if (r.notFound.length) parts.push('NOT FOUND in slate.players:\n  ' + r.notFound.join('\n  '));
+  if (r.noAddr.length)   parts.push('NO ADDRESS ON FILE:\n  ' + r.noAddr.map(x => x.mn + '  ' + x.name).join('\n  '));
+  if (parts.length) alert('Some inputs were skipped or incomplete:\n\n' + parts.join('\n\n'));
+}
+
+/* ── OOPS Coin (3.207) ─────────────────────────────────────────────
+   Mock-formal insert certificate. The joke is the situation — the
+   copy honors the player. One cert per Letter page, content in the
+   top two-thirds so it tri-folds into a #10 with the coin. */
+/* Coin artwork: a photo/scan of the real coin beats any drawing.
+   Stored as a data-URI in localStorage (guarded — big files stay
+   in-memory for the session only). SVG drawing remains the fallback. */
+let _spOopsCoinImg = '';
+try { _spOopsCoinImg = localStorage.getItem('spOopsCoinImg') || ''; } catch (e) {}
+/* 3.223: artwork is PERMANENT in slate.app_assets ('oops_coin_art') so
+   every device shares it; localStorage is only a cache. Load order: DB
+   wins. A device holding art locally with no DB row yet migrates it up
+   once (covers devices from before this existed). */
+let _spOopsArtReady = null;
+function spOopsEnsureCoinArt() {
+  if (_spOopsArtReady) return _spOopsArtReady;
+  _spOopsArtReady = (async () => {
+    try {
+      const rows = await sb('GET', 'app_assets?asset_key=eq.oops_coin_art&select=value');
+      if (rows && rows.length && rows[0].value) {
+        _spOopsCoinImg = rows[0].value;
+        try { if (_spOopsCoinImg.length < 1400000) localStorage.setItem('spOopsCoinImg', _spOopsCoinImg); } catch (e) {}
+      } else if (_spOopsCoinImg) {
+        await spOopsStoreCoinArt(_spOopsCoinImg);
+      }
+    } catch (e) { console.warn('[oops] coin art DB load failed \u2014 using local cache/SVG', e); }
+    spOopsCoinState();
+  })();
+  return _spOopsArtReady;
+}
+setTimeout(spOopsEnsureCoinArt, 0);
+function spOopsCoinState() {
+  const el = document.getElementById('spOopsCoinState');
+  if (el) el.textContent = _spOopsCoinImg ? 'using uploaded coin artwork' : 'no artwork — using built-in drawing';
+}
+/* Measure the artwork's real extent and crop to its content circle.
+   Content-based (not frame-based), so any padding amount works and
+   re-running on already-fitted art converges to the same margin. */
+function spOopsFitCoinArt(dataUri) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const cap = 1200;
+        const sc = Math.min(1, cap / Math.max(img.naturalWidth, img.naturalHeight));
+        const w = Math.max(1, Math.round(img.naturalWidth * sc));
+        const h = Math.max(1, Math.round(img.naturalHeight * sc));
+        const cv = document.createElement('canvas');
+        cv.width = w; cv.height = h;
+        const g = cv.getContext('2d', { willReadFrequently: true });
+        g.fillStyle = '#fff'; g.fillRect(0, 0, w, h);
+        g.drawImage(img, 0, 0, w, h);
+        const d = g.getImageData(0, 0, w, h).data;
+        const ink = p => d[p + 3] > 16 && !(d[p] > 244 && d[p + 1] > 244 && d[p + 2] > 244);
+        let x0 = w, y0 = h, x1 = -1, y1 = -1;
+        for (let y = 0; y < h; y++) for (let x = 0; x < w; x++)
+          if (ink((y * w + x) * 4)) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+        if (x1 < 0) { resolve(dataUri); return; }
+        const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+        let r2 = 0;
+        for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++)
+          if (ink((y * w + x) * 4)) { const q = (x - cx) * (x - cx) + (y - cy) * (y - cy); if (q > r2) r2 = q; }
+        const r = Math.sqrt(r2) * 1.07 + 2;
+        const OUT = 640;
+        const out = document.createElement('canvas');
+        out.width = OUT; out.height = OUT;
+        const og = out.getContext('2d');
+        og.fillStyle = '#fff'; og.fillRect(0, 0, OUT, OUT);
+        og.drawImage(cv, cx - r, cy - r, 2 * r, 2 * r, 0, 0, OUT, OUT);
+        resolve(out.toDataURL('image/png'));
+      } catch (e) { resolve(dataUri); }
+    };
+    img.onerror = () => resolve(dataUri);
+    img.src = dataUri;
+  });
+}
+function spOopsStoreCoinArt(uri) {
+  return spOopsFitCoinArt(uri).then(async fitted => {
+    _spOopsCoinImg = fitted;
+    try {
+      if (fitted.length < 1400000) localStorage.setItem('spOopsCoinImg', fitted);
+    } catch (e) { /* too big for localStorage \u2014 cache is optional */ }
+    try {
+      await sb('POST', 'app_assets?on_conflict=asset_key',
+        { asset_key: 'oops_coin_art', value: fitted, updated_at: new Date().toISOString() },
+        { 'Prefer': 'resolution=merge-duplicates' });
+    } catch (e) {
+      console.warn('[oops] coin art DB save failed \u2014 art stays device-local until a save succeeds', e);
+    }
+    spOopsCoinState();
+  });
+}
+function spOopsCoinPick(input) {
+  const f = input.files && input.files[0];
+  if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => spOopsStoreCoinArt(String(rd.result));
+  rd.readAsDataURL(f);
+}
+
+function spBuildOopsCertsHTML(names) {
+  const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  /* SVG coin — arc "Oops!", cracked 8-ball with highlight + chips,
+     gold sparkles. Unique ids per instance (ids are document-global). */
+  const coinSvg = i => '<svg viewBox="0 0 200 200" class="coinsvg" aria-hidden="true">'
+    + '<defs>'
+    + '<radialGradient id="oopsBall' + i + '" cx="38%" cy="30%" r="75%">'
+    + '<stop offset="0%" stop-color="#5a5a64"/><stop offset="45%" stop-color="#26262e"/><stop offset="100%" stop-color="#0d0d12"/>'
+    + '</radialGradient>'
+    + '<path id="oopsArc' + i + '" d="M 28 108 A 72 72 0 0 1 172 108" fill="none"/>'
+    + '</defs>'
+    + '<circle cx="100" cy="100" r="95" fill="#fffdf7" stroke="#1f2430" stroke-width="5"/>'
+    + '<circle cx="100" cy="100" r="86" fill="none" stroke="#b08d2f" stroke-width="2.5" stroke-dasharray="3.5 5"/>'
+    + '<text font-family="Comic Sans MS, Segoe Print, cursive" font-size="34" font-weight="700" fill="#1f2430">'
+    + '<textPath href="#oopsArc' + i + '" startOffset="50%" text-anchor="middle">Oops!</textPath></text>'
+    + '<g transform="translate(100 126)">'
+    + '<circle r="47" fill="url(#oopsBall' + i + ')" stroke="#0a0a0e" stroke-width="1.5"/>'
+    + '<ellipse cx="-16" cy="-22" rx="16" ry="9" fill="#ffffff" opacity="0.16" transform="rotate(-28 -16 -22)"/>'
+    + '<path d="M -8 -46 L -2 -30 L -12 -22 L -4 -12" fill="none" stroke="#c9c9d1" stroke-width="1.6" stroke-linejoin="round" opacity="0.8"/>'
+    + '<path d="M 18 -42 L 14 -30 L 24 -24" fill="none" stroke="#a9a9b1" stroke-width="1.3" opacity="0.7"/>'
+    + '<circle cy="-6" r="16.5" fill="#fffdf7"/>'
+    + '<text y="1" text-anchor="middle" font-family="Georgia, serif" font-size="21" font-weight="700" fill="#0d0d12">8</text>'
+    + '</g>'
+    + '<path d="M 52 172 l 7 -3 5 5 -8 3 z" fill="#8a8a94"/>'
+    + '<path d="M 140 176 l 6 -4 6 3 -7 4 z" fill="#a3a3ac"/>'
+    + '<g fill="#b08d2f">'
+    + '<path d="M 36 62 l 2.6 6 6 2.6 -6 2.6 -2.6 6 -2.6 -6 -6 -2.6 6 -2.6 z"/>'
+    + '<path d="M 162 58 l 2 4.6 4.6 2 -4.6 2 -2 4.6 -2 -4.6 -4.6 -2 4.6 -2 z"/>'
+    + '</g>'
+    + '</svg>';
+  /* Pristine 8-ball for the right flank - the ball as it stood before
+     the break. Twin medallion = the cert's bilateral balance. */
+  const ballSvg = i => '<svg viewBox="0 0 200 200" class="ballsvg" aria-hidden="true">'
+    + '<defs><radialGradient id="oopsPristine' + i + '" cx="36%" cy="28%" r="80%">'
+    + '<stop offset="0%" stop-color="#63636d"/><stop offset="42%" stop-color="#26262e"/><stop offset="100%" stop-color="#0a0a0f"/>'
+    + '</radialGradient></defs>'
+    + '<rect width="200" height="200" fill="#fff"/>'
+    + '<circle cx="100" cy="100" r="97" fill="url(#oopsPristine' + i + ')"/>'
+    + '<ellipse cx="66" cy="54" rx="24" ry="13" fill="#ffffff" opacity="0.3" transform="rotate(-28 66 54)"/>'
+    + '<circle cx="100" cy="100" r="30" fill="#fffdf7"/>'
+    + '<text x="100" y="112" text-anchor="middle" font-family="Georgia, serif" font-size="36" font-weight="700" fill="#0d0d12">8</text>'
+    + '</svg>';
+  const corner = rot => '<svg viewBox="0 0 60 60" class="corner ' + rot + '" aria-hidden="true">'
+    + '<path d="M 6 56 L 6 18 Q 6 6 18 6 L 56 6" fill="none" stroke="#b08d2f" stroke-width="2.5"/>'
+    + '<path d="M 56 6 q -2 8 -10 9 q 5 2 8 -1" fill="none" stroke="#b08d2f" stroke-width="1.6"/>'
+    + '<path d="M 6 56 q 8 -2 9 -10 q 2 5 -1 8" fill="none" stroke="#b08d2f" stroke-width="1.6"/>'
+    + '<path d="M 12 50 L 12 20 Q 12 12 20 12 L 50 12" fill="none" stroke="#0b3d2e" stroke-width="1.1"/>'
+    + '<circle cx="19" cy="19" r="2.6" fill="#b08d2f"/>'
+    + '</svg>';
+  const cert = (name, i) => '<div class="cert">'
+    + corner('c1') + corner('c2') + corner('c3') + corner('c4')
+    + '<div class="coinwrap">' + (_spOopsCoinImg
+        ? '<span class="coinclip"><img class="coinimg" src="' + _spOopsCoinImg + '" alt="OOPS Coin"></span>'
+        : coinSvg(i)) + '</div>'
+    + '<div class="txt">'
+    + '<div class="order">The Order of the <span class="oopsword">OOPS</span></div>'
+    + '<div class="sub">South Portland Metro APA \u00b7 Commemorative Citation</div>'
+    + '<div class="namerow"><span class="name">' + esc(name) + '</span></div>'
+    + '<div class="body"><span class="lede">Let it be recorded</span> that this player, being of steady '
+    + 'hand and sound stroke, did upon the break legally pocket the 8-ball \u2014 and, in the very same '
+    + 'stroke, send the cue ball home as well, converting instant victory into instant defeat before a '
+    + 'single opponent had lifted a cue.</div>'
+    + '<div class="body">In honor of this rare and spectacular reversal of fortune, and on behalf of '
+    + 'the unlucky few who have stood exactly there, the league confers the <strong>OOPS Coin</strong> \u2014 '
+    + 'to be kept, displayed, and produced whenever the story is told. And it will be told.</div>'
+    + '<div class="footrow">'
+    + '<span class="motto">Few have ever been there. You have.</span>'
+    + '<span class="datesig">' + esc(today) + ' \u00b7 South Portland Metro APA</span>'
+    + '</div>'
+    + '</div>'
+    + '<div class="coinwrap"><span class="coinclip">' + ballSvg(i) + '</span></div>'
+    + '</div>';
+  const sheets = [];
+  let n = 0;
+  for (let i = 0; i < names.length; i += 3) {
+    sheets.push('<div class="sheet">' + names.slice(i, i + 3).map(nm => cert(nm, n++)).join('<div class="cut"></div>') + '</div>');
+  }
+  return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>OOPS Coin certs</title>'
+    + '<style>'
+    + '@page { size: letter portrait; margin: 0.18in 0.4in; }'
+    + '* { -webkit-print-color-adjust: exact; print-color-adjust: exact; }'
+    + 'body { margin: 0; background: #fff; font-family: Georgia, "Times New Roman", serif; color: #22262e; }'
+    + '.sheet { page-break-after: always; }'
+    + '.sheet:last-child { page-break-after: auto; }'
+    + '.cert { box-sizing: border-box; position: relative; overflow: hidden; height: 3.3in;'
+    + '  margin-bottom: 0; padding: 0.19in 0.3in; display: flex; gap: 0.26in; align-items: center;'
+    + '  background: #fbf8f0; border: 3px solid #0b3d2e; outline: 1px solid #b08d2f; outline-offset: -7px;'
+    + '  border-radius: 3px; }'
+    + '.cut { border-bottom: 1px dashed #9ca3af; margin: 0.18in 0; }'
+    + '.corner { position: absolute; width: 0.42in; height: 0.42in; }'
+    + '.corner.c1 { top: 0.1in; left: 0.1in; }'
+    + '.corner.c2 { top: 0.1in; right: 0.1in; transform: rotate(90deg); }'
+    + '.corner.c3 { bottom: 0.1in; right: 0.1in; transform: rotate(180deg); }'
+    + '.corner.c4 { bottom: 0.1in; left: 0.1in; transform: rotate(270deg); }'
+    + '.coinwrap { flex: 0 0 1.45in; position: relative; z-index: 1; }'
+    + '.coinclip { width: 1.45in; height: 1.45in; display: block; border-radius: 50%;'
+    + '  overflow: hidden; background: #fff; border: 3px solid #0b3d2e; box-sizing: border-box;'
+    + '  box-shadow: 0.02in 0.03in 0.05in rgba(20,25,35,0.35); }'
+    + '.coinimg { width: 100%; height: 100%; display: block; }'
+    + '.ballsvg { width: 100%; height: 100%; display: block; }'
+    + '.coinsvg { width: 1.45in; height: 1.45in; display: block;'
+    + '  filter: drop-shadow(0.02in 0.03in 0.03in rgba(20,25,35,0.35)); }'
+    + '.txt { flex: 1; min-width: 0; position: relative; z-index: 1; text-align: center; }'
+    + '.order { font-size: 1.18rem; font-weight: 700; letter-spacing: 0.02em; color: #0b3d2e; }'
+    + '.oopsword { letter-spacing: 0.12em; }'
+    + '.sub { font-size: 0.55rem; text-transform: uppercase; letter-spacing: 0.11em; color: #b08d2f;'
+    + '  font-weight: 700; margin: 2px 0 4px; }'
+    + '.namerow { margin: 3px 0 3px; }'
+    + '.name { display: inline-block; white-space: nowrap; font-variant: small-caps; font-size: 1.62rem; font-weight: 700;'
+    + '  letter-spacing: 0.05em; line-height: 1.1; border-bottom: 3px solid #b08d2f;'
+    + '  padding: 0 0.15in 2px; }'
+    + '.body { font-size: 0.78rem; line-height: 1.38; margin: 2px auto; max-width: 5.1in; text-wrap: balance; }'
+    + '.body + .body { margin-top: 7px; }'
+    + '.lede { font-variant: small-caps; font-weight: 700; letter-spacing: 0.06em; color: #0b3d2e; }'
+    + '.footrow { max-width: 5.1in; margin: 4px auto 0; border-top: 1px solid #d8cfae;'
+    + '  padding-top: 3px; text-align: center; }'
+    + '.datesig { display: block; margin-top: 2px; }'
+    + '.motto { font-style: italic; font-size: 0.92rem; font-weight: 700; color: #0b3d2e; white-space: nowrap; }'
+    + '.datesig { font-size: 0.56rem; color: #9ca3af; letter-spacing: 0.04em; text-transform: uppercase; white-space: nowrap; }'
+    + '</style></head><body>'
+    + sheets.join('')
+    + '<script>document.querySelectorAll(".name").forEach(function(n){'
+    + 'var f=parseFloat(getComputedStyle(n).fontSize);'
+    + 'while(n.scrollWidth>n.parentElement.clientWidth&&f>11){f-=0.5;n.style.fontSize=f+"px";}'
+    + '});<' + '/script>'
+    + '<' + '/body></html>';
+}
+
+async function spOopsCerts() {
+  await spOopsEnsureCoinArt();
+  const raw = ((document.getElementById('spOopsBox') || {}).value || '')
+    .split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  if (!raw.length) { setStatus('spOopsStatus', 'Paste at least one number.', 'err'); return; }
+  try {
+    const r = await spResolveMailingList(raw);
+    const names = r.resolved.map(x => x.name);
+    if (!names.length) {
+      setStatus('spOopsStatus', 'No players resolved.', 'err');
+      spReportListIssues(r);
+      return;
+    }
+    spOpenPrintWindow(spBuildOopsCertsHTML(names), 'OOPS Coin certs: ' + names.length);
+    spListStatus('spOopsStatus', 'Printed ' + names.length + ' certificate' + (names.length === 1 ? '' : 's'),
+      { invalid: r.invalid, notFound: r.notFound, noAddr: [] });
+  } catch (e) {
+    setStatus('spOopsStatus', 'Failed: ' + e.message, 'err');
+  }
+}
+
+async function spOopsEnvelopes() {
+  const raw = ((document.getElementById('spOopsBox') || {}).value || '')
+    .split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  if (!raw.length) { setStatus('spOopsStatus', 'Paste at least one number.', 'err'); return; }
+  try {
+    const r = await spResolveMailingList(raw);
+    const envs = r.resolved.filter(x => x.env).map(x => ({ ...x.env, note: 'OOPS Coin' }));
+    if (!envs.length) {
+      setStatus('spOopsStatus', 'No printable envelopes — none of those players have an address on file.', 'err');
+      spReportListIssues(r);
+      return;
+    }
+    await spLoadOperatorProfile();
+    const html = spBuildEnvelopesHTML(envs, _spOperatorProfile || {});
+    spOpenPrintWindow(html, 'OOPS envelopes (' + envs.length + ')');
+    spListStatus('spOopsStatus', 'Printed ' + envs.length + ' envelope' + (envs.length === 1 ? '' : 's'), r);
+  } catch (e) {
+    setStatus('spOopsStatus', 'Failed: ' + e.message, 'err');
+  }
+}
+
 window.spAdhocEnvelopes = spAdhocEnvelopes;
+window.spOopsCerts      = spOopsCerts;
+window.spOopsCoinPick   = spOopsCoinPick;
+setTimeout(spOopsCoinState, 0);
+/* ── OOPS Coin dispatch-notice email (3.221, T1) ────────────────────
+   Recipients = the pasted numbers, resolved to the PLAYER's own
+   mailing address (same resolver the envelopes print from) + their
+   email. Preflight lists everyone with checkboxes; players already
+   emailed (patch_notify_log kind='oops', status='sent') default
+   UNCHECKED. Test-send probes the operator inbox before any real
+   send. batch_id groups log rows per mailing day. */
+/* Single source of truth for the default dispatch-notice copy - the
+   "Back to default" button and any manual DB reset both use this. */
+const SP_OOPS_NOTIFY_DEFAULT = {
+  subject: 'Your OOPS Coin is on its way',
+  body_html: '<p>Hi {first_name},</p>'
+    + '<p>It is our duty \u2014 and frankly our honor \u2014 to report that your OOPS Coin and its commemorative citation have been dispatched by mail to:</p>'
+    + '<p style="margin-left:20px"><strong>{address_block}</strong></p>'
+    + '<p>If that address is wrong, reply to this email and we\u2019ll redirect the evidence.</p>'
+    + '<p>One practical note: we\u2019re certain this will sail through the post office just fine with one stamp. If the post office somehow charges you more, we\u2019ll reimburse you \u2014 just reply and let us know.</p>'
+    + '<p><em>Few have ever been there. You have.</em></p>'
+    + '<p>\u2014 South Portland Metro APA</p>'
+};
+let _spOopsNotify = { tplLoaded: false, model: null };
+
+async function spOopsNotifyLoadTemplate(force) {
+  if (_spOopsNotify.tplLoaded && !force) return;
+  try {
+    const rows = await sb('GET', 'patch_notify_template?kind=eq.oops&select=subject,body_html');
+    if (rows && rows.length) {
+      document.getElementById('spOopsNotifySubject').value = rows[0].subject;
+      document.getElementById('spOopsNotifyBody').value    = rows[0].body_html;
+      _spOopsNotify.tplLoaded = true;
+    }
+  } catch (e) { console.warn('[oops-notify] template load', e); }
+}
+
+async function spOopsNotifySaveTemplate() {
+  const stat = document.getElementById('spOopsNotifyTplStatus');
+  const subject = document.getElementById('spOopsNotifySubject').value.trim();
+  const body_html = document.getElementById('spOopsNotifyBody').value;
+  if (!subject || !body_html) { stat.textContent = 'Subject + body required.'; stat.className = 'status-line err'; return; }
+  try {
+    await sb('PATCH', 'patch_notify_template?kind=eq.oops',
+      { subject, body_html, updated_by: getDeviceId(), updated_at: new Date().toISOString() });
+    stat.textContent = '\u2713 Saved.'; stat.className = 'status-line ok';
+    setTimeout(() => { stat.textContent = ''; stat.className = 'status-line'; }, 3000);
+  } catch (e) { stat.textContent = 'Save failed: ' + e.message; stat.className = 'status-line err'; }
+}
+
+async function spOopsNotifyResetTemplate() {
+  if (!confirm('Replace the current email template with the built-in default?\n\nYour current edits will be overwritten and the default saved.')) return;
+  document.getElementById('spOopsNotifySubject').value = SP_OOPS_NOTIFY_DEFAULT.subject;
+  document.getElementById('spOopsNotifyBody').value    = SP_OOPS_NOTIFY_DEFAULT.body_html;
+  await spOopsNotifySaveTemplate();
+}
+window.spOopsNotifyResetTemplate = spOopsNotifyResetTemplate;
+
+async function spOopsNotifyBuild() {
+  const raw = ((document.getElementById('spOopsBox') || {}).value || '')
+    .split(/\r?\n/).map(t => t.trim()).filter(Boolean);
+  if (!raw.length) throw new Error('Paste at least one player number first.');
+  const r = await spResolveMailingList(raw);
+  const withAddr = r.resolved.filter(x => x.env);
+  const emailRows = withAddr.length
+    ? await sb('POST', 'rpc/lookup_emails_by_number', { p_nums: withAddr.map(x => x.mn) })
+    : [];
+  const emailByInput = new Map();
+  for (const row of (emailRows || [])) emailByInput.set(String(row.input_number), (row.email || '').trim());
+  const recips = [], noEmail = [];
+  for (const x of withAddr) {
+    const lines = [];
+    if (x.env.co_name) lines.push('c/o ' + x.env.co_name);
+    lines.push(x.env.address_line1);
+    if (x.env.address_line2) lines.push(x.env.address_line2);
+    lines.push(x.env.city + ', ' + x.env.state + ' ' + x.env.zip);
+    const email = emailByInput.get(x.mn) || '';
+    if (!email) { noEmail.push(x.name + ' (#' + x.mn.slice(-5) + ')'); continue; }
+    recips.push({
+      member_number: x.mn.slice(-5), name: x.name, email,
+      addrText: lines.join(', '),
+      ctx: { first_name: x.name.split(' ')[0], full_name: x.name,
+             address_block: lines.map(esc).join('<br>') },
+      _checked: true, _prior: false, _sentNow: false
+    });
+  }
+  if (recips.length) {
+    try {
+      const logRows = await sb('GET', 'patch_notify_log?kind=eq.oops&status=eq.sent'
+        + '&member_number=in.(' + recips.map(x => x.member_number).join(',') + ')&select=member_number');
+      const prior = new Set((logRows || []).map(lr => lr.member_number));
+      for (const rr of recips) if (prior.has(rr.member_number)) { rr._prior = true; rr._checked = false; }
+    } catch (e) { console.warn('[oops-notify] prior-sent load failed \u2014 no dedup', e); }
+  }
+  return { recips, invalid: r.invalid, notFound: r.notFound,
+           noAddr: r.noAddr.map(x => x.name + ' (#' + String(x.mn).slice(-5) + ')'), noEmail };
+}
+
+function spOopsNotifyRender() {
+  const m = _spOopsNotify.model;
+  const box = document.getElementById('spOopsNotifyPreflight');
+  if (!m) { box.innerHTML = ''; return; }
+  const li = (label, arr, color) => arr.length
+    ? '<div style="margin-top:4px;color:' + color + ';font-size:0.82rem"><strong>' + esc(label) + ' (' + arr.length + '):</strong> ' + arr.map(esc).join(', ') + '</div>'
+    : '';
+  const n = m.recips.filter(x => x._checked).length;
+  box.innerHTML =
+    '<div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-top:8px">'
+    + (m.recips.length
+        ? m.recips.map((x, i) =>
+            '<div style="display:flex;gap:8px;align-items:center;padding:4px 0;border-bottom:1px dashed #e5e7eb;font-size:0.86rem;flex-wrap:wrap">'
+            + '<label style="display:flex;gap:6px;align-items:center;cursor:pointer;min-width:0">'
+            + '<input type="checkbox" ' + (x._checked ? 'checked' : '') + ' onchange="spOopsNotifyToggle(' + i + ',this.checked)">'
+            + '<strong>' + esc(x.name) + '</strong></label>'
+            + '<span class="hint">' + esc(x.email) + '</span>'
+            + '<span class="hint" style="min-width:0">' + esc(x.addrText) + '</span>'
+            + (x._sentNow ? '<span style="background:#0a6b3a;color:#fff;padding:1px 6px;border-radius:999px;font-size:0.7rem;font-weight:700">SENT</span>'
+               : x._prior ? '<span style="background:#6b7280;color:#fff;padding:1px 6px;border-radius:999px;font-size:0.7rem;font-weight:700">SENT BEFORE</span>' : '')
+            + '</div>').join('')
+        : '<div class="hint">No emailable recipients.</div>')
+    + li('Invalid numbers', m.invalid, '#b91c1c')
+    + li('Not found', m.notFound, '#b91c1c')
+    + li('No address on file (no coin envelope either)', m.noAddr, '#b91c1c')
+    + li('No email on file \u2014 coin still mails, they just don\u2019t get the note', m.noEmail, '#a76c00')
+    + '<div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap">'
+    + '<button type="button" class="btn btn-outline btn-sm" onclick="spOopsNotifyTest()">\ud83d\udce4 Test send to me</button>'
+    + '<button type="button" class="btn btn-primary btn-sm" onclick="spOopsNotifySendAll()">Send ' + n + ' email' + (n === 1 ? '' : 's') + '</button>'
+    + '</div></div>';
+}
+
+function spOopsNotifyToggle(i, on) {
+  if (_spOopsNotify.model && _spOopsNotify.model.recips[i]) {
+    _spOopsNotify.model.recips[i]._checked = on;
+    spOopsNotifyRender();
+  }
+}
+
+async function spOopsNotifyOpen() {
+  const stat = 'spOopsNotifyStatus';
+  setStatus(stat, 'Resolving recipients\u2026', '');
+  try {
+    await spOopsNotifyLoadTemplate();
+    _spOopsNotify.model = await spOopsNotifyBuild();
+    const m = _spOopsNotify.model;
+    setStatus(stat, m.recips.length + ' emailable recipient' + (m.recips.length === 1 ? '' : 's') + ' \u2014 review below, then send.', m.recips.length ? 'ok' : 'err');
+    spOopsNotifyRender();
+  } catch (e) {
+    setStatus(stat, e.message, 'err');
+    _spOopsNotify.model = null; spOopsNotifyRender();
+  }
+}
+
+async function spOopsNotifySendOne(rec, tpl, isTest, toOverride, batchId) {
+  const r = await fetch(PATCH_NOTIFY_MAILER_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({
+      action: 'patch_notify_send',
+      admin_key: SB_KEY,
+      to: toOverride || rec.email,
+      subject: spNotifySub(tpl.subject, rec.ctx),
+      body_html: spNotifySub(tpl.body_html, rec.ctx),
+      batch_id: batchId,
+      kind: 'oops',
+      member_number: rec.member_number,
+      is_test: !!isTest
+    }),
+    redirect: 'follow',
+    keepalive: true
+  });
+  const res = JSON.parse(await r.text());
+  if (!res.ok) throw new Error(res.error || 'send failed');
+}
+
+function spOopsNotifyTpl() {
+  return {
+    subject: document.getElementById('spOopsNotifySubject').value,
+    body_html: document.getElementById('spOopsNotifyBody').value
+  };
+}
+
+async function spOopsNotifyTest() {
+  const stat = 'spOopsNotifyStatus';
+  const m = _spOopsNotify.model;
+  if (!m || !m.recips.length) { setStatus(stat, 'Nothing to sample \u2014 run Email recipients first.', 'err'); return; }
+  const sample = m.recips.find(x => x._checked) || m.recips[0];
+  const to = prompt('Send the test (using ' + sample.name + '\u2019s real data) to:', 'soldans@southportlandmetroapa.com');
+  if (!to) return;
+  setStatus(stat, 'Sending test\u2026', '');
+  try {
+    await spOopsNotifySendOne(sample, spOopsNotifyTpl(), true, to, crypto.randomUUID());
+    setStatus(stat, '\u2713 Test sent to ' + to + ' \u2014 check the address block renders before sending for real.', 'ok');
+  } catch (e) { setStatus(stat, '\u2717 ' + e.message, 'err'); }
+}
+
+async function spOopsNotifySendAll() {
+  const stat = 'spOopsNotifyStatus';
+  const m = _spOopsNotify.model;
+  if (!m) { setStatus(stat, 'Run Email recipients first.', 'err'); return; }
+  const queue = m.recips.filter(x => x._checked);
+  if (!queue.length) { setStatus(stat, 'Nothing checked.', 'err'); return; }
+  if (!confirm('Send the coin dispatch email to ' + queue.length + ' player' + (queue.length === 1 ? '' : 's') + '?\n\nEach email states the mailing address on file and the one-stamp reimbursement promise.')) return;
+  const tpl = spOopsNotifyTpl();
+  const batchId = crypto.randomUUID();
+  let sent = 0, failed = [];
+  for (const rec of queue) {
+    setStatus(stat, 'Sending ' + (sent + failed.length + 1) + '/' + queue.length + ' \u2014 ' + rec.name + '\u2026', '');
+    try {
+      await spOopsNotifySendOne(rec, tpl, false, null, batchId);
+      rec._sentNow = true; rec._prior = true; rec._checked = false; sent++;
+    } catch (e) {
+      failed.push(rec.name + ' (' + e.message + ')');
+    }
+    spOopsNotifyRender();
+  }
+  setStatus(stat, 'Done \u2014 ' + sent + ' sent' + (failed.length ? ', ' + failed.length + ' FAILED: ' + failed.join('; ') : '') + '. Log: patch_notify_log kind=oops batch ' + batchId + '.', failed.length ? 'err' : 'ok');
+}
+window.spOopsNotifyOpen = spOopsNotifyOpen;
+window.spOopsNotifyTest = spOopsNotifyTest;
+window.spOopsNotifySendAll = spOopsNotifySendAll;
+window.spOopsNotifyToggle = spOopsNotifyToggle;
+window.spOopsNotifyLoadTemplate = spOopsNotifyLoadTemplate;
+window.spOopsNotifySaveTemplate = spOopsNotifySaveTemplate;
+
+window.spOopsEnvelopes  = spOopsEnvelopes;
 
 /* ════════════════════════════════════════════════════════════════════
    OPERATOR PROFILE — minimal Phase 3 (return address only)
@@ -22973,7 +23650,6 @@ let _hpVenues = [];                            // slate.host_venues rows
 let _hpUploads = { spring: null, summer: null }; // parsed PDF rows per session
 
 async function hpInit() {
-  await hpPopulateSessions();
   await hpLoadVenues();
   await hpLoadUploads();
   await hpLoadPlanTeams();
@@ -22983,6 +23659,7 @@ async function hpInit() {
   hpRenderTeamsByVenue();
   hpRenderPlanner();
   hpWireDropZones();
+  hpStartLivePoll();
 }
 
 /* Auto-extract unique venue names from the most-recent uploaded PDFs
@@ -23033,17 +23710,6 @@ function hpAggregateLatestTeamsByVenue() {
     arr.sort((a, b) => String(a.team_number).localeCompare(String(b.team_number)));
   }
   return byVenue;
-}
-
-async function hpPopulateSessions() {
-  const sel = document.getElementById('hpTargetSession');
-  if (!sel) return;
-  /* Pull all sessions; let the user choose the planning target. Future
-     sessions might not exist yet (Fall 26 hasn't been created) so we
-     also offer the most-recent name as a string label. */
-  const sessions = await sb('GET', 'sessions?select=id,name&order=id.asc');
-  sel.innerHTML = sessions.map(s =>
-    '<option value="' + s.id + '">' + esc(s.name) + '</option>').join('');
 }
 
 /* ── Activity 1: host venues ────────────────────────────────────── */
@@ -23402,19 +24068,35 @@ async function hpRefresh() {
 const HP_TARGET_SESSION = 'Fall 2026';   // hardcoded for v0.3; picker deferred
 let _hpPlanTeams = [];
 let _hpDivMeta   = new Map();   // division_number → { name, night }
-let _hpActiveDiv = null;
 
 const HP_NIGHT_ORDER = { Monday:0, Tuesday:1, Wednesday:2, Thursday:3, Friday:4, Saturday:5, Sunday:6 };
 
+let _hpPlanDivs = [];
+let _hpPlanDivById = new Map();
 async function hpLoadPlanTeams() {
   try {
     _hpPlanTeams = await sb('GET',
       'host_plan_teams?target_session=eq.' + encodeURIComponent(HP_TARGET_SESSION)
-      + '&select=*&order=team_number_full.asc');
+      + '&select=*&order=team_name.asc');
   } catch (e) {
     _hpPlanTeams = [];
     console.warn('[hostplan] plan teams load failed', e);
   }
+  try {
+    _hpPlanDivs = await sb('GET',
+      'host_plan_divisions?target_session=eq.' + encodeURIComponent(HP_TARGET_SESSION)
+      + '&select=*&order=name.asc');
+    _hpPlanDivById = new Map(_hpPlanDivs.map(d => [d.id, d]));
+  } catch (e) {
+    _hpPlanDivs = [];
+    _hpPlanDivById = new Map();
+    console.warn('[hostplan] plan divisions load failed', e);
+  }
+}
+
+function hpDivIdForSource(sourceDiv) {
+  const d = _hpPlanDivs.find(x => x.source_division_number === sourceDiv);
+  return d ? d.id : null;
 }
 
 /* Division names + nights from slate.divisions. Spring first so Summer
@@ -23449,6 +24131,11 @@ function hpNormalizeName(name) {
    Existing rows keep operator edits (return_status, placement, notes);
    sync only fills blank source fields and session flags. */
 async function hpSyncFromUploads() {
+  /* Merge Summer + Spring uploads into one entity per TEAM. Team numbers
+     are reassigned every session (2026-07-08: 197/215 number matches were
+     different teams) — identity is (division, normalized name), with a
+     name-only second pass for unambiguous division-movers. Numbers are
+     stored as provenance only. All writes key on the row id. */
   const summer = (_hpUploads.summer && Array.isArray(_hpUploads.summer.parsed_json))
     ? _hpUploads.summer.parsed_json : [];
   const spring = (_hpUploads.spring && Array.isArray(_hpUploads.spring.parsed_json))
@@ -23457,63 +24144,92 @@ async function hpSyncFromUploads() {
     alert('No parsed uploads found. Upload the Summer + Spring Team Screen PDFs in section 2 first.');
     return;
   }
-  const existing = new Map();
-  for (const r of _hpPlanTeams) existing.set(r.team_number_full, r);
-
-  const merged = new Map();   // team_number_full → record under construction
-  const takeRow = (t, which) => {
-    const tn = String(t.team_number || '').trim();
-    if (!/^\d{5}$/.test(tn)) return;              // skip malformed numbers
-    if (!hpIsSpmTeam(tn)) return;                 // CRA divisions stay out of the plan
-    let rec = merged.get(tn);
-    if (!rec) {
-      rec = { team_number_full: tn, division_number: tn.slice(0, 3),
-              team_name: '', summer_venue: null, spring_venue: null,
-              in_summer: false, in_spring: false };
-      merged.set(tn, rec);
+  const take = arr => {
+    const out = [];
+    for (const t of arr) {
+      const tn = String((t && t.team_number) || '').trim();
+      if (!/^\d{5}$/.test(tn)) continue;
+      if (!hpIsSpmTeam(tn)) continue;
+      const name = hpNormalizeName(t.team_name);
+      if (!name) continue;
+      out.push({ tn, div: tn.slice(0, 3), name, k: hpMatchKey(name), venue: t.venue || null });
     }
-    const name = hpNormalizeName(t.team_name);
-    if (which === 'summer') {
-      rec.in_summer = true;
-      rec.summer_venue = t.venue || rec.summer_venue;
-      if (name) rec.team_name = name;                       // summer name wins
-    } else {
-      rec.in_spring = true;
-      rec.spring_venue = t.venue || rec.spring_venue;
-      if (name && !rec.team_name) rec.team_name = name;     // spring fills gaps
-    }
+    return out;
   };
-  for (const t of summer) takeRow(t, 'summer');
-  for (const t of spring) takeRow(t, 'spring');
+  const su = take(summer), sp = take(spring);
 
-  const toInsert = [];
-  const toPatch  = [];
-  for (const [tn, rec] of merged) {
-    const prior = existing.get(tn);
+  /* Pass 1: (name, division) exact. Pass 2: name-only when exactly one
+     leftover on each side (division-movers). */
+  const spLeft = new Set(sp.map((_, i) => i));
+  const byKD = new Map();
+  sp.forEach((r, i) => { const kk = r.k + '|' + r.div; if (!byKD.has(kk)) byKD.set(kk, []); byKD.get(kk).push(i); });
+  const attach = new Map();
+  su.forEach((s, si) => {
+    const list = (byKD.get(s.k + '|' + s.div) || []).filter(i => spLeft.has(i));
+    if (list.length === 1) { attach.set(si, list[0]); spLeft.delete(list[0]); }
+  });
+  const spByK = new Map();
+  for (const i of spLeft) { const k = sp[i].k; if (!spByK.has(k)) spByK.set(k, []); spByK.get(k).push(i); }
+  su.forEach((s, si) => {
+    if (attach.has(si)) return;
+    const cand = (spByK.get(s.k) || []).filter(i => spLeft.has(i));
+    if (cand.length === 1) { attach.set(si, cand[0]); spLeft.delete(cand[0]); }
+  });
+
+  /* Manual links claim spring NAMES — re-syncs must not resurrect them. */
+  const claimed = new Set(_hpPlanTeams.filter(r => r.spring_team_name).map(r => hpMatchKey(r.spring_team_name) + '|' + (r.spring_team_number ? String(r.spring_team_number).slice(0, 3) : '')));
+  const existing = new Map();
+  for (const r of _hpPlanTeams) existing.set((r.division_number || '') + '|' + hpMatchKey(r.team_name), r);
+
+  const toInsert = [], toPatch = [], seen = new Set();
+  const divBySource = new Map(_hpPlanDivs.filter(d => d.source_division_number).map(d => [d.source_division_number, d.id]));
+  su.forEach((s, si) => {
+    const spI = attach.has(si) ? sp[attach.get(si)] : null;
+    const key = s.div + '|' + s.k;
+    if (seen.has(key)) return;
+    seen.add(key);
+    const prior = existing.get(key);
     if (!prior) {
       toInsert.push({
-        target_session:   HP_TARGET_SESSION,
-        team_number_full: tn,
-        division_number:  rec.division_number,
-        team_name:        rec.team_name || ('Team ' + tn),
-        summer_team_number: rec.in_summer ? tn : null,
-        summer_venue:     rec.summer_venue,
-        spring_venue:     rec.spring_venue,
-        in_summer:        rec.in_summer,
-        in_spring:        rec.in_spring,
-        return_status:    'unknown',
-        is_new_for_fall:  false,
-        placement_status: 'unassigned',
-        updated_by:       getDeviceId()
+        target_session: HP_TARGET_SESSION, team_number_full: s.tn, division_number: s.div,
+        plan_division_id: divBySource.get(s.div) || null,
+        team_name: s.name, summer_team_number: s.tn, summer_venue: s.venue, in_summer: true,
+        in_spring: !!spI, spring_venue: spI ? spI.venue : null,
+        spring_team_number: spI ? spI.tn : null, spring_team_name: spI ? spI.name : null,
+        return_status: 'unknown', is_new_for_fall: false, placement_status: 'unassigned',
+        updated_by: getDeviceId()
       });
     } else {
       const patch = {};
-      if (!prior.summer_venue && rec.summer_venue) patch.summer_venue = rec.summer_venue;
-      if (!prior.spring_venue && rec.spring_venue) patch.spring_venue = rec.spring_venue;
-      if (!prior.division_number)                  patch.division_number = rec.division_number;
-      if (rec.in_summer && !prior.in_summer)       patch.in_summer = true;
-      if (rec.in_spring && !prior.in_spring)       patch.in_spring = true;
-      if (Object.keys(patch).length) toPatch.push({ tn, patch });
+      if (!prior.in_summer) { patch.in_summer = true; patch.summer_venue = s.venue; patch.summer_team_number = s.tn; }
+      else if (!prior.summer_venue && s.venue) patch.summer_venue = s.venue;
+      if (spI && !prior.in_spring) {
+        patch.in_spring = true; patch.spring_venue = spI.venue;
+        patch.spring_team_number = spI.tn; patch.spring_team_name = spI.name;
+      } else if (spI && !prior.spring_venue && spI.venue) patch.spring_venue = spI.venue;
+      if (Object.keys(patch).length) toPatch.push({ id: prior.id, patch });
+    }
+  });
+  for (const i of spLeft) {
+    const r = sp[i];
+    if (claimed.has(r.k + '|' + r.div) || claimed.has(r.k + '|')) continue;
+    const key = r.div + '|' + r.k;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const prior = existing.get(key);
+    if (!prior) {
+      toInsert.push({
+        target_session: HP_TARGET_SESSION, team_number_full: r.tn, division_number: r.div,
+        plan_division_id: divBySource.get(r.div) || null,
+        team_name: r.name, spring_team_number: r.tn, spring_venue: r.venue,
+        in_spring: true, in_summer: false,
+        return_status: 'unknown', is_new_for_fall: false, placement_status: 'unassigned',
+        updated_by: getDeviceId()
+      });
+    } else {
+      const patch = {};
+      if (!prior.in_spring) { patch.in_spring = true; patch.spring_venue = r.venue; patch.spring_team_number = r.tn; }
+      if (Object.keys(patch).length) toPatch.push({ id: prior.id, patch });
     }
   }
 
@@ -23524,8 +24240,7 @@ async function hpSyncFromUploads() {
       await sb('POST', 'host_plan_teams', toInsert.slice(i, i + CHUNK));
     }
     for (const p of toPatch) {
-      await sb('PATCH', 'host_plan_teams?target_session=eq.' + encodeURIComponent(HP_TARGET_SESSION)
-        + '&team_number_full=eq.' + encodeURIComponent(p.tn), p.patch);
+      await sb('PATCH', 'host_plan_teams?id=eq.' + p.id, p.patch);
     }
     await hpLoadPlanTeams();
     await hpLoadDivisionMeta();
@@ -23568,204 +24283,570 @@ function hpEffectiveVenue(t) {
   return { name: homeName || '(no venue on file)', venue: hpVenueByName(homeName) };
 }
 
-/* Per-division fit stats — powers the nav badges. */
-function hpDivStats(div) {
-  const teams = _hpPlanTeams.filter(t => t.division_number === div);
-  const groups = new Map();
-  for (const t of teams) {
-    if (t.return_status === 'no') continue;
-    const eff = hpEffectiveVenue(t);
-    const key = eff.name.toLowerCase();
-    if (!groups.has(key)) groups.set(key, { venue: eff.venue, count: 0 });
-    groups.get(key).count++;
-  }
-  let overBy = 0;
-  for (const g of groups.values()) {
-    const cap = g.venue ? 2 * (g.venue.num_tables || 0) : 0;
-    if (cap > 0 && g.count > cap) overBy += g.count - cap;
-  }
-  const undecided = teams.filter(t => t.return_status === 'unknown').length;
-  return { total: teams.length, overBy, undecided };
+/* ── Fall placement worksheet (3.199) ───────────────────────
+ * One ledger row per team-entity; capacity board per (venue, night).
+ * Slice 1 is read-only — assignment writes come next and will reuse
+ * hpMoveTeam / hpSetReturnStatus below. Never blocks: capacity states
+ * are display-only (gray empty / green under / amber at / red over).
+ */
+let _hpWs = { filter: 'all', q: '', div: '' };
+
+/* A team's play night: explicit night_of_play wins, else its division's
+   night from slate.divisions meta (Summer wins over Spring upstream). */
+function hpTeamNight(t) {
+  if (t.night_of_play) return t.night_of_play;
+  const pd = _hpPlanDivById.get(t.plan_division_id);
+  if (pd && pd.night) return pd.night;
+  const m = _hpDivMeta.get(t.division_number);
+  return (m && m.night) || '';
 }
 
-/* ── Renders ── */
+/* Default fall venue: last venue played — Summer beats Spring. Null
+   when the name isn't in host_venues (capacity unknowable). */
+function hpDefaultVenue(t) {
+  const name = t.summer_venue || t.spring_venue || '';
+  return name ? hpVenueByName(name) : null;
+}
+
+/* Effective fall placement. States:
+   not_playing > confirmed (explicit pick) > defaulted (last-played
+   venue, counts toward capacity as-if-returning) > unplaced. */
+function hpEffectivePlacement(t) {
+  if (t.return_status === 'no') return { venue: null, state: 'not_playing' };
+  if (t.placement_venue_id) return { venue: hpVenueById(t.placement_venue_id), state: 'confirmed' };
+  const dv = hpDefaultVenue(t);
+  return dv ? { venue: dv, state: 'defaulted' } : { venue: null, state: 'unplaced' };
+}
+
+/* Back-compat disposition used by filters/summary. */
+function hpFallState(t) {
+  const st = hpEffectivePlacement(t).state;
+  return st === 'confirmed' ? 'placed' : (st === 'not_playing' ? 'not_playing' : 'unassigned');
+}
+
+const HP_WS_FILTERS = [
+  ['all', 'All'], ['unassigned', 'Unconfirmed'], ['placed', 'Confirmed'],
+  ['not_playing', 'Not playing'], ['both', 'Both sessions'],
+  ['spring_only', 'Spring only'], ['summer_only', 'Summer only'],
+  ['new', 'New for Fall'],
+];
+
+function hpWsMatches(t, f) {
+  switch (f) {
+    case 'unassigned':  return hpFallState(t) === 'unassigned';
+    case 'placed':      return hpFallState(t) === 'placed';
+    case 'not_playing': return hpFallState(t) === 'not_playing';
+    case 'both':        return !!(t.in_spring && t.in_summer);
+    case 'spring_only': return !!(t.in_spring && !t.in_summer);
+    case 'summer_only': return !!(t.in_summer && !t.in_spring);
+    case 'new':         return !!t.is_new_for_fall;
+    default:            return true;
+  }
+}
+
+function hpWsFiltered() {
+  const q = _hpWs.q.toLowerCase().trim();
+  return _hpPlanTeams
+    .filter(t => hpWsMatches(t, _hpWs.filter))
+    .filter(t => !_hpWs.div || String(t.plan_division_id) === _hpWs.div)
+    .filter(t => !q
+      || (t.team_name || '').toLowerCase().includes(q)
+      || (t.summer_venue || '').toLowerCase().includes(q)
+      || (t.spring_venue || '').toLowerCase().includes(q))
+    .sort((a, b) => (a.team_name || '').localeCompare(b.team_name || '')
+      || ((a.id || 0) - (b.id || 0)));
+}
+
+function hpWsBadges(t) {
+  let b = '';
+  if (t.in_summer) b += ' <span style="background:#0031a1;color:#fff;border-radius:4px;padding:0 4px;font-size:0.62rem;font-weight:700" title="Played Summer 2026">SU</span>';
+  if (t.in_spring) b += ' <span style="background:#7c3aed;color:#fff;border-radius:4px;padding:0 4px;font-size:0.62rem;font-weight:700" title="Played Spring 2026">SP</span>';
+  if (t.is_new_for_fall) b += ' <span style="background:#0a6b3a;color:#fff;border-radius:4px;padding:0 4px;font-size:0.62rem;font-weight:700">NEW</span>';
+  return b;
+}
+
+/* ── Cross-session same-team matching (slice 2) ──────────────────
+ * Spring-only + Summer-only rows that are really one team renumbered
+ * between sessions. Auto-suggest by normalized name; Link folds the
+ * Spring row into the Summer row (spring_team_number remembers the
+ * folded number — Unlink splits it back). Manual link covers renames.
+ * hpSyncFromUploads skips folded spring numbers so re-syncs never
+ * resurrect them (snapshot: slate.host_plan_teams_snap_0708).
+ */
+function hpMatchKey(name) { return hpNormalizeName(name).toLowerCase(); }
+
+function hpSpringOnly() { return _hpPlanTeams.filter(t => t.in_spring && !t.in_summer && !t.is_new_for_fall); }
+function hpSummerOnly() { return _hpPlanTeams.filter(t => t.in_summer && !t.in_spring); }
+
+function hpMatchSuggestions() {
+  const byName = new Map();
+  for (const s of hpSummerOnly()) {
+    const k = hpMatchKey(s.team_name);
+    if (!k) continue;
+    if (!byName.has(k)) byName.set(k, []);
+    byName.get(k).push(s);
+  }
+  const out = [];
+  for (const sp of hpSpringOnly()) {
+    for (const su of (byName.get(hpMatchKey(sp.team_name)) || [])) out.push({ spring: sp, summer: su });
+  }
+  return out;
+}
+
+/* ── Division chips: drive ledger AND board (board shows the
+   division's night). Ordered by night then division number. ── */
+function hpRenderDivChips() {
+  const el = document.getElementById('hpDivChips');
+  if (!el) return;
+  const divs = _hpPlanDivs.slice().sort((a, b) =>
+    ((HP_NIGHT_ORDER[a.night] ?? 9) - (HP_NIGHT_ORDER[b.night] ?? 9)) || a.name.localeCompare(b.name));
+  const chip = (val, label, sub, active) =>
+    '<button type="button" onclick="hpWsSetDiv(\'' + esc(val) + '\')"'
+    + ' style="display:inline-flex;align-items:baseline;gap:5px;padding:4px 9px;border-radius:8px;cursor:pointer;font-size:0.76rem;'
+    + (active ? 'border:2px solid #7c3aed;background:#f5f3ff;font-weight:700'
+              : 'border:1px solid var(--border);background:#fff')
+    + '">' + esc(label)
+    + (sub ? ' <span style="color:#9ca3af;font-size:0.64rem">' + esc(sub) + '</span>' : '')
+    + '</button>';
+  let html = chip('', 'All divisions', '', !_hpWs.div);
+  for (const d of divs) html += chip(String(d.id), d.name, d.night ? d.night.slice(0, 3) : '', _hpWs.div === String(d.id));
+  html += '<button type="button" onclick="hpOpenNewDivModal()"'
+    + ' style="padding:4px 9px;border-radius:8px;cursor:pointer;font-size:0.76rem;border:1px dashed var(--border);background:#fff;color:#6b7280">+ New division</button>';
+  el.innerHTML = html;
+}
+
+function hpWsSetDiv(d) {
+  _hpWs.div = d || '';
+  hpRenderDivChips();
+  hpRenderWorksheet();
+  hpRenderCapacityBoard();
+}
+
+function hpRenderMatchPanel() {
+  const el = document.getElementById('hpMatchPanel');
+  if (!el) return;
+  const springOnly = hpSpringOnly();
+  const summerOnly = hpSummerOnly();
+  if (!springOnly.length || !summerOnly.length) { el.innerHTML = ''; return; }
+  const sugg = hpMatchSuggestions();
+  const opt = (t, venueField) => '<option value="' + t.id + '">'
+    + esc(t.team_name) + (t[venueField] ? ' (' + esc(t[venueField]) + ')' : '') + '</option>';
+  let html = '<details' + (sugg.length ? ' open' : '') + ' style="margin-bottom:12px;border:1px solid var(--border);border-radius:8px;padding:10px;background:#fffbeb">'
+    + '<summary style="cursor:pointer;font-weight:700;font-size:0.9rem">Same-team matching'
+    + ' <span class="hint" style="font-weight:400">' + sugg.length + ' suggestion' + (sugg.length === 1 ? '' : 's')
+    + ' \u00b7 ' + springOnly.length + ' Spring-only \u00b7 ' + summerOnly.length + ' Summer-only</span></summary>'
+    + '<div style="margin-top:8px">';
+  for (const m of sugg.slice(0, 40)) {
+    html += '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px solid #fde68a;font-size:0.84rem;flex-wrap:wrap">'
+      + '<span style="min-width:0"><span style="background:#7c3aed;color:#fff;border-radius:4px;padding:0 4px;font-size:0.62rem;font-weight:700">SP</span> '
+      + esc(m.spring.team_name) + ' <span class="hint">(' + esc(m.spring.spring_venue || '?') + ')</span></span>'
+      + '<span style="color:#9ca3af">\u21c4</span>'
+      + '<span style="min-width:0"><span style="background:#0031a1;color:#fff;border-radius:4px;padding:0 4px;font-size:0.62rem;font-weight:700">SU</span> '
+      + esc(m.summer.team_name) + ' <span class="hint">(' + esc(m.summer.summer_venue || '?') + ')</span></span>'
+      + '<button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="hpLinkTeams(' + m.spring.id + ',' + m.summer.id + ')">Link</button>'
+      + '</div>';
+  }
+  if (sugg.length > 40) html += '<p class="hint">\u2026and ' + (sugg.length - 40) + ' more (link some to shorten the list).</p>';
+  html += '<div style="display:flex;gap:8px;align-items:center;margin-top:10px;padding-top:8px;border-top:1px solid #fde68a;flex-wrap:wrap">'
+    + '<span style="font-size:0.8rem;font-weight:600">Manual link:</span>'
+    + '<select id="hpMlSpring" style="max-width:240px;padding:5px;border:1px solid var(--border);border-radius:6px;font-size:0.8rem">'
+    + '<option value="">\u2014 Spring-only team \u2014</option>' + springOnly.map(t => opt(t, 'spring_venue')).join('') + '</select>'
+    + '<span style="color:#9ca3af">\u21c4</span>'
+    + '<select id="hpMlSummer" style="max-width:240px;padding:5px;border:1px solid var(--border);border-radius:6px;font-size:0.8rem">'
+    + '<option value="">\u2014 Summer-only team \u2014</option>' + summerOnly.map(t => opt(t, 'summer_venue')).join('') + '</select>'
+    + '<button class="btn btn-outline btn-sm" onclick="hpManualLink()">Link</button>'
+    + '</div></div></details>';
+  el.innerHTML = html;
+}
+
+/* Fold the Spring row into the Summer row (by row id). Carries
+   captain/notes the Summer row lacks; Summer keeps its own state.
+   spring_team_name is the identity the re-sync guard keys on. */
+async function hpLinkTeams(springId, summerId) {
+  const sp = _hpPlanTeams.find(t => t.id === Number(springId));
+  const su = _hpPlanTeams.find(t => t.id === Number(summerId));
+  if (!sp || !su) { alert('Row not found \u2014 refresh and retry.'); return; }
+  if (su.in_spring) { alert(su.team_name + ' already has Spring data.'); return; }
+  const patch = {
+    in_spring: true,
+    spring_venue: sp.spring_venue || null,
+    spring_team_number: sp.spring_team_number || sp.team_number_full || null,
+    spring_team_name: sp.team_name || null,
+    updated_by: getDeviceId()
+  };
+  if (!su.captain_name && sp.captain_name) patch.captain_name = sp.captain_name;
+  if (sp.notes) patch.notes = (su.notes ? su.notes + ' \u00b7 ' : '') + sp.notes;
+  try {
+    await sb('PATCH', 'host_plan_teams?id=eq.' + su.id, patch);
+    await sb('DELETE', 'host_plan_teams?id=eq.' + sp.id, null);
+    Object.assign(su, patch);
+    _hpPlanTeams = _hpPlanTeams.filter(t => t.id !== sp.id);
+    hpRenderPlanner();
+  } catch (e) { alert('Link failed: ' + e.message); }
+}
+
+/* Split a folded Spring row back out (by summer row id). */
+async function hpUnlinkTeam(summerId) {
+  const su = _hpPlanTeams.find(t => t.id === Number(summerId));
+  if (!su || !su.spring_team_name) return;
+  const springRow = {
+    target_session: HP_TARGET_SESSION,
+    team_number_full: su.spring_team_number || ('SP' + su.id),
+    division_number: su.spring_team_number ? su.spring_team_number.slice(0, 3) : su.division_number,
+    plan_division_id: su.spring_team_number ? hpDivIdForSource(su.spring_team_number.slice(0, 3)) : su.plan_division_id,
+    team_name: su.spring_team_name,
+    spring_team_number: su.spring_team_number || null,
+    spring_venue: su.spring_venue,
+    in_spring: true, in_summer: false,
+    return_status: 'unknown', is_new_for_fall: false,
+    placement_status: 'unassigned',
+    updated_by: getDeviceId()
+  };
+  try {
+    await sb('POST', 'host_plan_teams', springRow);
+    await sb('PATCH', 'host_plan_teams?id=eq.' + su.id,
+      { in_spring: false, spring_venue: null, spring_team_number: null, spring_team_name: null, updated_by: getDeviceId() });
+    su.in_spring = false; su.spring_venue = null; su.spring_team_number = null; su.spring_team_name = null;
+    await hpLoadPlanTeams();
+    hpRenderPlanner();
+  } catch (e) { alert('Unlink failed: ' + e.message); }
+}
+
+function hpManualLink() {
+  const sp = document.getElementById('hpMlSpring').value;
+  const su = document.getElementById('hpMlSummer').value;
+  if (!sp || !su) { alert('Pick a Spring-only and a Summer-only team.'); return; }
+  hpLinkTeams(sp, su);
+}
+
 function hpRenderPlanner() {
-  hpRenderDivNav();
-  hpRenderDivPane();
+  hpRenderWsChips();
+  hpRenderDivChips();
+  hpRenderMatchPanel();
+  hpRenderWorksheet();
+  hpRenderCapacityBoard();
   hpPopulateModalDivisions();
   const s = document.getElementById('hpPlanSummary');
   if (s) {
-    const divs = hpDivisionsList();
-    const over = divs.filter(d => hpDivStats(d).overBy > 0).length;
-    s.textContent = _hpPlanTeams.length
-      ? divs.length + ' divisions · ' + _hpPlanTeams.length + ' teams · ' + over + ' division' + (over === 1 ? '' : 's') + ' over capacity'
+    const n = _hpPlanTeams.length;
+    let conf = 0, def = 0, unp = 0, np = 0;
+    for (const t of _hpPlanTeams) {
+      const st = hpEffectivePlacement(t).state;
+      if (st === 'confirmed') conf++; else if (st === 'defaulted') def++;
+      else if (st === 'unplaced') unp++; else np++;
+    }
+    s.textContent = n
+      ? n + ' teams · ' + conf + ' confirmed · ' + def + ' default · ' + unp + ' no venue · ' + np + ' not playing'
       : 'Nothing synced yet — click 🔄 Sync from Summer + Spring.';
   }
 }
 
-function hpRenderDivNav() {
-  const el = document.getElementById('hpDivNav');
+function hpRenderWsChips() {
+  const el = document.getElementById('hpWsChips');
   if (!el) return;
-  const divs = hpDivisionsList();
-  if (!divs.length) { el.innerHTML = ''; return; }
-  if (!_hpActiveDiv || !divs.includes(_hpActiveDiv)) _hpActiveDiv = divs[0];
-
-  /* Group chips under night headers so the nav reads like the week. */
-  const byNight = new Map();
-  for (const d of divs) {
-    const night = (_hpDivMeta.get(d) || {}).night || 'Other';
-    if (!byNight.has(night)) byNight.set(night, []);
-    byNight.get(night).push(d);
-  }
-  const nights = [...byNight.keys()].sort((a, b) => (HP_NIGHT_ORDER[a] ?? 9) - (HP_NIGHT_ORDER[b] ?? 9));
-  let html = '';
-  for (const night of nights) {
-    html += '<div style="margin-bottom:8px">'
-      + '<div style="font-size:0.72rem;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px">' + esc(night) + '</div>'
-      + '<div style="display:flex;gap:6px;flex-wrap:wrap">';
-    for (const d of byNight.get(night)) {
-      const st = hpDivStats(d);
-      const active = d === _hpActiveDiv;
-      const badge = st.overBy > 0
-        ? '<span style="background:#b91c1c;color:#fff;border-radius:999px;padding:0 6px;font-size:0.68rem;font-weight:700">+' + st.overBy + '</span>'
-        : (st.undecided === 0 && st.total > 0
-            ? '<span style="color:#0a6b3a;font-weight:700">✓</span>'
-            : '<span style="color:#9ca3af;font-size:0.7rem">' + st.undecided + '?</span>');
-      const m = _hpDivMeta.get(d);
-      html += '<button type="button" onclick="hpSelectDivision(\'' + esc(d) + '\')"'
-        + ' title="' + esc(m && m.name ? m.name : d) + '"'
-        + ' style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:8px;cursor:pointer;font-size:0.82rem;'
-        + (active
-            ? 'border:2px solid #0031a1;background:#eef3ff;font-weight:700'
-            : 'border:1px solid var(--border);background:#fff')
-        + '">'
-        + esc(m && m.name ? m.name : ('Division ' + d))
-        + ' <span style="color:#9ca3af;font-size:0.7rem">' + esc(d) + '</span> '
-        + badge
-        + '</button>';
-    }
-    html += '</div></div>';
-  }
-  el.innerHTML = html;
+  el.innerHTML = HP_WS_FILTERS.map(([key, label]) => {
+    const count = _hpPlanTeams.filter(t => hpWsMatches(t, key)).length;
+    const active = _hpWs.filter === key;
+    return '<button type="button" onclick="hpWsSetFilter(\'' + key + '\')"'
+      + ' style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:8px;cursor:pointer;font-size:0.8rem;'
+      + (active ? 'border:2px solid #0031a1;background:#eef3ff;font-weight:700'
+                : 'border:1px solid var(--border);background:#fff')
+      + '">' + esc(label)
+      + ' <span style="color:#9ca3af;font-size:0.7rem">' + count + '</span></button>';
+  }).join('');
 }
 
-function hpSelectDivision(div) {
-  _hpActiveDiv = div;
-  hpRenderDivNav();
-  hpRenderDivPane();
-}
-
-function hpRenderDivPane() {
-  const el = document.getElementById('hpDivPane');
+function hpRenderWorksheet() {
+  const el = document.getElementById('hpWorksheet');
   if (!el) return;
-  if (!_hpActiveDiv) { el.innerHTML = ''; return; }
-  const div = _hpActiveDiv;
-  const meta = _hpDivMeta.get(div) || {};
-  const teams = _hpPlanTeams.filter(t => t.division_number === div);
-  if (!teams.length) {
-    el.innerHTML = '<p class="hint" style="margin:0">No teams in this division yet.</p>';
+  if (!_hpPlanTeams.length) {
+    el.innerHTML = '<p class="hint" style="margin:0">No plan rows yet \u2014 sync from the uploads above.</p>';
     return;
   }
+  const rows = hpWsFiltered();
+  const prevScroll = (document.getElementById('hpWsScroll') || {}).scrollTop || 0;
+  const venueOpts = _hpVenues.slice().sort((a, b) => a.name.localeCompare(b.name));
+  const NIGHTS = Object.keys(HP_NIGHT_ORDER);
+  const divsSorted = _hpPlanDivs.slice().sort((a, b) =>
+    ((HP_NIGHT_ORDER[a.night] ?? 9) - (HP_NIGHT_ORDER[b.night] ?? 9)) || a.name.localeCompare(b.name));
+  const divOpts = divsSorted.map(d =>
+    '<option value="' + d.id + '">' + esc(d.name) + (d.night ? ' (' + esc(d.night.slice(0, 3)) + ')' : '') + '</option>').join('');
 
-  /* Group by effective venue. */
-  const groups = new Map();   // lower(name) → { name, venue, teams: [] }
-  for (const t of teams) {
-    const eff = hpEffectiveVenue(t);
-    const key = eff.name.toLowerCase();
-    if (!groups.has(key)) groups.set(key, { name: eff.name, venue: eff.venue, teams: [] });
-    groups.get(key).teams.push(t);
+  /* Group by plan division (unmapped rows under "(no division)"). */
+  const byDiv = new Map();
+  for (const t of rows) {
+    const k = t.plan_division_id || 0;
+    if (!byDiv.has(k)) byDiv.set(k, []);
+    byDiv.get(k).push(t);
   }
-  const sorted = [...groups.values()].sort((a, b) => b.teams.length - a.teams.length || a.name.localeCompare(b.name));
+  const groupOrder = [...byDiv.keys()].sort((a, b) => {
+    const da = _hpPlanDivById.get(a), db = _hpPlanDivById.get(b);
+    const na = da ? (HP_NIGHT_ORDER[da.night] ?? 9) : 99;
+    const nb = db ? (HP_NIGHT_ORDER[db.night] ?? 9) : 99;
+    return na - nb || String(da ? da.name : 'zzz').localeCompare(String(db ? db.name : 'zzz'));
+  });
 
-  const venueOptions = _hpVenues.slice().sort((a, b) => a.name.localeCompare(b.name))
-    .map(v => '<option value="' + v.id + '">' + esc(v.name) + '</option>').join('');
+  let html = '<div id="hpWsScroll" style="border:1px solid var(--border);border-radius:8px;overflow:auto;max-height:78vh">'
+    + '<table style="width:100%;border-collapse:collapse;font-size:0.85rem">'
+    + '<thead><tr>'
+    + ['Team', 'Spring', 'Summer', 'Division / Night', 'Fall placement']
+        .map(h => '<th style="position:sticky;top:0;background:#f8fafc;z-index:1;text-align:left;padding:8px 10px;border-bottom:2px solid var(--border);font-size:0.72rem;text-transform:uppercase;letter-spacing:0.04em;color:#6b7280">' + h + '</th>').join('')
+    + '</tr></thead><tbody>';
 
-  const statusBtn = (t, val, label, color) => {
-    const on = t.return_status === val;
-    return '<button type="button" onclick="hpSetReturnStatus(\'' + esc(t.team_number_full) + '\',\'' + val + '\')"'
-      + ' title="' + esc(label) + '"'
-      + ' style="padding:2px 8px;border-radius:6px;font-size:0.74rem;font-weight:700;cursor:pointer;'
-      + (on ? 'border:2px solid ' + color + ';background:' + color + ';color:#fff'
-            : 'border:1px solid var(--border);background:#fff;color:#666')
-      + '">' + esc(label) + '</button>';
+  for (const gk of groupOrder) {
+    const d = _hpPlanDivById.get(gk);
+    const teams = byDiv.get(gk).slice().sort((a, b) => (a.team_name || '').localeCompare(b.team_name || ''));
+    const conf = teams.filter(t => hpEffectivePlacement(t).state === 'confirmed').length;
+    html += '<tr><td colspan="5" style="padding:9px 10px;background:#eef3ff;border-top:2px solid #c7d6f5;font-weight:700;font-size:0.82rem">'
+      + esc(d ? d.name : '(no division)')
+      + (d && d.night ? ' <span style="font-weight:400;color:#6b7280">\u00b7 ' + esc(d.night) + 's</span>' : '')
+      + ' <span style="font-weight:400;color:#6b7280;font-size:0.72rem">\u00b7 ' + teams.length + ' team' + (teams.length === 1 ? '' : 's') + ' \u00b7 ' + conf + ' confirmed</span>'
+      + '</td></tr>';
+    for (const t of teams) {
+      const eff = hpEffectivePlacement(t);
+      const np = eff.state === 'not_playing';
+      const effNight = hpTeamNight(t);
+      const defV = hpDefaultVenue(t);
+      const emptyLabel = np ? '\u2014' : (defV ? 'default: ' + defV.name : '\u2014 no venue \u2014');
+      const divSel = '<select onchange="hpMoveDivision(' + t.id + ', this.value)"'
+        + ' title="Move to a different Fall division \u2014 the team\u2019s night snaps to the division\u2019s night"'
+        + ' style="max-width:170px;padding:3px 5px;border:1px solid var(--border);border-radius:6px;font-size:0.76rem;background:#fff;margin-bottom:3px">'
+        + '<option value=""' + (t.plan_division_id ? '' : ' selected') + '>\u2014 division \u2014</option>'
+        + divsSorted.map(dd => '<option value="' + dd.id + '"' + (t.plan_division_id === dd.id ? ' selected' : '') + '>'
+            + esc(dd.name) + (dd.night ? ' (' + esc(dd.night.slice(0, 3)) + ')' : '') + '</option>').join('')
+        + '</select>';
+      const nightSel = '<select onchange="hpSetNight(' + t.id + ', this.value)"'
+        + ' title="Play night \u2014 defaults from the division"'
+        + ' style="max-width:110px;padding:3px 5px;border:1px solid var(--border);border-radius:6px;font-size:0.78rem;background:#fff">'
+        + '<option value=""' + (effNight ? '' : ' selected') + '>\u2014</option>'
+        + NIGHTS.map(n => '<option value="' + n + '"' + (effNight === n ? ' selected' : '') + '>' + n + '</option>').join('')
+        + '</select>';
+      const npBtn = '<button type="button" onclick="hpToggleNotPlaying(' + t.id + ')"'
+        + ' title="Toggle Not playing Fall"'
+        + ' style="padding:3px 8px;border-radius:6px;font-size:0.74rem;font-weight:700;cursor:pointer;white-space:nowrap;'
+        + (np ? 'border:2px solid #b91c1c;background:#b91c1c;color:#fff'
+              : 'border:1px solid var(--border);background:#fff;color:#6b7280')
+        + '">Not playing</button>';
+      const venueSel = '<select onchange="hpMoveTeam(' + t.id + ', this.value)"'
+        + ' title="Fall venue \u2014 unpicked teams default to their last-played venue and count toward its capacity; picking confirms. Picking a venue for a Not-playing team flips it back to playing."'
+        + ' style="max-width:190px;padding:3px 5px;border:1px solid var(--border);border-radius:6px;font-size:0.78rem;'
+        + (eff.state === 'defaulted' ? 'background:#fffbeb;color:#92400e;font-style:italic' : 'background:#fff')
+        + '">'
+        + '<option value=""' + (t.placement_venue_id ? '' : ' selected') + '>' + esc(emptyLabel) + '</option>'
+        + venueOpts.map(v => '<option value="' + v.id + '"' + (t.placement_venue_id === v.id ? ' selected' : '') + '>' + esc(v.name) + '</option>').join('')
+        + '</select>';
+      const stateChip = eff.state === 'confirmed'
+        ? '<span style="color:#0a6b3a;font-weight:700;font-size:0.68rem">\u2713</span>' : '';
+      html += '<tr style="border-bottom:1px solid #f1f5f9' + (np ? ';opacity:0.55' : '') + '">'
+        + '<td style="padding:7px 10px;min-width:190px">'
+        +   '<div style="font-weight:600">' + esc(t.team_name) + hpWsBadges(t) + '</div>'
+        +   (t.spring_team_name && hpMatchKey(t.spring_team_name) !== hpMatchKey(t.team_name)
+              ? '<div style="font-size:0.7rem;color:#9ca3af">was ' + esc(t.spring_team_name) + ' in Spring '
+                + '<button type="button" onclick="hpUnlinkTeam(' + t.id + ')" title="Unlink \u2014 split the Spring row back out" style="border:1px solid var(--border);background:#fff;border-radius:5px;font-size:0.62rem;cursor:pointer;padding:0 4px;color:#6b7280">unlink</button></div>'
+              : (t.spring_team_name
+                  ? '<div style="font-size:0.7rem;color:#9ca3af">linked '
+                    + '<button type="button" onclick="hpUnlinkTeam(' + t.id + ')" title="Unlink \u2014 split the Spring row back out" style="border:1px solid var(--border);background:#fff;border-radius:5px;font-size:0.62rem;cursor:pointer;padding:0 4px;color:#6b7280">unlink</button></div>'
+                  : ''))
+        + '</td>'
+        + '<td style="padding:7px 10px">' + (t.in_spring ? esc(t.spring_venue || '?') : '<span style="color:#d1d5db">\u2014</span>') + '</td>'
+        + '<td style="padding:7px 10px">' + (t.in_summer ? esc(t.summer_venue || '?') : '<span style="color:#d1d5db">\u2014</span>') + '</td>'
+        + '<td style="padding:7px 10px;white-space:nowrap">' + divSel + '<br>' + nightSel + '</td>'
+        + '<td style="padding:7px 10px"><div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">' + venueSel + stateChip + npBtn + '</div></td>'
+        + '</tr>';
+    }
+  }
+  html += '</tbody></table></div>'
+    + '<p class="hint" style="margin:6px 0 0">' + rows.length + ' of ' + _hpPlanTeams.length + ' teams shown</p>';
+  el.innerHTML = html;
+  const sc = document.getElementById('hpWsScroll');
+  if (sc && prevScroll) sc.scrollTop = prevScroll;
+}
+
+/* ── Capacity board. All-divisions view: one block per venue, only
+   nights with teams. Division-selected view: ONE cell per venue for
+   that division's night (counts include every division sharing the
+   night — capacity truth), empty venues shown as open, sorted
+   most-open-first. ── */
+function hpRenderCapacityBoard() {
+  const el = document.getElementById('hpCapacityBoard');
+  if (!el) return;
+  let venues = _hpVenues.slice().sort((a, b) => a.name.localeCompare(b.name));
+  const used = new Map();
+  let confTotal = 0, defTotal = 0;
+  for (const t of _hpPlanTeams) {
+    const eff = hpEffectivePlacement(t);
+    if (!eff.venue) continue;
+    const night = hpTeamNight(t) || '(no night)';
+    if (!used.has(eff.venue.id)) used.set(eff.venue.id, new Map());
+    const m = used.get(eff.venue.id);
+    if (!m.has(night)) m.set(night, { c: 0, d: 0 });
+    if (eff.state === 'confirmed') { m.get(night).c++; confTotal++; }
+    else { m.get(night).d++; defTotal++; }
+  }
+  const selMeta = _hpWs.div ? (_hpPlanDivById.get(Number(_hpWs.div)) || {}) : null;
+  const selNight = selMeta ? (selMeta.night || '') : '';
+  const cellChip = (v, night, cell, cap) => {
+    const n = cell.c + cell.d;
+    const open = cap - n;
+    const bg = n === 0 ? '#f0fdf4' : (n < cap ? '#dcfce7' : (n === cap ? '#fef3c7' : '#fee2e2'));
+    const fg = n === 0 ? '#4d7c0f' : (n < cap ? '#166534' : (n === cap ? '#92400e' : '#b91c1c'));
+    const title = v.name + ' \u00b7 ' + night + ' \u2014 ' + n + ' of ' + cap
+      + ' (' + cell.c + ' confirmed + ' + cell.d + ' default) \u00b7 '
+      + (open > 0 ? open + ' open' : (open === 0 ? 'at capacity' : 'OVERBOOKED by ' + (-open)));
+    return '<span title="' + esc(title) + '" style="display:inline-flex;align-items:baseline;gap:4px;padding:3px 8px;border-radius:6px;background:' + bg + ';color:' + fg + ';font-size:0.76rem;font-weight:700">'
+      + esc(night.slice(0, 3)) + ' ' + n + '/' + cap
+      + (open < 0 ? ' <span style="font-size:0.64rem">+' + (-open) + ' over</span>'
+                  : (open === 0 ? '' : ' <span style="font-size:0.64rem;font-weight:400">' + open + ' open</span>'))
+      + '</span>';
   };
-
-  let html = '<h3 style="margin:0 0 10px">' + esc(hpDivLabel(div))
-    + (meta.night ? ' <span class="hint" style="font-weight:400">· ' + esc(meta.night) + 's</span>' : '')
-    + '</h3>'
-    + '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px">';
-
-  for (const g of sorted) {
-    const counting = g.teams.filter(t => t.return_status !== 'no');
-    const cap = g.venue ? 2 * (g.venue.num_tables || 0) : 0;
-    let color, label;
-    if (!g.venue)                 { color = '#9ca3af'; label = 'venue not in host list'; }
-    else if (cap === 0)           { color = '#9ca3af'; label = 'no capacity set'; }
-    else if (counting.length > cap) { color = '#b91c1c'; label = 'OVER by ' + (counting.length - cap); }
-    else                          { color = '#0a6b3a'; label = 'fits · ' + (cap - counting.length) + ' open'; }
-
-    html += '<div style="background:#fff;border:1px solid var(--border);border-top:5px solid ' + color + ';border-radius:10px;padding:10px 12px">'
-      + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:2px">'
-      +   '<strong style="flex:1;font-size:0.95rem">' + esc(g.name) + '</strong>'
-      +   '<span style="background:' + color + ';color:#fff;padding:2px 9px;border-radius:999px;font-size:0.74rem;font-weight:700">'
-      +     counting.length + (cap ? ' / ' + cap : '') + '</span>'
-      + '</div>'
-      + '<div class="hint" style="font-size:0.72rem;margin-bottom:8px">' + esc(label) + '</div>';
-
-    for (const t of g.teams.slice().sort((a, b) => (a.team_name || '').localeCompare(b.team_name || ''))) {
-      const faded = t.return_status === 'no';
-      html += '<div style="display:flex;align-items:center;gap:6px;padding:5px 0;border-top:1px solid #f3f3f3'
-        + (faded ? ';opacity:0.45' : '') + '">'
-        + '<span style="font-family:ui-monospace,Menlo,monospace;font-size:0.72rem;color:#9ca3af;min-width:42px">' + esc(t.team_number_full) + '</span>'
-        + '<span style="flex:1;font-size:0.86rem;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(t.team_name) + '">'
-        +   esc(t.team_name)
-        +   (t.in_summer ? ' <span style="background:#0031a1;color:#fff;border-radius:4px;padding:0 4px;font-size:0.62rem;font-weight:700" title="Played Summer 2026">SU</span>' : '')
-        +   (t.in_spring ? ' <span style="background:#7c3aed;color:#fff;border-radius:4px;padding:0 4px;font-size:0.62rem;font-weight:700" title="Played Spring 2026">SP</span>' : '')
-        +   (t.is_new_for_fall ? ' <span style="background:#0a6b3a;color:#fff;border-radius:4px;padding:0 4px;font-size:0.62rem;font-weight:700">NEW</span>' : '')
-        + '</span>'
-        + statusBtn(t, 'yes', 'Yes', '#0a6b3a')
-        + statusBtn(t, 'no', 'No', '#b91c1c')
-        + statusBtn(t, 'unknown', '?', '#6b7280')
-        + '<select onchange="hpMoveTeam(\'' + esc(t.team_number_full) + '\', this.value)"'
-        +   ' title="Move this team to a different venue"'
-        +   ' style="max-width:120px;padding:2px 4px;border:1px solid var(--border);border-radius:6px;font-size:0.74rem">'
-        +   '<option value="">(home)</option>'
-        +   (t.placement_venue_id
-              ? venueOptions.replace('value="' + t.placement_venue_id + '"', 'value="' + t.placement_venue_id + '" selected')
-              : venueOptions)
-        + '</select>'
+  let html = '<div style="border:1px solid var(--border);border-radius:8px;padding:10px;background:#fafbfc">'
+    + '<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px;flex-wrap:wrap">'
+    + '<strong style="font-size:0.9rem">Venue capacity' + (selNight ? ' \u2014 ' + esc(selNight) + 's' : '') + '</strong>'
+    + '<span class="hint" style="font-size:0.72rem">'
+    + (selNight ? 'this division\u2019s venues \u00b7 counts include all teams that night \u00b7 most open first'
+                : 'cap = 2 \u00d7 tables per night \u00b7 ' + confTotal + ' confirmed + ' + defTotal + ' default')
+    + '</span></div>';
+  if (!venues.length) html += '<p class="hint" style="margin:0">No venues yet \u2014 add them in section 1.</p>';
+  if (selNight) {
+    /* Only venues this division's teams effectively sit at (confirmed or
+       defaulted). Cell counts remain whole-night across all divisions. */
+    const divVenueIds = new Set();
+    for (const t of _hpPlanTeams) {
+      if (String(t.plan_division_id) !== _hpWs.div) continue;
+      const eff = hpEffectivePlacement(t);
+      if (eff.venue) divVenueIds.add(eff.venue.id);
+    }
+    venues = venues.filter(v => divVenueIds.has(v.id));
+    venues = venues.slice().sort((a, b) => {
+      const openOf = v => 2 * (v.num_tables || 0)
+        - ((used.get(v.id) || new Map()).get(selNight) || { c: 0, d: 0 }).c
+        - ((used.get(v.id) || new Map()).get(selNight) || { c: 0, d: 0 }).d;
+      return openOf(b) - openOf(a) || a.name.localeCompare(b.name);
+    });
+    for (const v of venues) {
+      const cap = 2 * (v.num_tables || 0);
+      const cell = (used.get(v.id) || new Map()).get(selNight) || { c: 0, d: 0 };
+      html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid #eef2f7">'
+        + '<span style="flex:1;font-size:0.82rem;font-weight:600;min-width:0">' + esc(v.name) + '</span>'
+        + '<span class="hint" style="font-size:0.66rem;white-space:nowrap">' + (v.num_tables || 0) + 't</span>'
+        + cellChip(v, selNight, cell, cap)
         + '</div>';
     }
-    html += '</div>';
+  } else {
+    for (const v of venues) {
+      const cap = 2 * (v.num_tables || 0);
+      const m = used.get(v.id) || new Map();
+      const nights = [...m.keys()].filter(n => (m.get(n).c + m.get(n).d) > 0)
+        .sort((a, b) => (HP_NIGHT_ORDER[a] ?? 9) - (HP_NIGHT_ORDER[b] ?? 9));
+      html += '<div style="padding:8px 0;border-top:1px solid #eef2f7">'
+        + '<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">'
+        +   '<strong style="font-size:0.82rem">' + esc(v.name) + '</strong>'
+        +   '<span class="hint" style="font-size:0.68rem;white-space:nowrap">' + (v.num_tables || 0) + ' tables \u00b7 cap ' + cap + '/night</span>'
+        + '</div>';
+      if (!nights.length) {
+        html += '<div class="hint" style="font-size:0.72rem;margin-top:3px;color:#9ca3af">no teams \u2014 ' + cap + ' open every night</div>';
+      } else {
+        html += '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:5px">';
+        for (const night of nights) html += cellChip(v, night, m.get(night), cap);
+        html += '</div>';
+      }
+      html += '</div>';
+    }
   }
   html += '</div>';
   el.innerHTML = html;
 }
 
+function hpWsSetFilter(f) { _hpWs.filter = f; hpRenderWsChips(); hpRenderWorksheet(); }
+function hpWsSearchInput(v) { _hpWs.q = v || ''; hpRenderWorksheet(); }
+
 /* ── Mutations ── */
-async function hpSetReturnStatus(teamNumberFull, status) {
+async function hpSetReturnStatus(id, status) {
   try {
-    await sb('PATCH', 'host_plan_teams?target_session=eq.' + encodeURIComponent(HP_TARGET_SESSION)
-      + '&team_number_full=eq.' + encodeURIComponent(teamNumberFull),
+    await sb('PATCH', 'host_plan_teams?id=eq.' + Number(id),
       { return_status: status, updated_by: getDeviceId() });
-    const row = _hpPlanTeams.find(t => t.team_number_full === teamNumberFull);
+    const row = _hpPlanTeams.find(t => t.id === Number(id));
     if (row) row.return_status = status;
     hpRenderPlanner();
   } catch (e) { alert('Save failed: ' + e.message); }
 }
 
-async function hpMoveTeam(teamNumberFull, venueIdRaw) {
+async function hpMoveTeam(id, venueIdRaw) {
   const venueId = venueIdRaw ? parseInt(venueIdRaw, 10) : null;
+  const row = _hpPlanTeams.find(t => t.id === Number(id));
+  const patch = { placement_venue_id: venueId,
+                  placement_status: venueId ? 'placed' : 'unassigned',
+                  updated_by: getDeviceId() };
+  /* Assigning a venue to a Not-playing team implies it's playing again. */
+  if (venueId && row && row.return_status === 'no') patch.return_status = 'unknown';
   try {
-    await sb('PATCH', 'host_plan_teams?target_session=eq.' + encodeURIComponent(HP_TARGET_SESSION)
-      + '&team_number_full=eq.' + encodeURIComponent(teamNumberFull),
-      { placement_venue_id: venueId,
-        placement_status: venueId ? 'placed' : 'unassigned',
-        updated_by: getDeviceId() });
-    const row = _hpPlanTeams.find(t => t.team_number_full === teamNumberFull);
-    if (row) { row.placement_venue_id = venueId; row.placement_status = venueId ? 'placed' : 'unassigned'; }
+    await sb('PATCH', 'host_plan_teams?id=eq.' + Number(id), patch);
+    if (row) Object.assign(row, patch);
     hpRenderPlanner();
   } catch (e) { alert('Save failed: ' + e.message); }
+}
+
+async function hpSetNight(id, night) {
+  try {
+    await sb('PATCH', 'host_plan_teams?id=eq.' + Number(id),
+      { night_of_play: night || null, updated_by: getDeviceId() });
+    const row = _hpPlanTeams.find(t => t.id === Number(id));
+    if (row) row.night_of_play = night || null;
+    hpRenderPlanner();
+  } catch (e) { alert('Save failed: ' + e.message); }
+}
+
+async function hpToggleNotPlaying(id) {
+  const row = _hpPlanTeams.find(t => t.id === Number(id));
+  if (!row) return;
+  await hpSetReturnStatus(id, row.return_status === 'no' ? 'unknown' : 'no');
+}
+
+/* Move a team to a different Fall division — night snaps to the
+   division's night (per-team night stays editable afterwards). */
+async function hpMoveDivision(id, divIdRaw) {
+  const divId = divIdRaw ? parseInt(divIdRaw, 10) : null;
+  const row = _hpPlanTeams.find(t => t.id === Number(id));
+  const d = divId ? _hpPlanDivById.get(divId) : null;
+  const patch = {
+    plan_division_id: divId,
+    division_number: d ? (d.source_division_number || (row ? row.division_number : null)) : (row ? row.division_number : null),
+    night_of_play: d ? (d.night || null) : (row ? row.night_of_play : null),
+    updated_by: getDeviceId()
+  };
+  try {
+    await sb('PATCH', 'host_plan_teams?id=eq.' + Number(id), patch);
+    if (row) Object.assign(row, patch);
+    hpRenderPlanner();
+  } catch (e) { alert('Save failed: ' + e.message); }
+}
+
+/* ── New-division modal ── */
+function hpOpenNewDivModal() {
+  document.getElementById('hpNewDivName').value = '';
+  document.getElementById('hpNewDivNight').value = '';
+  document.getElementById('hpNewDivStatus').textContent = '';
+  document.getElementById('hpNewDivModal').style.display = 'flex';
+  setTimeout(() => document.getElementById('hpNewDivName').focus(), 0);
+}
+function hpCloseNewDivModal() {
+  document.getElementById('hpNewDivModal').style.display = 'none';
+}
+async function hpSaveNewDiv() {
+  const name = hpNormalizeName(document.getElementById('hpNewDivName').value);
+  const night = document.getElementById('hpNewDivNight').value;
+  const stat = document.getElementById('hpNewDivStatus');
+  if (!name) { stat.textContent = 'Division name is required.'; stat.className = 'status-line err'; return; }
+  if (!night) { stat.textContent = 'Pick a play night.'; stat.className = 'status-line err'; return; }
+  try {
+    await sb('POST', 'host_plan_divisions',
+      { target_session: HP_TARGET_SESSION, name: name, night: night });
+    hpCloseNewDivModal();
+    await hpLoadPlanTeams();
+    hpRenderPlanner();
+  } catch (e) {
+    stat.textContent = 'Save failed: ' + e.message; stat.className = 'status-line err';
+  }
 }
 
 /* ── New-team modal ── */
@@ -23773,9 +24854,10 @@ let _hpModalEscHandler = null;
 function hpPopulateModalDivisions() {
   const sel = document.getElementById('hpNewDivision');
   if (!sel) return;
-  const divs = hpDivisionsList();
-  sel.innerHTML = '<option value="">— pick —</option>'
-    + divs.map(d => '<option value="' + esc(d) + '">' + esc(hpDivLabel(d)) + '</option>').join('');
+  const divs = _hpPlanDivs.slice().sort((a, b) =>
+    ((HP_NIGHT_ORDER[a.night] ?? 9) - (HP_NIGHT_ORDER[b.night] ?? 9)) || a.name.localeCompare(b.name));
+  sel.innerHTML = '<option value="">\u2014 pick \u2014</option>'
+    + divs.map(d => '<option value="' + d.id + '">' + esc(d.name) + (d.night ? ' (' + esc(d.night.slice(0, 3)) + ')' : '') + '</option>').join('');
 }
 function hpOpenNewTeamModal() {
   document.getElementById('hpNewTeamName').value = '';
@@ -23783,7 +24865,6 @@ function hpOpenNewTeamModal() {
   document.getElementById('hpNewNotes').value = '';
   document.getElementById('hpNewTeamStatus').textContent = '';
   hpPopulateModalDivisions();
-  if (_hpActiveDiv) document.getElementById('hpNewDivision').value = _hpActiveDiv;
   document.getElementById('hpNewTeamModal').style.display = 'flex';
   _hpModalEscHandler = e => { if (e.key === 'Escape') hpCloseNewTeamModal(); };
   document.addEventListener('keydown', _hpModalEscHandler);
@@ -23798,35 +24879,34 @@ function hpCloseNewTeamModal() {
 }
 async function hpSaveNewTeam() {
   const name = hpNormalizeName(document.getElementById('hpNewTeamName').value);
-  const div  = document.getElementById('hpNewDivision').value;
+  const divId = parseInt(document.getElementById('hpNewDivision').value || '', 10) || null;
   const captain = document.getElementById('hpNewCaptain').value.trim();
-  const notes   = document.getElementById('hpNewNotes').value.trim();
+  const notes = document.getElementById('hpNewNotes').value.trim();
   const stat = document.getElementById('hpNewTeamStatus');
   if (!name) { stat.textContent = 'Team name is required.'; stat.className = 'status-line err'; return; }
-  if (!div)  { stat.textContent = 'Pick a division.';        stat.className = 'status-line err'; return; }
-  /* Synthetic team number for new teams: <div>N<seq>. Real numbers come
-     from TMS later; the operator can resync then. */
+  if (!divId) { stat.textContent = 'Pick a division.'; stat.className = 'status-line err'; return; }
+  const d = _hpPlanDivById.get(divId) || {};
+  const srcDiv = d.source_division_number || ('P' + divId);
   let seq = 1;
-  while (_hpPlanTeams.some(t => t.team_number_full === div + 'N' + seq)) seq++;
-  const tn = div + 'N' + seq;
+  while (_hpPlanTeams.some(t => t.team_number_full === srcDiv + 'N' + seq)) seq++;
   try {
     await sb('POST', 'host_plan_teams', {
-      target_session:   HP_TARGET_SESSION,
-      team_number_full: tn,
-      division_number:  div,
-      team_name:        name,
-      captain_name:     captain || null,
-      notes:            notes || null,
-      return_status:    'yes',
-      is_new_for_fall:  true,
-      in_summer:        false,
-      in_spring:        false,
+      target_session: HP_TARGET_SESSION,
+      team_number_full: srcDiv + 'N' + seq,
+      division_number: srcDiv,
+      plan_division_id: divId,
+      team_name: name,
+      captain_name: captain || null,
+      notes: notes || null,
+      return_status: 'yes',
+      is_new_for_fall: true,
+      in_summer: false,
+      in_spring: false,
       placement_status: 'unassigned',
-      updated_by:       getDeviceId()
+      updated_by: getDeviceId()
     });
     hpCloseNewTeamModal();
     await hpLoadPlanTeams();
-    _hpActiveDiv = div;
     hpRenderPlanner();
   } catch (e) {
     stat.textContent = 'Save failed: ' + e.message; stat.className = 'status-line err';
@@ -23835,54 +24915,39 @@ async function hpSaveNewTeam() {
 
 /* Remove a plan row (parse junk / duplicates). Not-returning teams should
    use the No status instead so they stay visible. */
-async function hpDeletePlanTeam(teamNumberFull) {
-  const row = _hpPlanTeams.find(t => t.team_number_full === teamNumberFull);
+async function hpDeletePlanTeam(id) {
+  const row = _hpPlanTeams.find(t => t.id === Number(id));
   if (!row) return;
-  if (!confirm('Remove "' + row.team_name + '" (' + teamNumberFull + ') from the plan?')) return;
+  if (!confirm('Remove "' + row.team_name + '" from the plan?')) return;
   try {
-    await sb('DELETE', 'host_plan_teams?target_session=eq.' + encodeURIComponent(HP_TARGET_SESSION)
-      + '&team_number_full=eq.' + encodeURIComponent(teamNumberFull));
-    _hpPlanTeams = _hpPlanTeams.filter(t => t.team_number_full !== teamNumberFull);
+    await sb('DELETE', 'host_plan_teams?id=eq.' + Number(id), null);
+    _hpPlanTeams = _hpPlanTeams.filter(t => t.id !== Number(id));
     hpRenderPlanner();
   } catch (e) { alert('Delete failed: ' + e.message); }
 }
 
-/* ── CSV export — one row per team, grouped by division/venue. ── */
-function hpExportPlanCsv() {
-  if (!_hpPlanTeams.length) { alert('Nothing to export yet.'); return; }
-  const esc2 = v => { if (v == null) return ''; const s = String(v).replace(/"/g, '""'); return /[",\r\n]/.test(s) ? '"' + s + '"' : s; };
-  const header = ['Division','Division name','Night','Team #','Team','Sessions','Returning','Venue','Fits'];
-  const out = [header.join(',')];
-  for (const div of hpDivisionsList()) {
-    const meta = _hpDivMeta.get(div) || {};
-    const teams = _hpPlanTeams.filter(t => t.division_number === div);
-    /* recompute per-venue fit within the division for the Fits column */
-    const counts = new Map();
-    for (const t of teams) {
-      if (t.return_status === 'no') continue;
-      const eff = hpEffectiveVenue(t);
-      const k = eff.name.toLowerCase();
-      counts.set(k, (counts.get(k) || 0) + 1);
-    }
-    for (const t of teams.slice().sort((a, b) => a.team_number_full.localeCompare(b.team_number_full))) {
-      const eff = hpEffectiveVenue(t);
-      const cap = eff.venue ? 2 * (eff.venue.num_tables || 0) : 0;
-      const n = counts.get(eff.name.toLowerCase()) || 0;
-      const fits = t.return_status === 'no' ? '' : (!cap ? 'no cap' : (n <= cap ? 'yes' : 'OVER'));
-      out.push([
-        div, meta.name || '', meta.night || '',
-        t.team_number_full, t.team_name,
-        [t.in_summer ? 'SU' : '', t.in_spring ? 'SP' : '', t.is_new_for_fall ? 'NEW' : ''].filter(Boolean).join('+'),
-        t.return_status, eff.name, fits
-      ].map(esc2).join(','));
-    }
-  }
-  const blob = new Blob(['﻿' + out.join('\r\n')], { type: 'text/csv;charset=utf-8' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'host-plan-' + HP_TARGET_SESSION.replace(/\s+/g, '-').toLowerCase() + '-' + new Date().toISOString().slice(0, 10) + '.csv';
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 500);
+/* ── Live-data poll (house rule): re-fetch plan + venues every 20s
+   while the tab is visible and the operator isn't mid-interaction, so
+   a second device's assignments appear without manual refresh. The
+   idempotent render preserves scroll; skipped while a select/input
+   inside the tab has focus or the new-team modal is open. */
+let _hpPollTimer = null;
+function hpStartLivePoll() {
+  if (_hpPollTimer) return;
+  _hpPollTimer = setInterval(async () => {
+    const tab = document.getElementById('tab-hostplan');
+    if (!tab || tab.offsetParent === null) return;
+    const modal = document.getElementById('hpNewTeamModal');
+    if (modal && modal.style.display !== 'none') return;
+    const ae = document.activeElement;
+    if (ae && (ae.tagName === 'SELECT' || ae.tagName === 'INPUT') && tab.contains(ae)) return;
+    try {
+      await hpLoadVenues();
+      await hpLoadPlanTeams();
+      hpRenderVenues();
+      hpRenderPlanner();
+    } catch (e) { console.warn('[hostplan] live poll failed', e); }
+  }, 20000);
 }
 
 window.hpInit               = hpInit;
@@ -23894,14 +24959,24 @@ window.hpAutoExtractClick   = hpAutoExtractClick;
 window.hpRefresh            = hpRefresh;
 window.hpSyncFromUploads    = hpSyncFromUploads;
 window.hpRenderPlanner      = hpRenderPlanner;
-window.hpSelectDivision     = hpSelectDivision;
+window.hpWsSetFilter        = hpWsSetFilter;
+window.hpWsSearchInput      = hpWsSearchInput;
+window.hpWsSetDiv           = hpWsSetDiv;
+window.hpMoveDivision       = hpMoveDivision;
+window.hpOpenNewDivModal    = hpOpenNewDivModal;
+window.hpCloseNewDivModal   = hpCloseNewDivModal;
+window.hpSaveNewDiv         = hpSaveNewDiv;
+window.hpLinkTeams          = hpLinkTeams;
+window.hpUnlinkTeam         = hpUnlinkTeam;
+window.hpManualLink         = hpManualLink;
+window.hpSetNight           = hpSetNight;
+window.hpToggleNotPlaying   = hpToggleNotPlaying;
 window.hpSetReturnStatus    = hpSetReturnStatus;
 window.hpMoveTeam           = hpMoveTeam;
 window.hpDeletePlanTeam     = hpDeletePlanTeam;
 window.hpOpenNewTeamModal   = hpOpenNewTeamModal;
 window.hpCloseNewTeamModal  = hpCloseNewTeamModal;
 window.hpSaveNewTeam        = hpSaveNewTeam;
-window.hpExportPlanCsv      = hpExportPlanCsv;
 
 
 // (Session loading is triggered by switchTab('certs') → certsAdminInit(),
