@@ -3364,7 +3364,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.224';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.225';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -12468,6 +12468,60 @@ function ssgCellState(team, col, fmt) {
   return { state: 'dash', tip: col.label };  // playoff / no_play
 }
 
+/* 3.225: hover a team name -> who receives the upload-copy email.
+   Same derivation the GAS notify uses (team_memberships -> players);
+   cached per team for the page lifetime. */
+const _ssgRosterCache = new Map();
+let _ssgRosterTipEl = null;
+async function ssgRosterFetch(teamId) {
+  if (_ssgRosterCache.has(teamId)) return _ssgRosterCache.get(teamId);
+  const tm = await sb('GET', 'team_memberships?team_id=eq.' + teamId + '&select=member_number,name_raw');
+  const nums = (tm || []).map(r => r.member_number).filter(Boolean);
+  const byNum = new Map();
+  if (nums.length) {
+    const ps = await sb('GET', 'players?member_number=in.(' + nums.join(',') + ')&select=member_number,first_name,last_name,email');
+    for (const p of (ps || [])) byNum.set(p.member_number, p);
+  }
+  const rows = (tm || []).map(r => {
+    const p = byNum.get(r.member_number);
+    const name = p ? ((p.first_name || '') + ' ' + (p.last_name || '')).replace(/\s+/g, ' ').trim()
+                   : (r.name_raw || r.member_number || '?');
+    return { name, email: ((p && p.email) || '').trim() };
+  });
+  _ssgRosterCache.set(teamId, rows);
+  return rows;
+}
+async function ssgRosterTipShow(ev, teamId) {
+  const td = ev.currentTarget;
+  ssgRosterTipHide();
+  const el = document.createElement('div');
+  el.style.cssText = 'position:fixed;z-index:9999;background:#1f2937;color:#fff;padding:10px 12px;'
+    + 'border-radius:8px;font-size:0.78rem;line-height:1.5;max-width:340px;'
+    + 'box-shadow:0 4px 14px rgba(0,0,0,0.3);pointer-events:none';
+  el.textContent = 'Loading roster\u2026';
+  document.body.appendChild(el);
+  const r = td.getBoundingClientRect();
+  el.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 360)) + 'px';
+  el.style.top = (r.bottom + 4) + 'px';
+  _ssgRosterTipEl = el;
+  try {
+    const rows = await ssgRosterFetch(teamId);
+    if (_ssgRosterTipEl !== el) return;
+    el.innerHTML = '<div style="font-weight:700;margin-bottom:4px">Upload email goes to:</div>'
+      + (rows.length
+          ? rows.map(x => '<div>' + esc(x.name) + ' \u2014 '
+              + (x.email ? esc(x.email) : '<span style="color:#fca5a5">no email on file</span>') + '</div>').join('')
+          : '<div>(no roster on file \u2014 refresh the Team Screen import)</div>');
+  } catch (e) {
+    if (_ssgRosterTipEl === el) el.textContent = 'Roster load failed: ' + (e && e.message || e);
+  }
+}
+function ssgRosterTipHide() {
+  if (_ssgRosterTipEl) { _ssgRosterTipEl.remove(); _ssgRosterTipEl = null; }
+}
+window.ssgRosterTipShow = ssgRosterTipShow;
+window.ssgRosterTipHide = ssgRosterTipHide;
+
 function ssgRenderGridDom(div) {
   const fmt = div.format;
   const teams = _ssgState.teams;
@@ -12505,7 +12559,7 @@ function ssgRenderGridDom(div) {
   // Body rows
   let bodyHtml = '';
   for (const t of teams) {
-    bodyHtml += `<tr><td style="position:sticky;left:0;background:#fff;z-index:1;padding:8px 10px;border-bottom:1px solid var(--border);font-weight:700;font-size:0.84rem">
+    bodyHtml += `<tr><td onmouseenter="ssgRosterTipShow(event, ${t.id})" onmouseleave="ssgRosterTipHide()" style="position:sticky;left:0;background:#fff;z-index:1;padding:8px 10px;border-bottom:1px solid var(--border);font-weight:700;font-size:0.84rem;cursor:help">
       <span style="color:var(--spm-accent);font-weight:800">${esc(t.team_number)}</span>
       <span style="color:var(--text);font-weight:600;margin-left:6px">${esc(t.team_name)}</span>
     </td>`;
@@ -12893,7 +12947,7 @@ async function ssgUploadOnBehalf(matchId, teamId, inputId, missingSidesEscaped) 
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ action: 'papertrail_upload_notify', admin_key: SB_KEY,
-          match_id: matchId, team_id: teamId }),
+          match_id: matchId, team_id: teamId, is_preprod: !!IS_PREPROD }),
         keepalive: true
       }).catch(function () {});
     } catch (e) { /* notify must never break the upload flow */ }
