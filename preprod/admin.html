@@ -3322,6 +3322,13 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         <div class="status-line" id="nrStatus" style="margin-top:6px"></div>
         <div id="nrIssues"></div>
       </div>
+      <div class="card" style="margin-bottom:14px">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+          <h2 style="margin:0">Segments</h2>
+          <span class="hint">SPM only &middot; who registers which way</span>
+        </div>
+        <div id="nrSegments"><p class="hint">Loading&hellip;</p></div>
+      </div>
       <div class="card">
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
           <h2 style="margin:0">Tracker</h2>
@@ -3403,7 +3410,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.226';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.227';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -5084,7 +5091,14 @@ async function init() {
    the report are zero-padded ('00320'); slate.teams stores unpadded
    ('320') — normalize BOTH sides via parseInt (house rule).
    ══════════════════════════════════════════════════════════════════════ */
-let _nr = { inited: false, targetId: null, teams: [], teamByKey: new Map(), parsed: null };
+/* Formats (slate.divisions.format values, SPM):
+   scorekeeper question = DJ pairs + Ladies (they use the app);
+   ReRack = paper-scored formats. CRA is OUT OF SCOPE (user 2026-07-11)
+   but CRA teams are still loaded so pasted CRA rows can be bucketed
+   "out of scope" instead of "unknown number". */
+const NR_QUESTION_FORMATS = ['8-Ball Open', '9-Ball Open', '8-Ball Ladies'];
+const NR_RERACK_FORMATS   = ['Masters', '8-Ball Doubles', '9-Ball Doubles'];
+let _nr = { inited: false, targetId: null, teams: [], teamsN1: [], teamByKey: new Map(), parsed: null, regByTeam: new Map() };
 
 function nrTeamKey(tn) {
   const n = parseInt(String(tn || '').trim(), 10);
@@ -5112,20 +5126,32 @@ async function nrInit() {
   await nrLoadTracker();
 }
 
-/* Teams of the CURRENT session (the Nexus question only exists for
-   teams playing N). Division name rides along for the grid. */
+/* Teams of N (current) and N-1 (previous by start_date). Current-
+   session map keeps BOTH operators so pasted CRA rows classify as
+   out-of-scope; everything downstream (tracker, segments) is SPM. */
+function nrPrevSession() {
+  const cur = currentSession;
+  if (!cur || !cur.start_date) return null;
+  const prior = (sessions || []).filter(x => x.start_date && x.start_date < cur.start_date)
+    .sort((a, b) => (a.start_date > b.start_date ? -1 : 1));
+  return prior[0] || null;
+}
 async function nrLoadTeams() {
   if (!currentSession) return;
+  const prev = nrPrevSession();
+  const ids = [currentSession.id].concat(prev ? [prev.id] : []);
   const rows = await sb('GET',
-    'teams?select=id,team_number,team_name,division:divisions!inner(id,session_id,name)'
-    + '&division.session_id=eq.' + currentSession.id + '&limit=2000');
-  _nr.teams = rows || [];
+    'teams?select=id,team_number,team_name,division:divisions!inner(id,session_id,name,format,operator_id)'
+    + '&division.session_id=in.(' + ids.join(',') + ')&limit=4000');
+  const all = rows || [];
+  _nr.teams   = all.filter(t => t.division.session_id === currentSession.id);
+  _nr.teamsN1 = prev ? all.filter(t => t.division.session_id === prev.id && t.division.operator_id === 1) : [];
   _nr.teamByKey = new Map();
   for (const t of _nr.teams) _nr.teamByKey.set(nrTeamKey(t.team_number), t);
 }
 
 function nrParseReport(text) {
-  const out = { rows: [], invalid: [], unmatched: [], conflicts: [] };
+  const out = { rows: [], invalid: [], unmatched: [], conflicts: [], outOfScope: [] };
   const lines = String(text || '').split(/\r?\n/);
   for (const line of lines) {
     if (!line.trim()) continue;
@@ -5141,6 +5167,7 @@ function nrParseReport(text) {
     else if (yes(notPlaying)) status = 'not_playing';
     const team = _nr.teamByKey.get(nrTeamKey(num));
     if (!team) { out.unmatched.push(num + ' ' + name); continue; }
+    if (team.division.operator_id !== 1) { out.outOfScope.push(num + ' ' + name); continue; }
     out.rows.push({ team, status, captain: cap, cocaptain: cocap, reportName: name });
   }
   return out;
@@ -5151,8 +5178,9 @@ function nrIssuesHtml(p) {
     ? '<div style="margin-top:4px;color:' + color + ';font-size:0.82rem"><strong>' + label + ' (' + arr.length + '):</strong> ' + arr.map(esc).join(', ') + '</div>'
     : '';
   return li('Unparseable lines', p.invalid, '#b91c1c')
-    + li('Team numbers not in ' + esc(currentSession ? currentSession.name : 'current session'), p.unmatched, '#b91c1c')
-    + li('Answered BOTH yes (kept as playing — verify in Nexus)', p.conflicts, '#a76c00');
+    + li('Team numbers not in ' + esc(currentSession ? currentSession.name : 'current session') + ' (Team Screen not imported?)', p.unmatched, '#b91c1c')
+    + li('Answered BOTH yes (kept as playing — verify in Nexus)', p.conflicts, '#a76c00')
+    + li('Out of scope (CRA) — ignored by design', p.outOfScope, '#6b7280');
 }
 
 function nrPreview() {
@@ -5234,6 +5262,48 @@ async function nrSave() {
   }
 }
 
+function nrChipFor(teamId) {
+  const st = _nr.regByTeam.get(teamId);
+  if (st === 'playing')     return '<span style="background:#f0fdf4;color:#16a34a;padding:1px 6px;border-radius:999px;font-weight:700;font-size:0.68rem">PLAYING</span>';
+  if (st === 'not_playing') return '<span style="background:#fef2f2;color:#b91c1c;padding:1px 6px;border-radius:999px;font-weight:700;font-size:0.68rem">NOT PLAYING</span>';
+  if (st === 'unanswered')  return '<span style="background:#fef9c3;color:#a16207;padding:1px 6px;border-radius:999px;font-weight:700;font-size:0.68rem">UNANSWERED</span>';
+  return '<span style="background:#f3f4f6;color:#9ca3af;padding:1px 6px;border-radius:999px;font-weight:700;font-size:0.68rem">UNTRACKED</span>';
+}
+
+/* Segments: (1) scorekeeper-question formats playing N — the Nexus
+   paste covers them; (2) ReRack formats playing N; (3) SPM teams from
+   N-1 — slice 4 subtracts the ones linked to an N team; until then the
+   full list renders with that caveat. */
+function nrRenderSegments() {
+  const el = document.getElementById('nrSegments');
+  if (!el) return;
+  const spmN = _nr.teams.filter(t => t.division.operator_id === 1);
+  const seg1 = spmN.filter(t => NR_QUESTION_FORMATS.indexOf(t.division.format) >= 0);
+  const seg2 = spmN.filter(t => NR_RERACK_FORMATS.indexOf(t.division.format) >= 0);
+  const seg3 = _nr.teamsN1;
+  const group = (title, hint, arr) => {
+    const tracked = arr.filter(t => _nr.regByTeam.has(t.id));
+    const answered = arr.filter(t => { const st = _nr.regByTeam.get(t.id); return st === 'playing' || st === 'not_playing'; });
+    return '<details style="margin-bottom:8px">'
+      + '<summary style="cursor:pointer;font-weight:700">' + title
+      + ' <span class="hint" style="font-weight:500">— ' + arr.length + ' team(s), '
+      + answered.length + ' answered, ' + tracked.length + ' tracked · ' + hint + '</span></summary>'
+      + '<div style="padding:8px 0 4px 14px;display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:4px">'
+      + arr.map(t => '<div style="font-size:0.8rem">'
+          + '<strong>' + esc(nrTeamKey(t.team_number)) + '</strong> ' + esc(t.team_name || '')
+          + ' <span class="hint">' + esc(t.division.format || '') + '</span> ' + nrChipFor(t.id)
+          + '</div>').join('')
+      + '</div></details>';
+  };
+  el.innerHTML =
+    group('1 · Scorekeeper question — DJ + Ladies playing ' + esc(currentSession.name),
+      'answers arrive via the Nexus report paste', seg1)
+    + group('2 · ReRack — Masters + Doubles playing ' + esc(currentSession.name),
+      'paper-scored formats; they answer in ReRack', seg2)
+    + group('3 · Played ' + esc(nrPrevSession() ? nrPrevSession().name : 'N-1') + ' — all SPM formats',
+      'slice 4 will hide the ones linked to a current team; answers via ReRack', seg3);
+}
+
 async function nrLoadTracker() {
   if (!_nr.targetId) return;
   const gs = document.getElementById('nrGridStatus');
@@ -5241,7 +5311,9 @@ async function nrLoadTracker() {
     const rows = await sb('GET', 'next_reg?target_session_id=eq.' + _nr.targetId
       + '&select=team_id,format,status,source,answered_by_name,answered_at,updated_at&order=updated_at.desc&limit=2000');
     const byId = new Map();
-    for (const t of _nr.teams) byId.set(t.id, t);
+    for (const t of _nr.teams.concat(_nr.teamsN1)) byId.set(t.id, t);
+    _nr.regByTeam = new Map();
+    for (const r of (rows || [])) _nr.regByTeam.set(r.team_id, r.status);
     const counts = { playing: 0, not_playing: 0, unanswered: 0 };
     for (const r of (rows || [])) if (counts[r.status] != null) counts[r.status]++;
     document.getElementById('nrCounts').textContent =
@@ -5273,6 +5345,7 @@ async function nrLoadTracker() {
         + '</table>'
       : '<p class="hint">Nothing tracked yet \u2014 paste a Nexus report above.</p>';
     gs.className = 'status-line'; gs.innerHTML = '';
+    nrRenderSegments();
   } catch (e) {
     gs.className = 'status-line shown err'; gs.textContent = 'Tracker load failed: ' + e.message;
   }
