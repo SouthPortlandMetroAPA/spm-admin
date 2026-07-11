@@ -3364,7 +3364,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.222';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.223';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11511,7 +11511,28 @@ function spReportListIssues(r) {
    in-memory for the session only). SVG drawing remains the fallback. */
 let _spOopsCoinImg = '';
 try { _spOopsCoinImg = localStorage.getItem('spOopsCoinImg') || ''; } catch (e) {}
-if (_spOopsCoinImg) setTimeout(() => spOopsStoreCoinArt(_spOopsCoinImg), 0);
+/* 3.223: artwork is PERMANENT in slate.app_assets ('oops_coin_art') so
+   every device shares it; localStorage is only a cache. Load order: DB
+   wins. A device holding art locally with no DB row yet migrates it up
+   once (covers devices from before this existed). */
+let _spOopsArtReady = null;
+function spOopsEnsureCoinArt() {
+  if (_spOopsArtReady) return _spOopsArtReady;
+  _spOopsArtReady = (async () => {
+    try {
+      const rows = await sb('GET', 'app_assets?asset_key=eq.oops_coin_art&select=value');
+      if (rows && rows.length && rows[0].value) {
+        _spOopsCoinImg = rows[0].value;
+        try { if (_spOopsCoinImg.length < 1400000) localStorage.setItem('spOopsCoinImg', _spOopsCoinImg); } catch (e) {}
+      } else if (_spOopsCoinImg) {
+        await spOopsStoreCoinArt(_spOopsCoinImg);
+      }
+    } catch (e) { console.warn('[oops] coin art DB load failed \u2014 using local cache/SVG', e); }
+    spOopsCoinState();
+  })();
+  return _spOopsArtReady;
+}
+setTimeout(spOopsEnsureCoinArt, 0);
 function spOopsCoinState() {
   const el = document.getElementById('spOopsCoinState');
   if (el) el.textContent = _spOopsCoinImg ? 'using uploaded coin artwork' : 'no artwork — using built-in drawing';
@@ -11558,11 +11579,18 @@ function spOopsFitCoinArt(dataUri) {
   });
 }
 function spOopsStoreCoinArt(uri) {
-  spOopsFitCoinArt(uri).then(fitted => {
+  return spOopsFitCoinArt(uri).then(async fitted => {
     _spOopsCoinImg = fitted;
     try {
       if (fitted.length < 1400000) localStorage.setItem('spOopsCoinImg', fitted);
-    } catch (e) { /* too big for localStorage \u2014 session-only is fine */ }
+    } catch (e) { /* too big for localStorage \u2014 cache is optional */ }
+    try {
+      await sb('POST', 'app_assets?on_conflict=asset_key',
+        { asset_key: 'oops_coin_art', value: fitted, updated_at: new Date().toISOString() },
+        { 'Prefer': 'resolution=merge-duplicates' });
+    } catch (e) {
+      console.warn('[oops] coin art DB save failed \u2014 art stays device-local until a save succeeds', e);
+    }
     spOopsCoinState();
   });
 }
@@ -11703,6 +11731,7 @@ function spBuildOopsCertsHTML(names) {
 }
 
 async function spOopsCerts() {
+  await spOopsEnsureCoinArt();
   const raw = ((document.getElementById('spOopsBox') || {}).value || '')
     .split(/\r?\n/).map(s => s.trim()).filter(Boolean);
   if (!raw.length) { setStatus('spOopsStatus', 'Paste at least one number.', 'err'); return; }
