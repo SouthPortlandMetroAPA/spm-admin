@@ -3463,7 +3463,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.235';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.236';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -5634,6 +5634,7 @@ function nrIntentRow(r) {
     + (contact ? '<div style="font-size:0.85rem;margin-top:2px">' + esc(contact) + '</div>' : '')
     + ((r.day_of_play || r.host_location)
         ? '<div style="font-size:0.82rem;margin-top:2px">' + esc([r.day_of_play, r.host_location].filter(Boolean).join(' · ')) + '</div>' : '')
+    + (r.players_needed ? '<div style="font-size:0.82rem;margin-top:2px">\ud83c\udfb1 needs ' + esc(r.players_needed) + '</div>' : '')
     + (r.note ? '<div class="hint" style="margin-top:2px">' + esc(r.note) + '</div>' : '')
     + '<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">' + btns + '</div>'
     + '</div>';
@@ -5897,7 +5898,7 @@ async function nrLoadTracker() {
   const gs = document.getElementById('nrGridStatus');
   try {
     const rows = await sbGetAll('next_reg?target_session_id=eq.' + _nr.targetId
-      + '&select=team_id,format,status,source,answered_by_name,answered_at,updated_at,team_note&order=updated_at.desc,team_id.asc');
+      + '&select=team_id,format,status,source,answered_by_name,answered_at,updated_at,team_note,players_needed&order=updated_at.desc,team_id.asc');
     const byId = new Map();
     for (const t of _nr.teams.concat(_nr.teamsN1)) byId.set(t.id, t);
     _nr.regByTeam = new Map();
@@ -5924,7 +5925,8 @@ async function nrLoadTracker() {
             return '<tr>'
               + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">'
               + (t ? '<strong>' + esc(nrTeamKey(t.team_number)) + '</strong> ' + esc(t.team_name || '') : '#' + r.team_id)
-              + (r.team_note ? '<div class="hint" style="font-size:0.74rem">\ud83d\udcdd ' + esc(r.team_note) + '</div>' : '') + '</td>'
+              + (r.team_note ? '<div class="hint" style="font-size:0.74rem">\ud83d\udcdd ' + esc(r.team_note) + '</div>' : '')
+              + (r.players_needed ? '<div class="hint" style="font-size:0.74rem">\ud83c\udfb1 needs ' + esc(r.players_needed) + '</div>' : '') + '</td>'
               + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)" class="hint">' + esc(r.format || '') + '</td>'
               + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">' + chip(r.status) + '</td>'
               + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)" class="hint">' + esc(r.source) + '</td>'
