@@ -3394,6 +3394,12 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <h2 style="margin:0">Tracker</h2>
           <span class="hint" id="nrCounts"></span>
         </div>
+        <div id="nrTrkFilters" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+          <button type="button" class="btn btn-primary btn-sm" data-trkf="all">All</button>
+          <button type="button" class="btn btn-outline btn-sm" data-trkf="playing">Playing</button>
+          <button type="button" class="btn btn-outline btn-sm" data-trkf="not_playing">Not playing</button>
+          <button type="button" class="btn btn-outline btn-sm" data-trkf="unanswered">Unanswered</button>
+        </div>
         <div class="status-line" id="nrGridStatus"></div>
         <div id="nrGrid"></div>
       </div>
@@ -3470,7 +3476,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.239';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.240';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -5182,6 +5188,15 @@ async function nrInit() {
     nrWireTeamScreenZone('nrTsZoneCur',  () => currentSession);
     document.getElementById('nrSaveBtn').addEventListener('click', nrSave);
     document.getElementById('nrOrTplSave').addEventListener('click', nrOrSaveTpl);
+    _nr.trackerFilter = 'all';
+    document.querySelectorAll('#nrTrkFilters button').forEach(b => {
+      b.onclick = () => {
+        _nr.trackerFilter = b.dataset.trkf;
+        document.querySelectorAll('#nrTrkFilters button').forEach(x =>
+          x.className = 'btn btn-sm ' + (x === b ? 'btn-primary' : 'btn-outline'));
+        nrLoadTracker();
+      };
+    });
     sel.onchange = () => { _nr.targetId = Number(sel.value); nrLoadTracker(); nrLoadIntents(); nrLoadOutreach(); };
     _nr.inited = true;
   }
@@ -5716,30 +5731,39 @@ async function nrOrEnsureRosters() {
   _nr.orRoster = new Map();
   for (let i = 0; i < ids.length; i += 100) {
     const got = await sbGetAll('team_memberships?team_id=in.(' + ids.slice(i, i + 100).join(',')
-      + ')&select=team_id,role,member_number,player:players(first_name,last_name,cell_phone)&order=id.asc');
+      + ')&select=team_id,role,member_number,player:players(first_name,last_name,cell_phone,home_phone,alt_phone,work_phone)&order=id.asc');
     for (const m of (got || [])) {
       if (!_nr.orRoster.has(m.team_id)) _nr.orRoster.set(m.team_id, []);
       _nr.orRoster.get(m.team_id).push(m);
     }
   }
 }
-/* The three segment groups, answered teams removed. 'how' picks the
-   {how} substitution: app = scorekeeper instruction, rerack = link. */
+/* The three segment groups — FULL team lists; teams pair first and the
+   answered filter runs per PAIR at render (either row answered = the
+   whole pair leaves outreach). Best reachable phone: cell, then home,
+   then alt, then work. */
+function nrBestPhone(p) {
+  const cand = [p && p.cell_phone, p && p.home_phone, p && p.alt_phone, p && p.work_phone];
+  for (const c of cand) if (otIsRealPhone(c)) return c;
+  return null;
+}
 function nrOrUniverse() {
-  const un = t => { const st = _nr.regByTeam.get(t.id); return st !== 'playing' && st !== 'not_playing'; };
   const spmN = _nr.teams.filter(t => t.division.operator_id === 1);
   return [
     { key: 'q', label: 'DJ + Ladies playing ' + (currentSession ? currentSession.name : 'N'), how: 'app',
-      teams: spmN.filter(t => NR_QUESTION_FORMATS.indexOf(t.division.format) >= 0).filter(un) },
+      teams: spmN.filter(t => NR_QUESTION_FORMATS.indexOf(t.division.format) >= 0) },
     { key: 'rr', label: 'Masters + Doubles playing ' + (currentSession ? currentSession.name : 'N'), how: 'rerack',
-      teams: spmN.filter(t => NR_RERACK_FORMATS.indexOf(t.division.format) >= 0).filter(un) },
+      teams: spmN.filter(t => NR_RERACK_FORMATS.indexOf(t.division.format) >= 0) },
     { key: 'n1', label: nrPrevSession() ? nrPrevSession().name + ' only' : 'prior session only', how: 'rerack',
-      teams: _nr.teamsN1.filter(t => !_nr.linkedN1.has(t.id)).filter(un) }
+      teams: _nr.teamsN1.filter(t => !_nr.linkedN1.has(t.id)) }
   ];
 }
-/* Merge DJ 8+9 twins: same normalized name, exactly one 8-Ball Open +
-   one 9-Ball Open, sharing at least one roster member — one card, one
-   text, both team ids stamped. Same-name strangers stay separate. */
+/* Merge 8+9 twins (DJ and Doubles): same normalized name, then GREEDY
+   roster-overlap matching WITHIN the name group — handles any group
+   size. Root cause fixed 2026-07-12: two different teams both named
+   "Chalk Dirty To Me" made a 4-team group the old exactly-2 rule
+   skipped entirely; roster overlap disambiguates (true twins share
+   players, same-name strangers share none). */
 function nrOrMergePairs(teams) {
   const byName = new Map();
   for (const t of teams) {
@@ -5747,16 +5771,27 @@ function nrOrMergePairs(teams) {
     if (!byName.has(k)) byName.set(k, []);
     byName.get(k).push(t);
   }
+  const members = id => (_nr.orRoster.get(id) || []).map(m => m.member_number);
+  const overlap = (a, b) => { const set = new Set(members(a.id)); return members(b.id).filter(n => set.has(n)).length; };
+  const eightOf = f => f === '8-Ball Open' ? '9-Ball Open' : f === '8-Ball Doubles' ? '9-Ball Doubles' : null;
   const out = [];
   for (const group of byName.values()) {
-    if (group.length === 2) {
-      const fmts = group.map(t => t.division.format).sort().join('|');
-      const r0 = (_nr.orRoster.get(group[0].id) || []).map(m => m.member_number);
-      const shares = (_nr.orRoster.get(group[1].id) || []).some(m => r0.indexOf(m.member_number) >= 0);
-      /* DJ twins AND Doubles twins (the 883/993-class divisions) */
-      if ((fmts === '8-Ball Open|9-Ball Open' || fmts === '8-Ball Doubles|9-Ball Doubles') && shares) { out.push(group); continue; }
+    const eights = group.filter(t => eightOf(t.division.format));
+    const nines = group.filter(t => t.division.format === '9-Ball Open' || t.division.format === '9-Ball Doubles');
+    const rest = group.filter(t => eights.indexOf(t) < 0 && nines.indexOf(t) < 0);
+    const taken = new Set();
+    for (const e of eights) {
+      let best = null, bestN = 0;
+      for (const n of nines) {
+        if (taken.has(n.id) || n.division.format !== eightOf(e.division.format)) continue;
+        const ov = overlap(e, n);
+        if (ov > bestN) { bestN = ov; best = n; }
+      }
+      if (best && bestN >= 1) { taken.add(best.id); out.push([e, best]); }
+      else out.push([e]);
     }
-    for (const t of group) out.push([t]);
+    for (const n of nines) if (!taken.has(n.id)) out.push([n]);
+    for (const t of rest) out.push([t]);
   }
   return out;
 }
@@ -5806,8 +5841,11 @@ function nrRenderOutreach() {
   if (!box || !_nr.orSent) return;
   const uni = nrOrUniverse();
   let total = 0, w1done = 0, w2done = 0;
+  const defnSt = id => { const st = _nr.regByTeam.get(id); return st === 'playing' || st === 'not_playing'; };
   const sect = uni.map(g => {
-    const pairs = nrOrMergePairs(g.teams);
+    const pairs = nrOrMergePairs(g.teams)
+      .filter(pair => !pair.some(t => defnSt(t.id)))
+      .sort((a, b) => (parseInt(a[0].team_number, 10) || 0) - (parseInt(b[0].team_number, 10) || 0));
     total += pairs.length;
     const rowsHtml = pairs.map(pair => {
       const t = pair[0];
@@ -5817,15 +5855,16 @@ function nrRenderOutreach() {
       const roster = pair.map(x => _nr.orRoster.get(x.id) || []).flat();
       const seenNum = new Set();
       const uniq = roster.filter(m => {
-        const d = otPhoneDigits((m.player || {}).cell_phone || '');
-        if (!d || !otIsRealPhone((m.player || {}).cell_phone)) return false;
+        const ph = nrBestPhone(m.player || {});
+        if (!ph) return false;
+        const d = otPhoneDigits(ph);
         if (seenNum.has(d)) return false;
         seenNum.add(d); return true;
       });
       const caps = uniq.filter(m => m.role === 'Captain' || m.role === 'Co-Captain');
       const wave = st.w1 ? 2 : 1;
       const recips = wave === 1 ? caps : uniq;
-      const digits = recips.map(m => otPhoneDigits(m.player.cell_phone)).join(',');
+      const digits = recips.map(m => otPhoneDigits(nrBestPhone(m.player))).join(',');
       const body = nrOrBody(pair, g.key === 'n1' ? 'n1' : 'cur', recips[0] ? recips[0].player : null, wave);
       const url = digits ? otBuildSmsUrl(digits, body) : '#';
       const idsAttr = pair.map(x => x.id).join(',');
@@ -5849,10 +5888,12 @@ function nrRenderOutreach() {
             : (recips.length
                 ? '<a class="btn btn-outline btn-sm" style="text-decoration:none" href="' + esc(url)
                   + '" data-or-send="' + idsAttr + '" data-or-wave="' + wave + '">' + label + '</a>'
-                : '<span class="sb-no-phone">no cells for wave ' + wave + '</span>'))
+                : '<span class="sb-no-phone">no phones for wave ' + wave + '</span>'))
+        + ' <button type="button" class="btn btn-outline btn-sm" data-or-set="' + idsAttr + '" data-or-status="playing" title="Mark playing">\u2713</button>'
+        + '<button type="button" class="btn btn-outline btn-sm" data-or-set="' + idsAttr + '" data-or-status="not_playing" title="Mark not playing">\u2717</button>'
         + '</span></div>';
     }).join('');
-    return '<details open style="margin-bottom:8px"><summary style="cursor:pointer;font-weight:700">' + esc(g.label)
+    return '<details style="margin-bottom:8px"><summary style="cursor:pointer;font-weight:700">' + esc(g.label)
       + ' <span class="hint" style="font-weight:500">\u2014 ' + pairs.length + ' unanswered</span></summary>'
       + '<div style="padding:6px 0 2px 8px">' + (rowsHtml || '<p class="hint">All answered \ud83c\udf89</p>') + '</div></details>';
   }).join('');
@@ -5873,6 +5914,49 @@ function nrRenderOutreach() {
       nrOrUnstamp(a.dataset.orUndo.split(',').map(Number), Number(a.dataset.orWave));
     });
   });
+  box.querySelectorAll('button[data-or-set]').forEach(b => {
+    b.onclick = () => nrOrSetStatus(b.dataset.orSet.split(',').map(Number), b.dataset.orStatus);
+  });
+}
+
+/* Operator sets the answer straight from outreach (source='admin'),
+   with a choice to email the roster about it. Email goes through the
+   same keyless GAS action; admin_key (the service key already in this
+   page's URL) bypasses the freshness gate, and preprod pages only ever
+   mail the operator. */
+async function nrOrSetStatus(teamIds, status) {
+  const word = status === 'playing' ? 'PLAYING' : 'NOT playing';
+  if (!confirm('Mark this team ' + word + ' for ' + nrOrTargetName() + '?')) return;
+  const sendMail = confirm('Also email the team about this? OK = email the roster, Cancel = record silently.');
+  const now = new Date().toISOString();
+  try {
+    await sb('POST', 'next_reg?on_conflict=target_session_id,team_id',
+      teamIds.map(id => ({
+        target_session_id: _nr.targetId, team_id: id, status: status, source: 'admin',
+        prior_nexus_status: null, answered_by_apa: null,
+        answered_by_name: 'Michelle & Paul Soldan', answered_at: now, updated_at: now
+      })),
+      { 'Prefer': 'resolution=merge-duplicates,return=minimal' });
+    await sb('POST', 'next_reg_log',
+      teamIds.map(id => ({
+        target_session_id: _nr.targetId, team_id: id,
+        old_status: (_nr.regRowByTeam.get(id) || {}).status || null, new_status: status,
+        actor_apa: null, actor_name: 'Michelle & Paul Soldan', source: 'admin'
+      })),
+      { 'Prefer': 'return=minimal' });
+    if (sendMail) {
+      try {
+        await fetch(OPTOUT_CONFIRM_MAILER_URL, {
+          method: 'POST', headers: { 'Content-Type': 'text/plain' },
+          body: JSON.stringify({ action: 'rerack_answer_notify', team_id: teamIds[0],
+            admin_key: SB_KEY, is_preprod: IS_PREPROD })
+        });
+      } catch (e) { /* mail is best-effort; the record is already saved */ }
+    }
+    setStatus('nrOrStatus', '\u2713 Marked ' + word + (sendMail ? ' \u2014 email sent.' : '.'), 'ok');
+  } catch (e) { setStatus('nrOrStatus', 'Set failed: ' + e.message, 'err'); }
+  await nrLoadTracker();
+  await nrLoadOutreach();
 }
 async function nrOrStamp(teamIds, wave) {
   try {
@@ -5999,6 +6083,7 @@ async function nrLoadTracker() {
       : st === 'not_playing'
         ? '<span style="background:#fef2f2;color:#b91c1c;padding:1px 8px;border-radius:999px;font-weight:700;font-size:0.72rem">NOT PLAYING</span>'
         : '<span style="background:#f3f4f6;color:#6b7280;padding:1px 8px;border-radius:999px;font-weight:700;font-size:0.72rem">UNANSWERED</span>';
+    const shown = (rows || []).filter(r => !_nr.trackerFilter || _nr.trackerFilter === 'all' || r.status === _nr.trackerFilter);
     document.getElementById('nrGrid').innerHTML = (rows || []).length
       ? '<table style="width:100%;border-collapse:collapse;font-size:0.84rem">'
         + '<tr><th style="text-align:left;padding:6px 8px;border-bottom:2px solid var(--border)">Team</th>'
@@ -6006,7 +6091,7 @@ async function nrLoadTracker() {
         + '<th style="text-align:left;padding:6px 8px;border-bottom:2px solid var(--border)">Status</th>'
         + '<th style="text-align:left;padding:6px 8px;border-bottom:2px solid var(--border)">Source</th>'
         + '<th style="text-align:left;padding:6px 8px;border-bottom:2px solid var(--border)">Updated</th></tr>'
-        + (rows || []).map(r => {
+        + shown.map(r => {
             const t = byId.get(r.team_id);
             return '<tr>'
               + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">'
