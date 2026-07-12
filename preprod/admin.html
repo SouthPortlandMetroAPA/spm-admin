@@ -3299,14 +3299,16 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
            2026-07-11-next-session-reg.md). Nexus report paste tracks the
            scorekeeper-question formats (DJ + Ladies playing N); later
            slices add segmentation, N-1 links, ReRack + outreach. -->
-      <div class="card" style="margin-bottom:14px">
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
-          <h2 style="margin:0">Next Session Registration</h2>
-          <label style="font-size:0.85rem;font-weight:700">Target:
-            <select id="nrTargetSel" style="margin-left:4px"></select>
-          </label>
-          <span class="hint" id="nrSummary"></span>
-        </div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+        <h2 style="margin:0">Next Session Registration</h2>
+        <label style="font-size:0.85rem;font-weight:700">Target:
+          <select id="nrTargetSel" style="margin-left:4px"></select>
+        </label>
+        <span class="hint" id="nrSummary"></span>
+      </div>
+      <div id="nrComingBack" style="margin:0 0 12px;font-size:0.9rem;font-weight:700"></div>
+      <details class="card" style="margin-bottom:14px">
+        <summary style="cursor:pointer;display:flex;align-items:center;gap:10px;flex-wrap:wrap"><h2 style="margin:0;font-size:1.05rem;display:inline">Uploads &amp; Nexus paste</h2></summary>
         <p class="hint" style="margin:0 0 8px">
           Paste the Nexus &ldquo;returning next session&rdquo; report (scorekeeper formats
           &mdash; DJ + Ladies). Columns: Team Number &middot; Team Name &middot; Captain &middot;
@@ -3334,43 +3336,31 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         </div>
         <div class="status-line" id="nrStatus" style="margin-top:6px"></div>
         <div id="nrIssues"></div>
-      </div>
-      <div class="card" style="margin-bottom:14px">
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
-          <h2 style="margin:0">Needs attention</h2>
-          <span class="hint" id="nrAttnCounts"></span>
-        </div>
-        <div id="nrAttn"><p class="hint">Loading&hellip;</p></div>
-      </div>
-      <div class="card" style="margin-bottom:14px">
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
-          <h2 style="margin:0">Segments</h2>
-          <span class="hint">SPM only &middot; who registers which way</span>
-        </div>
-        <div id="nrSegments"><p class="hint">Loading&hellip;</p></div>
-      </div>
-      <div class="card" style="margin-bottom:14px">
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
-          <h2 style="margin:0">Prior-session links</h2>
+      </details>
+      <details class="card" style="margin-bottom:14px">
+        <summary style="cursor:pointer;display:flex;align-items:center;gap:10px;flex-wrap:wrap"><h2 style="margin:0;font-size:1.05rem;display:inline">Needs attention</h2><span class="hint" id="nrAttnCounts"></span></summary>
+        <div id="nrAttn" style="margin-top:8px"><p class="hint">Loading&hellip;</p></div>
+      </details>
+      <details class="card" style="margin-bottom:14px">
+        <summary style="cursor:pointer;display:flex;align-items:center;gap:10px;flex-wrap:wrap"><h2 style="margin:0;font-size:1.05rem;display:inline">Segments</h2><span class="hint">SPM only &middot; who registers which way</span></summary>
+        <div id="nrSegments" style="margin-top:8px"><p class="hint">Loading&hellip;</p></div>
+      </details>
+      <details class="card" style="margin-bottom:14px">
+        <summary style="cursor:pointer;display:flex;align-items:center;gap:10px;flex-wrap:wrap"><h2 style="margin:0;font-size:1.05rem;display:inline">Prior-session links</h2><span class="hint" id="nrLinkCounts"></span></summary>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0">
           <button type="button" class="btn btn-outline btn-sm" id="nrComputeLinksBtn">Compute auto-links</button>
           <span class="hint">Auto-links ONLY when format + team name + &ge;3 shared players ALL agree. Everything else waits for you below.</span>
         </div>
         <div class="status-line" id="nrLinkStatus"></div>
         <div id="nrLinks"><p class="hint">Loading&hellip;</p></div>
-      </div>
-      <div class="card" style="margin-bottom:14px">
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
-          <h2 style="margin:0">New team intents</h2>
-          <span class="hint" id="nrIntentCounts"></span>
-        </div>
-        <p class="hint" style="margin:0 0 8px">From ReRack&rsquo;s &ldquo;Starting a NEW team?&rdquo; form &mdash; no roster yet. Contact them, then confirm or drop.</p>
+      </details>
+      <details class="card" style="margin-bottom:14px">
+        <summary style="cursor:pointer;display:flex;align-items:center;gap:10px;flex-wrap:wrap"><h2 style="margin:0;font-size:1.05rem;display:inline">New team intents</h2><span class="hint" id="nrIntentCounts"></span></summary>
+        <p class="hint" style="margin:8px 0">From ReRack&rsquo;s &ldquo;Starting a NEW team?&rdquo; form &mdash; no roster yet. Contact them, then confirm or drop.</p>
         <div id="nrIntents"><p class="hint">Loading&hellip;</p></div>
-      </div>
-      <div class="card" style="margin-bottom:14px">
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
-          <h2 style="margin:0">Outreach &mdash; unanswered teams</h2>
-          <span class="hint" id="nrOrCounts"></span>
-        </div>
+      </details>
+      <details class="card" style="margin-bottom:14px">
+        <summary style="cursor:pointer;display:flex;align-items:center;gap:10px;flex-wrap:wrap"><h2 style="margin:0;font-size:1.05rem;display:inline">Outreach &mdash; unanswered teams</h2><span class="hint" id="nrOrCounts"></span></summary>
         <p class="hint" style="margin:0 0 8px">
           Nothing sends automatically &mdash; each button opens YOUR texting app with the
           message pre-filled, then stamps the team so you can stage the next wave.
@@ -3388,12 +3378,10 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         </details>
         <div class="status-line" id="nrOrStatus"></div>
         <div id="nrOrList"><p class="hint">Loading&hellip;</p></div>
-      </div>
-      <div class="card">
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
-          <h2 style="margin:0">Tracker</h2>
-          <span class="hint" id="nrCounts"></span>
-        </div>
+      </details>
+      <details class="card">
+        <summary style="cursor:pointer;display:flex;align-items:center;gap:10px;flex-wrap:wrap"><h2 style="margin:0;font-size:1.05rem;display:inline">Tracker</h2><span class="hint" id="nrCounts"></span></summary>
+        <div style="height:8px"></div>
         <div id="nrTrkFilters" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
           <button type="button" class="btn btn-primary btn-sm" data-trkf="all">All</button>
           <button type="button" class="btn btn-outline btn-sm" data-trkf="playing">Playing</button>
@@ -3402,7 +3390,8 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         </div>
         <div class="status-line" id="nrGridStatus"></div>
         <div id="nrGrid"></div>
-      </div>
+      </details>
+      <div id="nrModalWrap"></div>
     </div>
 
     <div id="tab-contacts" class="tab-panel">
@@ -3476,7 +3465,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.240';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.241';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -5428,7 +5417,23 @@ async function nrLoadLinks() {
     + '&select=id,n1_team_id,n_team_id,origin&order=id.asc');
   _nr.links = rows || [];
   _nr.linkedN1 = new Set(_nr.links.map(l => l.n1_team_id));
+  const rej = await sbGetAll('next_reg_link_rejects?target_session_id=eq.' + _nr.targetId
+    + '&select=n1_team_id,n_team_id&order=id.asc');
+  _nr.rejects = new Set((rej || []).map(r => r.n1_team_id + '|' + r.n_team_id));
 }
+/* "Not the same team" — persist so this pair is never suggested (or
+   auto-linked) again. */
+async function nrRejectLink(n1Id, nId) {
+  try {
+    await sb('POST', 'next_reg_link_rejects?on_conflict=target_session_id,n1_team_id,n_team_id',
+      [{ target_session_id: _nr.targetId, n1_team_id: n1Id, n_team_id: nId }],
+      { 'Prefer': 'resolution=merge-duplicates,return=minimal' });
+    _nr.rejects.add(n1Id + '|' + nId);
+    _nr.review = (_nr.review || []).filter(r => !(r.n1.id === n1Id && r.cand.id === nId));
+    nrRenderLinks();
+  } catch (e) { setStatus('nrLinkStatus', 'Reject failed: ' + e.message, 'err'); }
+}
+window.nrRejectLink = nrRejectLink;
 
 async function nrLoadRosters() {
   if (_nr.rosterByTeam) return _nr.rosterByTeam;
@@ -5478,11 +5483,13 @@ async function nrComputeLinks() {
          already half the team (user rule 2026-07-12). Everything else
          keeps the >=3 bar. */
       const minOv = /Doubles/i.test(n1.division.format || '') ? 1 : 3;
-      const scored = candidates.map(c => ({
-        c,
-        nameMatch: hpMatchKey(c.team_name || '') === hpMatchKey(n1.team_name || '') && !!(n1.team_name || '').trim(),
-        overlap: nrOverlap(rosters.get(n1.id), rosters.get(c.id))
-      }));
+      const scored = candidates
+        .filter(c => !_nr.rejects || !_nr.rejects.has(n1.id + '|' + c.id))
+        .map(c => ({
+          c,
+          nameMatch: hpMatchKey(c.team_name || '') === hpMatchKey(n1.team_name || '') && !!(n1.team_name || '').trim(),
+          overlap: nrOverlap(rosters.get(n1.id), rosters.get(c.id))
+        }));
       const full = scored.filter(x => x.nameMatch && x.overlap >= minOv);
       const partial = scored.filter(x => (x.nameMatch || x.overlap >= minOv) && !(x.nameMatch && x.overlap >= minOv));
       if (full.length === 1) {
@@ -5540,14 +5547,21 @@ function nrRenderLinks() {
       + '<button type="button" class="btn btn-outline btn-sm" style="margin-left:auto" onclick="nrUnlink(' + l.id + ')">Unlink</button>'
       + '</div>';
   }).join('');
-  const reviewRows = (_nr.review || []).filter(r => !_nr.linkedN1.has(r.n1.id)).map((r, i) =>
+  const reviewRows = (_nr.review || [])
+    .filter(r => !_nr.linkedN1.has(r.n1.id))
+    .filter(r => !_nr.rejects || !_nr.rejects.has(r.n1.id + '|' + r.cand.id))
+    .map((r, i) =>
     '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:4px 0;border-bottom:1px dashed #e5e7eb;font-size:0.82rem">'
     + '<span>' + nrTeamLabel(r.n1) + ' \u2192 ' + nrTeamLabel(r.cand)
     + ' <span class="hint">(' + esc(r.why) + ')</span></span>'
-    + '<button type="button" class="btn btn-outline btn-sm" style="margin-left:auto" onclick="nrLink(' + r.n1.id + ',' + r.cand.id + ')">Link</button>'
-    + '</div>').join('');
+    + '<span style="margin-left:auto;display:flex;gap:6px">'
+    + '<button type="button" class="btn btn-outline btn-sm" onclick="nrLink(' + r.n1.id + ',' + r.cand.id + ')">Link</button>'
+    + '<button type="button" class="btn btn-outline btn-sm" style="color:#b91c1c" onclick="nrRejectLink(' + r.n1.id + ',' + r.cand.id + ')" title="Never suggest this pair again">Not the same</button>'
+    + '</span></div>').join('');
   const openL = _nr.uiLinkedOpen !== false ? ' open' : '';
   const openR = _nr.uiReviewOpen !== false ? ' open' : '';
+  const lc = document.getElementById('nrLinkCounts');
+  if (lc) lc.textContent = _nr.links.length + ' linked';
   el.innerHTML =
     '<details id="nrLinkedDetails"' + openL + '><summary style="cursor:pointer;font-weight:700;margin-bottom:4px">Linked \u2014 ' + _nr.links.length + '</summary>'
     + (linkRows || '<p class="hint">No links yet \u2014 hit Compute auto-links.</p>')
@@ -5878,7 +5892,7 @@ function nrRenderOutreach() {
           + '</span> <a href="#" data-or-undo="' + idsAttr + '" data-or-wave="' + w + '" class="hint" style="font-size:0.72rem">undo</a>';
       };
       return '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:5px 0;border-bottom:1px dashed #e5e7eb;font-size:0.82rem">'
-        + '<span><strong>' + esc(nrTeamKey(t.team_number)) + '</strong> ' + esc(t.team_name || '')
+        + '<span data-orhover="' + idsAttr + '" style="cursor:help"><strong>' + esc(nrTeamKey(t.team_number)) + '</strong> ' + esc(t.team_name || '')
         + ' <span class="hint">' + (pair.length > 1 ? (/Doubles/i.test(t.division.format || '') ? '8+9 Doubles' : '8+9') : esc(t.division.format || '')) + '</span></span>'
         + (st.w1 ? ' ' + stamp(1) : '')
         + (st.w2 ? ' ' + stamp(2) : '')
@@ -5893,7 +5907,7 @@ function nrRenderOutreach() {
         + '<button type="button" class="btn btn-outline btn-sm" data-or-set="' + idsAttr + '" data-or-status="not_playing" title="Mark not playing">\u2717</button>'
         + '</span></div>';
     }).join('');
-    return '<details style="margin-bottom:8px"><summary style="cursor:pointer;font-weight:700">' + esc(g.label)
+    return '<details data-orsec="' + g.key + '"' + (_nr.orOpen && _nr.orOpen[g.key] ? ' open' : '') + ' style="margin-bottom:8px"><summary style="cursor:pointer;font-weight:700">' + esc(g.label)
       + ' <span class="hint" style="font-weight:500">\u2014 ' + pairs.length + ' unanswered</span></summary>'
       + '<div style="padding:6px 0 2px 8px">' + (rowsHtml || '<p class="hint">All answered \ud83c\udf89</p>') + '</div></details>';
   }).join('');
@@ -5917,6 +5931,67 @@ function nrRenderOutreach() {
   box.querySelectorAll('button[data-or-set]').forEach(b => {
     b.onclick = () => nrOrSetStatus(b.dataset.orSet.split(',').map(Number), b.dataset.orStatus);
   });
+  box.querySelectorAll('details[data-orsec]').forEach(d => {
+    d.addEventListener('toggle', () => {
+      if (!_nr.orOpen) _nr.orOpen = {};
+      _nr.orOpen[d.dataset.orsec] = d.open;
+    });
+  });
+  box.querySelectorAll('[data-orhover]').forEach(sp => {
+    sp.addEventListener('mouseenter', ev => nrRosterTipShow(ev, sp.dataset.orhover.split(',').map(Number)));
+    sp.addEventListener('mouseleave', nrRosterTipHide);
+  });
+}
+
+/* Roster hover for outreach rows — instant, from the local cache.
+   Shows role + the best reachable phone per player. */
+let _nrTipEl = null;
+function nrRosterTipShow(ev, teamIds) {
+  nrRosterTipHide();
+  const seen = new Set();
+  const rows = teamIds.map(id => _nr.orRoster.get(id) || []).flat().filter(m => {
+    if (seen.has(m.member_number)) return false;
+    seen.add(m.member_number); return true;
+  });
+  const el = document.createElement('div');
+  el.style.cssText = 'position:fixed;z-index:9999;background:#1f2937;color:#fff;padding:10px 12px;'
+    + 'border-radius:8px;font-size:0.78rem;line-height:1.5;max-width:340px;'
+    + 'box-shadow:0 4px 14px rgba(0,0,0,0.3);pointer-events:none';
+  el.innerHTML = rows.length
+    ? rows.map(m => {
+        const p = m.player || {};
+        const nm = ((p.first_name || '') + ' ' + (p.last_name || '')).replace(/\s+/g, ' ').trim() || m.member_number;
+        const ph = nrBestPhone(p);
+        return '<div>' + (m.role === 'Captain' ? '\u2605 ' : m.role === 'Co-Captain' ? '\u2606 ' : '')
+          + esc(nm) + ' \u2014 ' + (ph ? esc(ph) : '<span style="color:#fca5a5">no phone</span>') + '</div>';
+      }).join('')
+    : '(no roster on file)';
+  document.body.appendChild(el);
+  const r = ev.currentTarget.getBoundingClientRect();
+  el.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 360)) + 'px';
+  el.style.top = (r.bottom + 4) + 'px';
+  _nrTipEl = el;
+}
+function nrRosterTipHide() {
+  if (_nrTipEl) { _nrTipEl.remove(); _nrTipEl = null; }
+}
+
+/* House modal — one dialog, explicit buttons, no browser popups. */
+function nrModal(opts) {
+  return new Promise(resolve => {
+    const wrap = document.getElementById('nrModalWrap');
+    wrap.innerHTML = '<div style="position:fixed;inset:0;background:rgba(10,20,40,0.55);z-index:9998;display:flex;align-items:center;justify-content:center;padding:20px">'
+      + '<div style="background:#fff;border-radius:12px;padding:22px;max-width:440px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.35)">'
+      + '<div style="font-weight:800;font-size:1.05rem;margin-bottom:6px">' + opts.title + '</div>'
+      + '<div class="hint" style="margin-bottom:14px">' + opts.body + '</div>'
+      + '<div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">'
+      + opts.buttons.map((b, i) => '<button type="button" class="btn ' + (b.primary ? 'btn-primary' : 'btn-outline')
+          + ' btn-sm" data-modalbtn="' + i + '">' + b.label + '</button>').join('')
+      + '</div></div></div>';
+    wrap.querySelectorAll('[data-modalbtn]').forEach(btn => {
+      btn.onclick = () => { wrap.innerHTML = ''; resolve(opts.buttons[Number(btn.dataset.modalbtn)].value); };
+    });
+  });
 }
 
 /* Operator sets the answer straight from outreach (source='admin'),
@@ -5926,8 +6001,18 @@ function nrRenderOutreach() {
    mail the operator. */
 async function nrOrSetStatus(teamIds, status) {
   const word = status === 'playing' ? 'PLAYING' : 'NOT playing';
-  if (!confirm('Mark this team ' + word + ' for ' + nrOrTargetName() + '?')) return;
-  const sendMail = confirm('Also email the team about this? OK = email the roster, Cancel = record silently.');
+  const first = _nr.teams.concat(_nr.teamsN1).find(t => t.id === teamIds[0]);
+  const choice = await nrModal({
+    title: 'Mark ' + esc(first ? first.team_name || '' : '') + ' ' + word + '?',
+    body: 'For ' + esc(nrOrTargetName()) + '. Email the whole roster about it, or record silently?',
+    buttons: [
+      { label: 'Mark + email team', value: 'email', primary: true },
+      { label: 'Mark silently', value: 'silent' },
+      { label: 'Cancel', value: null }
+    ]
+  });
+  if (!choice) return;
+  const sendMail = choice === 'email';
   const now = new Date().toISOString();
   try {
     await sb('POST', 'next_reg?on_conflict=target_session_id,team_id',
@@ -6049,6 +6134,26 @@ function nrRenderAttention() {
   box.innerHTML = html || '<p class="hint">\u2713 Nothing needs attention.</p>';
 }
 
+/* "Coming back" header counts — status=playing by bucket. DJ and
+   Doubles count RAW team rows (a pair = 2 teams, matching how Nexus
+   counts them — user rule 2026-07-12). */
+function nrRenderComingBack() {
+  const el = document.getElementById('nrComingBack');
+  if (!el || !_nr.regByTeam) return;
+  const playing = id => _nr.regByTeam.get(id) === 'playing';
+  const spmN = _nr.teams.filter(t => t.division.operator_id === 1);
+  const cnt = pred => spmN.filter(t => pred(t.division.format || '') && playing(t.id)).length;
+  const dj = cnt(f => f === '8-Ball Open' || f === '9-Ball Open');
+  const ladies = cnt(f => /Ladies/i.test(f));
+  const masters = cnt(f => /Masters/i.test(f));
+  const dbl = cnt(f => /Doubles/i.test(f));
+  const n1 = _nr.teamsN1.filter(t => !_nr.linkedN1.has(t.id) && playing(t.id)).length;
+  const total = dj + ladies + masters + dbl + n1;
+  el.innerHTML = 'Coming back so far: <span style="color:#16a34a">' + total + ' team(s)</span>'
+    + ' <span class="hint" style="font-weight:500">\u2014 DJ ' + dj + ' \u00b7 Ladies ' + ladies
+    + ' \u00b7 Masters ' + masters + ' \u00b7 Doubles ' + dbl + ' \u00b7 prior-session ' + n1 + '</span>';
+}
+
 async function nrLoadTracker() {
   if (!_nr.targetId) return;
   const gs = document.getElementById('nrGridStatus');
@@ -6109,6 +6214,7 @@ async function nrLoadTracker() {
         + '</table>'
       : '<p class="hint">Nothing tracked yet \u2014 paste a Nexus report above.</p>';
     gs.className = 'status-line'; gs.innerHTML = '';
+    nrRenderComingBack();
     nrRenderSegments();
     nrRenderAttention();
     if (_nr.orSent) nrRenderOutreach();
