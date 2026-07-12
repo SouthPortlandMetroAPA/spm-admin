@@ -3470,7 +3470,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.237';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.238';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -5349,6 +5349,7 @@ async function nrSave() {
       format: (r.team.division && r.team.division.name) || null,
       status: r.status,
       source: 'nexus',
+      prior_nexus_status: null,
       answered_by_apa: null,
       answered_by_name: null,
       answered_at: r.status === 'unanswered' ? null : now,
@@ -5917,11 +5918,17 @@ function nrComputeAttention() {
     if (defn(a) && defn(b) && a !== b) conflicts.push(g);
     else if (defn(a) !== defn(b)) halves.push(g);
   }
+  const changed = spmN.filter(t => {
+    const r = rowOf(t.id);
+    return r && r.source === 'rerack' && defn(r.status)
+      && defn(r.prior_nexus_status) && r.prior_nexus_status !== r.status;
+  });
+  const changedIds = new Set(changed.map(t => t.id));
   const pending = spmN.filter(t => {
     const r = rowOf(t.id);
-    return r && r.source === 'rerack' && defn(r.status);
+    return r && r.source === 'rerack' && defn(r.status) && !changedIds.has(t.id);
   });
-  return { conflicts: conflicts, halves: halves, pending: pending };
+  return { conflicts: conflicts, halves: halves, pending: pending, changed: changed };
 }
 function nrRenderAttention() {
   const box = document.getElementById('nrAttn');
@@ -5940,10 +5947,15 @@ function nrRenderAttention() {
       + items.map(x => '<div style="font-size:0.82rem;padding:2px 0">' + mapFn(x) + '</div>').join('')
       + '</div>'
     : '';
-  head.textContent = (a.conflicts.length + a.halves.length + a.pending.length)
-    ? a.conflicts.length + ' conflict \u00b7 ' + a.pending.length + ' pending Nexus \u00b7 ' + a.halves.length + ' half-entered'
+  head.textContent = (a.conflicts.length + a.halves.length + a.pending.length + a.changed.length)
+    ? a.conflicts.length + ' conflict \u00b7 ' + a.changed.length + ' changed mind \u00b7 ' + a.pending.length + ' pending Nexus \u00b7 ' + a.halves.length + ' half-entered'
     : '';
   const html = section('#b91c1c', '#fef2f2', '\ud83d\udd34 Conflicting 8+9 answers \u2014 resolve in Nexus', a.conflicts, pairLine)
+    + section('#b91c1c', '#fef2f2', '\ud83d\udd34 Changed their mind in ReRack \u2014 update Nexus, then re-paste', a.changed,
+        t => { const r = _nr.regRowByTeam.get(t.id);
+          return teamLine(t) + ' <span class="hint">' + esc(t.division.format) + ' \u00b7 Nexus has '
+            + lbl(r.prior_nexus_status) + ', ReRack now says ' + lbl(r.status)
+            + (r.answered_by_name ? ' \u00b7 by ' + esc(r.answered_by_name) : '') + '</span>'; })
     + section('#a16207', '#fefce8', '\ud83d\udfe1 Answered in ReRack \u2014 click into Nexus, then re-paste', a.pending,
         t => teamLine(t) + ' <span class="hint">' + esc(t.division.format) + ' \u00b7 ReRack says '
           + lbl(stOf(t.id)) + ((_nr.regRowByTeam.get(t.id) || {}).answered_by_name ? ' \u00b7 by ' + esc(_nr.regRowByTeam.get(t.id).answered_by_name) : '') + '</span>')
@@ -5956,7 +5968,7 @@ async function nrLoadTracker() {
   const gs = document.getElementById('nrGridStatus');
   try {
     const rows = await sbGetAll('next_reg?target_session_id=eq.' + _nr.targetId
-      + '&select=team_id,format,status,source,answered_by_name,answered_at,updated_at,team_note,players_needed&order=updated_at.desc,team_id.asc');
+      + '&select=team_id,format,status,source,answered_by_name,answered_at,updated_at,team_note,players_needed,prior_nexus_status&order=updated_at.desc,team_id.asc');
     const byId = new Map();
     for (const t of _nr.teams.concat(_nr.teamsN1)) byId.set(t.id, t);
     _nr.regByTeam = new Map();
