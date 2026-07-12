@@ -3351,6 +3351,14 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         <div class="status-line" id="nrLinkStatus"></div>
         <div id="nrLinks"><p class="hint">Loading&hellip;</p></div>
       </div>
+      <div class="card" style="margin-bottom:14px">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+          <h2 style="margin:0">New team intents</h2>
+          <span class="hint" id="nrIntentCounts"></span>
+        </div>
+        <p class="hint" style="margin:0 0 8px">From ReRack&rsquo;s &ldquo;Starting a NEW team?&rdquo; form &mdash; no roster yet. Contact them, then confirm or drop.</p>
+        <div id="nrIntents"><p class="hint">Loading&hellip;</p></div>
+      </div>
       <div class="card">
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
           <h2 style="margin:0">Tracker</h2>
@@ -3432,7 +3440,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.232';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.233';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -5143,7 +5151,7 @@ async function nrInit() {
     nrWireTeamScreenZone('nrTsZonePrev', () => nrPrevSession());
     nrWireTeamScreenZone('nrTsZoneCur',  () => currentSession);
     document.getElementById('nrSaveBtn').addEventListener('click', nrSave);
-    sel.onchange = () => { _nr.targetId = Number(sel.value); nrLoadTracker(); };
+    sel.onchange = () => { _nr.targetId = Number(sel.value); nrLoadTracker(); nrLoadIntents(); };
     _nr.inited = true;
   }
   /* Target picker: sessions AFTER the current one (by start_date),
@@ -5163,6 +5171,7 @@ async function nrInit() {
   await nrLoadTeams();
   await nrLoadLinks();
   await nrLoadTracker();
+  await nrLoadIntents();
   nrRenderLinks();
 }
 
@@ -5565,6 +5574,65 @@ function nrRenderSegments() {
       'they answer in ReRack; you click it into Nexus — the record — and it arrives via the paste', seg2)
     + group('3 · Played ' + esc(nrPrevSession() ? nrPrevSession().name : 'N-1') + ' only — all SPM formats',
       'linked teams excluded; answers via ReRack', seg3);
+}
+
+/* ── New team intents — slice 5b. Reads/writes slate.next_reg_new via
+     the admin service key; RLS has no anon policies, so ReRack's RPC is
+     the only public write path and nothing here leaks to anon. ── */
+async function nrLoadIntents() {
+  const box = document.getElementById('nrIntents');
+  if (!box || !_nr.targetId) return;
+  let rows = [];
+  try {
+    rows = await sbGetAll('next_reg_new?select=*&target_session_id=eq.' + _nr.targetId + '&order=created_at.desc');
+  } catch (e) {
+    box.innerHTML = '<p class="hint">Could not load intents: ' + esc(e.message) + '</p>';
+    return;
+  }
+  _nr.intents = rows;
+  nrRenderIntents();
+}
+const NR_INTENT_STATUSES = ['new', 'contacted', 'confirmed', 'dropped'];
+function nrIntentRow(r) {
+  const contact = [r.contact_phone, r.contact_email].filter(Boolean).join(' · ');
+  const btns = NR_INTENT_STATUSES.map(st =>
+    st === r.status
+      ? '<button type="button" class="btn btn-primary btn-sm" disabled>' + esc(st) + '</button>'
+      : '<button type="button" class="btn btn-outline btn-sm" data-intent="' + r.id + '" data-status="' + st + '">' + esc(st) + '</button>'
+  ).join(' ');
+  return '<div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-top:8px">'
+    + '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:baseline">'
+    + '<strong>' + esc(r.contact_name) + '</strong>'
+    + '<span class="hint">' + esc(r.format) + (r.contact_apa ? ' · APA ' + esc(r.contact_apa) : '') + ' · ' + esc(String(r.created_at || '').slice(0, 10)) + '</span>'
+    + '</div>'
+    + (contact ? '<div style="font-size:0.85rem;margin-top:2px">' + esc(contact) + '</div>' : '')
+    + (r.note ? '<div class="hint" style="margin-top:2px">' + esc(r.note) + '</div>' : '')
+    + '<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">' + btns + '</div>'
+    + '</div>';
+}
+function nrRenderIntents() {
+  const box = document.getElementById('nrIntents');
+  const head = document.getElementById('nrIntentCounts');
+  const rows = _nr.intents || [];
+  const open = rows.filter(r => r.status === 'new' || r.status === 'contacted');
+  const closed = rows.filter(r => r.status === 'confirmed' || r.status === 'dropped');
+  if (head) head.textContent = rows.length
+    ? rows.filter(r => r.status === 'new').length + ' new · ' + rows.filter(r => r.status === 'contacted').length + ' contacted · ' + closed.length + ' closed'
+    : '';
+  if (!rows.length) { box.innerHTML = '<p class="hint">None yet — new-team requests from ReRack land here.</p>'; return; }
+  box.innerHTML = open.map(nrIntentRow).join('')
+    + (closed.length
+        ? '<details style="margin-top:8px"><summary style="cursor:pointer;font-size:0.85rem">Confirmed + dropped — ' + closed.length + '</summary>' + closed.map(nrIntentRow).join('') + '</details>'
+        : '');
+  box.querySelectorAll('button[data-intent]').forEach(b => {
+    b.onclick = () => nrSetIntentStatus(Number(b.dataset.intent), b.dataset.status);
+  });
+}
+async function nrSetIntentStatus(id, status) {
+  try {
+    await sb('PATCH', 'next_reg_new?id=eq.' + id, { status: status, updated_at: new Date().toISOString() });
+  } catch (e) { alert('Update failed: ' + e.message); return; }
+  await nrLoadIntents();
 }
 
 async function nrLoadTracker() {
