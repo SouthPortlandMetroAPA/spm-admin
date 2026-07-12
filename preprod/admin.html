@@ -3432,7 +3432,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.231';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.232';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -5283,11 +5283,25 @@ async function nrSave() {
     const oldByTeam = new Map();
     for (let i = 0; i < ids.length; i += 150) {
       const got = await sb('GET', 'next_reg?target_session_id=eq.' + _nr.targetId
-        + '&team_id=in.(' + ids.slice(i, i + 150).join(',') + ')&select=team_id,status');
-      for (const r of (got || [])) oldByTeam.set(r.team_id, r.status);
+        + '&team_id=in.(' + ids.slice(i, i + 150).join(',') + ')&select=team_id,status,source');
+      for (const r of (got || [])) oldByTeam.set(r.team_id, r);
     }
     const now = new Date().toISOString();
-    const upserts = p.rows.map(r => ({
+    /* Guard (user rule 2026-07-12): Nexus is the record, but a paste
+       row still showing No/No must NOT clobber an answer collected in
+       ReRack that the operator hasn't clicked into Nexus yet. Those
+       rows skip the upsert and become the "pending Nexus entry" list. */
+    const pendingNexus = [];
+    const saveRows = p.rows.filter(r => {
+      const old = oldByTeam.get(r.team.id);
+      if (r.status === 'unanswered' && old && old.source === 'rerack' && old.status !== 'unanswered') {
+        pendingNexus.push(nrTeamKey(r.team.team_number) + ' ' + (r.team.team_name || '')
+          + ' \u2014 ReRack says ' + (old.status === 'playing' ? 'PLAYING' : 'NOT PLAYING'));
+        return false;
+      }
+      return true;
+    });
+    const upserts = saveRows.map(r => ({
       target_session_id: _nr.targetId,
       team_id: r.team.id,
       format: (r.team.division && r.team.division.name) || null,
@@ -5298,12 +5312,12 @@ async function nrSave() {
       answered_at: r.status === 'unanswered' ? null : now,
       updated_at: now
     }));
-    const logs = p.rows
-      .filter(r => (oldByTeam.get(r.team.id) || '(new)') !== r.status)
+    const logs = saveRows
+      .filter(r => ((oldByTeam.get(r.team.id) || {}).status || '(new)') !== r.status)
       .map(r => ({
         target_session_id: _nr.targetId,
         team_id: r.team.id,
-        old_status: oldByTeam.get(r.team.id) || null,
+        old_status: (oldByTeam.get(r.team.id) || {}).status || null,
         new_status: r.status,
         actor_apa: null,
         actor_name: 'Nexus report paste',
@@ -5325,9 +5339,18 @@ async function nrSave() {
       dbCount += (got || []).length;
     }
     const agree = dbCount === p.rows.length;
-    setStatus('nrStatus', 'Saved. Two-path check: parsed ' + p.rows.length
+    setStatus('nrStatus', 'Saved ' + saveRows.length + ' of ' + p.rows.length
+      + (pendingNexus.length ? ' (' + pendingNexus.length + ' protected ReRack answers skipped)' : '')
+      + '. Two-path check: parsed ' + p.rows.length
       + ' == DB ' + dbCount + ' \u2192 ' + (agree ? 'AGREE' : 'MISMATCH \u2014 investigate')
       + '. ' + logs.length + ' status change(s) logged.', agree ? 'ok' : 'err');
+    if (pendingNexus.length) {
+      document.getElementById('nrIssues').innerHTML =
+        '<div style="margin-top:6px;padding:8px 10px;border:1px solid #f59e0b;border-radius:8px;background:#fffbeb;font-size:0.84rem">'
+        + '<strong>Pending Nexus entry \u2014 ' + pendingNexus.length + ' team(s) answered in ReRack; click these into Nexus, then re-paste:</strong>'
+        + '<div style="margin-top:4px">' + pendingNexus.map(esc).join('<br>') + '</div></div>'
+        + document.getElementById('nrIssues').innerHTML;
+    }
     await nrLoadTracker();
   } catch (e) {
     setStatus('nrStatus', 'Save failed: ' + e.message, 'err');
@@ -5539,7 +5562,7 @@ function nrRenderSegments() {
     group('1 · Scorekeeper question — DJ + Ladies playing ' + esc(currentSession.name),
       'players answer in the scorekeeper app; arrives via the report paste', seg1)
     + group('2 · Masters + Doubles playing ' + esc(currentSession.name),
-      'you click their answers in Nexus as they confirm; arrives via the same paste', seg2)
+      'they answer in ReRack; you click it into Nexus — the record — and it arrives via the paste', seg2)
     + group('3 · Played ' + esc(nrPrevSession() ? nrPrevSession().name : 'N-1') + ' only — all SPM formats',
       'linked teams excluded; answers via ReRack', seg3);
 }
