@@ -3359,6 +3359,29 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         <p class="hint" style="margin:0 0 8px">From ReRack&rsquo;s &ldquo;Starting a NEW team?&rdquo; form &mdash; no roster yet. Contact them, then confirm or drop.</p>
         <div id="nrIntents"><p class="hint">Loading&hellip;</p></div>
       </div>
+      <div class="card" style="margin-bottom:14px">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+          <h2 style="margin:0">Outreach &mdash; unanswered teams</h2>
+          <span class="hint" id="nrOrCounts"></span>
+        </div>
+        <p class="hint" style="margin:0 0 8px">
+          Nothing sends automatically &mdash; each button opens YOUR texting app with the
+          message pre-filled, then stamps the team so you can stage the next wave.
+          Wave 1 texts captains + co-captains; wave 2 escalates to the whole roster.
+          Teams drop off as answers arrive. DJ 8+9 twins are merged &mdash; one text, both stamped.
+        </p>
+        <details style="margin:0 0 10px">
+          <summary style="cursor:pointer;font-weight:700;font-size:0.85rem">Message template</summary>
+          <textarea id="nrOrTpl" class="ehq-paste-box" style="min-height:70px;margin-top:6px"></textarea>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap">
+            <button type="button" class="btn btn-outline btn-sm" id="nrOrTplSave">Save template</button>
+            <span class="hint" style="font-size:0.75rem">Variables: {first_name} {team} {session} {how} &mdash; {how} becomes the scorekeeper-app instruction for DJ/Ladies and the ReRack link for everyone else.</span>
+          </div>
+          <div class="status-line" id="nrOrTplStatus"></div>
+        </details>
+        <div class="status-line" id="nrOrStatus"></div>
+        <div id="nrOrList"><p class="hint">Loading&hellip;</p></div>
+      </div>
       <div class="card">
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
           <h2 style="margin:0">Tracker</h2>
@@ -3440,7 +3463,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.233';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.234';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -5151,7 +5174,8 @@ async function nrInit() {
     nrWireTeamScreenZone('nrTsZonePrev', () => nrPrevSession());
     nrWireTeamScreenZone('nrTsZoneCur',  () => currentSession);
     document.getElementById('nrSaveBtn').addEventListener('click', nrSave);
-    sel.onchange = () => { _nr.targetId = Number(sel.value); nrLoadTracker(); nrLoadIntents(); };
+    document.getElementById('nrOrTplSave').addEventListener('click', nrOrSaveTpl);
+    sel.onchange = () => { _nr.targetId = Number(sel.value); nrLoadTracker(); nrLoadIntents(); nrLoadOutreach(); };
     _nr.inited = true;
   }
   /* Target picker: sessions AFTER the current one (by start_date),
@@ -5172,6 +5196,7 @@ async function nrInit() {
   await nrLoadLinks();
   await nrLoadTracker();
   await nrLoadIntents();
+  await nrLoadOutreach();
   nrRenderLinks();
 }
 
@@ -5197,6 +5222,7 @@ function nrWireTeamScreenZone(zoneId, sessGetter) {
     if (!file) return;
     await runTeamScreenImport(file, null, { session: sess, statusId: 'nrTsStatus' });
     _nr.rosterByTeam = null;              // rosters changed — recompute on next link run
+    _nr.orRoster = null;                  // outreach phone cache too
     await nrLoadTeams();
     await nrLoadLinks();
     await nrLoadTracker();
@@ -5635,6 +5661,205 @@ async function nrSetIntentStatus(id, status) {
   await nrLoadIntents();
 }
 
+/* ── Staged outreach — slice 7. Universe = the three segment groups,
+     minus answered teams. Sends are user-tap sms: links; the tap also
+     UPSERTs slate.next_reg_outreach so wave state survives reloads. ── */
+const NR_RERACK_URL = 'https://southportlandmetroapa.github.io/rerack/';
+function nrOrTargetName() {
+  const t = (sessions || []).find(x => x.id === _nr.targetId);
+  return t ? t.name : 'next session';
+}
+async function nrLoadOutreach() {
+  if (!_nr.targetId) return;
+  try {
+    const rows = await sbGetAll('next_reg_outreach?target_session_id=eq.' + _nr.targetId
+      + '&select=id,team_id,wave,sent_at&order=id.asc');
+    _nr.orSent = new Map();
+    for (const r of (rows || [])) {
+      if (!_nr.orSent.has(r.team_id)) _nr.orSent.set(r.team_id, {});
+      _nr.orSent.get(r.team_id)[r.wave] = r;
+    }
+    if (_nr.orTpl == null) {
+      const t = await sb('GET', 'outreach_templates?kind=eq.nextreg&select=body');
+      _nr.orTpl = (t && t[0] && t[0].body) || '';
+      const ta = document.getElementById('nrOrTpl');
+      if (ta) ta.value = _nr.orTpl;
+    }
+    await nrOrEnsureRosters();
+    nrRenderOutreach();
+  } catch (e) {
+    setStatus('nrOrStatus', 'Outreach load failed: ' + e.message, 'err');
+  }
+}
+/* One paged roster+phone fetch for every team in the outreach universe;
+   cached until a Team Screen import invalidates it. */
+async function nrOrEnsureRosters() {
+  if (_nr.orRoster) return;
+  const uni = nrOrUniverse();
+  const ids = [];
+  for (const g of uni) for (const t of g.teams) ids.push(t.id);
+  _nr.orRoster = new Map();
+  for (let i = 0; i < ids.length; i += 100) {
+    const got = await sbGetAll('team_memberships?team_id=in.(' + ids.slice(i, i + 100).join(',')
+      + ')&select=team_id,role,member_number,player:players(first_name,last_name,cell_phone)&order=id.asc');
+    for (const m of (got || [])) {
+      if (!_nr.orRoster.has(m.team_id)) _nr.orRoster.set(m.team_id, []);
+      _nr.orRoster.get(m.team_id).push(m);
+    }
+  }
+}
+/* The three segment groups, answered teams removed. 'how' picks the
+   {how} substitution: app = scorekeeper instruction, rerack = link. */
+function nrOrUniverse() {
+  const un = t => { const st = _nr.regByTeam.get(t.id); return st !== 'playing' && st !== 'not_playing'; };
+  const spmN = _nr.teams.filter(t => t.division.operator_id === 1);
+  return [
+    { key: 'q', label: 'DJ + Ladies playing ' + (currentSession ? currentSession.name : 'N'), how: 'app',
+      teams: spmN.filter(t => NR_QUESTION_FORMATS.indexOf(t.division.format) >= 0).filter(un) },
+    { key: 'rr', label: 'Masters + Doubles playing ' + (currentSession ? currentSession.name : 'N'), how: 'rerack',
+      teams: spmN.filter(t => NR_RERACK_FORMATS.indexOf(t.division.format) >= 0).filter(un) },
+    { key: 'n1', label: nrPrevSession() ? nrPrevSession().name + ' only' : 'prior session only', how: 'rerack',
+      teams: _nr.teamsN1.filter(t => !_nr.linkedN1.has(t.id)).filter(un) }
+  ];
+}
+/* Merge DJ 8+9 twins: same normalized name, exactly one 8-Ball Open +
+   one 9-Ball Open, sharing at least one roster member — one card, one
+   text, both team ids stamped. Same-name strangers stay separate. */
+function nrOrMergePairs(teams) {
+  const byName = new Map();
+  for (const t of teams) {
+    const k = hpMatchKey ? hpMatchKey(t.team_name || '') : String(t.team_name || '').toLowerCase().trim();
+    if (!byName.has(k)) byName.set(k, []);
+    byName.get(k).push(t);
+  }
+  const out = [];
+  for (const group of byName.values()) {
+    if (group.length === 2) {
+      const fmts = group.map(t => t.division.format).sort().join('|');
+      const r0 = (_nr.orRoster.get(group[0].id) || []).map(m => m.member_number);
+      const shares = (_nr.orRoster.get(group[1].id) || []).some(m => r0.indexOf(m.member_number) >= 0);
+      if (fmts === '8-Ball Open|9-Ball Open' && shares) { out.push(group); continue; }
+    }
+    for (const t of group) out.push([t]);
+  }
+  return out;
+}
+function nrOrBody(pair, how, firstPlayer) {
+  const t = pair[0];
+  const howText = how === 'app'
+    ? 'Answer the Returning question in your scorekeeper app.'
+    : 'Answer in 10 seconds: ' + NR_RERACK_URL;
+  const filled = String(_nr.orTpl || '')
+    .replace(/\{team\}/g, t.team_name || ('Team ' + nrTeamKey(t.team_number)))
+    .replace(/\{session\}/g, nrOrTargetName())
+    .replace(/\{how\}/g, howText);
+  return firstPlayer ? otSubstitute(filled, firstPlayer) : filled;
+}
+function nrOrWaveState(pair) {
+  /* pair is stamped when EVERY team id in it is stamped for that wave */
+  const has = w => pair.every(t => { const st = _nr.orSent.get(t.id); return st && st[w]; });
+  return { w1: has(1), w2: has(2) };
+}
+function nrRenderOutreach() {
+  const box = document.getElementById('nrOrList');
+  if (!box || !_nr.orSent) return;
+  const uni = nrOrUniverse();
+  let total = 0, w1done = 0, w2done = 0;
+  const sect = uni.map(g => {
+    const pairs = nrOrMergePairs(g.teams);
+    total += pairs.length;
+    const rowsHtml = pairs.map(pair => {
+      const t = pair[0];
+      const st = nrOrWaveState(pair);
+      if (st.w1) w1done++;
+      if (st.w2) w2done++;
+      const roster = pair.map(x => _nr.orRoster.get(x.id) || []).flat();
+      const seenNum = new Set();
+      const uniq = roster.filter(m => {
+        const d = otPhoneDigits((m.player || {}).cell_phone || '');
+        if (!d || !otIsRealPhone((m.player || {}).cell_phone)) return false;
+        if (seenNum.has(d)) return false;
+        seenNum.add(d); return true;
+      });
+      const caps = uniq.filter(m => m.role === 'Captain' || m.role === 'Co-Captain');
+      const wave = st.w1 ? 2 : 1;
+      const recips = wave === 1 ? caps : uniq;
+      const digits = recips.map(m => otPhoneDigits(m.player.cell_phone)).join(',');
+      const body = nrOrBody(pair, g.how, recips[0] ? recips[0].player : null);
+      const url = digits ? otBuildSmsUrl(digits, body) : '#';
+      const idsAttr = pair.map(x => x.id).join(',');
+      const label = wave === 1
+        ? '\ud83d\udcf1 Wave 1 \u2014 captains \u00b7 ' + recips.length
+        : '\ud83d\udcf1 Wave 2 \u2014 whole roster \u00b7 ' + recips.length;
+      const stamp = w => {
+        const rec = _nr.orSent.get(pair[0].id);
+        const at = rec && rec[w] ? String(rec[w].sent_at).slice(0, 10) : '';
+        return '<span style="background:#eef2ff;color:#4338ca;padding:1px 8px;border-radius:999px;font-weight:700;font-size:0.68rem">WAVE ' + w + ' \u00b7 ' + at
+          + '</span> <a href="#" data-or-undo="' + idsAttr + '" data-or-wave="' + w + '" class="hint" style="font-size:0.72rem">undo</a>';
+      };
+      return '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:5px 0;border-bottom:1px dashed #e5e7eb;font-size:0.82rem">'
+        + '<span><strong>' + esc(nrTeamKey(t.team_number)) + '</strong> ' + esc(t.team_name || '')
+        + ' <span class="hint">' + (pair.length > 1 ? '8+9' : esc(t.division.format || '')) + '</span></span>'
+        + (st.w1 ? ' ' + stamp(1) : '')
+        + (st.w2 ? ' ' + stamp(2) : '')
+        + '<span style="margin-left:auto">'
+        + (st.w2
+            ? '<span class="hint" style="font-size:0.75rem">both waves out \u2014 waiting</span>'
+            : (recips.length
+                ? '<a class="btn btn-outline btn-sm" style="text-decoration:none" href="' + esc(url)
+                  + '" data-or-send="' + idsAttr + '" data-or-wave="' + wave + '">' + label + '</a>'
+                : '<span class="sb-no-phone">no cells for wave ' + wave + '</span>'))
+        + '</span></div>';
+    }).join('');
+    return '<details open style="margin-bottom:8px"><summary style="cursor:pointer;font-weight:700">' + esc(g.label)
+      + ' <span class="hint" style="font-weight:500">\u2014 ' + pairs.length + ' unanswered</span></summary>'
+      + '<div style="padding:6px 0 2px 8px">' + (rowsHtml || '<p class="hint">All answered \ud83c\udf89</p>') + '</div></details>';
+  }).join('');
+  document.getElementById('nrOrCounts').textContent =
+    total + ' unanswered \u00b7 wave 1 sent ' + w1done + ' \u00b7 wave 2 sent ' + w2done;
+  box.innerHTML = total ? sect : '<p class="hint">Everyone has answered \u2014 nothing to chase.</p>';
+  box.querySelectorAll('a[data-or-send]').forEach(a => {
+    a.addEventListener('click', () => {
+      /* let the sms: navigation proceed; stamp in the background */
+      const ids = a.dataset.orSend.split(',').map(Number);
+      const wave = Number(a.dataset.orWave);
+      nrOrStamp(ids, wave);
+    });
+  });
+  box.querySelectorAll('a[data-or-undo]').forEach(a => {
+    a.addEventListener('click', ev => {
+      ev.preventDefault();
+      nrOrUnstamp(a.dataset.orUndo.split(',').map(Number), Number(a.dataset.orWave));
+    });
+  });
+}
+async function nrOrStamp(teamIds, wave) {
+  try {
+    await sb('POST', 'next_reg_outreach?on_conflict=target_session_id,team_id,wave',
+      teamIds.map(id => ({ target_session_id: _nr.targetId, team_id: id, wave: wave })),
+      { 'Prefer': 'resolution=merge-duplicates,return=minimal' });
+  } catch (e) { setStatus('nrOrStatus', 'Stamp failed: ' + e.message, 'err'); }
+  await nrLoadOutreach();
+}
+async function nrOrUnstamp(teamIds, wave) {
+  try {
+    await sb('DELETE', 'next_reg_outreach?target_session_id=eq.' + _nr.targetId
+      + '&team_id=in.(' + teamIds.join(',') + ')&wave=eq.' + wave);
+  } catch (e) { setStatus('nrOrStatus', 'Undo failed: ' + e.message, 'err'); }
+  await nrLoadOutreach();
+}
+async function nrOrSaveTpl() {
+  const v = document.getElementById('nrOrTpl').value;
+  try {
+    await sb('POST', 'outreach_templates?on_conflict=kind',
+      { kind: 'nextreg', body: v, updated_at: new Date().toISOString() },
+      { 'Prefer': 'resolution=merge-duplicates,return=minimal' });
+    _nr.orTpl = v;
+    setStatus('nrOrTplStatus', '\u2713 Saved', 'ok');
+    nrRenderOutreach();
+  } catch (e) { setStatus('nrOrTplStatus', 'Save failed: ' + e.message, 'err'); }
+}
+
 async function nrLoadTracker() {
   if (!_nr.targetId) return;
   const gs = document.getElementById('nrGridStatus');
@@ -5677,6 +5902,7 @@ async function nrLoadTracker() {
       : '<p class="hint">Nothing tracked yet \u2014 paste a Nexus report above.</p>';
     gs.className = 'status-line'; gs.innerHTML = '';
     nrRenderSegments();
+    if (_nr.orSent) nrRenderOutreach();
   } catch (e) {
     gs.className = 'status-line shown err'; gs.textContent = 'Tracker load failed: ' + e.message;
   }
