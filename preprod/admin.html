@@ -3337,6 +3337,13 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       </div>
       <div class="card" style="margin-bottom:14px">
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+          <h2 style="margin:0">Needs attention</h2>
+          <span class="hint" id="nrAttnCounts"></span>
+        </div>
+        <div id="nrAttn"><p class="hint">Loading&hellip;</p></div>
+      </div>
+      <div class="card" style="margin-bottom:14px">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
           <h2 style="margin:0">Segments</h2>
           <span class="hint">SPM only &middot; who registers which way</span>
         </div>
@@ -3463,7 +3470,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.236';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.237';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -5690,6 +5697,7 @@ async function nrLoadOutreach() {
     }
     await nrOrEnsureRosters();
     nrRenderOutreach();
+    nrRenderAttention();
   } catch (e) {
     setStatus('nrOrStatus', 'Outreach load failed: ' + e.message, 'err');
   }
@@ -5698,9 +5706,10 @@ async function nrLoadOutreach() {
    cached until a Team Screen import invalidates it. */
 async function nrOrEnsureRosters() {
   if (_nr.orRoster) return;
-  const uni = nrOrUniverse();
-  const ids = [];
-  for (const g of uni) for (const t of g.teams) ids.push(t.id);
+  /* ALL current SPM + unlinked N-1 teams — the attention card pairs
+     answered teams too, so the unanswered-only universe is not enough */
+  const ids = _nr.teams.filter(t => t.division.operator_id === 1).map(t => t.id)
+    .concat(_nr.teamsN1.filter(t => !_nr.linkedN1.has(t.id)).map(t => t.id));
   _nr.orRoster = new Map();
   for (let i = 0; i < ids.length; i += 100) {
     const got = await sbGetAll('team_memberships?team_id=in.(' + ids.slice(i, i + 100).join(',')
@@ -5893,6 +5902,55 @@ async function nrOrSaveTpl() {
   } catch (e) { setStatus('nrOrTplStatus', 'Save failed: ' + e.message, 'err'); }
 }
 
+/* ── Needs attention — scope event #8 (standing card, live data).
+     Semantics per the locked matrix: definitive beats unanswered; a
+     P+N pair is a RED conflict (ReRack shows the team PLAYING). ── */
+function nrComputeAttention() {
+  const spmN = _nr.teams.filter(t => t.division.operator_id === 1);
+  const rowOf = id => _nr.regRowByTeam && _nr.regRowByTeam.get(id);
+  const stOf = id => { const r = rowOf(id); return r ? r.status : 'unanswered'; };
+  const defn = v => v === 'playing' || v === 'not_playing';
+  const pairs = nrOrMergePairs(spmN).filter(g => g.length === 2);
+  const conflicts = [], halves = [];
+  for (const g of pairs) {
+    const a = stOf(g[0].id), b = stOf(g[1].id);
+    if (defn(a) && defn(b) && a !== b) conflicts.push(g);
+    else if (defn(a) !== defn(b)) halves.push(g);
+  }
+  const pending = spmN.filter(t => {
+    const r = rowOf(t.id);
+    return r && r.source === 'rerack' && defn(r.status);
+  });
+  return { conflicts: conflicts, halves: halves, pending: pending };
+}
+function nrRenderAttention() {
+  const box = document.getElementById('nrAttn');
+  const head = document.getElementById('nrAttnCounts');
+  if (!box || !_nr.regRowByTeam || !_nr.orRoster) return;
+  const a = nrComputeAttention();
+  const stOf = id => { const r = _nr.regRowByTeam.get(id); return r ? r.status : 'unanswered'; };
+  const lbl = st => st === 'playing' ? 'YES' : st === 'not_playing' ? 'NO' : 'blank';
+  const teamLine = t => '<strong>' + esc(nrTeamKey(t.team_number)) + '</strong> ' + esc(t.team_name || '');
+  const pairLine = g => teamLine(g[0]) + ' <span class="hint">'
+    + esc(g[0].division.format) + ' ' + lbl(stOf(g[0].id)) + ' \u00b7 '
+    + esc(g[1].division.format) + ' ' + lbl(stOf(g[1].id)) + '</span>';
+  const section = (color, bg, title, items, mapFn) => items.length
+    ? '<div style="border-left:4px solid ' + color + ';background:' + bg + ';border-radius:0 8px 8px 0;padding:8px 10px;margin-top:8px">'
+      + '<div style="font-weight:700;font-size:0.84rem;color:' + color + '">' + title + ' \u2014 ' + items.length + '</div>'
+      + items.map(x => '<div style="font-size:0.82rem;padding:2px 0">' + mapFn(x) + '</div>').join('')
+      + '</div>'
+    : '';
+  head.textContent = (a.conflicts.length + a.halves.length + a.pending.length)
+    ? a.conflicts.length + ' conflict \u00b7 ' + a.pending.length + ' pending Nexus \u00b7 ' + a.halves.length + ' half-entered'
+    : '';
+  const html = section('#b91c1c', '#fef2f2', '\ud83d\udd34 Conflicting 8+9 answers \u2014 resolve in Nexus', a.conflicts, pairLine)
+    + section('#a16207', '#fefce8', '\ud83d\udfe1 Answered in ReRack \u2014 click into Nexus, then re-paste', a.pending,
+        t => teamLine(t) + ' <span class="hint">' + esc(t.division.format) + ' \u00b7 ReRack says '
+          + lbl(stOf(t.id)) + ((_nr.regRowByTeam.get(t.id) || {}).answered_by_name ? ' \u00b7 by ' + esc(_nr.regRowByTeam.get(t.id).answered_by_name) : '') + '</span>')
+    + section('#a16207', '#fefce8', '\ud83d\udfe1 Half-entered pairs \u2014 finish the other Nexus row', a.halves, pairLine);
+  box.innerHTML = html || '<p class="hint">\u2713 Nothing needs attention.</p>';
+}
+
 async function nrLoadTracker() {
   if (!_nr.targetId) return;
   const gs = document.getElementById('nrGridStatus');
@@ -5902,7 +5960,8 @@ async function nrLoadTracker() {
     const byId = new Map();
     for (const t of _nr.teams.concat(_nr.teamsN1)) byId.set(t.id, t);
     _nr.regByTeam = new Map();
-    for (const r of (rows || [])) _nr.regByTeam.set(r.team_id, r.status);
+    _nr.regRowByTeam = new Map();
+    for (const r of (rows || [])) { _nr.regByTeam.set(r.team_id, r.status); _nr.regRowByTeam.set(r.team_id, r); }
     const counts = { playing: 0, not_playing: 0, unanswered: 0 };
     for (const r of (rows || [])) if (counts[r.status] != null) counts[r.status]++;
     document.getElementById('nrCounts').textContent =
@@ -5937,6 +5996,7 @@ async function nrLoadTracker() {
       : '<p class="hint">Nothing tracked yet \u2014 paste a Nexus report above.</p>';
     gs.className = 'status-line'; gs.innerHTML = '';
     nrRenderSegments();
+    nrRenderAttention();
     if (_nr.orSent) nrRenderOutreach();
   } catch (e) {
     gs.className = 'status-line shown err'; gs.textContent = 'Tracker load failed: ' + e.message;
