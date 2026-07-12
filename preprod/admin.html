@@ -3432,7 +3432,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.229';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.230';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -5208,9 +5208,11 @@ async function nrLoadTeams() {
   if (!currentSession) return;
   const prev = nrPrevSession();
   const ids = [currentSession.id].concat(prev ? [prev.id] : []);
-  const rows = await sb('GET',
+  /* PostgREST caps one response at 1000 rows and the two sessions
+     together exceed that — page via sbGetAll (needs a stable order). */
+  const rows = await sbGetAll(
     'teams?select=id,team_number,team_name,division:divisions!inner(id,session_id,name,format,operator_id)'
-    + '&division.session_id=in.(' + ids.join(',') + ')&limit=4000');
+    + '&division.session_id=in.(' + ids.join(',') + ')&order=id.asc');
   const all = rows || [];
   _nr.teams   = all.filter(t => t.division.session_id === currentSession.id);
   _nr.teamsN1 = prev ? all.filter(t => t.division.session_id === prev.id && t.division.operator_id === 1) : [];
@@ -5337,8 +5339,8 @@ async function nrSave() {
    ambiguity NEVER auto-links. */
 async function nrLoadLinks() {
   if (!_nr.targetId) return;
-  const rows = await sb('GET', 'next_reg_links?target_session_id=eq.' + _nr.targetId
-    + '&select=id,n1_team_id,n_team_id,origin&limit=2000');
+  const rows = await sbGetAll('next_reg_links?target_session_id=eq.' + _nr.targetId
+    + '&select=id,n1_team_id,n_team_id,origin&order=id.asc');
   _nr.links = rows || [];
   _nr.linkedN1 = new Set(_nr.links.map(l => l.n1_team_id));
 }
@@ -5349,8 +5351,8 @@ async function nrLoadRosters() {
     .concat(_nr.teamsN1.map(t => t.id));
   const map = new Map();
   for (let i = 0; i < spmIds.length; i += 80) {
-    const rows = await sb('GET', 'team_memberships?team_id=in.(' + spmIds.slice(i, i + 80).join(',')
-      + ')&select=team_id,member_number&limit=3000');
+    const rows = await sbGetAll('team_memberships?team_id=in.(' + spmIds.slice(i, i + 80).join(',')
+      + ')&select=team_id,member_number&order=id.asc');
     for (const r of (rows || [])) {
       if (!r.member_number) continue;
       if (!map.has(r.team_id)) map.set(r.team_id, new Set());
@@ -5530,8 +5532,8 @@ async function nrLoadTracker() {
   if (!_nr.targetId) return;
   const gs = document.getElementById('nrGridStatus');
   try {
-    const rows = await sb('GET', 'next_reg?target_session_id=eq.' + _nr.targetId
-      + '&select=team_id,format,status,source,answered_by_name,answered_at,updated_at&order=updated_at.desc&limit=2000');
+    const rows = await sbGetAll('next_reg?target_session_id=eq.' + _nr.targetId
+      + '&select=team_id,format,status,source,answered_by_name,answered_at,updated_at&order=updated_at.desc,team_id.asc');
     const byId = new Map();
     for (const t of _nr.teams.concat(_nr.teamsN1)) byId.set(t.id, t);
     _nr.regByTeam = new Map();
