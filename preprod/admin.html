@@ -3432,7 +3432,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.230';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.231';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -5247,10 +5247,14 @@ function nrIssuesHtml(p) {
   const li = (label, arr, color) => arr.length
     ? '<div style="margin-top:4px;color:' + color + ';font-size:0.82rem"><strong>' + label + ' (' + arr.length + '):</strong> ' + arr.map(esc).join(', ') + '</div>'
     : '';
+  const oos = p.outOfScope.length
+    ? '<details style="margin-top:4px"><summary style="cursor:pointer;color:#6b7280;font-size:0.82rem"><strong>Out of scope \u2014 CRA, ignored by design \u2014 ' + p.outOfScope.length + '</strong></summary>'
+      + '<div style="color:#6b7280;font-size:0.8rem;padding:4px 0 0 14px">' + p.outOfScope.map(esc).join(', ') + '</div></details>'
+    : '';
   return li('Unparseable lines', p.invalid, '#b91c1c')
     + li('Team numbers not in ' + esc(currentSession ? currentSession.name : 'current session') + ' (Team Screen not imported?)', p.unmatched, '#b91c1c')
     + li('Answered BOTH yes (kept as playing — verify in Nexus)', p.conflicts, '#a76c00')
-    + li('Out of scope (CRA) — ignored by design', p.outOfScope, '#6b7280');
+    + oos;
 }
 
 function nrPreview() {
@@ -5389,13 +5393,17 @@ async function nrComputeLinks() {
     for (const n1 of _nr.teamsN1) {
       if (_nr.linkedN1.has(n1.id)) continue;
       const candidates = byFormat.get(n1.division.format || '?') || [];
+      /* Doubles rosters max out at 2 players — one shared player is
+         already half the team (user rule 2026-07-12). Everything else
+         keeps the >=3 bar. */
+      const minOv = /Doubles/i.test(n1.division.format || '') ? 1 : 3;
       const scored = candidates.map(c => ({
         c,
         nameMatch: hpMatchKey(c.team_name || '') === hpMatchKey(n1.team_name || '') && !!(n1.team_name || '').trim(),
         overlap: nrOverlap(rosters.get(n1.id), rosters.get(c.id))
       }));
-      const full = scored.filter(x => x.nameMatch && x.overlap >= 3);
-      const partial = scored.filter(x => (x.nameMatch || x.overlap >= 3) && !(x.nameMatch && x.overlap >= 3));
+      const full = scored.filter(x => x.nameMatch && x.overlap >= minOv);
+      const partial = scored.filter(x => (x.nameMatch || x.overlap >= minOv) && !(x.nameMatch && x.overlap >= minOv));
       if (full.length === 1) {
         autos.push({ n1, n: full[0].c, overlap: full[0].overlap });
       } else if (full.length > 1) {
@@ -5457,13 +5465,21 @@ function nrRenderLinks() {
     + ' <span class="hint">(' + esc(r.why) + ')</span></span>'
     + '<button type="button" class="btn btn-outline btn-sm" style="margin-left:auto" onclick="nrLink(' + r.n1.id + ',' + r.cand.id + ')">Link</button>'
     + '</div>').join('');
+  const openL = _nr.uiLinkedOpen !== false ? ' open' : '';
+  const openR = _nr.uiReviewOpen !== false ? ' open' : '';
   el.innerHTML =
-    '<div style="font-weight:700;margin-bottom:4px">Linked \u2014 ' + _nr.links.length + '</div>'
+    '<details id="nrLinkedDetails"' + openL + '><summary style="cursor:pointer;font-weight:700;margin-bottom:4px">Linked \u2014 ' + _nr.links.length + '</summary>'
     + (linkRows || '<p class="hint">No links yet \u2014 hit Compute auto-links.</p>')
-    + '<div style="font-weight:700;margin:10px 0 4px">Review queue' + (_nr.review ? ' \u2014 ' + (_nr.review.filter(r => !_nr.linkedN1.has(r.n1.id)).length) : '') + '</div>'
+    + '</details>'
+    + '<details id="nrReviewDetails"' + openR + ' style="margin-top:10px"><summary style="cursor:pointer;font-weight:700;margin-bottom:4px">Review queue' + (_nr.review ? ' \u2014 ' + (_nr.review.filter(r => !_nr.linkedN1.has(r.n1.id)).length) : '') + '</summary>'
     + (_nr.review == null
         ? '<p class="hint">Run Compute auto-links to populate suggestions.</p>'
-        : (reviewRows || '<p class="hint">Nothing to review \u2014 remaining prior-session teams have no plausible current-session match.</p>'));
+        : (reviewRows || '<p class="hint">Nothing to review \u2014 remaining prior-session teams have no plausible current-session match.</p>'))
+    + '</details>';
+  const ld = document.getElementById('nrLinkedDetails');
+  const rd = document.getElementById('nrReviewDetails');
+  if (ld) ld.addEventListener('toggle', () => { _nr.uiLinkedOpen = ld.open; });
+  if (rd) rd.addEventListener('toggle', () => { _nr.uiReviewOpen = rd.open; });
 }
 
 async function nrLink(n1Id, nId) {
@@ -5521,9 +5537,9 @@ function nrRenderSegments() {
   };
   el.innerHTML =
     group('1 · Scorekeeper question — DJ + Ladies playing ' + esc(currentSession.name),
-      'answers arrive via the Nexus report paste', seg1)
-    + group('2 · ReRack — Masters + Doubles playing ' + esc(currentSession.name),
-      'paper-scored formats; they answer in ReRack', seg2)
+      'players answer in the scorekeeper app; arrives via the report paste', seg1)
+    + group('2 · Masters + Doubles playing ' + esc(currentSession.name),
+      'you click their answers in Nexus as they confirm; arrives via the same paste', seg2)
     + group('3 · Played ' + esc(nrPrevSession() ? nrPrevSession().name : 'N-1') + ' only — all SPM formats',
       'linked teams excluded; answers via ReRack', seg3);
 }
