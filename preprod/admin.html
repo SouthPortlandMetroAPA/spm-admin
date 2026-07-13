@@ -3486,7 +3486,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.244';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.245';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -5877,7 +5877,7 @@ async function nrOrTplEmailTest() {
     try {
       const res = await nrGasJson({ action: 'nextreg_email_send', admin_key: SB_KEY,
         test_to: 'southportlandmetroapa@gmail.com',
-        subject: k[1] + ': ' + fill(subjBox ? subjBox.value : ''),
+        subject: fill(subjBox ? subjBox.value : ''),
         html_body: fill(bodyBox.value) });
       if (res && res.ok) sent++; else failed.push(k[1] + ' \u2014 ' + ((res && res.error) || 'unknown'));
     } catch (e) { failed.push(k[1] + ' \u2014 ' + e.message); }
