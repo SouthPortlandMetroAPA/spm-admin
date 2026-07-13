@@ -3486,7 +3486,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.245';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.246';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -5974,6 +5974,7 @@ function nrRenderOutreach() {
                 : '<span class="sb-no-phone">no phones for wave ' + wave + '</span>'))
         + ' <button type="button" class="btn btn-outline btn-sm" data-or-set="' + idsAttr + '" data-or-status="playing" title="Mark playing">\u2713</button>'
         + '<button type="button" class="btn btn-outline btn-sm" data-or-set="' + idsAttr + '" data-or-status="not_playing" title="Mark not playing">\u2717</button>'
+        + '<button type="button" class="btn btn-outline btn-sm" data-or-set="' + idsAttr + '" data-or-status="undecided" title="Mark still deciding" style="color:#6d28d9">?</button>'
         + '</span></div>';
     }).join('');
     return '<details data-orsec="' + g.key + '"' + (_nr.orOpen && _nr.orOpen[g.key] ? ' open' : '') + ' style="margin-bottom:8px"><summary style="cursor:pointer;font-weight:700">' + esc(g.label)
@@ -6153,7 +6154,7 @@ function nrModal(opts) {
    page's URL) bypasses the freshness gate, and preprod pages only ever
    mail the operator. */
 async function nrOrSetStatus(teamIds, status) {
-  const word = status === 'playing' ? 'PLAYING' : 'NOT playing';
+  const word = status === 'playing' ? 'PLAYING' : status === 'not_playing' ? 'NOT playing' : 'STILL DECIDING';
   const first = _nr.teams.concat(_nr.teamsN1).find(t => t.id === teamIds[0]);
   const choice = await nrModal({
     title: 'Mark ' + esc(first ? first.team_name || '' : '') + ' ' + word + '?',
