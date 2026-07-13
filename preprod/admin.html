@@ -3433,6 +3433,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         </div>
         <div class="status-line" id="plStatus"></div>
         <div id="plTally" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"></div>
+        <div id="plTeams"></div>
         <div id="plVoters"></div>
         <details style="margin-top:12px">
           <summary style="cursor:pointer;font-weight:700">Haven't voted yet</summary>
@@ -3545,7 +3546,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.249';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.250';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -6494,7 +6495,8 @@ async function plLoad() {
           : '');
     const lbl = k => ((poll.options || []).find(o => o.key === k) || {}).label || k;
     document.getElementById('plVoters').innerHTML = (rows || []).length
-      ? '<table style="width:100%;border-collapse:collapse;font-size:0.84rem">'
+      ? '<div style="font-weight:700;margin:12px 0 6px">By player</div>'
+        + '<table style="width:100%;border-collapse:collapse;font-size:0.84rem">'
         + '<tr><th style="text-align:left;padding:6px 8px;border-bottom:2px solid var(--border)">Player</th>'
         + '<th style="text-align:left;padding:6px 8px;border-bottom:2px solid var(--border)">Team</th>'
         + '<th style="text-align:left;padding:6px 8px;border-bottom:2px solid var(--border)">Answer</th>'
@@ -6511,34 +6513,213 @@ async function plLoad() {
             + '</tr>').join('')
         + '</table>'
       : '<p class="hint">No responses yet.</p>';
-    await plRenderMissing(poll, rows || []);
+    const roster = await plRosterByTeam(poll);
+    plRenderTeams(poll, rows || [], roster);
+    plRenderMissing(poll, rows || [], roster);
     plfFill(poll, (rows || []).length);
     st.className = 'status-line'; st.textContent = '';
   } catch (e) { st.className = 'status-line shown err'; st.textContent = 'Load failed: ' + e.message; }
 }
-async function plRenderMissing(poll, rows) {
+function plRenderMissing(poll, rows, roster) {
   const box = document.getElementById('plMissing');
+  if (!roster) { box.innerHTML = '<p class="hint">No roster-based eligibility rule on this poll.</p>'; return; }
+  if (!roster.teams.length) { box.innerHTML = '<p class="hint">No matching division this session.</p>'; return; }
+  const voted = new Set(rows.map(r => r.member_number));
+  const seen = new Set();
+  const missing = [];
+  for (const t of roster.teams) for (const m of t.members) {
+    if (voted.has(m.apa) || seen.has(m.apa)) continue;
+    seen.add(m.apa); missing.push({ name: m.name, team: t.name });
+  }
+  box.innerHTML = missing.length
+    ? '<div class="hint" style="margin-bottom:4px">Still to hear from ' + missing.length + ':</div>'
+      + missing.map(m => '<div style="font-size:0.82rem;padding:2px 0">' + esc(m.name)
+          + ' <span class="hint">' + esc(m.team || '') + '</span></div>').join('')
+    : '<p class="hint">✓ Everyone eligible has voted.</p>';
+}
+
+/* ── Team view, 3.250. One row per roster team, one square per rostered
+     player colored by their vote, so intra-team disagreement and turnout
+     are visible without drilling. For 3-option polls with one detectable
+     neutral option the other two become poles — blue vs orange with a
+     gray middle, validated against the dataviz palette checks — and
+     teams sort along that spectrum so proto-divisions read straight down
+     the table. Any other option shape falls back to categorical colors
+     and unanimous/mixed badges. Solid needs two-thirds of at least 2
+     votes on one side with zero opposing votes; any opposing vote is a
+     Split — the "talk to the captain first" pile. */
+const PL_POLE_A = '#2a78d6', PL_POLE_B = '#eb6834', PL_NEUTRAL = '#898781';
+const PL_CAT = ['#2a78d6', '#1baf7a', '#eda100', '#4a3aa7', '#e34948', '#e87ba4'];
+function plPoles(options) {
+  if ((options || []).length !== 3) return null;
+  const isNeu = o => /either|don.?t care|no preference|flexib|unsure|neutral|whatever/i
+    .test(String(o.key || '') + ' ' + String(o.label || ''));
+  const neu = options.filter(isNeu);
+  if (neu.length !== 1) return null;
+  const p = options.filter(o => !isNeu(o));
+  return { a: p[0].key, b: p[1].key, neutral: neu[0].key };
+}
+function plTeamBadge(counts, votes, poles) {
+  if (!votes) return { rank: 6, kind: 'none' };
+  if (!poles) {
+    const keys = Object.keys(counts).filter(k => counts[k] > 0);
+    if (keys.length === 1) return { rank: 0, kind: 'unanimous', side: keys[0] };
+    return { rank: 3, kind: 'mixed' };
+  }
+  const a = counts[poles.a] || 0, b = counts[poles.b] || 0;
+  if (a > 0 && b > 0) return { rank: 3, kind: 'split' };
+  if (!a && !b) return { rank: 2, kind: 'flex' };
+  const solid = votes >= 2 && (a || b) * 3 >= votes * 2;
+  if (a) return { rank: solid ? 0 : 1, kind: solid ? 'solid' : 'lean', side: poles.a };
+  return { rank: solid ? 5 : 4, kind: solid ? 'solid' : 'lean', side: poles.b };
+}
+async function plRosterByTeam(poll) {
   const el = poll.eligibility || {};
-  if (el.rule !== 'division_roster') { box.innerHTML = '<p class="hint">No eligibility rule on this poll.</p>'; return; }
+  if (el.rule !== 'division_roster') return null;
   const divs = await sb('GET', 'divisions?session_id=eq.' + currentSession.id
     + '&operator_id=eq.' + el.operator_id + '&format=eq.' + encodeURIComponent(el.format)
     + '&night_of_play=eq.' + encodeURIComponent(el.night) + '&select=id');
-  if (!(divs || []).length) { box.innerHTML = '<p class="hint">No matching division this session.</p>'; return; }
-  const teams = await sb('GET', 'teams?division_id=in.(' + divs.map(d => d.id).join(',') + ')&select=id,team_name');
-  const tName = new Map((teams || []).map(t => [t.id, t.team_name]));
-  const tm = await sbGetAll('team_memberships?team_id=in.(' + (teams || []).map(t => t.id).join(',')
+  if (!(divs || []).length) return { teams: [] };
+  const teams = await sb('GET', 'teams?division_id=in.(' + divs.map(d => d.id).join(',')
+    + ')&select=id,team_number,team_name&order=team_number.asc');
+  if (!(teams || []).length) return { teams: [] };
+  const byTeam = new Map(teams.map(t => [t.id, { id: t.id, number: t.team_number, name: t.team_name, members: [] }]));
+  const tm = await sbGetAll('team_memberships?team_id=in.(' + teams.map(t => t.id).join(',')
     + ')&select=team_id,member_number,name_raw&order=id.asc');
-  const voted = new Set(rows.map(r => r.member_number));
   const seen = new Set();
-  const missing = (tm || []).filter(m => {
-    if (voted.has(m.member_number) || seen.has(m.member_number)) return false;
-    seen.add(m.member_number); return true;
-  });
-  box.innerHTML = missing.length
-    ? '<div class="hint" style="margin-bottom:4px">' + missing.length + ' player(s) still to hear from:</div>'
-      + missing.map(m => '<div style="font-size:0.82rem;padding:2px 0">' + esc(m.name_raw || m.member_number)
-          + ' <span class="hint">' + esc(tName.get(m.team_id) || '') + '</span></div>').join('')
-    : '<p class="hint">\u2713 Everyone eligible has voted.</p>';
+  for (const m of (tm || [])) {
+    const t = byTeam.get(m.team_id);
+    const k = m.team_id + '|' + m.member_number;
+    if (!t || seen.has(k)) continue;
+    seen.add(k);
+    t.members.push({ apa: m.member_number, name: m.name_raw || m.member_number });
+  }
+  return { teams: [...byTeam.values()] };
+}
+function plRenderTeams(poll, rows, roster) {
+  const box = document.getElementById('plTeams');
+  if (!roster) { box.innerHTML = ''; return; }
+  if (!roster.teams.length && !rows.length) { box.innerHTML = ''; return; }
+  const options = poll.options || [];
+  const poles = plPoles(options);
+  const color = {};
+  if (poles) { color[poles.a] = PL_POLE_A; color[poles.b] = PL_POLE_B; color[poles.neutral] = PL_NEUTRAL; }
+  else options.forEach((o, i) => { color[o.key] = i < PL_CAT.length ? PL_CAT[i] : PL_NEUTRAL; });
+  const lbl = k => ((options.find(o => o.key === k) || {}).label) || k;
+  const hasTue = !!((poll.extras || {}).checkbox);
+  const order = poles ? [poles.a, poles.neutral, poles.b] : options.map(o => o.key);
+  const orderIx = k => { const i = order.indexOf(k); return i < 0 ? order.length : i; };
+
+  /* group ballots by roster team; anything off-roster groups by its
+     denormalized team name so no vote ever disappears from this view */
+  const byApa = new Map();
+  for (const t of roster.teams) for (const m of t.members) if (!byApa.has(m.apa)) byApa.set(m.apa, t.id);
+  const voteByApa = new Map(rows.map(r => [r.member_number, r]));
+  const strays = new Map();
+  for (const r of rows) if (!byApa.has(r.member_number)) {
+    const k = r.team_name || 'No team on file';
+    if (!strays.has(k)) strays.set(k, []);
+    strays.get(k).push(r);
+  }
+  const models = [];
+  for (const t of roster.teams) {
+    const mem = t.members.map(m => ({ name: m.name, vote: voteByApa.get(m.apa) || null }));
+    const counts = {}; let votes = 0, tue = 0;
+    for (const m of mem) if (m.vote) {
+      votes++; counts[m.vote.choice] = (counts[m.vote.choice] || 0) + 1;
+      if (m.vote.extras && m.vote.extras.tuesday) tue++;
+    }
+    models.push({ name: t.name, number: t.number, mem, counts, votes, roster: mem.length, tue,
+                  badge: plTeamBadge(counts, votes, poles) });
+  }
+  for (const [name, list] of strays) {
+    const counts = {}; let tue = 0;
+    for (const r of list) { counts[r.choice] = (counts[r.choice] || 0) + 1; if (r.extras && r.extras.tuesday) tue++; }
+    models.push({ name: name + ' — not on the division roster', number: '',
+                  mem: list.map(r => ({ name: r.member_name, vote: r })),
+                  counts, votes: list.length, roster: list.length, tue,
+                  badge: plTeamBadge(counts, list.length, poles) });
+  }
+  models.sort((x, y) => x.badge.rank - y.badge.rank || y.votes - x.votes
+    || String(x.number).localeCompare(String(y.number), undefined, { numeric: true }));
+
+  /* summary chips + the division read */
+  const tally = {};
+  for (const m of models) {
+    const b = m.badge;
+    const key = (b.kind === 'solid' || b.kind === 'lean' || b.kind === 'unanimous') ? 'side:' + b.side : b.kind;
+    tally[key] = (tally[key] || 0) + 1;
+  }
+  const chip = (nn, txt, c) =>
+    '<span style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);background:#fff;padding:4px 10px;border-radius:999px;font-size:0.8rem;font-weight:700">'
+    + (c ? '<span style="width:10px;height:10px;border-radius:3px;background:' + c + '"></span>' : '')
+    + nn + ' ' + esc(txt) + '</span>';
+  let head = '';
+  if (poles) {
+    const nA = tally['side:' + poles.a] || 0, nB = tally['side:' + poles.b] || 0;
+    const nF = tally.flex || 0, nS = tally.split || tally.mixed || 0, n0 = tally.none || 0;
+    head = '<div style="display:flex;gap:8px;flex-wrap:wrap;margin:2px 0 8px">'
+      + chip(nA, 'teams toward ' + lbl(poles.a), PL_POLE_A)
+      + chip(nF, 'flexible', PL_NEUTRAL)
+      + chip(nS, 'split — talk to captain', '#a16207')
+      + chip(nB, 'teams toward ' + lbl(poles.b), PL_POLE_B)
+      + (n0 ? chip(n0, 'no votes yet', null) : '')
+      + '</div>'
+      + '<div class="hint" style="margin:0 0 8px;font-size:0.8rem">Two-division read: '
+      + nA + ' on the “' + esc(lbl(poles.a)) + '” side, '
+      + nB + ' on the “' + esc(lbl(poles.b)) + '” side; '
+      + nF + ' flexible can fill either; '
+      + nS + ' split need a captain call before placing'
+      + (n0 ? '; ' + n0 + ' silent so far' : '') + '.</div>';
+  }
+  const legend = '<div style="display:flex;gap:14px;flex-wrap:wrap;margin:0 0 6px;font-size:0.76rem;color:#555">'
+    + order.map(k => '<span style="display:inline-flex;align-items:center;gap:5px">'
+        + '<span style="width:11px;height:11px;border-radius:3px;background:' + color[k] + '"></span>' + esc(lbl(k)) + '</span>').join('')
+    + '<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:11px;height:11px;border-radius:3px;border:1px solid #b9b7ae;background:transparent;box-sizing:border-box"></span>no vote yet</span>'
+    + '</div>';
+  const sqHtml = (name, choice) => choice
+    ? '<span title="' + esc(name) + ' — ' + esc(lbl(choice)) + '" style="display:inline-block;width:13px;height:13px;border-radius:3px;margin:0 2px 2px 0;background:' + (color[choice] || PL_NEUTRAL) + '"></span>'
+    : '<span title="' + esc(name) + ' — no vote yet" style="display:inline-block;width:13px;height:13px;border-radius:3px;margin:0 2px 2px 0;border:1px solid #b9b7ae;background:transparent;box-sizing:border-box"></span>';
+  const badgeHtml = b => {
+    if (b.kind === 'none') return '<span class="hint">no votes yet</span>';
+    if (b.kind === 'flex') return '<span style="font-weight:700;color:#52514e">Flexible</span>';
+    if (b.kind === 'split') return '<span style="font-weight:700;color:#a16207">⚠ Split</span>';
+    if (b.kind === 'mixed') return '<span style="font-weight:700;color:#a16207">⚠ Mixed</span>';
+    const word = b.kind === 'unanimous' ? 'Unanimous' : b.kind === 'solid' ? 'Solid' : 'Lean';
+    return '<span style="display:inline-flex;align-items:center;gap:5px;font-weight:700">'
+      + '<span style="width:10px;height:10px;border-radius:3px;background:' + (color[b.side] || '#52514e') + '"></span>'
+      + word + ' ' + esc(String(b.side)) + '</span>';
+  };
+  const th = t => '<th style="text-align:left;padding:6px 8px;border-bottom:2px solid var(--border)">' + t + '</th>';
+  const rowsHtml = models.map(m => {
+    const sorted = m.mem.slice().sort((p, q) =>
+      (p.vote ? orderIx(p.vote.choice) : 99) - (q.vote ? orderIx(q.vote.choice) : 99)
+      || String(p.name).localeCompare(String(q.name)));
+    const detail = m.badge.kind === 'split' || m.badge.kind === 'mixed';
+    const bd = detail ? '' : 'border-bottom:1px solid var(--border);';
+    const td = c => '<td style="padding:6px 8px;' + bd + '">' + c + '</td>';
+    return '<tr>'
+      + td('<strong>' + esc(m.name) + '</strong>' + (m.number ? ' <span class="hint">#' + esc(String(m.number)) + '</span>' : ''))
+      + td(sorted.map(p => sqHtml(p.name, p.vote ? p.vote.choice : null)).join(''))
+      + td('<span class="hint">' + (order.filter(k => m.counts[k]).map(k => m.counts[k] + ' ' + esc(k)).join(' · ') || '—') + '</span>')
+      + td(m.votes + '/' + m.roster)
+      + td(badgeHtml(m.badge))
+      + (hasTue ? td(m.tue ? String(m.tue) : '') : '')
+      + '</tr>'
+      + (detail
+        ? '<tr><td colspan="' + (hasTue ? 6 : 5) + '" style="padding:0 8px 8px 22px;border-bottom:1px solid var(--border)">'
+          + sorted.filter(p => p.vote).map(p =>
+              '<span style="display:inline-flex;align-items:center;gap:5px;margin-right:14px;font-size:0.78rem">'
+              + '<span style="width:9px;height:9px;border-radius:2px;background:' + (color[p.vote.choice] || PL_NEUTRAL) + '"></span>'
+              + esc(p.name) + ' — ' + esc(String(p.vote.choice)) + '</span>').join('')
+          + '</td></tr>'
+        : '');
+  }).join('');
+  box.innerHTML = '<div style="font-weight:700;margin:2px 0 6px">By team</div>'
+    + head + legend
+    + '<table style="width:100%;border-collapse:collapse;font-size:0.84rem">'
+    + '<tr>' + th('Team') + th('Ballots') + th('Tally') + th('Voted') + th('Read') + (hasTue ? th('Tue?') : '') + '</tr>'
+    + rowsHtml + '</table>';
 }
 
 /* ── Poll builder (0.2 generic draft). Options lock once responses
