@@ -1023,6 +1023,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="certs">Certs</button>
       <button class="tab" data-tab="dolphin">Dolphin</button>
       <button class="tab" data-tab="contacts">Contacts</button>
+      <button class="tab" data-tab="nextreg">Next Session</button>
     </div>
 
     <div id="globalStatus" class="status-line"></div>
@@ -1523,6 +1524,26 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         </div>
         <div id="spPatchesBlocker" class="status-line"></div>
         <div id="spPatchesList"></div>
+        <details id="spManDetails" style="border-top:1px solid var(--border,#e5e7eb); margin-top:12px; padding-top:10px;">
+          <summary style="cursor:pointer; font-weight:700; font-size:0.9rem;">&#65291; Manual SP &mdash; scotch doubles &amp; anything Nexus can't report</summary>
+          <p class="hint" style="margin:6px 0 8px;">Scotch-doubles specials never appear in a Nexus report. Adding one here creates the patch identity directly &mdash; it rides the next mail batch and shows in PatchCheck like any other patch. Compute never duplicates or removes it.</p>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+            <select id="spManDiv"><option value="">Division&hellip;</option></select>
+            <select id="spManTeam" disabled><option value="">Team&hellip;</option></select>
+            <select id="spManPlayer" disabled><option value="">Player&hellip;</option></select>
+            <select id="spManCode">
+              <option value="">SP code&hellip;</option>
+              <option value="8">8 &mdash; 8 on the break</option>
+              <option value="x">x &mdash; 8-ball break &amp; run</option>
+              <option value="9">9 &mdash; 9 on the snap</option>
+              <option value="n">n &mdash; 9-ball break &amp; run</option>
+              <option value="r">r &mdash; rackless</option>
+              <option value="k">k &mdash; 9-ball skunk</option>
+            </select>
+            <button type="button" class="btn btn-outline" id="spManAddBtn" disabled>Add SP</button>
+          </div>
+          <div class="status-line" id="spManStatus"></div>
+        </details>
         <!-- Re-mail a lost patch: clear one patch's mailed stamp so it
              rides the next batch (to the updated mailing contact). -->
         <div style="border-top:1px solid var(--border,#e5e7eb); margin-top:12px; padding-top:10px;">
@@ -3293,6 +3314,107 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
          keyed on APA# in each contact's SPM_APA field; all contacts
          land in the 'SPM APA' contact group. Never deletes.
          ══════════════════════════════════════════════════════════════ -->
+    <div id="tab-nextreg" class="tab-panel">
+      <!-- Next Session Registration (slice 2 of brief
+           2026-07-11-next-session-reg.md). Nexus report paste tracks the
+           scorekeeper-question formats (DJ + Ladies playing N); later
+           slices add segmentation, N-1 links, ReRack + outreach. -->
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+        <h2 style="margin:0">Next Session Registration</h2>
+        <label style="font-size:0.85rem;font-weight:700">Target:
+          <select id="nrTargetSel" style="margin-left:4px"></select>
+        </label>
+        <span class="hint" id="nrSummary"></span>
+      </div>
+      <div id="nrComingBack" style="margin:0 0 12px;font-size:0.9rem;font-weight:700"></div>
+      <details class="card" style="margin-bottom:14px">
+        <summary style="cursor:pointer;display:flex;align-items:center;gap:10px;flex-wrap:wrap"><h2 style="margin:0;font-size:1.05rem;display:inline">Uploads &amp; Nexus paste</h2></summary>
+        <p class="hint" style="margin:0 0 8px">
+          Paste the Nexus &ldquo;returning next session&rdquo; report (scorekeeper formats
+          &mdash; DJ + Ladies). Columns: Team Number &middot; Team Name &middot; Captain &middot;
+          Co-Captain &middot; Registered Playing &middot; Registered Not Playing. Both
+          &ldquo;No&rdquo; = unanswered. Re-pasting updates in place.
+        </p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin:0 0 10px">
+          <div class="upload-zone" id="nrTsZonePrev" style="flex:1;min-width:240px;border:2px dashed var(--border);border-radius:10px;padding:14px;text-align:center;cursor:pointer;background:#fafafa">
+            <div style="font-weight:700" id="nrTsZonePrevLabel">Drop PRIOR-session Team Screen PDF</div>
+            <div class="hint" style="font-size:0.75rem">writes teams + rosters into the prior session</div>
+            <input type="file" accept="application/pdf" style="display:none">
+          </div>
+          <div class="upload-zone" id="nrTsZoneCur" style="flex:1;min-width:240px;border:2px dashed var(--border);border-radius:10px;padding:14px;text-align:center;cursor:pointer;background:#fafafa">
+            <div style="font-weight:700" id="nrTsZoneCurLabel">Drop CURRENT-session Team Screen PDF</div>
+            <div class="hint" style="font-size:0.75rem">same import as the Uploads tab</div>
+            <input type="file" accept="application/pdf" style="display:none">
+          </div>
+        </div>
+        <div class="status-line" id="nrTsStatus" style="margin:0 0 10px"></div>
+        <textarea id="nrPasteBox" class="ehq-paste-box" style="min-height:90px"
+          placeholder="Paste the Nexus report here (tab-separated, straight from the copy)"></textarea>
+        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;align-items:center">
+          <button type="button" class="btn btn-outline" id="nrParseBtn">Preview</button>
+          <button type="button" class="btn btn-primary" id="nrSaveBtn" disabled>Save to tracker</button>
+        </div>
+        <div class="status-line" id="nrStatus" style="margin-top:6px"></div>
+        <div id="nrIssues"></div>
+      </details>
+      <details class="card" style="margin-bottom:14px">
+        <summary style="cursor:pointer;display:flex;align-items:center;gap:10px;flex-wrap:wrap"><h2 style="margin:0;font-size:1.05rem;display:inline">Needs attention</h2><span class="hint" id="nrAttnCounts"></span></summary>
+        <div id="nrAttn" style="margin-top:8px"><p class="hint">Loading&hellip;</p></div>
+      </details>
+      <details class="card" style="margin-bottom:14px">
+        <summary style="cursor:pointer;display:flex;align-items:center;gap:10px;flex-wrap:wrap"><h2 style="margin:0;font-size:1.05rem;display:inline">Segments</h2><span class="hint">SPM only &middot; who registers which way</span></summary>
+        <div id="nrSegments" style="margin-top:8px"><p class="hint">Loading&hellip;</p></div>
+      </details>
+      <details class="card" style="margin-bottom:14px">
+        <summary style="cursor:pointer;display:flex;align-items:center;gap:10px;flex-wrap:wrap"><h2 style="margin:0;font-size:1.05rem;display:inline">Prior-session links</h2><span class="hint" id="nrLinkCounts"></span></summary>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0">
+          <button type="button" class="btn btn-outline btn-sm" id="nrComputeLinksBtn">Compute auto-links</button>
+          <span class="hint">Auto-links ONLY when format + team name + &ge;3 shared players ALL agree. Everything else waits for you below.</span>
+        </div>
+        <div class="status-line" id="nrLinkStatus"></div>
+        <div id="nrLinks"><p class="hint">Loading&hellip;</p></div>
+      </details>
+      <details class="card" style="margin-bottom:14px">
+        <summary style="cursor:pointer;display:flex;align-items:center;gap:10px;flex-wrap:wrap"><h2 style="margin:0;font-size:1.05rem;display:inline">New team intents</h2><span class="hint" id="nrIntentCounts"></span></summary>
+        <p class="hint" style="margin:8px 0">From ReRack&rsquo;s &ldquo;Starting a NEW team?&rdquo; form &mdash; no roster yet. Contact them, then confirm or drop.</p>
+        <div id="nrIntents"><p class="hint">Loading&hellip;</p></div>
+      </details>
+      <details class="card" style="margin-bottom:14px">
+        <summary style="cursor:pointer;display:flex;align-items:center;gap:10px;flex-wrap:wrap"><h2 style="margin:0;font-size:1.05rem;display:inline">Outreach &mdash; unanswered teams</h2><span class="hint" id="nrOrCounts"></span></summary>
+        <p class="hint" style="margin:0 0 8px">
+          Nothing sends automatically &mdash; each button opens YOUR texting app with the
+          message pre-filled, then stamps the team so you can stage the next wave.
+          Wave 1 texts captains + co-captains; wave 2 escalates to the whole roster.
+          Teams drop off as answers arrive. DJ and Doubles 8+9 twins are merged &mdash; one text, both stamped.
+        </p>
+        <details style="margin:0 0 10px">
+          <summary style="cursor:pointer;font-weight:700;font-size:0.85rem">Message templates &mdash; per wave &times; format</summary>
+          <div id="nrOrTplGrid" style="margin-top:6px"></div>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap">
+            <button type="button" class="btn btn-outline btn-sm" id="nrOrTplSave">Save all templates</button>
+            <span class="hint" style="font-size:0.75rem">Variables: {first_name} {team} {session} {rerack} &mdash; the DJ/Ladies templates should offer both the scorekeeper app and ReRack.</span>
+          </div>
+          <div class="status-line" id="nrOrTplStatus"></div>
+        </details>
+        <div class="status-line" id="nrOrStatus"></div>
+        <div id="nrOrList"><p class="hint">Loading&hellip;</p></div>
+      </details>
+      <details class="card">
+        <summary style="cursor:pointer;display:flex;align-items:center;gap:10px;flex-wrap:wrap"><h2 style="margin:0;font-size:1.05rem;display:inline">Tracker</h2><span class="hint" id="nrCounts"></span></summary>
+        <div style="height:8px"></div>
+        <div id="nrTrkFilters" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+          <button type="button" class="btn btn-primary btn-sm" data-trkf="all">All</button>
+          <button type="button" class="btn btn-outline btn-sm" data-trkf="playing">Playing</button>
+          <button type="button" class="btn btn-outline btn-sm" data-trkf="not_playing">Not playing</button>
+          <button type="button" class="btn btn-outline btn-sm" data-trkf="undecided">Deciding</button>
+          <button type="button" class="btn btn-outline btn-sm" data-trkf="unanswered">Unanswered</button>
+        </div>
+        <div class="status-line" id="nrGridStatus"></div>
+        <div id="nrGrid"></div>
+      </details>
+      <div id="nrModalWrap"></div>
+    </div>
+
     <div id="tab-contacts" class="tab-panel">
       <div class="card">
         <h2 style="margin:0 0 6px">Google Contacts sync</h2>
@@ -3364,7 +3486,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.225';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.246';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -3489,11 +3611,12 @@ function detectReport(headers) {
 /* Helper: stamp a successful import in slate.report_uploads. Swallows
  * errors silently — tracking failures shouldn't fail user-facing
  * imports. */
-async function logReportUpload(reportKey, rowCount, summary) {
+async function logReportUpload(reportKey, rowCount, summary, sessionId) {
+  const sid = sessionId || (currentSession && currentSession.id);
   if (!currentSession) return;
   try {
     await sb('POST', 'report_uploads', {
-      session_id: currentSession.id,
+      session_id: sid,
       report_key: reportKey,
       row_count: rowCount == null ? null : rowCount,
       summary: summary || null
@@ -4085,10 +4208,16 @@ async function parseTeamScreenPdf(pdf, onProgress) {
 
 /** Orchestration: parse the chosen PDF, upsert teams, rebuild Member rows.
  *  Called by handleFileDrop when it detects a Team Screen PDF. */
-async function runTeamScreenImport(file, pdf) {
-  hideStatus('pdfProgress');
-  if (!currentSession) {
-    return setStatus('pdfProgress', 'No current session. Create one on the Sessions tab first.', 'err');
+/* v3.229: session-parameterized so the Next Session tab can import
+   Team Screens for the PRIOR session without flipping the header
+   pill. opts = { session, statusId }; defaults preserve the Uploads
+   tab behavior exactly. */
+async function runTeamScreenImport(file, pdf, opts) {
+  const sess = (opts && opts.session) || currentSession;
+  const stId = (opts && opts.statusId) || 'pdfProgress';
+  hideStatus(stId);
+  if (!sess) {
+    return setStatus(stId, 'No current session. Create one on the Sessions tab first.', 'err');
   }
 
   try {
@@ -4099,19 +4228,19 @@ async function runTeamScreenImport(file, pdf) {
     }
 
     // 1. Parse the PDF page by page.
-    setStatus('pdfProgress', 'Loading PDF…', 'progress');
+    setStatus(stId, 'Loading PDF…', 'progress');
     const teams = await parseTeamScreenPdf(pdf, (i, total) => {
-      setStatus('pdfProgress', 'Parsing page ' + i + ' / ' + total + '…', 'progress');
+      setStatus(stId, 'Parsing page ' + i + ' / ' + total + '…', 'progress');
     });
     if (!teams.length) {
-      return setStatus('pdfProgress',
+      return setStatus(stId,
         'No team pages detected. Is this the Team Screen report? Header should read "Team Screen for:".', 'err');
     }
 
     // 2. Load every division in the current session so we can map team → division.
-    setStatus('pdfProgress', 'Looking up ' + teams.length + ' teams against session divisions…', 'progress');
+    setStatus(stId, 'Looking up ' + teams.length + ' teams against session divisions…', 'progress');
     const divs = await sb('GET',
-      'divisions?select=id,division_number&session_id=eq.' + currentSession.id + '&order=division_number.asc');
+      'divisions?select=id,division_number&session_id=eq.' + sess.id + '&order=division_number.asc');
     const divByNum = new Map();
     for (const d of divs) divByNum.set(String(parseInt(d.division_number, 10)), d);
 
@@ -4138,7 +4267,7 @@ async function runTeamScreenImport(file, pdf) {
     }
     if (!teamUpserts.length) {
       const totalSkipped = [...missingDivsMap.values()].reduce((s, a) => s + a.length, 0);
-      return setStatus('pdfProgress',
+      return setStatus(stId,
         'No teams matched any division in the current session. '
         + totalSkipped + ' team(s) across ' + missingDivsMap.size
         + ' missing division(s) skipped. Division numbers: '
@@ -4146,7 +4275,7 @@ async function runTeamScreenImport(file, pdf) {
     }
 
     // 4. Upsert teams in 500-row batches.
-    setStatus('pdfProgress', 'Upserting ' + teamUpserts.length + ' teams…', 'progress');
+    setStatus(stId, 'Upserting ' + teamUpserts.length + ' teams…', 'progress');
     for (let i = 0; i < teamUpserts.length; i += 500) {
       await sb('POST', 'teams?on_conflict=division_id,team_number',
         teamUpserts.slice(i, i + 500),
@@ -4172,7 +4301,7 @@ async function runTeamScreenImport(file, pdf) {
     const CHECK_BATCH = 200;
     for (let i = 0; i < allMembers.length; i += CHECK_BATCH) {
       const chunk = allMembers.slice(i, i + CHECK_BATCH);
-      setStatus('pdfProgress',
+      setStatus(stId,
         'Checking ' + Math.min(i + CHECK_BATCH, allMembers.length) + ' / ' + allMembers.length + ' player member#s…',
         'progress');
       const rows = await sb('GET',
@@ -4192,7 +4321,7 @@ async function runTeamScreenImport(file, pdf) {
     const teamIds = [...teamIdByKey.values()];
     const _tsSnapshotMembers = [];
     const _tsSnapshotCaptains = [];
-    setStatus('pdfProgress', 'Snapshotting current rosters for atomic rollback…', 'progress');
+    setStatus(stId, 'Snapshotting current rosters for atomic rollback…', 'progress');
     for (let i = 0; i < teamIds.length; i += 100) {
       const chunk = teamIds.slice(i, i + 100);
       const got = await sb('GET',
@@ -4203,7 +4332,7 @@ async function runTeamScreenImport(file, pdf) {
         else _tsSnapshotCaptains.push(r);
       }
     }
-    setStatus('pdfProgress', 'Clearing old Member rows on ' + teamIds.length + ' teams…', 'progress');
+    setStatus(stId, 'Clearing old Member rows on ' + teamIds.length + ' teams…', 'progress');
     for (let i = 0; i < teamIds.length; i += 100) {
       const chunk = teamIds.slice(i, i + 100);
       await sb('DELETE',
@@ -4269,7 +4398,7 @@ async function runTeamScreenImport(file, pdf) {
     const unmatched = unmatchedList.length;
 
     // 9. Batch-insert memberships.
-    setStatus('pdfProgress', 'Inserting ' + membershipRows.length + ' memberships…', 'progress');
+    setStatus(stId, 'Inserting ' + membershipRows.length + ' memberships…', 'progress');
     for (let i = 0; i < membershipRows.length; i += 500) {
       await sb('POST', 'team_memberships',
         membershipRows.slice(i, i + 500),
@@ -4280,7 +4409,7 @@ async function runTeamScreenImport(file, pdf) {
     //      no longer in the team roster (Team Screen import may have removed
     //      the player). Match captain.name_raw against the new roster's
     //      "First Last" strings. Hard error -> rollback the import.
-    setStatus('pdfProgress', 'Re-resolving captain/co-captain rows against new rosters…', 'progress');
+    setStatus(stId, 'Re-resolving captain/co-captain rows against new rosters…', 'progress');
     // Build a per-team set of valid member_numbers (after Step 9 inserts).
     const _tsRosterMnByTeam = new Map();         // team_id -> Set(member_number)
     const _tsRosterEntriesByTeam = new Map();    // team_id -> [{member_number,name_raw,player:{first_name,last_name}}]
@@ -4373,7 +4502,7 @@ async function runTeamScreenImport(file, pdf) {
     // Apply captain patches: delete the stale captain row, insert a new
     // one with the resolved member_number.
     if (_tsCaptainPatches.length) {
-      setStatus('pdfProgress', 'Updating ' + _tsCaptainPatches.length + ' captain mn re-resolution(s)…', 'progress');
+      setStatus(stId, 'Updating ' + _tsCaptainPatches.length + ' captain mn re-resolution(s)…', 'progress');
       for (const p of _tsCaptainPatches) {
         try {
           await sb('DELETE',
@@ -4480,14 +4609,14 @@ async function runTeamScreenImport(file, pdf) {
         + '</details></div>';
     }
 
-    setStatus('pdfProgress', msg, 'ok');
+    setStatus(stId, msg, 'ok');
     await logReportUpload('Team Screen', teamUpserts.length,
       teamUpserts.length + ' team(s), ' + matched + ' members matched, '
-      + unmatched + ' stored as name-only');
+      + unmatched + ' stored as name-only', sess.id);
     await refreshCounts();
     await loadReportStatus();
   } catch (e) {
-    setStatus('pdfProgress', 'Import failed: ' + esc(e.message), 'err');
+    setStatus(stId, 'Import failed: ' + esc(e.message), 'err');
   }
 }
 window.runTeamScreenImport = runTeamScreenImport;
@@ -5038,6 +5167,1225 @@ async function init() {
   }
 }
 
+/* ══════════════════════════════════════════════════════════════════════
+   NEXT SESSION REGISTRATION (slice 2 — brief 2026-07-11-next-session-reg)
+   Nexus report paste → slate.next_reg (source='nexus'), append-only
+   transition log, tracker grid, two-path count check. Team numbers in
+   the report are zero-padded ('00320'); slate.teams stores unpadded
+   ('320') — normalize BOTH sides via parseInt (house rule).
+   ══════════════════════════════════════════════════════════════════════ */
+/* Formats (slate.divisions.format values, SPM):
+   scorekeeper question = DJ pairs + Ladies (they use the app);
+   ReRack = paper-scored formats. CRA is OUT OF SCOPE (user 2026-07-11)
+   but CRA teams are still loaded so pasted CRA rows can be bucketed
+   "out of scope" instead of "unknown number". */
+const NR_QUESTION_FORMATS = ['8-Ball Open', '9-Ball Open', '8-Ball Ladies'];
+const NR_RERACK_FORMATS   = ['Masters', '8-Ball Doubles', '9-Ball Doubles'];
+let _nr = { inited: false, targetId: null, teams: [], teamsN1: [], teamByKey: new Map(), parsed: null, regByTeam: new Map(),
+            links: [], linkedN1: new Set(), review: null, rosterByTeam: null };
+
+function nrTeamKey(tn) {
+  const n = parseInt(String(tn || '').trim(), 10);
+  return Number.isFinite(n) ? String(n) : String(tn || '').trim();
+}
+
+async function nrInit() {
+  const sel = document.getElementById('nrTargetSel');
+  if (!_nr.inited) {
+    document.getElementById('nrParseBtn').addEventListener('click', nrPreview);
+    document.getElementById('nrComputeLinksBtn').addEventListener('click', nrComputeLinks);
+    nrWireTeamScreenZone('nrTsZonePrev', () => nrPrevSession());
+    nrWireTeamScreenZone('nrTsZoneCur',  () => currentSession);
+    document.getElementById('nrSaveBtn').addEventListener('click', nrSave);
+    document.getElementById('nrOrTplSave').addEventListener('click', nrOrSaveTpl);
+    _nr.trackerFilter = 'all';
+    document.querySelectorAll('#nrTrkFilters button').forEach(b => {
+      b.onclick = () => {
+        _nr.trackerFilter = b.dataset.trkf;
+        document.querySelectorAll('#nrTrkFilters button').forEach(x =>
+          x.className = 'btn btn-sm ' + (x === b ? 'btn-primary' : 'btn-outline'));
+        nrLoadTracker();
+      };
+    });
+    sel.onchange = () => { _nr.targetId = Number(sel.value); nrLoadTracker(); nrLoadIntents(); nrLoadOutreach(); };
+    _nr.inited = true;
+  }
+  /* Target picker: sessions AFTER the current one (by start_date),
+     newest-first fallback to all non-current. Default = the next one. */
+  const cur = currentSession;
+  const future = (sessions || []).filter(x => !x.is_current && cur && cur.start_date && x.start_date > cur.start_date)
+    .sort((a, b) => (a.start_date < b.start_date ? -1 : 1));
+  const opts = future.length ? future : (sessions || []).filter(x => !x.is_current);
+  const prevS = nrPrevSession();
+  const lp = document.getElementById('nrTsZonePrevLabel');
+  const lc = document.getElementById('nrTsZoneCurLabel');
+  if (lp && prevS) lp.textContent = 'Drop ' + prevS.name + ' Team Screen PDF';
+  if (lc && currentSession) lc.textContent = 'Drop ' + currentSession.name + ' Team Screen PDF';
+  sel.innerHTML = opts.map(x => '<option value="' + x.id + '">' + esc(x.name) + '</option>').join('');
+  if (!_nr.targetId && opts.length) _nr.targetId = opts[0].id;
+  if (_nr.targetId) sel.value = String(_nr.targetId);
+  await nrLoadTeams();
+  await nrLoadLinks();
+  await nrLoadTracker();
+  await nrLoadIntents();
+  await nrLoadOutreach();
+  nrRenderLinks();
+}
+
+/* Teams of N (current) and N-1 (previous by start_date). Current-
+   session map keeps BOTH operators so pasted CRA rows classify as
+   out-of-scope; everything downstream (tracker, segments) is SPM. */
+function nrPrevSession() {
+  const cur = currentSession;
+  if (!cur || !cur.start_date) return null;
+  const prior = (sessions || []).filter(x => x.start_date && x.start_date < cur.start_date)
+    .sort((a, b) => (a.start_date > b.start_date ? -1 : 1));
+  return prior[0] || null;
+}
+/* Team Screen drop zones — reuse the Uploads-tab import engine with an
+   explicit target session; refresh everything the rosters feed. */
+function nrWireTeamScreenZone(zoneId, sessGetter) {
+  const zone = document.getElementById(zoneId);
+  if (!zone) return;
+  const input = zone.querySelector('input[type=file]');
+  const go = async (file) => {
+    const sess = sessGetter();
+    if (!sess) { setStatus('nrTsStatus', 'Session not loaded yet.', 'err'); return; }
+    if (!file) return;
+    await runTeamScreenImport(file, null, { session: sess, statusId: 'nrTsStatus' });
+    _nr.rosterByTeam = null;              // rosters changed — recompute on next link run
+    _nr.orRoster = null;                  // outreach phone cache too
+    await nrLoadTeams();
+    await nrLoadLinks();
+    await nrLoadTracker();
+    nrRenderLinks();
+  };
+  zone.addEventListener('click', () => input.click());
+  input.addEventListener('change', () => { go(input.files[0]); input.value = ''; });
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.style.background = '#eef2ff'; });
+  zone.addEventListener('dragleave', () => { zone.style.background = '#fafafa'; });
+  zone.addEventListener('drop', e => {
+    e.preventDefault(); zone.style.background = '#fafafa';
+    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    go(f);
+  });
+}
+
+async function nrLoadTeams() {
+  if (!currentSession) return;
+  const prev = nrPrevSession();
+  const ids = [currentSession.id].concat(prev ? [prev.id] : []);
+  /* PostgREST caps one response at 1000 rows and the two sessions
+     together exceed that — page via sbGetAll (needs a stable order). */
+  const rows = await sbGetAll(
+    'teams?select=id,team_number,team_name,division:divisions!inner(id,session_id,name,format,operator_id)'
+    + '&division.session_id=in.(' + ids.join(',') + ')&order=id.asc');
+  const all = rows || [];
+  _nr.teams   = all.filter(t => t.division.session_id === currentSession.id);
+  _nr.teamsN1 = prev ? all.filter(t => t.division.session_id === prev.id && t.division.operator_id === 1) : [];
+  _nr.teamByKey = new Map();
+  for (const t of _nr.teams) _nr.teamByKey.set(nrTeamKey(t.team_number), t);
+}
+
+function nrParseReport(text) {
+  const out = { rows: [], invalid: [], unmatched: [], conflicts: [], outOfScope: [] };
+  const lines = String(text || '').split(/\r?\n/);
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    if (/team\s*number/i.test(line)) continue;               // header
+    const cells = line.split('\t').map(c => c.trim());
+    if (cells.length < 6) { if (line.trim()) out.invalid.push(line.trim().slice(0, 60)); continue; }
+    const [num, name, cap, cocap, playing, notPlaying] = cells;
+    if (!/^\d{3,8}$/.test(num)) { out.invalid.push(line.trim().slice(0, 60)); continue; }
+    const yes = v => /^yes$/i.test(v || '');
+    let status = 'unanswered';
+    if (yes(playing) && yes(notPlaying)) { out.conflicts.push(num + ' ' + name); status = 'playing'; }
+    else if (yes(playing)) status = 'playing';
+    else if (yes(notPlaying)) status = 'not_playing';
+    const team = _nr.teamByKey.get(nrTeamKey(num));
+    if (!team) { out.unmatched.push(num + ' ' + name); continue; }
+    if (team.division.operator_id !== 1) { out.outOfScope.push(num + ' ' + name); continue; }
+    out.rows.push({ team, status, captain: cap, cocaptain: cocap, reportName: name });
+  }
+  return out;
+}
+
+function nrIssuesHtml(p) {
+  const li = (label, arr, color) => arr.length
+    ? '<div style="margin-top:4px;color:' + color + ';font-size:0.82rem"><strong>' + label + ' (' + arr.length + '):</strong> ' + arr.map(esc).join(', ') + '</div>'
+    : '';
+  const oos = p.outOfScope.length
+    ? '<details style="margin-top:4px"><summary style="cursor:pointer;color:#6b7280;font-size:0.82rem"><strong>Out of scope \u2014 CRA, ignored by design \u2014 ' + p.outOfScope.length + '</strong></summary>'
+      + '<div style="color:#6b7280;font-size:0.8rem;padding:4px 0 0 14px">' + p.outOfScope.map(esc).join(', ') + '</div></details>'
+    : '';
+  return li('Unparseable lines', p.invalid, '#b91c1c')
+    + li('Team numbers not in ' + esc(currentSession ? currentSession.name : 'current session') + ' (Team Screen not imported?)', p.unmatched, '#b91c1c')
+    + li('Answered BOTH yes (kept as playing — verify in Nexus)', p.conflicts, '#a76c00')
+    + oos;
+}
+
+function nrPreview() {
+  const p = nrParseReport(document.getElementById('nrPasteBox').value);
+  _nr.parsed = p;
+  const counts = { playing: 0, not_playing: 0, unanswered: 0 };
+  for (const r of p.rows) counts[r.status]++;
+  setStatus('nrStatus', 'Parsed ' + p.rows.length + ' team(s): '
+    + counts.playing + ' playing \u00b7 ' + counts.not_playing + ' not playing \u00b7 '
+    + counts.unanswered + ' unanswered.'
+    + (p.unmatched.length + p.invalid.length ? ' Issues below.' : ''),
+    p.rows.length ? 'ok' : 'err');
+  document.getElementById('nrIssues').innerHTML = nrIssuesHtml(p);
+  document.getElementById('nrSaveBtn').disabled = !p.rows.length || !_nr.targetId;
+}
+
+async function nrSave() {
+  const p = _nr.parsed;
+  if (!p || !p.rows.length || !_nr.targetId) return;
+  const btn = document.getElementById('nrSaveBtn');
+  btn.disabled = true;
+  try {
+    /* Transition log: fetch existing statuses first, log only changes. */
+    setStatus('nrStatus', 'Checking existing statuses\u2026', '');
+    const ids = p.rows.map(r => r.team.id);
+    const oldByTeam = new Map();
+    for (let i = 0; i < ids.length; i += 150) {
+      const got = await sb('GET', 'next_reg?target_session_id=eq.' + _nr.targetId
+        + '&team_id=in.(' + ids.slice(i, i + 150).join(',') + ')&select=team_id,status,source');
+      for (const r of (got || [])) oldByTeam.set(r.team_id, r);
+    }
+    const now = new Date().toISOString();
+    /* Guard (user rule 2026-07-12): Nexus is the record, but a paste
+       row still showing No/No must NOT clobber an answer collected in
+       ReRack that the operator hasn't clicked into Nexus yet. Those
+       rows skip the upsert and become the "pending Nexus entry" list. */
+    const pendingNexus = [];
+    const saveRows = p.rows.filter(r => {
+      const old = oldByTeam.get(r.team.id);
+      if (r.status === 'unanswered' && old && old.source === 'rerack' && old.status !== 'unanswered') {
+        pendingNexus.push(nrTeamKey(r.team.team_number) + ' ' + (r.team.team_name || '')
+          + ' \u2014 ReRack says ' + (old.status === 'playing' ? 'PLAYING' : 'NOT PLAYING'));
+        return false;
+      }
+      return true;
+    });
+    const upserts = saveRows.map(r => ({
+      target_session_id: _nr.targetId,
+      team_id: r.team.id,
+      format: (r.team.division && r.team.division.name) || null,
+      status: r.status,
+      source: 'nexus',
+      prior_nexus_status: null,
+      answered_by_apa: null,
+      answered_by_name: null,
+      answered_at: r.status === 'unanswered' ? null : now,
+      updated_at: now
+    }));
+    const logs = saveRows
+      .filter(r => ((oldByTeam.get(r.team.id) || {}).status || '(new)') !== r.status)
+      .map(r => ({
+        target_session_id: _nr.targetId,
+        team_id: r.team.id,
+        old_status: (oldByTeam.get(r.team.id) || {}).status || null,
+        new_status: r.status,
+        actor_apa: null,
+        actor_name: 'Nexus report paste',
+        source: 'nexus'
+      }));
+    setStatus('nrStatus', 'Saving ' + upserts.length + ' row(s)\u2026', '');
+    for (let i = 0; i < upserts.length; i += 200) {
+      await sb('POST', 'next_reg?on_conflict=target_session_id,team_id',
+        upserts.slice(i, i + 200), { 'Prefer': 'resolution=merge-duplicates' });
+    }
+    for (let i = 0; i < logs.length; i += 200) {
+      if (logs.length) await sb('POST', 'next_reg_log', logs.slice(i, i + 200));
+    }
+    /* Two-path check: DB row count for these teams must equal parsed. */
+    let dbCount = 0;
+    for (let i = 0; i < ids.length; i += 150) {
+      const got = await sb('GET', 'next_reg?target_session_id=eq.' + _nr.targetId
+        + '&team_id=in.(' + ids.slice(i, i + 150).join(',') + ')&select=team_id');
+      dbCount += (got || []).length;
+    }
+    const agree = dbCount === p.rows.length;
+    setStatus('nrStatus', 'Saved ' + saveRows.length + ' of ' + p.rows.length
+      + (pendingNexus.length ? ' (' + pendingNexus.length + ' protected ReRack answers skipped)' : '')
+      + '. Two-path check: parsed ' + p.rows.length
+      + ' == DB ' + dbCount + ' \u2192 ' + (agree ? 'AGREE' : 'MISMATCH \u2014 investigate')
+      + '. ' + logs.length + ' status change(s) logged.', agree ? 'ok' : 'err');
+    if (pendingNexus.length) {
+      document.getElementById('nrIssues').innerHTML =
+        '<div style="margin-top:6px;padding:8px 10px;border:1px solid #f59e0b;border-radius:8px;background:#fffbeb;font-size:0.84rem">'
+        + '<strong>Pending Nexus entry \u2014 ' + pendingNexus.length + ' team(s) answered in ReRack; click these into Nexus, then re-paste:</strong>'
+        + '<div style="margin-top:4px">' + pendingNexus.map(esc).join('<br>') + '</div></div>'
+        + document.getElementById('nrIssues').innerHTML;
+    }
+    await nrLoadTracker();
+  } catch (e) {
+    setStatus('nrStatus', 'Save failed: ' + e.message, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* ── Prior-session link engine (slice 4) ──────────────────────────
+   Auto rule (locked in interview): format + hpMatchKey(name) + roster
+   overlap ≥3 — ALL THREE. Partial agreement → review queue. Wrong-link
+   asymmetry: a bad link silently drops a team from the ask list, so
+   ambiguity NEVER auto-links. */
+async function nrLoadLinks() {
+  if (!_nr.targetId) return;
+  const rows = await sbGetAll('next_reg_links?target_session_id=eq.' + _nr.targetId
+    + '&select=id,n1_team_id,n_team_id,origin&order=id.asc');
+  _nr.links = rows || [];
+  _nr.linkedN1 = new Set(_nr.links.map(l => l.n1_team_id));
+  const rej = await sbGetAll('next_reg_link_rejects?target_session_id=eq.' + _nr.targetId
+    + '&select=n1_team_id,n_team_id&order=id.asc');
+  _nr.rejects = new Set((rej || []).map(r => r.n1_team_id + '|' + r.n_team_id));
+}
+/* "Not the same team" — persist so this pair is never suggested (or
+   auto-linked) again. */
+async function nrRejectLink(n1Id, nId) {
+  try {
+    await sb('POST', 'next_reg_link_rejects?on_conflict=target_session_id,n1_team_id,n_team_id',
+      [{ target_session_id: _nr.targetId, n1_team_id: n1Id, n_team_id: nId }],
+      { 'Prefer': 'resolution=merge-duplicates,return=minimal' });
+    _nr.rejects.add(n1Id + '|' + nId);
+    _nr.review = (_nr.review || []).filter(r => !(r.n1.id === n1Id && r.cand.id === nId));
+    nrRenderLinks();
+  } catch (e) { setStatus('nrLinkStatus', 'Reject failed: ' + e.message, 'err'); }
+}
+window.nrRejectLink = nrRejectLink;
+
+async function nrLoadRosters() {
+  if (_nr.rosterByTeam) return _nr.rosterByTeam;
+  const spmIds = _nr.teams.filter(t => t.division.operator_id === 1).map(t => t.id)
+    .concat(_nr.teamsN1.map(t => t.id));
+  const map = new Map();
+  for (let i = 0; i < spmIds.length; i += 80) {
+    const rows = await sbGetAll('team_memberships?team_id=in.(' + spmIds.slice(i, i + 80).join(',')
+      + ')&select=team_id,member_number&order=id.asc');
+    for (const r of (rows || [])) {
+      if (!r.member_number) continue;
+      if (!map.has(r.team_id)) map.set(r.team_id, new Set());
+      map.get(r.team_id).add(String(r.member_number));
+    }
+  }
+  _nr.rosterByTeam = map;
+  return map;
+}
+
+function nrOverlap(aSet, bSet) {
+  if (!aSet || !bSet) return 0;
+  let n = 0;
+  for (const m of aSet) if (bSet.has(m)) n++;
+  return n;
+}
+
+async function nrComputeLinks() {
+  const st = 'nrLinkStatus';
+  const btn = document.getElementById('nrComputeLinksBtn');
+  btn.disabled = true;
+  try {
+    setStatus(st, 'Loading rosters\u2026', '');
+    const rosters = await nrLoadRosters();
+    await nrLoadLinks();
+    const spmN = _nr.teams.filter(t => t.division.operator_id === 1);
+    const byFormat = new Map();
+    for (const t of spmN) {
+      const f = t.division.format || '?';
+      if (!byFormat.has(f)) byFormat.set(f, []);
+      byFormat.get(f).push(t);
+    }
+    const autos = [], review = [];
+    for (const n1 of _nr.teamsN1) {
+      if (_nr.linkedN1.has(n1.id)) continue;
+      const candidates = byFormat.get(n1.division.format || '?') || [];
+      /* Doubles rosters max out at 2 players — one shared player is
+         already half the team (user rule 2026-07-12). Everything else
+         keeps the >=3 bar. */
+      const minOv = /Doubles/i.test(n1.division.format || '') ? 1 : 3;
+      const scored = candidates
+        .filter(c => !_nr.rejects || !_nr.rejects.has(n1.id + '|' + c.id))
+        .map(c => ({
+          c,
+          nameMatch: hpMatchKey(c.team_name || '') === hpMatchKey(n1.team_name || '') && !!(n1.team_name || '').trim(),
+          overlap: nrOverlap(rosters.get(n1.id), rosters.get(c.id))
+        }));
+      const full = scored.filter(x => x.nameMatch && x.overlap >= minOv);
+      const partial = scored.filter(x => (x.nameMatch || x.overlap >= minOv) && !(x.nameMatch && x.overlap >= minOv));
+      if (full.length === 1) {
+        autos.push({ n1, n: full[0].c, overlap: full[0].overlap });
+      } else if (full.length > 1) {
+        for (const x of full) review.push({ n1, cand: x.c, why: 'MULTIPLE full matches \u2014 pick one', overlap: x.overlap, nameMatch: x.nameMatch });
+      } else {
+        for (const x of partial.sort((a, b) => b.overlap - a.overlap).slice(0, 3)) {
+          review.push({ n1, cand: x.c,
+            why: (x.nameMatch ? 'name matches' : 'name differs') + ' \u00b7 ' + x.overlap + ' shared players',
+            overlap: x.overlap, nameMatch: x.nameMatch });
+        }
+      }
+    }
+    if (autos.length) {
+      const bodies = autos.map(a => ({
+        target_session_id: _nr.targetId, n1_team_id: a.n1.id, n_team_id: a.n.id, origin: 'auto'
+      }));
+      for (let i = 0; i < bodies.length; i += 200) {
+        await sb('POST', 'next_reg_links?on_conflict=target_session_id,n1_team_id',
+          bodies.slice(i, i + 200), { 'Prefer': 'resolution=merge-duplicates' });
+      }
+    }
+    _nr.review = review;
+    await nrLoadLinks();
+    setStatus(st, autos.length + ' auto-linked on triple agreement \u00b7 ' + review.length
+      + ' review suggestions \u00b7 '
+      + _nr.teamsN1.filter(t => !_nr.linkedN1.has(t.id)).length + ' prior-session team(s) still unlinked.', 'ok');
+    nrRenderLinks();
+    nrRenderSegments();
+  } catch (e) {
+    setStatus(st, 'Compute failed: ' + e.message, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function nrTeamLabel(t) {
+  return '<strong>' + esc(nrTeamKey(t.team_number)) + '</strong> ' + esc(t.team_name || '')
+    + ' <span class="hint">' + esc(t.division.format || '') + '</span>';
+}
+
+function nrRenderLinks() {
+  const el = document.getElementById('nrLinks');
+  if (!el) return;
+  const byId = new Map();
+  for (const t of _nr.teams.concat(_nr.teamsN1)) byId.set(t.id, t);
+  const linkRows = _nr.links.map(l => {
+    const a = byId.get(l.n1_team_id), b = byId.get(l.n_team_id);
+    if (!a || !b) return '';
+    return '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:4px 0;border-bottom:1px dashed #e5e7eb;font-size:0.82rem">'
+      + '<span>' + nrTeamLabel(a) + ' \u2192 ' + nrTeamLabel(b) + '</span>'
+      + '<span style="background:' + (l.origin === 'auto' ? '#eef2ff;color:#4338ca' : '#f0fdf4;color:#16a34a')
+      + ';padding:1px 6px;border-radius:999px;font-weight:700;font-size:0.68rem">' + l.origin.toUpperCase() + '</span>'
+      + '<button type="button" class="btn btn-outline btn-sm" style="margin-left:auto" onclick="nrUnlink(' + l.id + ')">Unlink</button>'
+      + '</div>';
+  }).join('');
+  const reviewRows = (_nr.review || [])
+    .filter(r => !_nr.linkedN1.has(r.n1.id))
+    .filter(r => !_nr.rejects || !_nr.rejects.has(r.n1.id + '|' + r.cand.id))
+    .map((r, i) =>
+    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:4px 0;border-bottom:1px dashed #e5e7eb;font-size:0.82rem">'
+    + '<span>' + nrTeamLabel(r.n1) + ' \u2192 ' + nrTeamLabel(r.cand)
+    + ' <span class="hint">(' + esc(r.why) + ')</span></span>'
+    + '<span style="margin-left:auto;display:flex;gap:6px">'
+    + '<button type="button" class="btn btn-outline btn-sm" onclick="nrLink(' + r.n1.id + ',' + r.cand.id + ')">Link</button>'
+    + '<button type="button" class="btn btn-outline btn-sm" style="color:#b91c1c" onclick="nrRejectLink(' + r.n1.id + ',' + r.cand.id + ')" title="Never suggest this pair again">Not the same</button>'
+    + '</span></div>').join('');
+  const openL = _nr.uiLinkedOpen !== false ? ' open' : '';
+  const openR = _nr.uiReviewOpen !== false ? ' open' : '';
+  const lc = document.getElementById('nrLinkCounts');
+  if (lc) lc.textContent = _nr.links.length + ' linked';
+  el.innerHTML =
+    '<details id="nrLinkedDetails"' + openL + '><summary style="cursor:pointer;font-weight:700;margin-bottom:4px">Linked \u2014 ' + _nr.links.length + '</summary>'
+    + (linkRows || '<p class="hint">No links yet \u2014 hit Compute auto-links.</p>')
+    + '</details>'
+    + '<details id="nrReviewDetails"' + openR + ' style="margin-top:10px"><summary style="cursor:pointer;font-weight:700;margin-bottom:4px">Review queue' + (_nr.review ? ' \u2014 ' + (_nr.review.filter(r => !_nr.linkedN1.has(r.n1.id)).length) : '') + '</summary>'
+    + (_nr.review == null
+        ? '<p class="hint">Run Compute auto-links to populate suggestions.</p>'
+        : (reviewRows || '<p class="hint">Nothing to review \u2014 remaining prior-session teams have no plausible current-session match.</p>'))
+    + '</details>';
+  const ld = document.getElementById('nrLinkedDetails');
+  const rd = document.getElementById('nrReviewDetails');
+  if (ld) ld.addEventListener('toggle', () => { _nr.uiLinkedOpen = ld.open; });
+  if (rd) rd.addEventListener('toggle', () => { _nr.uiReviewOpen = rd.open; });
+}
+
+async function nrLink(n1Id, nId) {
+  try {
+    await sb('POST', 'next_reg_links?on_conflict=target_session_id,n1_team_id',
+      [{ target_session_id: _nr.targetId, n1_team_id: n1Id, n_team_id: nId, origin: 'manual' }],
+      { 'Prefer': 'resolution=merge-duplicates' });
+    await nrLoadLinks();
+    nrRenderLinks(); nrRenderSegments();
+  } catch (e) { setStatus('nrLinkStatus', 'Link failed: ' + e.message, 'err'); }
+}
+
+async function nrUnlink(linkId) {
+  try {
+    await sb('DELETE', 'next_reg_links?id=eq.' + linkId);
+    await nrLoadLinks();
+    nrRenderLinks(); nrRenderSegments();
+  } catch (e) { setStatus('nrLinkStatus', 'Unlink failed: ' + e.message, 'err'); }
+}
+window.nrLink = nrLink;
+window.nrUnlink = nrUnlink;
+
+function nrChipFor(teamId) {
+  const st = _nr.regByTeam.get(teamId);
+  if (st === 'playing')     return '<span style="background:#f0fdf4;color:#16a34a;padding:1px 6px;border-radius:999px;font-weight:700;font-size:0.68rem">PLAYING</span>';
+  if (st === 'not_playing') return '<span style="background:#fef2f2;color:#b91c1c;padding:1px 6px;border-radius:999px;font-weight:700;font-size:0.68rem">NOT PLAYING</span>';
+  if (st === 'undecided')   return '<span style="background:#ede9fe;color:#6d28d9;padding:1px 6px;border-radius:999px;font-weight:700;font-size:0.68rem">DECIDING</span>';
+  if (st === 'unanswered')  return '<span style="background:#fef9c3;color:#a16207;padding:1px 6px;border-radius:999px;font-weight:700;font-size:0.68rem">UNANSWERED</span>';
+  return '<span style="background:#f3f4f6;color:#9ca3af;padding:1px 6px;border-radius:999px;font-weight:700;font-size:0.68rem">UNTRACKED</span>';
+}
+
+/* Segments: (1) scorekeeper-question formats playing N — the Nexus
+   paste covers them; (2) ReRack formats playing N; (3) SPM teams from
+   N-1 — slice 4 subtracts the ones linked to an N team; until then the
+   full list renders with that caveat. */
+function nrRenderSegments() {
+  const el = document.getElementById('nrSegments');
+  if (!el) return;
+  const spmN = _nr.teams.filter(t => t.division.operator_id === 1);
+  const seg1 = spmN.filter(t => NR_QUESTION_FORMATS.indexOf(t.division.format) >= 0);
+  const seg2 = spmN.filter(t => NR_RERACK_FORMATS.indexOf(t.division.format) >= 0);
+  const seg3 = _nr.teamsN1.filter(t => !_nr.linkedN1.has(t.id));
+  const group = (title, hint, arr) => {
+    const tracked = arr.filter(t => _nr.regByTeam.has(t.id));
+    const answered = arr.filter(t => { const st = _nr.regByTeam.get(t.id); return st === 'playing' || st === 'not_playing'; });
+    return '<details style="margin-bottom:8px">'
+      + '<summary style="cursor:pointer;font-weight:700">' + title
+      + ' <span class="hint" style="font-weight:500">— ' + arr.length + ' team(s), '
+      + answered.length + ' answered, ' + tracked.length + ' tracked · ' + hint + '</span></summary>'
+      + '<div style="padding:8px 0 4px 14px;display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:4px">'
+      + arr.map(t => '<div style="font-size:0.8rem">'
+          + '<strong>' + esc(nrTeamKey(t.team_number)) + '</strong> ' + esc(t.team_name || '')
+          + ' <span class="hint">' + esc(t.division.format || '') + '</span> ' + nrChipFor(t.id)
+          + '</div>').join('')
+      + '</div></details>';
+  };
+  el.innerHTML =
+    group('1 · Scorekeeper question — DJ + Ladies playing ' + esc(currentSession.name),
+      'players answer in the scorekeeper app or in ReRack; the paste and ReRack both land here', seg1)
+    + group('2 · Masters + Doubles playing ' + esc(currentSession.name),
+      'they answer in ReRack; you click it into Nexus — the record — and it arrives via the paste', seg2)
+    + group('3 · Played ' + esc(nrPrevSession() ? nrPrevSession().name : 'N-1') + ' only — all SPM formats',
+      'linked teams excluded; answers via ReRack', seg3);
+}
+
+/* ── New team intents — slice 5b. Reads/writes slate.next_reg_new via
+     the admin service key; RLS has no anon policies, so ReRack's RPC is
+     the only public write path and nothing here leaks to anon. ── */
+async function nrLoadIntents() {
+  const box = document.getElementById('nrIntents');
+  if (!box || !_nr.targetId) return;
+  let rows = [];
+  try {
+    rows = await sbGetAll('next_reg_new?select=*&target_session_id=eq.' + _nr.targetId + '&order=created_at.desc');
+  } catch (e) {
+    box.innerHTML = '<p class="hint">Could not load intents: ' + esc(e.message) + '</p>';
+    return;
+  }
+  _nr.intents = rows;
+  nrRenderIntents();
+}
+const NR_INTENT_STATUSES = ['new', 'contacted', 'confirmed', 'dropped'];
+function nrIntentRow(r) {
+  const contact = [r.contact_phone, r.contact_email].filter(Boolean).join(' · ');
+  const btns = NR_INTENT_STATUSES.map(st =>
+    st === r.status
+      ? '<button type="button" class="btn btn-primary btn-sm" disabled>' + esc(st) + '</button>'
+      : '<button type="button" class="btn btn-outline btn-sm" data-intent="' + r.id + '" data-status="' + st + '">' + esc(st) + '</button>'
+  ).join(' ');
+  return '<div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-top:8px">'
+    + '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:baseline">'
+    + '<strong>' + esc(r.contact_name) + '</strong>'
+    + '<span class="hint">' + esc(r.format) + (r.contact_apa ? ' · APA ' + esc(r.contact_apa) : '') + ' · ' + esc(String(r.created_at || '').slice(0, 10)) + '</span>'
+    + '</div>'
+    + (contact ? '<div style="font-size:0.85rem;margin-top:2px">' + esc(contact) + '</div>' : '')
+    + ((r.day_of_play || r.host_location)
+        ? '<div style="font-size:0.82rem;margin-top:2px">' + esc([r.day_of_play, r.host_location].filter(Boolean).join(' · ')) + '</div>' : '')
+    + (r.players_needed ? '<div style="font-size:0.82rem;margin-top:2px">\ud83c\udfb1 needs ' + esc(r.players_needed) + '</div>' : '')
+    + (_nr.capByIntent && _nr.capByIntent.has(r.id)
+        ? '<div style="font-size:0.82rem;margin-top:2px">\ud83d\udc65 ' + _nr.capHtml(_nr.capByIntent.get(r.id)) + '</div>' : '')
+    + (r.note ? '<div class="hint" style="margin-top:2px">' + esc(r.note) + '</div>' : '')
+    + '<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">' + btns + '</div>'
+    + '</div>';
+}
+function nrRenderIntents() {
+  const box = document.getElementById('nrIntents');
+  const head = document.getElementById('nrIntentCounts');
+  const rows = _nr.intents || [];
+  const open = rows.filter(r => r.status === 'new' || r.status === 'contacted');
+  const closed = rows.filter(r => r.status === 'confirmed' || r.status === 'dropped');
+  if (head) head.textContent = rows.length
+    ? rows.filter(r => r.status === 'new').length + ' new · ' + rows.filter(r => r.status === 'contacted').length + ' contacted · ' + closed.length + ' closed'
+    : '';
+  if (!rows.length) { box.innerHTML = '<p class="hint">None yet — new-team requests from ReRack land here.</p>'; return; }
+  box.innerHTML = open.map(nrIntentRow).join('')
+    + (closed.length
+        ? '<details style="margin-top:8px"><summary style="cursor:pointer;font-size:0.85rem">Confirmed + dropped — ' + closed.length + '</summary>' + closed.map(nrIntentRow).join('') + '</details>'
+        : '');
+  box.querySelectorAll('button[data-intent]').forEach(b => {
+    b.onclick = () => nrSetIntentStatus(Number(b.dataset.intent), b.dataset.status);
+  });
+}
+async function nrSetIntentStatus(id, status) {
+  try {
+    await sb('PATCH', 'next_reg_new?id=eq.' + id, { status: status, updated_at: new Date().toISOString() });
+  } catch (e) { alert('Update failed: ' + e.message); return; }
+  await nrLoadIntents();
+}
+
+/* ── Staged outreach — slice 7. Universe = the three segment groups,
+     minus answered teams. Sends are user-tap sms: links; the tap also
+     UPSERTs slate.next_reg_outreach so wave state survives reloads. ── */
+const NR_RERACK_URL = 'https://southportlandmetroapa.github.io/rerack/';
+function nrOrTargetName() {
+  const t = (sessions || []).find(x => x.id === _nr.targetId);
+  return t ? t.name : 'next session';
+}
+async function nrLoadOutreach() {
+  if (!_nr.targetId) return;
+  try {
+    const rows = await sbGetAll('next_reg_outreach?target_session_id=eq.' + _nr.targetId
+      + '&select=id,team_id,wave,sent_at&order=id.asc');
+    _nr.orSent = new Map();
+    for (const r of (rows || [])) {
+      if (!_nr.orSent.has(r.team_id)) _nr.orSent.set(r.team_id, {});
+      _nr.orSent.get(r.team_id)[r.wave] = r;
+    }
+    if (!_nr.orTpls) {
+      const rows = await sbGetAll('next_reg_templates?select=wave,format_key,body,subject&order=id.asc');
+      _nr.orTpls = new Map();
+      _nr.orTplSubj = new Map();
+      for (const r of (rows || [])) {
+        _nr.orTpls.set(r.wave + '|' + r.format_key, r.body);
+        if (r.subject) _nr.orTplSubj.set(r.wave + '|' + r.format_key, r.subject);
+      }
+      nrRenderTplGrid();
+    }
+    await nrOrEnsureRosters();
+    nrRenderOutreach();
+    nrRenderAttention();
+  } catch (e) {
+    setStatus('nrOrStatus', 'Outreach load failed: ' + e.message, 'err');
+  }
+}
+/* One paged roster+phone fetch for every team in the outreach universe;
+   cached until a Team Screen import invalidates it. */
+async function nrOrEnsureRosters() {
+  if (_nr.orRoster) return;
+  /* ALL current SPM + unlinked N-1 teams — the attention card pairs
+     answered teams too, so the unanswered-only universe is not enough */
+  const ids = _nr.teams.filter(t => t.division.operator_id === 1).map(t => t.id)
+    .concat(_nr.teamsN1.filter(t => !_nr.linkedN1.has(t.id)).map(t => t.id));
+  _nr.orRoster = new Map();
+  for (let i = 0; i < ids.length; i += 100) {
+    const got = await sbGetAll('team_memberships?team_id=in.(' + ids.slice(i, i + 100).join(',')
+      + ')&select=team_id,role,member_number,player:players(first_name,last_name,cell_phone,home_phone,alt_phone,work_phone)&order=id.asc');
+    for (const m of (got || [])) {
+      if (!_nr.orRoster.has(m.team_id)) _nr.orRoster.set(m.team_id, []);
+      _nr.orRoster.get(m.team_id).push(m);
+    }
+  }
+}
+/* The three segment groups — FULL team lists; teams pair first and the
+   answered filter runs per PAIR at render (either row answered = the
+   whole pair leaves outreach). Best reachable phone: cell, then home,
+   then alt, then work. */
+function nrBestPhone(p) {
+  const cand = [p && p.cell_phone, p && p.home_phone, p && p.alt_phone, p && p.work_phone];
+  for (const c of cand) if (otIsRealPhone(c)) return c;
+  return null;
+}
+function nrOrUniverse() {
+  const spmN = _nr.teams.filter(t => t.division.operator_id === 1);
+  return [
+    { key: 'q', label: 'DJ + Ladies playing ' + (currentSession ? currentSession.name : 'N'), how: 'app',
+      teams: spmN.filter(t => NR_QUESTION_FORMATS.indexOf(t.division.format) >= 0) },
+    { key: 'rr', label: 'Masters + Doubles playing ' + (currentSession ? currentSession.name : 'N'), how: 'rerack',
+      teams: spmN.filter(t => NR_RERACK_FORMATS.indexOf(t.division.format) >= 0) },
+    { key: 'n1', label: nrPrevSession() ? nrPrevSession().name + ' only' : 'prior session only', how: 'rerack',
+      teams: _nr.teamsN1.filter(t => !_nr.linkedN1.has(t.id)) }
+  ];
+}
+/* Merge 8+9 twins (DJ and Doubles): same normalized name, then GREEDY
+   roster-overlap matching WITHIN the name group — handles any group
+   size. Root cause fixed 2026-07-12: two different teams both named
+   "Chalk Dirty To Me" made a 4-team group the old exactly-2 rule
+   skipped entirely; roster overlap disambiguates (true twins share
+   players, same-name strangers share none). */
+function nrOrMergePairs(teams) {
+  const byName = new Map();
+  for (const t of teams) {
+    const k = hpMatchKey ? hpMatchKey(t.team_name || '') : String(t.team_name || '').toLowerCase().trim();
+    if (!byName.has(k)) byName.set(k, []);
+    byName.get(k).push(t);
+  }
+  const members = id => (_nr.orRoster.get(id) || []).map(m => m.member_number);
+  const overlap = (a, b) => { const set = new Set(members(a.id)); return members(b.id).filter(n => set.has(n)).length; };
+  const eightOf = f => f === '8-Ball Open' ? '9-Ball Open' : f === '8-Ball Doubles' ? '9-Ball Doubles' : null;
+  const out = [];
+  for (const group of byName.values()) {
+    const eights = group.filter(t => eightOf(t.division.format));
+    const nines = group.filter(t => t.division.format === '9-Ball Open' || t.division.format === '9-Ball Doubles');
+    const rest = group.filter(t => eights.indexOf(t) < 0 && nines.indexOf(t) < 0);
+    const taken = new Set();
+    for (const e of eights) {
+      let best = null, bestN = 0;
+      for (const n of nines) {
+        if (taken.has(n.id) || n.division.format !== eightOf(e.division.format)) continue;
+        const ov = overlap(e, n);
+        if (ov > bestN) { bestN = ov; best = n; }
+      }
+      if (best && bestN >= 1) { taken.add(best.id); out.push([e, best]); }
+      else out.push([e]);
+    }
+    for (const n of nines) if (!taken.has(n.id)) out.push([n]);
+    for (const t of rest) out.push([t]);
+  }
+  return out;
+}
+const NR_TPL_KEYS = [
+  ['dj', 'DJ 8+9'], ['ladies', 'Ladies'], ['masters', 'Masters'],
+  ['doubles', 'Doubles 8+9'], ['n1', 'Prior-session returners']
+];
+function nrRenderTplGrid() {
+  const grid = document.getElementById('nrOrTplGrid');
+  if (!grid || !_nr.orTpls) return;
+  grid.innerHTML = [0, 1, 2].map(w =>
+    '<div style="font-weight:700;font-size:0.82rem;margin-top:8px">'
+    + (w === 0 ? 'Wave 0 — EMAIL: one per team, whole roster on the To line. HTML ok. '
+         + '<button type="button" class="btn btn-outline btn-sm" data-tplemailtest>Send me a test email</button>'
+       : 'Wave ' + w + (w === 1 ? ' — TEXT captains + co-captains' : ' — TEXT whole roster')) + '</div>'
+    + NR_TPL_KEYS.map(k =>
+        '<label style="display:block;font-size:0.75rem;color:#6b7280;margin-top:6px">' + esc(k[1])
+        + (w === 0
+            ? '<input data-tplsubj="0|' + k[0] + '" placeholder="Subject" style="width:100%;margin-top:2px;font-size:0.8rem" value="'
+              + esc(_nr.orTplSubj.get('0|' + k[0]) || '') + '">'
+            : '')
+        + '<textarea data-tplkey="' + w + '|' + k[0] + '" class="ehq-paste-box" style="min-height:52px;margin-top:2px;font-size:0.8rem">'
+        + esc(_nr.orTpls.get(w + '|' + k[0]) || '') + '</textarea></label>'
+      ).join('')
+  ).join('');
+  const testBtn = grid.querySelector('[data-tplemailtest]');
+  if (testBtn) testBtn.onclick = nrOrTplEmailTest;
+}
+/* Send each wave-0 template (CURRENT editor values, saved or not) to
+   the operator inbox — one [TEST] email per format, sample team name. */
+async function nrOrTplEmailTest() {
+  const fill = x => String(x)
+    .replace(/\{team\}/g, 'The Sample Rackers')
+    .replace(/\{session\}/g, nrOrTargetName())
+    .replace(/\{rerack\}/g, NR_RERACK_URL);
+  setStatus('nrOrTplStatus', 'Sending 5 test emails to the league inbox\u2026', '');
+  let sent = 0;
+  const failed = [];
+  for (const k of NR_TPL_KEYS) {
+    const subjBox = document.querySelector('#nrOrTplGrid input[data-tplsubj="0|' + k[0] + '"]');
+    const bodyBox = document.querySelector('#nrOrTplGrid textarea[data-tplkey="0|' + k[0] + '"]');
+    if (!bodyBox || !(bodyBox.value || '').trim()) { failed.push(k[1] + ' \u2014 empty'); continue; }
+    try {
+      const res = await nrGasJson({ action: 'nextreg_email_send', admin_key: SB_KEY,
+        test_to: 'southportlandmetroapa@gmail.com',
+        subject: fill(subjBox ? subjBox.value : ''),
+        html_body: fill(bodyBox.value) });
+      if (res && res.ok) sent++; else failed.push(k[1] + ' \u2014 ' + ((res && res.error) || 'unknown'));
+    } catch (e) { failed.push(k[1] + ' \u2014 ' + e.message); }
+  }
+  setStatus('nrOrTplStatus', '\u2713 ' + sent + ' test email(s) sent to the league inbox'
+    + (failed.length ? ' \u00b7 FAILED: ' + failed.join('; ') : '') + '.', failed.length ? 'err' : 'ok');
+}
+/* Which template column a team texts under. n1 teams use 'n1' whatever
+   their format; current-session teams key off division format. */
+function nrOrFormatKey(t, segKey) {
+  if (segKey === 'n1') return 'n1';
+  const f = t.division.format || '';
+  if (/Doubles/i.test(f)) return 'doubles';
+  if (/Masters/i.test(f)) return 'masters';
+  if (/Ladies/i.test(f)) return 'ladies';
+  return 'dj';
+}
+function nrOrBody(pair, segKey, firstPlayer, wave) {
+  const t = pair[0];
+  const tpl = (_nr.orTpls && _nr.orTpls.get(wave + '|' + nrOrFormatKey(t, segKey))) || '';
+  const filled = String(tpl)
+    .replace(/\{team\}/g, t.team_name || ('Team ' + nrTeamKey(t.team_number)))
+    .replace(/\{session\}/g, nrOrTargetName())
+    .replace(/\{rerack\}/g, NR_RERACK_URL);
+  return firstPlayer ? otSubstitute(filled, firstPlayer) : filled;
+}
+function nrOrWaveState(pair) {
+  /* pair is stamped when EVERY team id in it is stamped for that wave */
+  const has = w => pair.every(t => { const st = _nr.orSent.get(t.id); return st && st[w]; });
+  return { w0: has(0), w1: has(1), w2: has(2) };
+}
+function nrRenderOutreach() {
+  const box = document.getElementById('nrOrList');
+  if (!box || !_nr.orSent) return;
+  const uni = nrOrUniverse();
+  let total = 0, w0done = 0, w1done = 0, w2done = 0;
+  if (!_nr.orPairs) _nr.orPairs = {};
+  if (!_nr.orEmailSel) _nr.orEmailSel = new Map();
+  const defnSt = id => { const st = _nr.regByTeam.get(id); return st === 'playing' || st === 'not_playing'; };
+  const sect = uni.map(g => {
+    const pairs = nrOrMergePairs(g.teams)
+      .filter(pair => !pair.some(t => defnSt(t.id)))
+      .sort((a, b) => (parseInt(a[0].team_number, 10) || 0) - (parseInt(b[0].team_number, 10) || 0));
+    total += pairs.length;
+    _nr.orPairs[g.key] = pairs;
+    const rowsHtml = pairs.map(pair => {
+      const t = pair[0];
+      const st = nrOrWaveState(pair);
+      if (st.w0) w0done++;
+      if (st.w1) w1done++;
+      if (st.w2) w2done++;
+      const roster = pair.map(x => _nr.orRoster.get(x.id) || []).flat();
+      const seenNum = new Set();
+      const uniq = roster.filter(m => {
+        const ph = nrBestPhone(m.player || {});
+        if (!ph) return false;
+        const d = otPhoneDigits(ph);
+        if (seenNum.has(d)) return false;
+        seenNum.add(d); return true;
+      });
+      const caps = uniq.filter(m => m.role === 'Captain' || m.role === 'Co-Captain');
+      const wave = st.w1 ? 2 : 1;
+      const recips = wave === 1 ? caps : uniq;
+      const digits = recips.map(m => otPhoneDigits(nrBestPhone(m.player))).join(',');
+      const body = nrOrBody(pair, g.key === 'n1' ? 'n1' : 'cur', recips[0] ? recips[0].player : null, wave);
+      const url = digits ? otBuildSmsUrl(digits, body) : '#';
+      const idsAttr = pair.map(x => x.id).join(',');
+      const label = wave === 1
+        ? '\ud83d\udcf1 Wave 1 \u2014 captains \u00b7 ' + recips.length
+        : '\ud83d\udcf1 Wave 2 \u2014 whole roster \u00b7 ' + recips.length;
+      const stamp = w => {
+        const rec = _nr.orSent.get(pair[0].id);
+        const at = rec && rec[w] ? String(rec[w].sent_at).slice(0, 10) : '';
+        return '<span style="background:#eef2ff;color:#4338ca;padding:1px 8px;border-radius:999px;font-weight:700;font-size:0.68rem">'
+          + (w === 0 ? 'EMAILED' : 'WAVE ' + w) + ' \u00b7 ' + at
+          + '</span> <a href="#" data-or-undo="' + idsAttr + '" data-or-wave="' + w + '" class="hint" style="font-size:0.72rem">undo</a>';
+      };
+      const emChecked = _nr.orEmailSel.has(idsAttr) ? _nr.orEmailSel.get(idsAttr) : !st.w0;
+      return '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:5px 0;border-bottom:1px dashed #e5e7eb;font-size:0.82rem">'
+        + '<input type="checkbox" data-oremail="' + idsAttr + '"' + (emChecked ? ' checked' : '') + ' title="Include in the email send">'
+        + '<span data-orhover="' + idsAttr + '" style="cursor:help"><strong>' + esc(nrTeamKey(t.team_number)) + '</strong> ' + esc(t.team_name || '')
+        + ' <span class="hint">' + (pair.length > 1 ? (/Doubles/i.test(t.division.format || '') ? '8+9 Doubles' : '8+9') : esc(t.division.format || '')) + '</span></span>'
+        + (pair.some(x => _nr.regByTeam.get(x.id) === 'undecided')
+            ? ' <span style="background:#ede9fe;color:#6d28d9;padding:1px 8px;border-radius:999px;font-weight:700;font-size:0.68rem">DECIDING</span>' : '')
+        + (st.w0 ? ' ' + stamp(0) : '')
+        + (st.w1 ? ' ' + stamp(1) : '')
+        + (st.w2 ? ' ' + stamp(2) : '')
+        + '<span style="margin-left:auto">'
+        + (st.w2
+            ? '<span class="hint" style="font-size:0.75rem">both waves out \u2014 waiting</span>'
+            : (recips.length
+                ? '<a class="btn btn-outline btn-sm" style="text-decoration:none" href="' + esc(url)
+                  + '" data-or-send="' + idsAttr + '" data-or-wave="' + wave + '">' + label + '</a>'
+                : '<span class="sb-no-phone">no phones for wave ' + wave + '</span>'))
+        + ' <button type="button" class="btn btn-outline btn-sm" data-or-set="' + idsAttr + '" data-or-status="playing" title="Mark playing">\u2713</button>'
+        + '<button type="button" class="btn btn-outline btn-sm" data-or-set="' + idsAttr + '" data-or-status="not_playing" title="Mark not playing">\u2717</button>'
+        + '<button type="button" class="btn btn-outline btn-sm" data-or-set="' + idsAttr + '" data-or-status="undecided" title="Mark still deciding" style="color:#6d28d9">?</button>'
+        + '</span></div>';
+    }).join('');
+    return '<details data-orsec="' + g.key + '"' + (_nr.orOpen && _nr.orOpen[g.key] ? ' open' : '') + ' style="margin-bottom:8px"><summary style="cursor:pointer;font-weight:700">' + esc(g.label)
+      + ' <span class="hint" style="font-weight:500">\u2014 ' + pairs.length + ' unanswered</span></summary>'
+      + '<div style="padding:6px 0 2px 8px">'
+      + '<div style="margin:2px 0 8px"><button type="button" class="btn btn-primary btn-sm" data-orsecemail="' + g.key + '">\ud83d\udce7 Email checked teams</button></div>'
+      + (rowsHtml || '<p class="hint">All answered \ud83c\udf89</p>') + '</div></details>';
+  }).join('');
+  document.getElementById('nrOrCounts').textContent =
+    total + ' unanswered \u00b7 emailed ' + w0done + ' \u00b7 wave 1 sent ' + w1done + ' \u00b7 wave 2 sent ' + w2done;
+  box.innerHTML = total ? sect : '<p class="hint">Everyone has answered \u2014 nothing to chase.</p>';
+  box.querySelectorAll('a[data-or-send]').forEach(a => {
+    a.addEventListener('click', () => {
+      /* let the sms: navigation proceed; stamp in the background */
+      const ids = a.dataset.orSend.split(',').map(Number);
+      const wave = Number(a.dataset.orWave);
+      nrOrStamp(ids, wave);
+    });
+  });
+  box.querySelectorAll('a[data-or-undo]').forEach(a => {
+    a.addEventListener('click', ev => {
+      ev.preventDefault();
+      nrOrUnstamp(a.dataset.orUndo.split(',').map(Number), Number(a.dataset.orWave));
+    });
+  });
+  box.querySelectorAll('button[data-or-set]').forEach(b => {
+    b.onclick = () => nrOrSetStatus(b.dataset.orSet.split(',').map(Number), b.dataset.orStatus);
+  });
+  box.querySelectorAll('details[data-orsec]').forEach(d => {
+    d.addEventListener('toggle', () => {
+      if (!_nr.orOpen) _nr.orOpen = {};
+      _nr.orOpen[d.dataset.orsec] = d.open;
+    });
+  });
+  box.querySelectorAll('[data-orhover]').forEach(sp => {
+    sp.addEventListener('mouseenter', ev => nrRosterTipShow(ev, sp.dataset.orhover.split(',').map(Number)));
+    sp.addEventListener('mouseleave', nrRosterTipHide);
+  });
+  box.querySelectorAll('input[data-oremail]').forEach(cb => {
+    cb.addEventListener('change', () => { _nr.orEmailSel.set(cb.dataset.oremail, cb.checked); });
+  });
+  box.querySelectorAll('button[data-orsecemail]').forEach(b => {
+    b.onclick = () => nrOrEmailSection(b.dataset.orsecemail);
+  });
+}
+
+/* ── Wave 0 — EMAIL a whole category (scope #14B). Sequential sends
+     through the admin-gated GAS bulk action; each success stamps wave 0
+     so re-runs skip already-emailed teams. Canary: 3 sends, house-modal
+     confirm, then the remainder. Preprod only ever mails the operator. */
+async function nrGasJson(payload) {
+  const r = await fetch(OPTOUT_CONFIRM_MAILER_URL, { method: 'POST',
+    headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify(payload) });
+  return r.json();
+}
+async function nrOrEmailSection(secKey) {
+  const uni = nrOrUniverse();
+  const g = uni.find(x => x.key === secKey);
+  const pairs = (_nr.orPairs && _nr.orPairs[secKey]) || [];
+  const targets = pairs.filter(pair => {
+    const key = pair.map(x => x.id).join(',');
+    const st = nrOrWaveState(pair);
+    return _nr.orEmailSel.has(key) ? _nr.orEmailSel.get(key) : !st.w0;
+  });
+  if (!targets.length) { setStatus('nrOrStatus', 'No teams checked in that section.', 'err'); return; }
+  let quotaLine = '';
+  try {
+    const q = await nrGasJson({ action: 'mailer_quota', admin_key: SB_KEY });
+    if (q && q.ok) quotaLine = ' Gmail quota left today: ' + q.remaining + '.';
+  } catch (e) { /* quota display is best-effort */ }
+  const start = await nrModal({
+    title: 'Email ' + targets.length + ' team(s) \u2014 ' + esc(g ? g.label : secKey),
+    body: 'One email per team, every roster member on the To line \u2014 8+9 twins get both rosters.'
+      + quotaLine
+      + (IS_PREPROD ? ' PREPROD: everything goes to your inbox only.' : '')
+      + ' The first 3 go out as a canary, then you confirm the rest.',
+    buttons: [{ label: 'Send canary \u2014 first 3', value: 'go', primary: true }, { label: 'Cancel', value: null }]
+  });
+  if (!start) return;
+  let sent = 0;
+  const failed = [];
+  for (let i = 0; i < targets.length; i++) {
+    if (i === 3 && targets.length > 3) {
+      const cont = await nrModal({
+        title: 'Canary done \u2014 ' + sent + ' sent' + (failed.length ? ', ' + failed.length + ' failed' : ''),
+        body: (IS_PREPROD ? 'Check your inbox for the three test emails.' : 'Spot-check delivery.')
+          + ' Continue with the remaining ' + (targets.length - 3) + '?',
+        buttons: [{ label: 'Send the rest', value: 'go', primary: true }, { label: 'Stop here', value: null }]
+      });
+      if (!cont) break;
+    }
+    const pair = targets[i];
+    const t = pair[0];
+    setStatus('nrOrStatus', 'Emailing ' + (i + 1) + '/' + targets.length + ' \u2014 '
+      + (t.team_name || nrTeamKey(t.team_number)) + '\u2026', '');
+    const fmtKey = nrOrFormatKey(t, secKey === 'n1' ? 'n1' : 'cur');
+    const fill = x => String(x)
+      .replace(/\{team\}/g, t.team_name || ('Team ' + nrTeamKey(t.team_number)))
+      .replace(/\{session\}/g, nrOrTargetName())
+      .replace(/\{rerack\}/g, NR_RERACK_URL);
+    const subj = _nr.orTplSubj.get('0|' + fmtKey) || 'Is {team} coming back for {session}?';
+    const bodyTpl = _nr.orTpls.get('0|' + fmtKey) || '';
+    if (!bodyTpl) { failed.push(nrTeamKey(t.team_number) + ' \u2014 no wave-0 template for ' + fmtKey); continue; }
+    try {
+      const res = await nrGasJson({ action: 'nextreg_email_send', admin_key: SB_KEY,
+        team_ids: pair.map(x => x.id), subject: fill(subj), html_body: fill(bodyTpl),
+        is_preprod: IS_PREPROD });
+      if (res && res.ok) {
+        sent++;
+        await sb('POST', 'next_reg_outreach?on_conflict=target_session_id,team_id,wave',
+          pair.map(x => ({ target_session_id: _nr.targetId, team_id: x.id, wave: 0 })),
+          { 'Prefer': 'resolution=merge-duplicates,return=minimal' });
+      } else {
+        failed.push(nrTeamKey(t.team_number) + ' \u2014 ' + ((res && res.error) || 'unknown'));
+      }
+    } catch (e) { failed.push(nrTeamKey(t.team_number) + ' \u2014 ' + e.message); }
+  }
+  setStatus('nrOrStatus', '\u2713 Emailed ' + sent + ' team(s)'
+    + (failed.length ? ' \u00b7 FAILED: ' + failed.join('; ') : '') + '.', failed.length ? 'err' : 'ok');
+  await nrLoadOutreach();
+}
+
+/* Roster hover for outreach rows — instant, from the local cache.
+   Shows role + the best reachable phone per player. */
+let _nrTipEl = null;
+function nrRosterTipShow(ev, teamIds) {
+  nrRosterTipHide();
+  const seen = new Set();
+  const rows = teamIds.map(id => _nr.orRoster.get(id) || []).flat().filter(m => {
+    if (seen.has(m.member_number)) return false;
+    seen.add(m.member_number); return true;
+  });
+  const el = document.createElement('div');
+  el.style.cssText = 'position:fixed;z-index:9999;background:#1f2937;color:#fff;padding:10px 12px;'
+    + 'border-radius:8px;font-size:0.78rem;line-height:1.5;max-width:340px;'
+    + 'box-shadow:0 4px 14px rgba(0,0,0,0.3);pointer-events:none';
+  el.innerHTML = rows.length
+    ? rows.map(m => {
+        const p = m.player || {};
+        const nm = ((p.first_name || '') + ' ' + (p.last_name || '')).replace(/\s+/g, ' ').trim() || m.member_number;
+        const ph = nrBestPhone(p);
+        return '<div>' + (m.role === 'Captain' ? '\u2605 ' : m.role === 'Co-Captain' ? '\u2606 ' : '')
+          + esc(nm) + ' \u2014 ' + (ph ? esc(ph) : '<span style="color:#fca5a5">no phone</span>') + '</div>';
+      }).join('')
+    : '(no roster on file)';
+  document.body.appendChild(el);
+  const r = ev.currentTarget.getBoundingClientRect();
+  el.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 360)) + 'px';
+  el.style.top = (r.bottom + 4) + 'px';
+  _nrTipEl = el;
+}
+function nrRosterTipHide() {
+  if (_nrTipEl) { _nrTipEl.remove(); _nrTipEl = null; }
+}
+
+/* House modal — one dialog, explicit buttons, no browser popups. */
+function nrModal(opts) {
+  return new Promise(resolve => {
+    const wrap = document.getElementById('nrModalWrap');
+    wrap.innerHTML = '<div style="position:fixed;inset:0;background:rgba(10,20,40,0.55);z-index:9998;display:flex;align-items:center;justify-content:center;padding:20px">'
+      + '<div style="background:#fff;border-radius:12px;padding:22px;max-width:440px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.35)">'
+      + '<div style="font-weight:800;font-size:1.05rem;margin-bottom:6px">' + opts.title + '</div>'
+      + '<div class="hint" style="margin-bottom:14px">' + opts.body + '</div>'
+      + '<div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">'
+      + opts.buttons.map((b, i) => '<button type="button" class="btn ' + (b.primary ? 'btn-primary' : 'btn-outline')
+          + ' btn-sm" data-modalbtn="' + i + '">' + b.label + '</button>').join('')
+      + '</div></div></div>';
+    wrap.querySelectorAll('[data-modalbtn]').forEach(btn => {
+      btn.onclick = () => { wrap.innerHTML = ''; resolve(opts.buttons[Number(btn.dataset.modalbtn)].value); };
+    });
+  });
+}
+
+/* Operator sets the answer straight from outreach (source='admin'),
+   with a choice to email the roster about it. Email goes through the
+   same keyless GAS action; admin_key (the service key already in this
+   page's URL) bypasses the freshness gate, and preprod pages only ever
+   mail the operator. */
+async function nrOrSetStatus(teamIds, status) {
+  const word = status === 'playing' ? 'PLAYING' : status === 'not_playing' ? 'NOT playing' : 'STILL DECIDING';
+  const first = _nr.teams.concat(_nr.teamsN1).find(t => t.id === teamIds[0]);
+  const choice = await nrModal({
+    title: 'Mark ' + esc(first ? first.team_name || '' : '') + ' ' + word + '?',
+    body: 'For ' + esc(nrOrTargetName()) + '. Email the whole roster about it, or record silently?',
+    buttons: [
+      { label: 'Mark + email team', value: 'email', primary: true },
+      { label: 'Mark silently', value: 'silent' },
+      { label: 'Cancel', value: null }
+    ]
+  });
+  if (!choice) return;
+  const sendMail = choice === 'email';
+  const now = new Date().toISOString();
+  try {
+    await sb('POST', 'next_reg?on_conflict=target_session_id,team_id',
+      teamIds.map(id => ({
+        target_session_id: _nr.targetId, team_id: id, status: status, source: 'admin',
+        prior_nexus_status: null, answered_by_apa: null,
+        answered_by_name: 'Michelle & Paul Soldan', answered_at: now, updated_at: now
+      })),
+      { 'Prefer': 'resolution=merge-duplicates,return=minimal' });
+    await sb('POST', 'next_reg_log',
+      teamIds.map(id => ({
+        target_session_id: _nr.targetId, team_id: id,
+        old_status: (_nr.regRowByTeam.get(id) || {}).status || null, new_status: status,
+        actor_apa: null, actor_name: 'Michelle & Paul Soldan', source: 'admin'
+      })),
+      { 'Prefer': 'return=minimal' });
+    if (sendMail) {
+      try {
+        await fetch(OPTOUT_CONFIRM_MAILER_URL, {
+          method: 'POST', headers: { 'Content-Type': 'text/plain' },
+          body: JSON.stringify({ action: 'rerack_answer_notify', team_id: teamIds[0],
+            admin_key: SB_KEY, is_preprod: IS_PREPROD })
+        });
+      } catch (e) { /* mail is best-effort; the record is already saved */ }
+    }
+    setStatus('nrOrStatus', '\u2713 Marked ' + word + (sendMail ? ' \u2014 email sent.' : '.'), 'ok');
+  } catch (e) { setStatus('nrOrStatus', 'Set failed: ' + e.message, 'err'); }
+  await nrLoadTracker();
+  await nrLoadOutreach();
+}
+async function nrOrStamp(teamIds, wave) {
+  try {
+    await sb('POST', 'next_reg_outreach?on_conflict=target_session_id,team_id,wave',
+      teamIds.map(id => ({ target_session_id: _nr.targetId, team_id: id, wave: wave })),
+      { 'Prefer': 'resolution=merge-duplicates,return=minimal' });
+  } catch (e) { setStatus('nrOrStatus', 'Stamp failed: ' + e.message, 'err'); }
+  await nrLoadOutreach();
+}
+async function nrOrUnstamp(teamIds, wave) {
+  try {
+    await sb('DELETE', 'next_reg_outreach?target_session_id=eq.' + _nr.targetId
+      + '&team_id=in.(' + teamIds.join(',') + ')&wave=eq.' + wave);
+  } catch (e) { setStatus('nrOrStatus', 'Undo failed: ' + e.message, 'err'); }
+  await nrLoadOutreach();
+}
+async function nrOrSaveTpl() {
+  const boxes = document.querySelectorAll('#nrOrTplGrid textarea[data-tplkey]');
+  const rows = [];
+  boxes.forEach(b => {
+    const parts = b.dataset.tplkey.split('|');
+    const subjBox = document.querySelector('#nrOrTplGrid input[data-tplsubj="' + b.dataset.tplkey + '"]');
+    rows.push({ wave: Number(parts[0]), format_key: parts[1], body: b.value,
+      subject: subjBox ? subjBox.value : null, updated_at: new Date().toISOString() });
+  });
+  try {
+    await sb('POST', 'next_reg_templates?on_conflict=wave,format_key', rows,
+      { 'Prefer': 'resolution=merge-duplicates,return=minimal' });
+    for (const r of rows) {
+      _nr.orTpls.set(r.wave + '|' + r.format_key, r.body);
+      if (r.subject != null) _nr.orTplSubj.set(r.wave + '|' + r.format_key, r.subject);
+    }
+    setStatus('nrOrTplStatus', '\u2713 All 15 saved', 'ok');
+    nrRenderOutreach();
+  } catch (e) { setStatus('nrOrTplStatus', 'Save failed: ' + e.message, 'err'); }
+}
+
+/* ── Needs attention — scope event #8 (standing card, live data).
+     Semantics per the locked matrix: definitive beats unanswered; a
+     P+N pair is a RED conflict (ReRack shows the team PLAYING). ── */
+function nrComputeAttention() {
+  const spmN = _nr.teams.filter(t => t.division.operator_id === 1);
+  const rowOf = id => _nr.regRowByTeam && _nr.regRowByTeam.get(id);
+  const stOf = id => { const r = rowOf(id); return r ? r.status : 'unanswered'; };
+  const defn = v => v === 'playing' || v === 'not_playing';
+  const pairs = nrOrMergePairs(spmN).filter(g => g.length === 2);
+  const conflicts = [], halves = [];
+  for (const g of pairs) {
+    const a = stOf(g[0].id), b = stOf(g[1].id);
+    if (defn(a) && defn(b) && a !== b) conflicts.push(g);
+    else if (defn(a) !== defn(b)) halves.push(g);
+  }
+  const changed = spmN.filter(t => {
+    const r = rowOf(t.id);
+    return r && r.source === 'rerack' && defn(r.status)
+      && defn(r.prior_nexus_status) && r.prior_nexus_status !== r.status;
+  });
+  const changedIds = new Set(changed.map(t => t.id));
+  const pending = spmN.filter(t => {
+    const r = rowOf(t.id);
+    return r && r.source === 'rerack' && defn(r.status) && !changedIds.has(t.id);
+  });
+  return { conflicts: conflicts, halves: halves, pending: pending, changed: changed };
+}
+function nrRenderAttention() {
+  const box = document.getElementById('nrAttn');
+  const head = document.getElementById('nrAttnCounts');
+  if (!box || !_nr.regRowByTeam || !_nr.orRoster) return;
+  const a = nrComputeAttention();
+  const stOf = id => { const r = _nr.regRowByTeam.get(id); return r ? r.status : 'unanswered'; };
+  const lbl = st => st === 'playing' ? 'YES' : st === 'not_playing' ? 'NO'
+    : st === 'undecided' ? 'DECIDING' : 'blank';
+  const teamLine = t => '<strong>' + esc(nrTeamKey(t.team_number)) + '</strong> ' + esc(t.team_name || '');
+  const pairLine = g => teamLine(g[0]) + ' <span class="hint">'
+    + esc(g[0].division.format) + ' ' + lbl(stOf(g[0].id)) + ' \u00b7 '
+    + esc(g[1].division.format) + ' ' + lbl(stOf(g[1].id)) + '</span>';
+  const section = (color, bg, title, items, mapFn) => items.length
+    ? '<div style="border-left:4px solid ' + color + ';background:' + bg + ';border-radius:0 8px 8px 0;padding:8px 10px;margin-top:8px">'
+      + '<div style="font-weight:700;font-size:0.84rem;color:' + color + '">' + title + ' \u2014 ' + items.length + '</div>'
+      + items.map(x => '<div style="font-size:0.82rem;padding:2px 0">' + mapFn(x) + '</div>').join('')
+      + '</div>'
+    : '';
+  head.textContent = (a.conflicts.length + a.halves.length + a.pending.length + a.changed.length)
+    ? a.conflicts.length + ' conflict \u00b7 ' + a.changed.length + ' changed mind \u00b7 ' + a.pending.length + ' pending Nexus \u00b7 ' + a.halves.length + ' half-entered'
+    : '';
+  const html = section('#b91c1c', '#fef2f2', '\ud83d\udd34 Conflicting 8+9 answers \u2014 resolve in Nexus', a.conflicts, pairLine)
+    + section('#b91c1c', '#fef2f2', '\ud83d\udd34 Changed their mind in ReRack \u2014 update Nexus, then re-paste', a.changed,
+        t => { const r = _nr.regRowByTeam.get(t.id);
+          return teamLine(t) + ' <span class="hint">' + esc(t.division.format) + ' \u00b7 Nexus has '
+            + lbl(r.prior_nexus_status) + ', ReRack now says ' + lbl(r.status)
+            + (r.answered_by_name ? ' \u00b7 by ' + esc(r.answered_by_name) : '') + '</span>'; })
+    + section('#a16207', '#fefce8', '\ud83d\udfe1 Answered in ReRack \u2014 click into Nexus, then re-paste', a.pending,
+        t => teamLine(t) + ' <span class="hint">' + esc(t.division.format) + ' \u00b7 ReRack says '
+          + lbl(stOf(t.id)) + ((_nr.regRowByTeam.get(t.id) || {}).answered_by_name ? ' \u00b7 by ' + esc(_nr.regRowByTeam.get(t.id).answered_by_name) : '') + '</span>')
+    + section('#a16207', '#fefce8', '\ud83d\udfe1 Half-entered pairs \u2014 finish the other Nexus row', a.halves, pairLine);
+  box.innerHTML = html || '<p class="hint">\u2713 Nothing needs attention.</p>';
+}
+
+/* "Coming back" header counts — status=playing by bucket. DJ and
+   Doubles count RAW team rows (a pair = 2 teams, matching how Nexus
+   counts them — user rule 2026-07-12). */
+function nrRenderComingBack() {
+  const el = document.getElementById('nrComingBack');
+  if (!el || !_nr.regByTeam) return;
+  const playing = id => _nr.regByTeam.get(id) === 'playing';
+  const spmN = _nr.teams.filter(t => t.division.operator_id === 1);
+  const cnt = pred => spmN.filter(t => pred(t.division.format || '') && playing(t.id)).length;
+  const dj = cnt(f => f === '8-Ball Open' || f === '9-Ball Open');
+  const ladies = cnt(f => /Ladies/i.test(f));
+  const masters = cnt(f => /Masters/i.test(f));
+  const dbl = cnt(f => /Doubles/i.test(f));
+  const n1 = _nr.teamsN1.filter(t => !_nr.linkedN1.has(t.id) && playing(t.id)).length;
+  const total = dj + ladies + masters + dbl + n1;
+  el.innerHTML = 'Coming back so far: <span style="color:#16a34a">' + total + ' team(s)</span>'
+    + ' <span class="hint" style="font-weight:500">\u2014 DJ ' + dj + ' \u00b7 Ladies ' + ladies
+    + ' \u00b7 Masters ' + masters + ' \u00b7 Doubles ' + dbl + ' \u00b7 prior-session ' + n1 + '</span>';
+}
+
+async function nrLoadTracker() {
+  if (!_nr.targetId) return;
+  const gs = document.getElementById('nrGridStatus');
+  try {
+    const rows = await sbGetAll('next_reg?target_session_id=eq.' + _nr.targetId
+      + '&select=team_id,format,status,source,answered_by_name,answered_at,updated_at,team_note,players_needed,prior_nexus_status&order=updated_at.desc,team_id.asc');
+    const byId = new Map();
+    for (const t of _nr.teams.concat(_nr.teamsN1)) byId.set(t.id, t);
+    _nr.regByTeam = new Map();
+    _nr.regRowByTeam = new Map();
+    for (const r of (rows || [])) { _nr.regByTeam.set(r.team_id, r.status); _nr.regRowByTeam.set(r.team_id, r); }
+    /* ReRack-captured Fall rosters (Masters/Doubles) — team- and
+       intent-keyed in one paged read */
+    const cap = await sbGetAll('next_reg_roster?target_session_id=eq.' + _nr.targetId
+      + '&select=team_id,intent_id,apa,full_name,position&order=id.asc');
+    _nr.capByTeam = new Map(); _nr.capByIntent = new Map();
+    for (const r of (cap || [])) {
+      const m = r.team_id ? _nr.capByTeam : _nr.capByIntent;
+      const k = r.team_id || r.intent_id;
+      if (!m.has(k)) m.set(k, []);
+      m.get(k).push(r);
+    }
+    const capName = r => esc(r.full_name) + ' <span class="hint">' + (r.apa ? esc(r.apa) : 'no # yet') + '</span>';
+    _nr.capHtml = list => (list || []).sort((a, b) => a.position - b.position).map(capName).join(' \u00b7 ');
+    const counts = { playing: 0, not_playing: 0, unanswered: 0, undecided: 0 };
+    for (const r of (rows || [])) if (counts[r.status] != null) counts[r.status]++;
+    document.getElementById('nrCounts').textContent =
+      (rows || []).length + ' tracked \u00b7 ' + counts.playing + ' playing \u00b7 '
+      + counts.not_playing + ' not playing \u00b7 ' + counts.undecided + ' deciding \u00b7 '
+      + counts.unanswered + ' unanswered';
+    const chip = st => st === 'playing'
+      ? '<span style="background:#f0fdf4;color:#16a34a;padding:1px 8px;border-radius:999px;font-weight:700;font-size:0.72rem">PLAYING</span>'
+      : st === 'not_playing'
+        ? '<span style="background:#fef2f2;color:#b91c1c;padding:1px 8px;border-radius:999px;font-weight:700;font-size:0.72rem">NOT PLAYING</span>'
+        : st === 'undecided'
+          ? '<span style="background:#ede9fe;color:#6d28d9;padding:1px 8px;border-radius:999px;font-weight:700;font-size:0.72rem">STILL DECIDING</span>'
+          : '<span style="background:#f3f4f6;color:#6b7280;padding:1px 8px;border-radius:999px;font-weight:700;font-size:0.72rem">UNANSWERED</span>';
+    const shown = (rows || []).filter(r => !_nr.trackerFilter || _nr.trackerFilter === 'all' || r.status === _nr.trackerFilter);
+    document.getElementById('nrGrid').innerHTML = (rows || []).length
+      ? '<table style="width:100%;border-collapse:collapse;font-size:0.84rem">'
+        + '<tr><th style="text-align:left;padding:6px 8px;border-bottom:2px solid var(--border)">Team</th>'
+        + '<th style="text-align:left;padding:6px 8px;border-bottom:2px solid var(--border)">Division</th>'
+        + '<th style="text-align:left;padding:6px 8px;border-bottom:2px solid var(--border)">Status</th>'
+        + '<th style="text-align:left;padding:6px 8px;border-bottom:2px solid var(--border)">Source</th>'
+        + '<th style="text-align:left;padding:6px 8px;border-bottom:2px solid var(--border)">Updated</th></tr>'
+        + shown.map(r => {
+            const t = byId.get(r.team_id);
+            return '<tr>'
+              + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">'
+              + (t ? '<strong>' + esc(nrTeamKey(t.team_number)) + '</strong> ' + esc(t.team_name || '') : '#' + r.team_id)
+              + (r.team_note ? '<div class="hint" style="font-size:0.74rem">\ud83d\udcdd ' + esc(r.team_note) + '</div>' : '')
+              + (r.players_needed ? '<div class="hint" style="font-size:0.74rem">\ud83c\udfb1 needs ' + esc(r.players_needed) + '</div>' : '')
+              + (_nr.capByTeam && _nr.capByTeam.has(r.team_id)
+                  ? '<div style="font-size:0.74rem">\ud83d\udc65 ' + _nr.capHtml(_nr.capByTeam.get(r.team_id)) + '</div>' : '') + '</td>'
+              + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)" class="hint">' + esc(r.format || '') + '</td>'
+              + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">' + chip(r.status) + '</td>'
+              + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)" class="hint">' + esc(r.source) + '</td>'
+              + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)" class="hint">' + esc(String(r.updated_at || '').slice(0, 16).replace('T', ' ')) + '</td>'
+              + '</tr>';
+          }).join('')
+        + '</table>'
+      : '<p class="hint">Nothing tracked yet \u2014 paste a Nexus report above.</p>';
+    gs.className = 'status-line'; gs.innerHTML = '';
+    nrRenderComingBack();
+    nrRenderSegments();
+    nrRenderAttention();
+    if (_nr.orSent) nrRenderOutreach();
+  } catch (e) {
+    gs.className = 'status-line shown err'; gs.textContent = 'Tracker load failed: ' + e.message;
+  }
+}
+
 const TAB_LABEL = {
   sessions:      'Sessions',
   uploads:       'Uploads',
@@ -5054,7 +6402,8 @@ const TAB_LABEL = {
   playoffs:      'Playoffs',
   hostplan:      'Host Plan',
   dolphin:       'Dolphin',
-  contacts:      'Contacts'
+  contacts:      'Contacts',
+  nextreg:       'Next Session Reg'
 };
 
 function switchTab(name) {
@@ -5078,6 +6427,7 @@ function switchTab(name) {
   if (name === 'dolphin')     dpInit();
   if (name === 'certs')       { certsAdminInit(); certsNotifyInit(); }
   if (name === 'hostplan')    hpInit();
+  if (name === 'nextreg')     nrInit();
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -8798,6 +10148,12 @@ function spOnEnterTab() {
     // SP report + labels uploads auto-save on detect — no modal wiring (v3.4).
     // Patches buttons
     document.getElementById('spComputePatchesBtn').addEventListener('click', spComputePatches);
+    document.getElementById('spManDetails').addEventListener('toggle', ev => { if (ev.target.open) spManInit(); });
+    document.getElementById('spManDiv').addEventListener('change', spManDivChange);
+    document.getElementById('spManTeam').addEventListener('change', spManTeamChange);
+    document.getElementById('spManPlayer').addEventListener('change', spManSync);
+    document.getElementById('spManCode').addEventListener('change', spManSync);
+    document.getElementById('spManAddBtn').addEventListener('click', spManAdd);
     document.getElementById('spMailPatchesBtn').addEventListener('click', spMailPatches);
     document.getElementById('spRemailFindBtn').addEventListener('click', spRemailFind);
     spRemailPopulateCodes();
@@ -9634,6 +10990,85 @@ async function spLoadDivisionMeta() {
    operator). Builds the canonical patch set and UPSERTs into
    sp_patches. Existing rows are left untouched (preserves mailed_at).
 */
+/* ── Manual SP — scope #14A. sp_patches stores 5-digit padded LOCAL
+     member numbers ('972' prefix stripped, zero-padding kept) and
+     5-digit padded team numbers — matching the BD-report convention so
+     mailing-label joins keep working. ── */
+let _spMan = { divs: [], teams: [], roster: [], inited: false };
+async function spManInit() {
+  if (_spMan.inited || !currentSession) return;
+  _spMan.inited = true;
+  const sel = document.getElementById('spManDiv');
+  try {
+    _spMan.divs = await sb('GET', 'divisions?session_id=eq.' + currentSession.id
+      + '&select=id,division_number,name,format,operator_id&order=division_number.asc');
+    sel.innerHTML = '<option value="">Division\u2026</option>' + _spMan.divs.map(d =>
+      '<option value="' + d.id + '">' + esc(d.division_number + ' \u2014 ' + (d.name || '') + ' \u00b7 ' + (d.format || '')) + '</option>').join('');
+  } catch (e) { setStatus('spManStatus', 'Divisions load failed: ' + e.message, 'err'); }
+}
+async function spManDivChange() {
+  const divId = document.getElementById('spManDiv').value;
+  const tSel = document.getElementById('spManTeam');
+  const pSel = document.getElementById('spManPlayer');
+  pSel.innerHTML = '<option value="">Player\u2026</option>'; pSel.disabled = true;
+  spManSync();
+  if (!divId) { tSel.disabled = true; return; }
+  _spMan.teams = await sb('GET', 'teams?division_id=eq.' + divId + '&select=id,team_number,team_name&order=team_number.asc');
+  tSel.innerHTML = '<option value="">Team\u2026</option>' + _spMan.teams.map(t =>
+    '<option value="' + t.id + '">' + esc(nrTeamKey(t.team_number) + ' ' + (t.team_name || '')) + '</option>').join('');
+  tSel.disabled = false;
+}
+async function spManTeamChange() {
+  const teamId = document.getElementById('spManTeam').value;
+  const pSel = document.getElementById('spManPlayer');
+  spManSync();
+  if (!teamId) { pSel.disabled = true; return; }
+  const tm = await sb('GET', 'team_memberships?team_id=eq.' + teamId + '&select=member_number,name_raw&order=id.asc');
+  const nums = (tm || []).map(r => r.member_number).filter(Boolean);
+  const byNum = new Map();
+  if (nums.length) {
+    const ps = await sb('GET', 'players?member_number=in.(' + nums.join(',') + ')&select=member_number,first_name,last_name');
+    for (const p of (ps || [])) byNum.set(p.member_number, p);
+  }
+  _spMan.roster = (tm || []).map(r => {
+    const p = byNum.get(r.member_number);
+    const nm = p ? ((p.first_name || '') + ' ' + (p.last_name || '')).replace(/\s+/g, ' ').trim() : (r.name_raw || r.member_number);
+    return { member_number: r.member_number, name: nm };
+  });
+  pSel.innerHTML = '<option value="">Player\u2026</option>' + _spMan.roster.map(x =>
+    '<option value="' + esc(x.member_number) + '">' + esc(x.name) + '</option>').join('');
+  pSel.disabled = false;
+}
+function spManSync() {
+  const ok = document.getElementById('spManDiv').value && document.getElementById('spManTeam').value
+    && document.getElementById('spManPlayer').value && document.getElementById('spManCode').value;
+  document.getElementById('spManAddBtn').disabled = !ok;
+}
+async function spManAdd() {
+  const div = _spMan.divs.find(d => String(d.id) === document.getElementById('spManDiv').value);
+  const team = _spMan.teams.find(t => String(t.id) === document.getElementById('spManTeam').value);
+  const mem = document.getElementById('spManPlayer').value;
+  const person = _spMan.roster.find(x => x.member_number === mem);
+  const code = document.getElementById('spManCode').value;
+  if (!div || !team || !person || !code) return;
+  const localNum = String(mem).replace(/^972/, '');
+  const teamNum = String(parseInt(team.team_number, 10)).padStart(5, '0');
+  try {
+    const dup = await sb('GET', 'sp_patches?session_id=eq.' + currentSession.id
+      + '&member_number=eq.' + localNum + '&division_number=eq.' + encodeURIComponent(div.division_number)
+      + '&sp_type=eq.' + code + '&select=id&limit=1');
+    if (dup && dup.length) { setStatus('spManStatus', 'Already tracked \u2014 that player has this SP in this division.', 'err'); return; }
+    await sb('POST', 'sp_patches', {
+      session_id: currentSession.id, operator_id: div.operator_id,
+      member_number: localNum, member_name: person.name,
+      division_number: div.division_number, team_number: teamNum,
+      sp_type: code, is_slam: false, weight: 1, source_report_id: null
+    });
+    setStatus('spManStatus', '\u2713 Added ' + code + ' for ' + person.name + ' \u2014 it rides the next mail batch.', 'ok');
+    await spLoadPatches();
+  } catch (e) { setStatus('spManStatus', 'Add failed: ' + e.message, 'err'); }
+}
+
 async function spComputePatches() {
   if (!currentSession || !currentSession.id) {
     setStatus('spPatchesBlocker', 'Pick a current session first.', 'err');
