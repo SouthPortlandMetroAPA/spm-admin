@@ -1024,6 +1024,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="dolphin">Dolphin</button>
       <button class="tab" data-tab="contacts">Contacts</button>
       <button class="tab" data-tab="nextreg">Next Session</button>
+      <button class="tab" data-tab="polls">PulseCheck</button>
     </div>
 
     <div id="globalStatus" class="status-line"></div>
@@ -3423,6 +3424,23 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <div id="nrModalWrap"></div>
     </div>
 
+    <div id="tab-polls" class="tab-panel">
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+          <h2 style="margin:0">PulseCheck results</h2>
+          <select id="plSel"></select>
+          <span class="hint" id="plCounts"></span>
+        </div>
+        <div class="status-line" id="plStatus"></div>
+        <div id="plTally" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"></div>
+        <div id="plVoters"></div>
+        <details style="margin-top:12px">
+          <summary style="cursor:pointer;font-weight:700">Haven't voted yet</summary>
+          <div id="plMissing" style="margin-top:6px"></div>
+        </details>
+      </div>
+    </div>
+
     <div id="tab-contacts" class="tab-panel">
       <div class="card">
         <h2 style="margin:0 0 6px">Google Contacts sync</h2>
@@ -3494,7 +3512,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.247';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.248';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -6394,6 +6412,96 @@ async function nrLoadTracker() {
   }
 }
 
+/* ── PulseCheck results (brief 2026-07-13-pulsecheck.md) ──────────
+     Reads slate.polls / poll_responses with the admin key; the missing
+     list re-derives eligibility from the poll's own rule so it can
+     never disagree with what the vote RPC enforces. */
+let _pl = { polls: [], inited: false };
+async function plInit() {
+  if (!_pl.inited) {
+    _pl.inited = true;
+    document.getElementById('plSel').onchange = plLoad;
+  }
+  _pl.polls = await sb('GET', 'polls?select=id,slug,title,options,eligibility,extras,is_open&order=id.desc') || [];
+  const sel = document.getElementById('plSel');
+  sel.innerHTML = _pl.polls.map(p =>
+    '<option value="' + p.id + '">' + esc(p.title) + (p.is_open ? '' : ' [closed]') + '</option>').join('');
+  if (_pl.polls.length) await plLoad();
+  else document.getElementById('plVoters').innerHTML = '<p class="hint">No polls yet.</p>';
+}
+async function plLoad() {
+  const poll = _pl.polls.find(p => String(p.id) === document.getElementById('plSel').value) || _pl.polls[0];
+  if (!poll) return;
+  const st = document.getElementById('plStatus');
+  try {
+    const rows = await sbGetAll('poll_responses?poll_id=eq.' + poll.id + '&select=*&order=updated_at.desc');
+    const byChoice = new Map();
+    for (const o of (poll.options || [])) byChoice.set(o.key, 0);
+    let tuesday = 0;
+    for (const r of (rows || [])) {
+      byChoice.set(r.choice, (byChoice.get(r.choice) || 0) + 1);
+      if (r.extras && r.extras.tuesday) tuesday++;
+    }
+    /* two-path: tally must sum to the row count */
+    let sum = 0; for (const v of byChoice.values()) sum += v;
+    const mismatch = sum !== (rows || []).length;
+    document.getElementById('plCounts').textContent = (rows || []).length + ' responses'
+      + (mismatch ? ' \u26a0 TALLY MISMATCH \u2014 sum ' + sum : '');
+    document.getElementById('plTally').innerHTML =
+      (poll.options || []).map(o =>
+        '<span style="background:#e8f0fe;color:#0031a1;border:1px solid #afc6f0;padding:4px 12px;border-radius:999px;font-weight:700;font-size:0.82rem">'
+        + esc(o.label) + ': ' + (byChoice.get(o.key) || 0) + '</span>').join('')
+      + ((poll.extras || {}).checkbox
+          ? '<span style="background:#ede9fe;color:#6d28d9;border:1px solid #c4b5fd;padding:4px 12px;border-radius:999px;font-weight:700;font-size:0.82rem">Tuesday interest: ' + tuesday + '</span>'
+          : '');
+    const lbl = k => ((poll.options || []).find(o => o.key === k) || {}).label || k;
+    document.getElementById('plVoters').innerHTML = (rows || []).length
+      ? '<table style="width:100%;border-collapse:collapse;font-size:0.84rem">'
+        + '<tr><th style="text-align:left;padding:6px 8px;border-bottom:2px solid var(--border)">Player</th>'
+        + '<th style="text-align:left;padding:6px 8px;border-bottom:2px solid var(--border)">Team</th>'
+        + '<th style="text-align:left;padding:6px 8px;border-bottom:2px solid var(--border)">Answer</th>'
+        + '<th style="text-align:left;padding:6px 8px;border-bottom:2px solid var(--border)">Tue?</th>'
+        + '<th style="text-align:left;padding:6px 8px;border-bottom:2px solid var(--border)">Comment</th>'
+        + '<th style="text-align:left;padding:6px 8px;border-bottom:2px solid var(--border)">Updated</th></tr>'
+        + rows.map(r => '<tr>'
+            + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)"><strong>' + esc(r.member_name) + '</strong></td>'
+            + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)" class="hint">' + esc(r.team_name || '') + '</td>'
+            + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">' + esc(lbl(r.choice)) + '</td>'
+            + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">' + (r.extras && r.extras.tuesday ? '\u2705' : '') + '</td>'
+            + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)" class="hint">' + esc((r.extras && r.extras.comment) || '') + '</td>'
+            + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)" class="hint">' + esc(String(r.updated_at || '').slice(0, 16).replace('T', ' ')) + '</td>'
+            + '</tr>').join('')
+        + '</table>'
+      : '<p class="hint">No responses yet.</p>';
+    await plRenderMissing(poll, rows || []);
+    st.className = 'status-line'; st.textContent = '';
+  } catch (e) { st.className = 'status-line shown err'; st.textContent = 'Load failed: ' + e.message; }
+}
+async function plRenderMissing(poll, rows) {
+  const box = document.getElementById('plMissing');
+  const el = poll.eligibility || {};
+  if (el.rule !== 'division_roster') { box.innerHTML = '<p class="hint">No eligibility rule on this poll.</p>'; return; }
+  const divs = await sb('GET', 'divisions?session_id=eq.' + currentSession.id
+    + '&operator_id=eq.' + el.operator_id + '&format=eq.' + encodeURIComponent(el.format)
+    + '&night_of_play=eq.' + encodeURIComponent(el.night) + '&select=id');
+  if (!(divs || []).length) { box.innerHTML = '<p class="hint">No matching division this session.</p>'; return; }
+  const teams = await sb('GET', 'teams?division_id=in.(' + divs.map(d => d.id).join(',') + ')&select=id,team_name');
+  const tName = new Map((teams || []).map(t => [t.id, t.team_name]));
+  const tm = await sbGetAll('team_memberships?team_id=in.(' + (teams || []).map(t => t.id).join(',')
+    + ')&select=team_id,member_number,name_raw&order=id.asc');
+  const voted = new Set(rows.map(r => r.member_number));
+  const seen = new Set();
+  const missing = (tm || []).filter(m => {
+    if (voted.has(m.member_number) || seen.has(m.member_number)) return false;
+    seen.add(m.member_number); return true;
+  });
+  box.innerHTML = missing.length
+    ? '<div class="hint" style="margin-bottom:4px">' + missing.length + ' player(s) still to hear from:</div>'
+      + missing.map(m => '<div style="font-size:0.82rem;padding:2px 0">' + esc(m.name_raw || m.member_number)
+          + ' <span class="hint">' + esc(tName.get(m.team_id) || '') + '</span></div>').join('')
+    : '<p class="hint">\u2713 Everyone eligible has voted.</p>';
+}
+
 const TAB_LABEL = {
   sessions:      'Sessions',
   uploads:       'Uploads',
@@ -6411,7 +6519,8 @@ const TAB_LABEL = {
   hostplan:      'Host Plan',
   dolphin:       'Dolphin',
   contacts:      'Contacts',
-  nextreg:       'Next Session Reg'
+  nextreg:       'Next Session Reg',
+  polls:         'PulseCheck'
 };
 
 function switchTab(name) {
@@ -6436,6 +6545,7 @@ function switchTab(name) {
   if (name === 'certs')       { certsAdminInit(); certsNotifyInit(); }
   if (name === 'hostplan')    hpInit();
   if (name === 'nextreg')     nrInit();
+  if (name === 'polls')       plInit();
 }
 
 /* ══════════════════════════════════════════════════════════════════════
