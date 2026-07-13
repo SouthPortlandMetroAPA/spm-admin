@@ -3438,6 +3438,39 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <summary style="cursor:pointer;font-weight:700">Haven't voted yet</summary>
           <div id="plMissing" style="margin-top:6px"></div>
         </details>
+        <details id="plEdit" style="margin-top:12px;border-top:1px solid var(--border);padding-top:10px">
+          <summary style="cursor:pointer;font-weight:700">New poll / edit selected</summary>
+          <div style="display:grid;gap:8px;margin-top:8px;max-width:680px">
+            <input id="plfTitle" placeholder="Question title &mdash; players see this">
+            <textarea id="plfBody" class="ehq-paste-box" style="min-height:70px" placeholder="Context paragraphs &mdash; HTML ok"></textarea>
+            <div>
+              <div style="font-weight:700;font-size:0.82rem;margin-bottom:4px">Answer options
+                <span class="hint" id="plfOptLock" style="display:none;color:#a16207">&mdash; LOCKED, this poll already has responses</span></div>
+              <div id="plfOpts"></div>
+              <button type="button" class="btn btn-outline btn-sm" id="plfOptAdd">+ Option</button>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+              <label style="font-size:0.82rem;font-weight:700">Who can vote:
+                <select id="plfRule">
+                  <option value="division_roster">One division &mdash; format + night</option>
+                  <option value="formats">Any player in format(s)</option>
+                  <option value="all_spm">Any current SPM player</option>
+                </select>
+              </label>
+              <input id="plfFormat" placeholder="Format(s), comma-sep" style="max-width:200px">
+              <input id="plfNight" placeholder="Night" style="max-width:120px">
+              <input id="plfAudience" placeholder="Audience label for refusals" style="max-width:260px">
+            </div>
+            <input id="plfCheckbox" placeholder="Optional extra checkbox copy &mdash; blank for none">
+            <input id="plfComment" placeholder="Comment-box placeholder &mdash; blank for generic">
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button type="button" class="btn btn-primary btn-sm" id="plfSaveNew">Create as NEW poll</button>
+              <button type="button" class="btn btn-outline btn-sm" id="plfUpdate">Update selected</button>
+              <button type="button" class="btn btn-outline btn-sm" id="plfToggle">Open / close selected</button>
+            </div>
+            <div class="status-line" id="plfStatus"></div>
+          </div>
+        </details>
       </div>
     </div>
 
@@ -3512,7 +3545,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.248';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.249';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -6421,6 +6454,11 @@ async function plInit() {
   if (!_pl.inited) {
     _pl.inited = true;
     document.getElementById('plSel').onchange = plLoad;
+    document.getElementById('plfOptAdd').onclick = () => { _plf.opts.push({ key: '', label: '', blurb: '' }); plfDrawOpts(); };
+    document.getElementById('plfRule').onchange = plfRuleSync;
+    document.getElementById('plfSaveNew').onclick = plfSaveNew;
+    document.getElementById('plfUpdate').onclick = plfUpdate;
+    document.getElementById('plfToggle').onclick = plfToggle;
   }
   _pl.polls = await sb('GET', 'polls?select=id,slug,title,options,eligibility,extras,is_open&order=id.desc') || [];
   const sel = document.getElementById('plSel');
@@ -6474,6 +6512,7 @@ async function plLoad() {
         + '</table>'
       : '<p class="hint">No responses yet.</p>';
     await plRenderMissing(poll, rows || []);
+    plfFill(poll, (rows || []).length);
     st.className = 'status-line'; st.textContent = '';
   } catch (e) { st.className = 'status-line shown err'; st.textContent = 'Load failed: ' + e.message; }
 }
@@ -6500,6 +6539,119 @@ async function plRenderMissing(poll, rows) {
       + missing.map(m => '<div style="font-size:0.82rem;padding:2px 0">' + esc(m.name_raw || m.member_number)
           + ' <span class="hint">' + esc(tName.get(m.team_id) || '') + '</span></div>').join('')
     : '<p class="hint">\u2713 Everyone eligible has voted.</p>';
+}
+
+/* ── Poll builder (0.2 generic draft). Options lock once responses
+     exist (removing one would orphan votes); slugs are immutable and
+     auto-generated per the house rule; there is no hard delete — close
+     the poll instead. ── */
+let _plf = { opts: [], locked: false, responses: 0 };
+function plfSlugify(title) {
+  let base = String(title || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  if (!base) base = 'poll';
+  let slug = base, n = 2;
+  const taken = new Set(_pl.polls.map(p => p.slug));
+  while (taken.has(slug)) slug = base + '-' + (n++);
+  return slug;
+}
+function plfDrawOpts() {
+  const box = document.getElementById('plfOpts');
+  const dis = _plf.locked ? ' disabled' : '';
+  box.innerHTML = _plf.opts.map((o, i) =>
+    '<div style="display:flex;gap:6px;margin-bottom:4px">'
+    + '<input data-pfo="key" data-pfi="' + i + '" placeholder="key" value="' + esc(o.key || '') + '" style="max-width:120px"' + dis + '>'
+    + '<input data-pfo="label" data-pfi="' + i + '" placeholder="Label players tap" value="' + esc(o.label || '') + '" style="flex:1"' + dis + '>'
+    + '<input data-pfo="blurb" data-pfi="' + i + '" placeholder="small blurb" value="' + esc(o.blurb || '') + '" style="flex:1"' + dis + '>'
+    + '<button type="button" class="btn btn-outline btn-sm" data-pfdel="' + i + '"' + dis + '>&times;</button>'
+    + '</div>').join('');
+  document.getElementById('plfOptLock').style.display = _plf.locked ? '' : 'none';
+  document.getElementById('plfOptAdd').disabled = _plf.locked;
+  box.querySelectorAll('input[data-pfo]').forEach(inp => inp.addEventListener('input', () => {
+    _plf.opts[Number(inp.dataset.pfi)][inp.dataset.pfo] = inp.value;
+  }));
+  box.querySelectorAll('[data-pfdel]').forEach(b => b.onclick = () => {
+    _plf.opts.splice(Number(b.dataset.pfdel), 1);
+    if (!_plf.opts.length) _plf.opts.push({ key: '', label: '', blurb: '' });
+    plfDrawOpts();
+  });
+}
+function plfRuleSync() {
+  const rule = document.getElementById('plfRule').value;
+  document.getElementById('plfFormat').style.display = rule === 'all_spm' ? 'none' : '';
+  document.getElementById('plfNight').style.display = rule === 'division_roster' ? '' : 'none';
+}
+function plfFill(poll, responseCount) {
+  _plf.locked = responseCount > 0;
+  _plf.responses = responseCount;
+  document.getElementById('plfTitle').value = poll ? poll.title : '';
+  document.getElementById('plfBody').value = poll ? (poll.body_html || '') : '';
+  _plf.opts = poll ? (poll.options || []).map(o => ({ ...o })) : [{ key: '', label: '', blurb: '' }, { key: '', label: '', blurb: '' }];
+  const el = poll ? (poll.eligibility || {}) : {};
+  document.getElementById('plfRule').value = el.rule || 'all_spm';
+  document.getElementById('plfFormat').value = el.format || (el.formats || []).join(', ') || '';
+  document.getElementById('plfNight').value = el.night || '';
+  document.getElementById('plfAudience').value = el.audience_label || '';
+  const x = poll ? (poll.extras || {}) : {};
+  document.getElementById('plfCheckbox').value = x.checkbox || '';
+  document.getElementById('plfComment').value = x.comment_placeholder || '';
+  plfRuleSync();
+  plfDrawOpts();
+}
+function plfCollect() {
+  const title = document.getElementById('plfTitle').value.trim();
+  if (!title) throw new Error('title required');
+  const opts = _plf.opts
+    .map(o => ({ key: (o.key || '').trim(), label: (o.label || '').trim(), blurb: (o.blurb || '').trim() }))
+    .filter(o => o.key && o.label);
+  if (opts.length < 2) throw new Error('need at least 2 options with key + label');
+  const rule = document.getElementById('plfRule').value;
+  const fmts = document.getElementById('plfFormat').value.split(',').map(x => x.trim()).filter(Boolean);
+  const el = { rule: rule, operator_id: 1,
+    audience_label: document.getElementById('plfAudience').value.trim() || 'eligible players' };
+  if (rule === 'division_roster') {
+    if (fmts.length !== 1 || !document.getElementById('plfNight').value.trim()) throw new Error('division rule needs ONE format + a night');
+    el.format = fmts[0]; el.night = document.getElementById('plfNight').value.trim();
+  } else if (rule === 'formats') {
+    if (!fmts.length) throw new Error('formats rule needs at least one format');
+    el.formats = fmts;
+  }
+  const extras = {};
+  const cb = document.getElementById('plfCheckbox').value.trim();
+  const cp = document.getElementById('plfComment').value.trim();
+  if (cb) extras.checkbox = cb;
+  if (cp) extras.comment_placeholder = cp;
+  return { title: title, body_html: document.getElementById('plfBody').value.trim() || null,
+           options: opts, eligibility: el, extras: extras };
+}
+async function plfSaveNew() {
+  try {
+    const row = plfCollect();
+    row.slug = plfSlugify(row.title);
+    await sb('POST', 'polls', row);
+    setStatus('plfStatus', '\u2713 Created \u2014 slug ' + row.slug, 'ok');
+    await plInit();
+  } catch (e) { setStatus('plfStatus', e.message, 'err'); }
+}
+async function plfUpdate() {
+  const poll = _pl.polls.find(p => String(p.id) === document.getElementById('plSel').value);
+  if (!poll) { setStatus('plfStatus', 'Pick a poll above first.', 'err'); return; }
+  try {
+    const row = plfCollect();
+    if (_plf.locked) { delete row.options; }   /* votes exist — copy only */
+    await sb('PATCH', 'polls?id=eq.' + poll.id, row);
+    setStatus('plfStatus', '\u2713 Updated' + (_plf.locked ? ' \u2014 options untouched, locked' : ''), 'ok');
+    await plInit();
+  } catch (e) { setStatus('plfStatus', e.message, 'err'); }
+}
+async function plfToggle() {
+  const poll = _pl.polls.find(p => String(p.id) === document.getElementById('plSel').value);
+  if (!poll) { setStatus('plfStatus', 'Pick a poll above first.', 'err'); return; }
+  try {
+    await sb('PATCH', 'polls?id=eq.' + poll.id, { is_open: !poll.is_open });
+    setStatus('plfStatus', '\u2713 Poll is now ' + (poll.is_open ? 'CLOSED' : 'OPEN'), 'ok');
+    await plInit();
+  } catch (e) { setStatus('plfStatus', e.message, 'err'); }
 }
 
 const TAB_LABEL = {
