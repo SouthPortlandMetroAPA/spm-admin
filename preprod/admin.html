@@ -3485,7 +3485,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.242';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.243';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -5842,7 +5842,8 @@ function nrRenderTplGrid() {
   if (!grid || !_nr.orTpls) return;
   grid.innerHTML = [0, 1, 2].map(w =>
     '<div style="font-weight:700;font-size:0.82rem;margin-top:8px">'
-    + (w === 0 ? 'Wave 0 — EMAIL: one per team, whole roster on the To line. HTML ok.'
+    + (w === 0 ? 'Wave 0 — EMAIL: one per team, whole roster on the To line. HTML ok. '
+         + '<button type="button" class="btn btn-outline btn-sm" data-tplemailtest>Send me a test email</button>'
        : 'Wave ' + w + (w === 1 ? ' — TEXT captains + co-captains' : ' — TEXT whole roster')) + '</div>'
     + NR_TPL_KEYS.map(k =>
         '<label style="display:block;font-size:0.75rem;color:#6b7280;margin-top:6px">' + esc(k[1])
@@ -5854,6 +5855,33 @@ function nrRenderTplGrid() {
         + esc(_nr.orTpls.get(w + '|' + k[0]) || '') + '</textarea></label>'
       ).join('')
   ).join('');
+  const testBtn = grid.querySelector('[data-tplemailtest]');
+  if (testBtn) testBtn.onclick = nrOrTplEmailTest;
+}
+/* Send each wave-0 template (CURRENT editor values, saved or not) to
+   the operator inbox — one [TEST] email per format, sample team name. */
+async function nrOrTplEmailTest() {
+  const fill = x => String(x)
+    .replace(/\{team\}/g, 'The Sample Rackers')
+    .replace(/\{session\}/g, nrOrTargetName())
+    .replace(/\{rerack\}/g, NR_RERACK_URL);
+  setStatus('nrOrTplStatus', 'Sending 5 test emails to the league inbox\u2026', '');
+  let sent = 0;
+  const failed = [];
+  for (const k of NR_TPL_KEYS) {
+    const subjBox = document.querySelector('#nrOrTplGrid input[data-tplsubj="0|' + k[0] + '"]');
+    const bodyBox = document.querySelector('#nrOrTplGrid textarea[data-tplkey="0|' + k[0] + '"]');
+    if (!bodyBox || !(bodyBox.value || '').trim()) { failed.push(k[1] + ' \u2014 empty'); continue; }
+    try {
+      const res = await nrGasJson({ action: 'nextreg_email_send', admin_key: SB_KEY,
+        test_to: 'southportlandmetroapa@gmail.com',
+        subject: k[1] + ': ' + fill(subjBox ? subjBox.value : ''),
+        html_body: fill(bodyBox.value) });
+      if (res && res.ok) sent++; else failed.push(k[1] + ' \u2014 ' + ((res && res.error) || 'unknown'));
+    } catch (e) { failed.push(k[1] + ' \u2014 ' + e.message); }
+  }
+  setStatus('nrOrTplStatus', '\u2713 ' + sent + ' test email(s) sent to the league inbox'
+    + (failed.length ? ' \u00b7 FAILED: ' + failed.join('; ') : '') + '.', failed.length ? 'err' : 'ok');
 }
 /* Which template column a team texts under. n1 teams use 'n1' whatever
    their format; current-session teams key off division format. */
