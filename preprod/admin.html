@@ -3406,6 +3406,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <button type="button" class="btn btn-primary btn-sm" data-trkf="all">All</button>
           <button type="button" class="btn btn-outline btn-sm" data-trkf="playing">Playing</button>
           <button type="button" class="btn btn-outline btn-sm" data-trkf="not_playing">Not playing</button>
+          <button type="button" class="btn btn-outline btn-sm" data-trkf="undecided">Deciding</button>
           <button type="button" class="btn btn-outline btn-sm" data-trkf="unanswered">Unanswered</button>
         </div>
         <div class="status-line" id="nrGridStatus"></div>
@@ -3485,7 +3486,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.243';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.244';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -5621,6 +5622,7 @@ function nrChipFor(teamId) {
   const st = _nr.regByTeam.get(teamId);
   if (st === 'playing')     return '<span style="background:#f0fdf4;color:#16a34a;padding:1px 6px;border-radius:999px;font-weight:700;font-size:0.68rem">PLAYING</span>';
   if (st === 'not_playing') return '<span style="background:#fef2f2;color:#b91c1c;padding:1px 6px;border-radius:999px;font-weight:700;font-size:0.68rem">NOT PLAYING</span>';
+  if (st === 'undecided')   return '<span style="background:#ede9fe;color:#6d28d9;padding:1px 6px;border-radius:999px;font-weight:700;font-size:0.68rem">DECIDING</span>';
   if (st === 'unanswered')  return '<span style="background:#fef9c3;color:#a16207;padding:1px 6px;border-radius:999px;font-weight:700;font-size:0.68rem">UNANSWERED</span>';
   return '<span style="background:#f3f4f6;color:#9ca3af;padding:1px 6px;border-radius:999px;font-weight:700;font-size:0.68rem">UNTRACKED</span>';
 }
@@ -5958,6 +5960,8 @@ function nrRenderOutreach() {
         + '<input type="checkbox" data-oremail="' + idsAttr + '"' + (emChecked ? ' checked' : '') + ' title="Include in the email send">'
         + '<span data-orhover="' + idsAttr + '" style="cursor:help"><strong>' + esc(nrTeamKey(t.team_number)) + '</strong> ' + esc(t.team_name || '')
         + ' <span class="hint">' + (pair.length > 1 ? (/Doubles/i.test(t.division.format || '') ? '8+9 Doubles' : '8+9') : esc(t.division.format || '')) + '</span></span>'
+        + (pair.some(x => _nr.regByTeam.get(x.id) === 'undecided')
+            ? ' <span style="background:#ede9fe;color:#6d28d9;padding:1px 8px;border-radius:999px;font-weight:700;font-size:0.68rem">DECIDING</span>' : '')
         + (st.w0 ? ' ' + stamp(0) : '')
         + (st.w1 ? ' ' + stamp(1) : '')
         + (st.w2 ? ' ' + stamp(2) : '')
@@ -6261,7 +6265,8 @@ function nrRenderAttention() {
   if (!box || !_nr.regRowByTeam || !_nr.orRoster) return;
   const a = nrComputeAttention();
   const stOf = id => { const r = _nr.regRowByTeam.get(id); return r ? r.status : 'unanswered'; };
-  const lbl = st => st === 'playing' ? 'YES' : st === 'not_playing' ? 'NO' : 'blank';
+  const lbl = st => st === 'playing' ? 'YES' : st === 'not_playing' ? 'NO'
+    : st === 'undecided' ? 'DECIDING' : 'blank';
   const teamLine = t => '<strong>' + esc(nrTeamKey(t.team_number)) + '</strong> ' + esc(t.team_name || '');
   const pairLine = g => teamLine(g[0]) + ' <span class="hint">'
     + esc(g[0].division.format) + ' ' + lbl(stOf(g[0].id)) + ' \u00b7 '
@@ -6332,16 +6337,19 @@ async function nrLoadTracker() {
     }
     const capName = r => esc(r.full_name) + ' <span class="hint">' + (r.apa ? esc(r.apa) : 'no # yet') + '</span>';
     _nr.capHtml = list => (list || []).sort((a, b) => a.position - b.position).map(capName).join(' \u00b7 ');
-    const counts = { playing: 0, not_playing: 0, unanswered: 0 };
+    const counts = { playing: 0, not_playing: 0, unanswered: 0, undecided: 0 };
     for (const r of (rows || [])) if (counts[r.status] != null) counts[r.status]++;
     document.getElementById('nrCounts').textContent =
       (rows || []).length + ' tracked \u00b7 ' + counts.playing + ' playing \u00b7 '
-      + counts.not_playing + ' not playing \u00b7 ' + counts.unanswered + ' unanswered';
+      + counts.not_playing + ' not playing \u00b7 ' + counts.undecided + ' deciding \u00b7 '
+      + counts.unanswered + ' unanswered';
     const chip = st => st === 'playing'
       ? '<span style="background:#f0fdf4;color:#16a34a;padding:1px 8px;border-radius:999px;font-weight:700;font-size:0.72rem">PLAYING</span>'
       : st === 'not_playing'
         ? '<span style="background:#fef2f2;color:#b91c1c;padding:1px 8px;border-radius:999px;font-weight:700;font-size:0.72rem">NOT PLAYING</span>'
-        : '<span style="background:#f3f4f6;color:#6b7280;padding:1px 8px;border-radius:999px;font-weight:700;font-size:0.72rem">UNANSWERED</span>';
+        : st === 'undecided'
+          ? '<span style="background:#ede9fe;color:#6d28d9;padding:1px 8px;border-radius:999px;font-weight:700;font-size:0.72rem">STILL DECIDING</span>'
+          : '<span style="background:#f3f4f6;color:#6b7280;padding:1px 8px;border-radius:999px;font-weight:700;font-size:0.72rem">UNANSWERED</span>';
     const shown = (rows || []).filter(r => !_nr.trackerFilter || _nr.trackerFilter === 'all' || r.status === _nr.trackerFilter);
     document.getElementById('nrGrid').innerHTML = (rows || []).length
       ? '<table style="width:100%;border-collapse:collapse;font-size:0.84rem">'
