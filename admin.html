@@ -1024,6 +1024,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="dolphin">Dolphin</button>
       <button class="tab" data-tab="contacts">Contacts</button>
       <button class="tab" data-tab="nextreg">Next Session</button>
+      <button class="tab" data-tab="polls">PulseCheck</button>
     </div>
 
     <div id="globalStatus" class="status-line"></div>
@@ -2159,6 +2160,14 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
             <span style="font-size:0.78rem; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.04em">SL 9-ball:</span>
             <div id="otSl9Pills" class="ot-sl-pills" data-fmt="9"></div>
+          </div>
+          <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+            <span style="font-size:0.78rem; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.04em">Gender:</span>
+            <div class="ot-sl-pills" id="otGenderPills">
+              <button type="button" class="ot-sl-pill active" data-otgender="all">All</button>
+              <button type="button" class="ot-sl-pill" data-otgender="M">Men</button>
+              <button type="button" class="ot-sl-pill" data-otgender="F">Women</button>
+            </div>
           </div>
           <button type="button" id="otSlClearBtn" class="hint" style="background:none; border:0; color:var(--muted); cursor:pointer; text-decoration:underline; font-size:0.78rem;">Clear all</button>
         </div>
@@ -3415,6 +3424,66 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <div id="nrModalWrap"></div>
     </div>
 
+    <div id="tab-polls" class="tab-panel">
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+          <h2 style="margin:0">PulseCheck results</h2>
+          <select id="plSel"></select>
+          <span class="hint" id="plCounts"></span>
+        </div>
+        <div class="status-line" id="plStatus"></div>
+        <div id="plTally" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"></div>
+        <div id="plTeams"></div>
+        <div id="plVoters"></div>
+        <details style="margin-top:12px">
+          <summary style="cursor:pointer;font-weight:700">Haven't voted yet</summary>
+          <div id="plMissing" style="margin-top:6px"></div>
+        </details>
+        <details style="margin-top:12px">
+          <summary style="cursor:pointer;font-weight:700">Invite players &mdash; email + text</summary>
+          <div id="plOr" style="margin-top:6px"><p class="hint">Loading&hellip;</p></div>
+        </details>
+        <details id="plEdit" style="margin-top:12px;border-top:1px solid var(--border);padding-top:10px">
+          <summary style="cursor:pointer;font-weight:700">New poll / edit selected</summary>
+          <div style="display:grid;gap:8px;margin-top:8px;max-width:680px">
+            <input id="plfTitle" placeholder="Question title &mdash; players see this">
+            <textarea id="plfBody" class="ehq-paste-box" style="min-height:70px" placeholder="Context paragraphs &mdash; HTML ok"></textarea>
+            <div>
+              <div style="font-weight:700;font-size:0.82rem;margin-bottom:4px">Answer options
+                <span class="hint" id="plfOptLock" style="display:none;color:#a16207">&mdash; LOCKED, this poll already has responses</span></div>
+              <div id="plfOpts"></div>
+              <button type="button" class="btn btn-outline btn-sm" id="plfOptAdd">+ Option</button>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+              <label style="font-size:0.82rem;font-weight:700">Who can vote:
+                <select id="plfRule">
+                  <option value="division_roster">One division &mdash; format + night</option>
+                  <option value="formats">Any player in format(s)</option>
+                  <option value="all_spm">Any current SPM player</option>
+                </select>
+              </label>
+              <input id="plfFormat" placeholder="Format(s), comma-sep" style="max-width:200px">
+              <input id="plfNight" placeholder="Night" style="max-width:120px">
+              <input id="plfAudience" placeholder="Audience label for refusals" style="max-width:260px">
+            </div>
+            <input id="plfCheckbox" placeholder="Optional extra checkbox copy &mdash; blank for none">
+            <input id="plfComment" placeholder="Comment-box placeholder &mdash; blank for generic">
+            <div style="font-weight:700;font-size:0.82rem;margin-top:2px">Invite templates
+              <span class="hint" style="font-weight:500">&mdash; vars {first_name} {link}; the mailer fills {first_name} per player and appends the signature</span></div>
+            <input id="plfEmailSubj" placeholder="Invite email subject">
+            <textarea id="plfEmailBody" class="ehq-paste-box" style="min-height:60px" placeholder="Invite email body &mdash; HTML ok"></textarea>
+            <textarea id="plfTextBody" class="ehq-paste-box" style="min-height:40px" placeholder="Invite text message"></textarea>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button type="button" class="btn btn-primary btn-sm" id="plfSaveNew">Create as NEW poll</button>
+              <button type="button" class="btn btn-outline btn-sm" id="plfUpdate">Update selected</button>
+              <button type="button" class="btn btn-outline btn-sm" id="plfToggle">Open / close selected</button>
+            </div>
+            <div class="status-line" id="plfStatus"></div>
+          </div>
+        </details>
+      </div>
+    </div>
+
     <div id="tab-contacts" class="tab-panel">
       <div class="card">
         <h2 style="margin:0 0 6px">Google Contacts sync</h2>
@@ -3486,7 +3555,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.246';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.253';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -6138,12 +6207,23 @@ function nrModal(opts) {
       + '<div style="background:#fff;border-radius:12px;padding:22px;max-width:440px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.35)">'
       + '<div style="font-weight:800;font-size:1.05rem;margin-bottom:6px">' + opts.title + '</div>'
       + '<div class="hint" style="margin-bottom:14px">' + opts.body + '</div>'
+      + (opts.select
+          ? '<div style="margin:-4px 0 14px"><label style="font-size:0.82rem;font-weight:700">' + esc(opts.select.label)
+            + '<br><select id="nrModalSel" style="margin-top:4px;max-width:100%">'
+            + opts.select.options.map(o => '<option value="' + esc(String(o.value)) + '">' + esc(o.label) + '</option>').join('')
+            + '</select></label></div>'
+          : '')
       + '<div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">'
       + opts.buttons.map((b, i) => '<button type="button" class="btn ' + (b.primary ? 'btn-primary' : 'btn-outline')
           + ' btn-sm" data-modalbtn="' + i + '">' + b.label + '</button>').join('')
       + '</div></div></div>';
     wrap.querySelectorAll('[data-modalbtn]').forEach(btn => {
-      btn.onclick = () => { wrap.innerHTML = ''; resolve(opts.buttons[Number(btn.dataset.modalbtn)].value); };
+      btn.onclick = () => {
+        const v = opts.buttons[Number(btn.dataset.modalbtn)].value;
+        const sel = opts.select ? (document.getElementById('nrModalSel') || {}).value : undefined;
+        wrap.innerHTML = '';
+        resolve(v !== null && opts.select ? { value: v, selected: sel } : v);
+      };
     });
   });
 }
@@ -6152,13 +6232,28 @@ function nrModal(opts) {
    with a choice to email the roster about it. Email goes through the
    same keyless GAS action; admin_key (the service key already in this
    page's URL) bypasses the freshness gate, and preprod pages only ever
-   mail the operator. */
+   mail the operator. 3.251: the popup also asks WHO the answer came
+   from — the operator, or a roster member of the pair — and records it
+   in answered_by_apa/name (source stays admin per the user's locked
+   attribution decision: audit-true, with "by <member>" shown). */
 async function nrOrSetStatus(teamIds, status) {
   const word = status === 'playing' ? 'PLAYING' : status === 'not_playing' ? 'NOT playing' : 'STILL DECIDING';
   const first = _nr.teams.concat(_nr.teamsN1).find(t => t.id === teamIds[0]);
+  const seenWho = new Set();
+  const roster = teamIds.map(id => _nr.orRoster.get(id) || []).flat().filter(m => {
+    if (seenWho.has(m.member_number)) return false;
+    seenWho.add(m.member_number); return true;
+  });
+  const whoOpts = [{ value: '', label: 'You — record as admin' }].concat(roster.map(m => {
+    const p = m.player || {};
+    const nm = ((p.first_name || '') + ' ' + (p.last_name || '')).replace(/\s+/g, ' ').trim() || m.member_number;
+    return { value: m.member_number,
+             label: (m.role === 'Captain' ? '★ ' : m.role === 'Co-Captain' ? '☆ ' : '') + nm };
+  }));
   const choice = await nrModal({
     title: 'Mark ' + esc(first ? first.team_name || '' : '') + ' ' + word + '?',
-    body: 'For ' + esc(nrOrTargetName()) + '. Email the whole roster about it, or record silently?',
+    body: 'For ' + esc(nrOrTargetName()) + '. Pick who gave you this answer, then email the whole roster about it or record silently.',
+    select: { label: 'Answer from', options: whoOpts },
     buttons: [
       { label: 'Mark + email team', value: 'email', primary: true },
       { label: 'Mark silently', value: 'silent' },
@@ -6166,21 +6261,26 @@ async function nrOrSetStatus(teamIds, status) {
     ]
   });
   if (!choice) return;
-  const sendMail = choice === 'email';
+  const sendMail = choice.value === 'email';
+  const byApa = choice.selected || null;
+  const byM = byApa ? roster.find(m => m.member_number === byApa) : null;
+  const byName = byM
+    ? (((((byM.player || {}).first_name || '') + ' ' + ((byM.player || {}).last_name || '')).replace(/\s+/g, ' ').trim()) || byApa)
+    : 'Michelle & Paul Soldan';
   const now = new Date().toISOString();
   try {
     await sb('POST', 'next_reg?on_conflict=target_session_id,team_id',
       teamIds.map(id => ({
         target_session_id: _nr.targetId, team_id: id, status: status, source: 'admin',
-        prior_nexus_status: null, answered_by_apa: null,
-        answered_by_name: 'Michelle & Paul Soldan', answered_at: now, updated_at: now
+        prior_nexus_status: null, answered_by_apa: byApa,
+        answered_by_name: byName, answered_at: now, updated_at: now
       })),
       { 'Prefer': 'resolution=merge-duplicates,return=minimal' });
     await sb('POST', 'next_reg_log',
       teamIds.map(id => ({
         target_session_id: _nr.targetId, team_id: id,
         old_status: (_nr.regRowByTeam.get(id) || {}).status || null, new_status: status,
-        actor_apa: null, actor_name: 'Michelle & Paul Soldan', source: 'admin'
+        actor_apa: byApa, actor_name: byName, source: 'admin'
       })),
       { 'Prefer': 'return=minimal' });
     if (sendMail) {
@@ -6370,12 +6470,18 @@ async function nrLoadTracker() {
                   ? '<div style="font-size:0.74rem">\ud83d\udc65 ' + _nr.capHtml(_nr.capByTeam.get(r.team_id)) + '</div>' : '') + '</td>'
               + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)" class="hint">' + esc(r.format || '') + '</td>'
               + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">' + chip(r.status) + '</td>'
-              + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)" class="hint">' + esc(r.source) + '</td>'
+              + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)" class="hint">' + esc(r.source)
+              + (r.source === 'admin'
+                  ? ' <button type="button" class="btn btn-outline btn-sm" data-trkundo="' + r.team_id + '" style="padding:0 6px;font-size:0.7rem" title="Undo this admin update">&#8630; undo</button>'
+                  : '') + '</td>'
               + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)" class="hint">' + esc(String(r.updated_at || '').slice(0, 16).replace('T', ' ')) + '</td>'
               + '</tr>';
           }).join('')
         + '</table>'
       : '<p class="hint">Nothing tracked yet \u2014 paste a Nexus report above.</p>';
+    document.querySelectorAll('#nrGrid button[data-trkundo]').forEach(b => {
+      b.onclick = () => nrTrkUndo(Number(b.dataset.trkundo));
+    });
     gs.className = 'status-line'; gs.innerHTML = '';
     nrRenderComingBack();
     nrRenderSegments();
@@ -6384,6 +6490,637 @@ async function nrLoadTracker() {
   } catch (e) {
     gs.className = 'status-line shown err'; gs.textContent = 'Tracker load failed: ' + e.message;
   }
+}
+
+/* Undo an admin-set answer (3.253). Restores the previous status +
+   source from the newest log row (which must itself be source=admin —
+   anything newer means the admin update was already superseded). When
+   the prior source was rerack, the original answerer's attribution is
+   restored from the newest pre-admin rerack log row; restoring to
+   nexus nulls attribution. The undo is logged with note='undo' and
+   never sends email. */
+async function nrTrkUndo(teamId) {
+  const t = _nr.teams.concat(_nr.teamsN1).find(x => x.id === teamId);
+  const logs = await sb('GET', 'next_reg_log?team_id=eq.' + teamId
+    + '&target_session_id=eq.' + _nr.targetId
+    + '&order=id.desc&limit=8&select=old_status,new_status,old_source,source,actor_apa,actor_name,note');
+  const ev = (logs || [])[0];
+  if (!ev || ev.source !== 'admin') {
+    setStatus('nrGridStatus', 'Nothing to undo — the latest change was not an admin update.', 'err');
+    return;
+  }
+  const backStatus = ev.old_status || 'unanswered';
+  const backSource = ev.old_source || 'nexus';
+  const lblW = s => s === 'playing' ? 'PLAYING' : s === 'not_playing' ? 'NOT PLAYING'
+    : s === 'undecided' ? 'STILL DECIDING' : 'UNANSWERED';
+  const go = await nrModal({
+    title: 'Undo the admin update for ' + esc(t ? t.team_name || '' : '#' + teamId) + '?',
+    body: 'Restores ' + lblW(backStatus) + ' from ' + esc(backSource) + '. No email goes out.',
+    buttons: [{ label: 'Undo it', value: 'go', primary: true }, { label: 'Cancel', value: null }]
+  });
+  if (!go) return;
+  let byApa = null, byName = null;
+  if (backSource === 'rerack') {
+    const prev = (logs || []).slice(1).find(x => x.source === 'rerack');
+    if (prev) { byApa = prev.actor_apa || null; byName = prev.actor_name || null; }
+  }
+  const now = new Date().toISOString();
+  const patch = { target_session_id: _nr.targetId, team_id: teamId,
+    status: backStatus, source: backSource, prior_nexus_status: null,
+    answered_by_apa: byApa, answered_by_name: byName, updated_at: now };
+  if (backSource === 'nexus') patch.answered_at = null;
+  try {
+    await sb('POST', 'next_reg?on_conflict=target_session_id,team_id', [patch],
+      { 'Prefer': 'resolution=merge-duplicates,return=minimal' });
+    await sb('POST', 'next_reg_log',
+      [{ target_session_id: _nr.targetId, team_id: teamId,
+         old_status: ev.new_status, new_status: backStatus,
+         actor_apa: null, actor_name: 'Michelle & Paul Soldan',
+         source: 'admin', old_source: 'admin', note: 'undo' }],
+      { 'Prefer': 'return=minimal' });
+    setStatus('nrGridStatus', '✓ Undone — back to ' + lblW(backStatus) + ' from ' + esc(backSource) + '.', 'ok');
+  } catch (e) { setStatus('nrGridStatus', 'Undo failed: ' + e.message, 'err'); }
+  await nrLoadTracker();
+  await nrLoadOutreach();
+}
+
+/* ── PulseCheck results (brief 2026-07-13-pulsecheck.md) ──────────
+     Reads slate.polls / poll_responses with the admin key; the missing
+     list re-derives eligibility from the poll's own rule so it can
+     never disagree with what the vote RPC enforces. */
+let _pl = { polls: [], inited: false };
+async function plInit() {
+  if (!_pl.inited) {
+    _pl.inited = true;
+    document.getElementById('plSel').onchange = plLoad;
+    document.getElementById('plfOptAdd').onclick = () => { _plf.opts.push({ key: '', label: '', blurb: '' }); plfDrawOpts(); };
+    document.getElementById('plfRule').onchange = plfRuleSync;
+    document.getElementById('plfSaveNew').onclick = plfSaveNew;
+    document.getElementById('plfUpdate').onclick = plfUpdate;
+    document.getElementById('plfToggle').onclick = plfToggle;
+  }
+  _pl.polls = await sb('GET', 'polls?select=id,slug,title,options,eligibility,extras,is_open&order=id.desc') || [];
+  const sel = document.getElementById('plSel');
+  sel.innerHTML = _pl.polls.map(p =>
+    '<option value="' + p.id + '">' + esc(p.title) + (p.is_open ? '' : ' [closed]') + '</option>').join('');
+  if (_pl.polls.length) await plLoad();
+  else document.getElementById('plVoters').innerHTML = '<p class="hint">No polls yet.</p>';
+}
+async function plLoad() {
+  const poll = _pl.polls.find(p => String(p.id) === document.getElementById('plSel').value) || _pl.polls[0];
+  if (!poll) return;
+  const st = document.getElementById('plStatus');
+  try {
+    const rows = await sbGetAll('poll_responses?poll_id=eq.' + poll.id + '&select=*&order=updated_at.desc');
+    const byChoice = new Map();
+    for (const o of (poll.options || [])) byChoice.set(o.key, 0);
+    let tuesday = 0;
+    for (const r of (rows || [])) {
+      byChoice.set(r.choice, (byChoice.get(r.choice) || 0) + 1);
+      if (r.extras && r.extras.tuesday) tuesday++;
+    }
+    /* two-path: tally must sum to the row count */
+    let sum = 0; for (const v of byChoice.values()) sum += v;
+    const mismatch = sum !== (rows || []).length;
+    document.getElementById('plCounts').textContent = (rows || []).length + ' responses'
+      + (mismatch ? ' \u26a0 TALLY MISMATCH \u2014 sum ' + sum : '');
+    document.getElementById('plTally').innerHTML =
+      (poll.options || []).map(o =>
+        '<span style="background:#e8f0fe;color:#0031a1;border:1px solid #afc6f0;padding:4px 12px;border-radius:999px;font-weight:700;font-size:0.82rem">'
+        + esc(o.label) + ': ' + (byChoice.get(o.key) || 0) + '</span>').join('')
+      + ((poll.extras || {}).checkbox
+          ? '<span style="background:#ede9fe;color:#6d28d9;border:1px solid #c4b5fd;padding:4px 12px;border-radius:999px;font-weight:700;font-size:0.82rem">Tuesday interest: ' + tuesday + '</span>'
+          : '');
+    const lbl = k => ((poll.options || []).find(o => o.key === k) || {}).label || k;
+    document.getElementById('plVoters').innerHTML = (rows || []).length
+      ? '<div style="font-weight:700;margin:12px 0 6px">By player</div>'
+        + '<table style="width:100%;border-collapse:collapse;font-size:0.84rem">'
+        + '<tr><th style="text-align:left;padding:6px 8px;border-bottom:2px solid var(--border)">Player</th>'
+        + '<th style="text-align:left;padding:6px 8px;border-bottom:2px solid var(--border)">Team</th>'
+        + '<th style="text-align:left;padding:6px 8px;border-bottom:2px solid var(--border)">Answer</th>'
+        + '<th style="text-align:left;padding:6px 8px;border-bottom:2px solid var(--border)">Tue?</th>'
+        + '<th style="text-align:left;padding:6px 8px;border-bottom:2px solid var(--border)">Comment</th>'
+        + '<th style="text-align:left;padding:6px 8px;border-bottom:2px solid var(--border)">Updated</th></tr>'
+        + rows.map(r => '<tr>'
+            + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)"><strong>' + esc(r.member_name) + '</strong></td>'
+            + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)" class="hint">' + esc(r.team_name || '') + '</td>'
+            + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">' + esc(lbl(r.choice)) + '</td>'
+            + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">' + (r.extras && r.extras.tuesday ? '\u2705' : '') + '</td>'
+            + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)" class="hint">' + esc((r.extras && r.extras.comment) || '') + '</td>'
+            + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)" class="hint">' + esc(String(r.updated_at || '').slice(0, 16).replace('T', ' ')) + '</td>'
+            + '</tr>').join('')
+        + '</table>'
+      : '<p class="hint">No responses yet.</p>';
+    const roster = await plRosterByTeam(poll);
+    plRenderTeams(poll, rows || [], roster);
+    plRenderMissing(poll, rows || [], roster);
+    await plRenderOutreach(poll, rows || [], roster);
+    plfFill(poll, (rows || []).length);
+    st.className = 'status-line'; st.textContent = '';
+  } catch (e) { st.className = 'status-line shown err'; st.textContent = 'Load failed: ' + e.message; }
+}
+function plRenderMissing(poll, rows, roster) {
+  const box = document.getElementById('plMissing');
+  if (!roster) { box.innerHTML = '<p class="hint">No roster-based eligibility rule on this poll.</p>'; return; }
+  if (!roster.teams.length) { box.innerHTML = '<p class="hint">No matching division this session.</p>'; return; }
+  const voted = new Set(rows.map(r => r.member_number));
+  const seen = new Set();
+  const missing = [];
+  for (const t of roster.teams) for (const m of t.members) {
+    if (voted.has(m.apa) || seen.has(m.apa)) continue;
+    seen.add(m.apa); missing.push({ name: m.name, team: t.name });
+  }
+  box.innerHTML = missing.length
+    ? '<div class="hint" style="margin-bottom:4px">Still to hear from ' + missing.length + ':</div>'
+      + missing.map(m => '<div style="font-size:0.82rem;padding:2px 0">' + esc(m.name)
+          + ' <span class="hint">' + esc(m.team || '') + '</span></div>').join('')
+    : '<p class="hint">✓ Everyone eligible has voted.</p>';
+}
+
+/* ── Team view, 3.250. One row per roster team, one square per rostered
+     player colored by their vote, so intra-team disagreement and turnout
+     are visible without drilling. For 3-option polls with one detectable
+     neutral option the other two become poles — blue vs orange with a
+     gray middle, validated against the dataviz palette checks — and
+     teams sort along that spectrum so proto-divisions read straight down
+     the table. Any other option shape falls back to categorical colors
+     and unanimous/mixed badges. Solid needs two-thirds of at least 2
+     votes on one side with zero opposing votes; any opposing vote is a
+     Split — the "talk to the captain first" pile. */
+const PL_POLE_A = '#2a78d6', PL_POLE_B = '#eb6834', PL_NEUTRAL = '#898781';
+const PL_CAT = ['#2a78d6', '#1baf7a', '#eda100', '#4a3aa7', '#e34948', '#e87ba4'];
+function plPoles(options) {
+  if ((options || []).length !== 3) return null;
+  const isNeu = o => /either|don.?t care|no preference|flexib|unsure|neutral|whatever/i
+    .test(String(o.key || '') + ' ' + String(o.label || ''));
+  const neu = options.filter(isNeu);
+  if (neu.length !== 1) return null;
+  const p = options.filter(o => !isNeu(o));
+  return { a: p[0].key, b: p[1].key, neutral: neu[0].key };
+}
+function plTeamBadge(counts, votes, poles) {
+  if (!votes) return { rank: 6, kind: 'none' };
+  if (!poles) {
+    const keys = Object.keys(counts).filter(k => counts[k] > 0);
+    if (keys.length === 1) return { rank: 0, kind: 'unanimous', side: keys[0] };
+    return { rank: 3, kind: 'mixed' };
+  }
+  const a = counts[poles.a] || 0, b = counts[poles.b] || 0;
+  if (a > 0 && b > 0) return { rank: 3, kind: 'split' };
+  if (!a && !b) return { rank: 2, kind: 'flex' };
+  const solid = votes >= 2 && (a || b) * 3 >= votes * 2;
+  if (a) return { rank: solid ? 0 : 1, kind: solid ? 'solid' : 'lean', side: poles.a };
+  return { rank: solid ? 5 : 4, kind: solid ? 'solid' : 'lean', side: poles.b };
+}
+async function plRosterByTeam(poll) {
+  const el = poll.eligibility || {};
+  if (el.rule !== 'division_roster') return null;
+  const divs = await sb('GET', 'divisions?session_id=eq.' + currentSession.id
+    + '&operator_id=eq.' + el.operator_id + '&format=eq.' + encodeURIComponent(el.format)
+    + '&night_of_play=eq.' + encodeURIComponent(el.night) + '&select=id');
+  if (!(divs || []).length) return { teams: [] };
+  const teams = await sb('GET', 'teams?division_id=in.(' + divs.map(d => d.id).join(',')
+    + ')&select=id,team_number,team_name&order=team_number.asc');
+  if (!(teams || []).length) return { teams: [] };
+  const byTeam = new Map(teams.map(t => [t.id, { id: t.id, number: t.team_number, name: t.team_name, members: [] }]));
+  const tm = await sbGetAll('team_memberships?team_id=in.(' + teams.map(t => t.id).join(',')
+    + ')&select=team_id,member_number,name_raw&order=id.asc');
+  const seen = new Set();
+  for (const m of (tm || [])) {
+    const t = byTeam.get(m.team_id);
+    const k = m.team_id + '|' + m.member_number;
+    if (!t || seen.has(k)) continue;
+    seen.add(k);
+    t.members.push({ apa: m.member_number, name: m.name_raw || m.member_number });
+  }
+  return { teams: [...byTeam.values()] };
+}
+function plRenderTeams(poll, rows, roster) {
+  const box = document.getElementById('plTeams');
+  if (!roster) { box.innerHTML = ''; return; }
+  if (!roster.teams.length && !rows.length) { box.innerHTML = ''; return; }
+  const options = poll.options || [];
+  const poles = plPoles(options);
+  const color = {};
+  if (poles) { color[poles.a] = PL_POLE_A; color[poles.b] = PL_POLE_B; color[poles.neutral] = PL_NEUTRAL; }
+  else options.forEach((o, i) => { color[o.key] = i < PL_CAT.length ? PL_CAT[i] : PL_NEUTRAL; });
+  const lbl = k => ((options.find(o => o.key === k) || {}).label) || k;
+  const hasTue = !!((poll.extras || {}).checkbox);
+  const order = poles ? [poles.a, poles.neutral, poles.b] : options.map(o => o.key);
+  const orderIx = k => { const i = order.indexOf(k); return i < 0 ? order.length : i; };
+
+  /* group ballots by roster team; anything off-roster groups by its
+     denormalized team name so no vote ever disappears from this view */
+  const byApa = new Map();
+  for (const t of roster.teams) for (const m of t.members) if (!byApa.has(m.apa)) byApa.set(m.apa, t.id);
+  const voteByApa = new Map(rows.map(r => [r.member_number, r]));
+  const strays = new Map();
+  for (const r of rows) if (!byApa.has(r.member_number)) {
+    const k = r.team_name || 'No team on file';
+    if (!strays.has(k)) strays.set(k, []);
+    strays.get(k).push(r);
+  }
+  const models = [];
+  for (const t of roster.teams) {
+    const mem = t.members.map(m => ({ name: m.name, vote: voteByApa.get(m.apa) || null }));
+    const counts = {}; let votes = 0, tue = 0;
+    for (const m of mem) if (m.vote) {
+      votes++; counts[m.vote.choice] = (counts[m.vote.choice] || 0) + 1;
+      if (m.vote.extras && m.vote.extras.tuesday) tue++;
+    }
+    models.push({ name: t.name, number: t.number, mem, counts, votes, roster: mem.length, tue,
+                  badge: plTeamBadge(counts, votes, poles) });
+  }
+  for (const [name, list] of strays) {
+    const counts = {}; let tue = 0;
+    for (const r of list) { counts[r.choice] = (counts[r.choice] || 0) + 1; if (r.extras && r.extras.tuesday) tue++; }
+    models.push({ name: name + ' — not on the division roster', number: '',
+                  mem: list.map(r => ({ name: r.member_name, vote: r })),
+                  counts, votes: list.length, roster: list.length, tue,
+                  badge: plTeamBadge(counts, list.length, poles) });
+  }
+  models.sort((x, y) => x.badge.rank - y.badge.rank || y.votes - x.votes
+    || String(x.number).localeCompare(String(y.number), undefined, { numeric: true }));
+
+  /* summary chips + the division read */
+  const tally = {};
+  for (const m of models) {
+    const b = m.badge;
+    const key = (b.kind === 'solid' || b.kind === 'lean' || b.kind === 'unanimous') ? 'side:' + b.side : b.kind;
+    tally[key] = (tally[key] || 0) + 1;
+  }
+  const chip = (nn, txt, c) =>
+    '<span style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);background:#fff;padding:4px 10px;border-radius:999px;font-size:0.8rem;font-weight:700">'
+    + (c ? '<span style="width:10px;height:10px;border-radius:3px;background:' + c + '"></span>' : '')
+    + nn + ' ' + esc(txt) + '</span>';
+  let head = '';
+  if (poles) {
+    const nA = tally['side:' + poles.a] || 0, nB = tally['side:' + poles.b] || 0;
+    const nF = tally.flex || 0, nS = tally.split || tally.mixed || 0, n0 = tally.none || 0;
+    head = '<div style="display:flex;gap:8px;flex-wrap:wrap;margin:2px 0 8px">'
+      + chip(nA, 'teams toward ' + lbl(poles.a), PL_POLE_A)
+      + chip(nF, 'flexible', PL_NEUTRAL)
+      + chip(nS, 'split — talk to captain', '#a16207')
+      + chip(nB, 'teams toward ' + lbl(poles.b), PL_POLE_B)
+      + (n0 ? chip(n0, 'no votes yet', null) : '')
+      + '</div>'
+      + '<div class="hint" style="margin:0 0 8px;font-size:0.8rem">Two-division read: '
+      + nA + ' on the “' + esc(lbl(poles.a)) + '” side, '
+      + nB + ' on the “' + esc(lbl(poles.b)) + '” side; '
+      + nF + ' flexible can fill either; '
+      + nS + ' split need a captain call before placing'
+      + (n0 ? '; ' + n0 + ' silent so far' : '') + '.</div>';
+  }
+  const legend = '<div style="display:flex;gap:14px;flex-wrap:wrap;margin:0 0 6px;font-size:0.76rem;color:#555">'
+    + order.map(k => '<span style="display:inline-flex;align-items:center;gap:5px">'
+        + '<span style="width:11px;height:11px;border-radius:3px;background:' + color[k] + '"></span>' + esc(lbl(k)) + '</span>').join('')
+    + '<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:11px;height:11px;border-radius:3px;border:1px solid #b9b7ae;background:transparent;box-sizing:border-box"></span>no vote yet</span>'
+    + '</div>';
+  const sqHtml = (name, choice) => choice
+    ? '<span title="' + esc(name) + ' — ' + esc(lbl(choice)) + '" style="display:inline-block;width:13px;height:13px;border-radius:3px;margin:0 2px 2px 0;background:' + (color[choice] || PL_NEUTRAL) + '"></span>'
+    : '<span title="' + esc(name) + ' — no vote yet" style="display:inline-block;width:13px;height:13px;border-radius:3px;margin:0 2px 2px 0;border:1px solid #b9b7ae;background:transparent;box-sizing:border-box"></span>';
+  const badgeHtml = b => {
+    if (b.kind === 'none') return '<span class="hint">no votes yet</span>';
+    if (b.kind === 'flex') return '<span style="font-weight:700;color:#52514e">Flexible</span>';
+    if (b.kind === 'split') return '<span style="font-weight:700;color:#a16207">⚠ Split</span>';
+    if (b.kind === 'mixed') return '<span style="font-weight:700;color:#a16207">⚠ Mixed</span>';
+    const word = b.kind === 'unanimous' ? 'Unanimous' : b.kind === 'solid' ? 'Solid' : 'Lean';
+    return '<span style="display:inline-flex;align-items:center;gap:5px;font-weight:700">'
+      + '<span style="width:10px;height:10px;border-radius:3px;background:' + (color[b.side] || '#52514e') + '"></span>'
+      + word + ' ' + esc(String(b.side)) + '</span>';
+  };
+  const th = t => '<th style="text-align:left;padding:6px 8px;border-bottom:2px solid var(--border)">' + t + '</th>';
+  const rowsHtml = models.map(m => {
+    const sorted = m.mem.slice().sort((p, q) =>
+      (p.vote ? orderIx(p.vote.choice) : 99) - (q.vote ? orderIx(q.vote.choice) : 99)
+      || String(p.name).localeCompare(String(q.name)));
+    const detail = m.badge.kind === 'split' || m.badge.kind === 'mixed';
+    const bd = detail ? '' : 'border-bottom:1px solid var(--border);';
+    const td = c => '<td style="padding:6px 8px;' + bd + '">' + c + '</td>';
+    return '<tr>'
+      + td('<strong>' + esc(m.name) + '</strong>' + (m.number ? ' <span class="hint">#' + esc(String(m.number)) + '</span>' : ''))
+      + td(sorted.map(p => sqHtml(p.name, p.vote ? p.vote.choice : null)).join(''))
+      + td('<span class="hint">' + (order.filter(k => m.counts[k]).map(k => m.counts[k] + ' ' + esc(k)).join(' · ') || '—') + '</span>')
+      + td(m.votes + '/' + m.roster)
+      + td(badgeHtml(m.badge))
+      + (hasTue ? td(m.tue ? String(m.tue) : '') : '')
+      + '</tr>'
+      + (detail
+        ? '<tr><td colspan="' + (hasTue ? 6 : 5) + '" style="padding:0 8px 8px 22px;border-bottom:1px solid var(--border)">'
+          + sorted.filter(p => p.vote).map(p =>
+              '<span style="display:inline-flex;align-items:center;gap:5px;margin-right:14px;font-size:0.78rem">'
+              + '<span style="width:9px;height:9px;border-radius:2px;background:' + (color[p.vote.choice] || PL_NEUTRAL) + '"></span>'
+              + esc(p.name) + ' — ' + esc(String(p.vote.choice)) + '</span>').join('')
+          + '</td></tr>'
+        : '');
+  }).join('');
+  box.innerHTML = '<div style="font-weight:700;margin:2px 0 6px">By team</div>'
+    + head + legend
+    + '<table style="width:100%;border-collapse:collapse;font-size:0.84rem">'
+    + '<tr>' + th('Team') + th('Ballots') + th('Tally') + th('Voted') + th('Read') + (hasTue ? th('Tue?') : '') + '</tr>'
+    + rowsHtml + '</table>';
+}
+
+/* ── Participation outreach (3.252, T1 — brief
+     2026-07-13-pulsecheck-outreach.md). Recipients derive from the same
+     plRosterByTeam result the missing-voters list uses, so the two can
+     never disagree. Emails: one personal send per player through GAS
+     pulse_email_send (admin-key gated; preprod mails the operator only)
+     with the house canary — 3 sends, modal confirm, remainder — and a
+     poll_outreach stamp per success so re-runs skip already-emailed
+     players by default (checkbox overrides). Texts are operator-tapped
+     sms: links via otBuildSmsUrl; the tap stamps kind=text. Templates
+     live on the poll row (extras.email_subject/email_body/text_body). */
+let _plOr = { scope: 'missing', sel: new Map(), stamps: new Map(), players: new Map(), all: [] };
+/* Preprod stamps are '<kind>_preprod' — same DB as prod, so a preprod
+   canary must never mark a player EMAILED for the real prod send. */
+function plOrKind(k) { return IS_PREPROD ? k + '_preprod' : k; }
+const PL_APP_URL = 'https://southportlandmetroapa.github.io/pulsecheck/';
+function plOrFill(tpl, vals) {
+  let s = String(tpl);
+  for (const k of Object.keys(vals)) s = s.split('{' + k + '}').join(vals[k]);
+  return s;
+}
+async function plRenderOutreach(poll, rows, roster) {
+  const box = document.getElementById('plOr');
+  if (!roster || !roster.teams.length) {
+    box.innerHTML = '<p class="hint">Invites need a poll with a roster-based audience.</p>';
+    return;
+  }
+  const stamps = await sb('GET', 'poll_outreach?poll_id=eq.' + poll.id + '&select=member_number,kind') || [];
+  _plOr.stamps = new Map();
+  for (const s of stamps) _plOr.stamps.set(s.member_number + '|' + s.kind, true);
+  const voted = new Set(rows.map(r => r.member_number));
+  const seen = new Set();
+  const all = [];
+  for (const t of roster.teams) for (const m of t.members) {
+    if (seen.has(m.apa)) continue;
+    seen.add(m.apa);
+    all.push({ apa: m.apa, name: m.name, team: t.name, voted: voted.has(m.apa) });
+  }
+  _plOr.players = new Map();
+  for (let i = 0; i < all.length; i += 100) {
+    const chunk = all.slice(i, i + 100).map(x => x.apa);
+    const ps = await sb('GET', 'players?member_number=in.(' + chunk.join(',')
+      + ')&select=member_number,first_name,last_name,email,cell_phone,home_phone,alt_phone,work_phone') || [];
+    for (const p of ps) _plOr.players.set(p.member_number, p);
+  }
+  _plOr.all = all;
+  plOrDraw(poll);
+}
+function plOrDraw(poll) {
+  const box = document.getElementById('plOr');
+  const all = _plOr.all;
+  const list = _plOr.scope === 'missing' ? all.filter(x => !x.voted) : all;
+  const x = poll.extras || {};
+  const link = PL_APP_URL + '?p=' + poll.slug;
+  const pill = (key, label) =>
+    '<button type="button" class="btn ' + (_plOr.scope === key ? 'btn-primary' : 'btn-outline')
+    + ' btn-sm" data-plorscope="' + key + '">' + label + '</button>';
+  const rowsHtml = list.map(m => {
+    const p = _plOr.players.get(m.apa) || {};
+    const em = String(p.email || '').trim();
+    const ph = nrBestPhone(p);
+    const digits = ph ? String(ph).replace(/\D/g, '') : '';
+    const first = String(p.first_name || '').trim() || String(m.name).split(' ')[0];
+    const smsBody = plOrFill(x.text_body || 'Quick SPM poll: {link}',
+      { first_name: first, link: link, poll_title: poll.title });
+    const checked = _plOr.sel.has(m.apa) ? _plOr.sel.get(m.apa) : (!!em && !_plOr.stamps.get(m.apa + '|' + plOrKind('email')));
+    return '<div style="display:flex;gap:8px;align-items:center;padding:3px 0;font-size:0.84rem;flex-wrap:wrap">'
+      + '<input type="checkbox" data-plorsel="' + m.apa + '"' + (checked && em ? ' checked' : '') + (em ? '' : ' disabled') + '>'
+      + '<strong>' + esc(m.name) + '</strong>'
+      + '<span class="hint">' + esc(m.team) + '</span>'
+      + (m.voted ? '<span style="color:#15803d;font-size:0.72rem;font-weight:700">VOTED</span>' : '')
+      + (em ? '' : '<span style="color:#b91c1c;font-size:0.72rem;font-weight:700">NO EMAIL</span>')
+      + (_plOr.stamps.get(m.apa + '|' + plOrKind('email')) ? '<span style="background:#e8f0fe;color:#0031a1;border-radius:999px;padding:1px 8px;font-size:0.7rem;font-weight:700">EMAILED</span>' : '')
+      + (_plOr.stamps.get(m.apa + '|' + plOrKind('text')) ? '<span style="background:#ede9fe;color:#6d28d9;border-radius:999px;padding:1px 8px;font-size:0.7rem;font-weight:700">TEXTED</span>' : '')
+      + (digits
+          ? '<a href="' + otBuildSmsUrl(digits, smsBody) + '" data-plortext="' + m.apa + '" style="margin-left:auto;font-size:0.78rem">&#128172; text</a>'
+          : '<span class="hint" style="margin-left:auto;font-size:0.72rem">no phone</span>')
+      + '</div>';
+  }).join('');
+  box.innerHTML =
+    '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px">'
+      + pill('missing', 'Haven\'t voted') + pill('all', 'Everyone eligible')
+      + '<button type="button" class="btn btn-primary btn-sm" data-ploremail="1" style="margin-left:auto">&#128231; Email checked</button>'
+      + '<button type="button" class="btn btn-outline btn-sm" data-plortest="1">Send me a test email</button>'
+    + '</div>'
+    + '<div class="hint" style="margin-bottom:6px;font-size:0.76rem">Invite templates are edited in the poll editor below. One personal email per player; already-emailed players start unchecked'
+      + (IS_PREPROD ? '. PREPROD: every email goes to your inbox only.' : '.') + '</div>'
+    + (rowsHtml || '<p class="hint">Nobody in this scope.</p>');
+  box.querySelectorAll('[data-plorscope]').forEach(b => b.onclick = () => { _plOr.scope = b.dataset.plorscope; plOrDraw(poll); });
+  box.querySelectorAll('input[data-plorsel]').forEach(cb =>
+    cb.addEventListener('change', () => _plOr.sel.set(cb.dataset.plorsel, cb.checked)));
+  box.querySelectorAll('a[data-plortext]').forEach(a =>
+    a.addEventListener('click', () => plOrStampText(poll, a.dataset.plortext)));
+  const eb = box.querySelector('[data-ploremail]'); if (eb) eb.onclick = () => plOrEmail(poll);
+  const tb = box.querySelector('[data-plortest]'); if (tb) tb.onclick = () => plOrTest(poll);
+}
+async function plOrStampText(poll, apa) {
+  /* let the sms: navigation proceed; stamp in the background */
+  try {
+    await sb('POST', 'poll_outreach?on_conflict=poll_id,member_number,kind',
+      [{ poll_id: poll.id, member_number: apa, kind: plOrKind('text') }],
+      { 'Prefer': 'resolution=merge-duplicates,return=minimal' });
+    _plOr.stamps.set(apa + '|' + plOrKind('text'), true);
+    plOrDraw(poll);
+  } catch (e) { setStatus('plStatus', 'Text stamp failed: ' + e.message, 'err'); }
+}
+async function plOrTest(poll) {
+  const x = poll.extras || {};
+  if (!x.email_subject || !x.email_body) { setStatus('plStatus', 'Set the invite subject + body in the poll editor first.', 'err'); return; }
+  const link = PL_APP_URL + '?p=' + poll.slug;
+  const vals = { link: link, poll_title: poll.title };
+  setStatus('plStatus', 'Sending test to your inbox…', '');
+  try {
+    const res = await nrGasJson({ action: 'pulse_email_send', admin_key: SB_KEY,
+      test_to: 'southportlandmetroapa@gmail.com',
+      subject: plOrFill(x.email_subject, vals), html_body: plOrFill(x.email_body, vals),
+      is_preprod: IS_PREPROD });
+    setStatus('plStatus', res && res.ok ? '✓ Test sent to your inbox.' : 'Test failed: ' + ((res && res.error) || 'unknown'), res && res.ok ? 'ok' : 'err');
+  } catch (e) { setStatus('plStatus', 'Test failed: ' + e.message, 'err'); }
+}
+async function plOrEmail(poll) {
+  const x = poll.extras || {};
+  if (!x.email_subject || !x.email_body) { setStatus('plStatus', 'Set the invite subject + body in the poll editor first.', 'err'); return; }
+  const all = _plOr.all;
+  const link = PL_APP_URL + '?p=' + poll.slug;
+  const vals = { link: link, poll_title: poll.title };
+  const list = (_plOr.scope === 'missing' ? all.filter(m => !m.voted) : all).filter(m => {
+    const p = _plOr.players.get(m.apa) || {};
+    if (!String(p.email || '').trim()) return false;
+    return _plOr.sel.has(m.apa) ? _plOr.sel.get(m.apa) : !_plOr.stamps.get(m.apa + '|' + plOrKind('email'));
+  });
+  if (!list.length) { setStatus('plStatus', 'Nobody checked with an email on file.', 'err'); return; }
+  let quotaLine = '';
+  try {
+    const q = await nrGasJson({ action: 'mailer_quota', admin_key: SB_KEY });
+    if (q && q.ok) quotaLine = ' Gmail quota left today: ' + q.remaining + '.';
+  } catch (e) { /* quota display is best-effort */ }
+  const start = await nrModal({
+    title: 'Email ' + list.length + ' players about this poll?',
+    body: 'One personal email each, through the mailer.' + quotaLine
+      + (IS_PREPROD ? ' PREPROD: everything goes to your inbox only.' : '')
+      + (list.length > 3 ? ' The first 3 go out as a canary, then you confirm the rest.' : ''),
+    buttons: [{ label: list.length > 3 ? 'Send canary — first 3' : 'Send', value: 'go', primary: true },
+              { label: 'Cancel', value: null }]
+  });
+  if (!start) return;
+  let sent = 0;
+  const failed = [];
+  for (let i = 0; i < list.length; i++) {
+    if (i === 3 && list.length > 3) {
+      const cont = await nrModal({
+        title: 'Canary done — ' + sent + ' sent' + (failed.length ? ', ' + failed.length + ' failed' : ''),
+        body: (IS_PREPROD ? 'Check your inbox for the three test emails.' : 'Spot-check delivery.')
+          + ' Continue with the remaining ' + (list.length - 3) + '?',
+        buttons: [{ label: 'Send the rest', value: 'go', primary: true }, { label: 'Stop here', value: null }]
+      });
+      if (!cont) break;
+    }
+    const m = list[i];
+    setStatus('plStatus', 'Emailing ' + (i + 1) + '/' + list.length + ' — ' + m.name + '…', '');
+    try {
+      const res = await nrGasJson({ action: 'pulse_email_send', admin_key: SB_KEY,
+        member_number: m.apa,
+        subject: plOrFill(x.email_subject, vals), html_body: plOrFill(x.email_body, vals),
+        is_preprod: IS_PREPROD });
+      if (res && res.ok) {
+        sent++;
+        await sb('POST', 'poll_outreach?on_conflict=poll_id,member_number,kind',
+          [{ poll_id: poll.id, member_number: m.apa, kind: plOrKind('email') }],
+          { 'Prefer': 'resolution=merge-duplicates,return=minimal' });
+        _plOr.stamps.set(m.apa + '|' + plOrKind('email'), true);
+      } else {
+        failed.push(m.name + ' — ' + ((res && res.error) || 'unknown'));
+      }
+    } catch (e) { failed.push(m.name + ' — ' + e.message); }
+  }
+  setStatus('plStatus', '✓ Emailed ' + sent + ' of ' + list.length
+    + (failed.length ? ' · FAILED: ' + failed.join('; ') : '') + '.', failed.length ? 'err' : 'ok');
+  plOrDraw(poll);
+}
+
+/* ── Poll builder (0.2 generic draft). Options lock once responses
+     exist (removing one would orphan votes); slugs are immutable and
+     auto-generated per the house rule; there is no hard delete — close
+     the poll instead. ── */
+let _plf = { opts: [], locked: false, responses: 0 };
+function plfSlugify(title) {
+  let base = String(title || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  if (!base) base = 'poll';
+  let slug = base, n = 2;
+  const taken = new Set(_pl.polls.map(p => p.slug));
+  while (taken.has(slug)) slug = base + '-' + (n++);
+  return slug;
+}
+function plfDrawOpts() {
+  const box = document.getElementById('plfOpts');
+  const dis = _plf.locked ? ' disabled' : '';
+  box.innerHTML = _plf.opts.map((o, i) =>
+    '<div style="display:flex;gap:6px;margin-bottom:4px">'
+    + '<input data-pfo="key" data-pfi="' + i + '" placeholder="key" value="' + esc(o.key || '') + '" style="max-width:120px"' + dis + '>'
+    + '<input data-pfo="label" data-pfi="' + i + '" placeholder="Label players tap" value="' + esc(o.label || '') + '" style="flex:1"' + dis + '>'
+    + '<input data-pfo="blurb" data-pfi="' + i + '" placeholder="small blurb" value="' + esc(o.blurb || '') + '" style="flex:1"' + dis + '>'
+    + '<button type="button" class="btn btn-outline btn-sm" data-pfdel="' + i + '"' + dis + '>&times;</button>'
+    + '</div>').join('');
+  document.getElementById('plfOptLock').style.display = _plf.locked ? '' : 'none';
+  document.getElementById('plfOptAdd').disabled = _plf.locked;
+  box.querySelectorAll('input[data-pfo]').forEach(inp => inp.addEventListener('input', () => {
+    _plf.opts[Number(inp.dataset.pfi)][inp.dataset.pfo] = inp.value;
+  }));
+  box.querySelectorAll('[data-pfdel]').forEach(b => b.onclick = () => {
+    _plf.opts.splice(Number(b.dataset.pfdel), 1);
+    if (!_plf.opts.length) _plf.opts.push({ key: '', label: '', blurb: '' });
+    plfDrawOpts();
+  });
+}
+function plfRuleSync() {
+  const rule = document.getElementById('plfRule').value;
+  document.getElementById('plfFormat').style.display = rule === 'all_spm' ? 'none' : '';
+  document.getElementById('plfNight').style.display = rule === 'division_roster' ? '' : 'none';
+}
+function plfFill(poll, responseCount) {
+  _plf.locked = responseCount > 0;
+  _plf.responses = responseCount;
+  document.getElementById('plfTitle').value = poll ? poll.title : '';
+  document.getElementById('plfBody').value = poll ? (poll.body_html || '') : '';
+  _plf.opts = poll ? (poll.options || []).map(o => ({ ...o })) : [{ key: '', label: '', blurb: '' }, { key: '', label: '', blurb: '' }];
+  const el = poll ? (poll.eligibility || {}) : {};
+  document.getElementById('plfRule').value = el.rule || 'all_spm';
+  document.getElementById('plfFormat').value = el.format || (el.formats || []).join(', ') || '';
+  document.getElementById('plfNight').value = el.night || '';
+  document.getElementById('plfAudience').value = el.audience_label || '';
+  const x = poll ? (poll.extras || {}) : {};
+  document.getElementById('plfCheckbox').value = x.checkbox || '';
+  document.getElementById('plfComment').value = x.comment_placeholder || '';
+  document.getElementById('plfEmailSubj').value = x.email_subject || '';
+  document.getElementById('plfEmailBody').value = x.email_body || '';
+  document.getElementById('plfTextBody').value = x.text_body || '';
+  plfRuleSync();
+  plfDrawOpts();
+}
+function plfCollect() {
+  const title = document.getElementById('plfTitle').value.trim();
+  if (!title) throw new Error('title required');
+  const opts = _plf.opts
+    .map(o => ({ key: (o.key || '').trim(), label: (o.label || '').trim(), blurb: (o.blurb || '').trim() }))
+    .filter(o => o.key && o.label);
+  if (opts.length < 2) throw new Error('need at least 2 options with key + label');
+  const rule = document.getElementById('plfRule').value;
+  const fmts = document.getElementById('plfFormat').value.split(',').map(x => x.trim()).filter(Boolean);
+  const el = { rule: rule, operator_id: 1,
+    audience_label: document.getElementById('plfAudience').value.trim() || 'eligible players' };
+  if (rule === 'division_roster') {
+    if (fmts.length !== 1 || !document.getElementById('plfNight').value.trim()) throw new Error('division rule needs ONE format + a night');
+    el.format = fmts[0]; el.night = document.getElementById('plfNight').value.trim();
+  } else if (rule === 'formats') {
+    if (!fmts.length) throw new Error('formats rule needs at least one format');
+    el.formats = fmts;
+  }
+  const extras = {};
+  const cb = document.getElementById('plfCheckbox').value.trim();
+  const cp = document.getElementById('plfComment').value.trim();
+  if (cb) extras.checkbox = cb;
+  if (cp) extras.comment_placeholder = cp;
+  const pes = document.getElementById('plfEmailSubj').value.trim();
+  const peb = document.getElementById('plfEmailBody').value.trim();
+  const ptb = document.getElementById('plfTextBody').value.trim();
+  if (pes) extras.email_subject = pes;
+  if (peb) extras.email_body = peb;
+  if (ptb) extras.text_body = ptb;
+  return { title: title, body_html: document.getElementById('plfBody').value.trim() || null,
+           options: opts, eligibility: el, extras: extras };
+}
+async function plfSaveNew() {
+  try {
+    const row = plfCollect();
+    row.slug = plfSlugify(row.title);
+    await sb('POST', 'polls', row);
+    setStatus('plfStatus', '\u2713 Created \u2014 slug ' + row.slug, 'ok');
+    await plInit();
+  } catch (e) { setStatus('plfStatus', e.message, 'err'); }
+}
+async function plfUpdate() {
+  const poll = _pl.polls.find(p => String(p.id) === document.getElementById('plSel').value);
+  if (!poll) { setStatus('plfStatus', 'Pick a poll above first.', 'err'); return; }
+  try {
+    const row = plfCollect();
+    if (_plf.locked) { delete row.options; }   /* votes exist — copy only */
+    await sb('PATCH', 'polls?id=eq.' + poll.id, row);
+    setStatus('plfStatus', '\u2713 Updated' + (_plf.locked ? ' \u2014 options untouched, locked' : ''), 'ok');
+    await plInit();
+  } catch (e) { setStatus('plfStatus', e.message, 'err'); }
+}
+async function plfToggle() {
+  const poll = _pl.polls.find(p => String(p.id) === document.getElementById('plSel').value);
+  if (!poll) { setStatus('plfStatus', 'Pick a poll above first.', 'err'); return; }
+  try {
+    await sb('PATCH', 'polls?id=eq.' + poll.id, { is_open: !poll.is_open });
+    setStatus('plfStatus', '\u2713 Poll is now ' + (poll.is_open ? 'CLOSED' : 'OPEN'), 'ok');
+    await plInit();
+  } catch (e) { setStatus('plfStatus', e.message, 'err'); }
 }
 
 const TAB_LABEL = {
@@ -6403,7 +7140,8 @@ const TAB_LABEL = {
   hostplan:      'Host Plan',
   dolphin:       'Dolphin',
   contacts:      'Contacts',
-  nextreg:       'Next Session Reg'
+  nextreg:       'Next Session Reg',
+  polls:         'PulseCheck'
 };
 
 function switchTab(name) {
@@ -6428,6 +7166,7 @@ function switchTab(name) {
   if (name === 'certs')       { certsAdminInit(); certsNotifyInit(); }
   if (name === 'hostplan')    hpInit();
   if (name === 'nextreg')     nrInit();
+  if (name === 'polls')       plInit();
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -16743,6 +17482,7 @@ const _otState = {
   filter: {
     status: 'all',
     search: '',
+    gender: 'all',         /* 'all' | 'M' | 'F' — live filter, no re-run */
     touch:    new Set(),   /* must HAVE done: subset of {email,text,call} */
     touchNot: new Set()    /* must NOT have done: subset of {email,text,call} */
   },
@@ -16886,6 +17626,14 @@ async function otInit() {
 
   /* Initial SL pill render. */
   otRenderSlPills();
+  document.querySelectorAll('#otGenderPills [data-otgender]').forEach(b => {
+    b.addEventListener('click', () => {
+      _otState.filter.gender = b.dataset.otgender;
+      document.querySelectorAll('#otGenderPills [data-otgender]').forEach(x =>
+        x.classList.toggle('active', x === b));
+      otRenderStats(); otRenderList();
+    });
+  });
   document.getElementById('otSlClearBtn').addEventListener('click', () => {
     _otState.sl8 = new Set(); _otState.sl9 = new Set();
     otRenderSlPills();
@@ -17411,6 +18159,21 @@ async function otRun() {
       return { ...r, _status: s };
     });
 
+    /* Gender hydration (3.247) — the source RPCs don't return it; one
+       chunked players read covers every candidate incl. universe
+       extras. Failure degrades gracefully: the pill just matches
+       nothing but All. */
+    try {
+      const nums = [...new Set(candidates.map(c => c.member_number).filter(Boolean))];
+      const gByNum = new Map();
+      for (let i = 0; i < nums.length; i += 400) {
+        const got = await sb('GET', 'players?member_number=in.(' + nums.slice(i, i + 400).join(',')
+          + ')&select=member_number,gender');
+        for (const p of (got || [])) gByNum.set(p.member_number, p.gender);
+      }
+      for (const c of candidates) c.gender = gByNum.get(c.member_number) || null;
+    } catch (e) { console.warn('[outreach] gender hydration failed', e); }
+
     _otState.candidates = candidates;
     document.getElementById('otResults').style.display = '';
     document.getElementById('otEmptyState').style.display = 'none';
@@ -17605,6 +18368,7 @@ function otFilteredCandidates() {
     if (touchNotSet.has('email') && s.last_emailed_at) return false;
     if (touchNotSet.has('text')  && s.last_texted_at)  return false;
     if (touchNotSet.has('call')  && s.last_called_at)  return false;
+    if (f.gender && f.gender !== 'all' && c.gender !== f.gender) return false;
     return true;
   });
   return { allEligible, visible: allEligible.filter(c => otMatchesSearch(c, f.search)) };
@@ -17624,7 +18388,7 @@ function otRenderList() {
      changes and is preserved across in-place re-renders (status edits),
      keeping the idempotent-render rule (scroll position survives). */
   const sig = f.status + '|' + [...(f.touch || [])].sort().join(',') + '|'
-    + [...(f.touchNot || [])].sort().join(',') + '|' + otNormalize(f.search);
+    + [...(f.touchNot || [])].sort().join(',') + '|' + (f.gender || 'all') + '|' + otNormalize(f.search);
   if (sig !== _otState._lastRenderSig) {
     _otState._lastRenderSig = sig;
     _otState.renderLimit = 150;
