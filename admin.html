@@ -2134,6 +2134,12 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <button class="btn btn-outline btn-sm" id="otAddAllBtn"
                   title="Add every person in the current filtered list to Google Contacts (SPM APA group, soldans@). Already-added people are skipped; if a number matches one of your own contacts it's updated in place (league data wins); shared-number spouses become a combined household contact."
                   style="align-self:flex-end; padding:6px 12px;">👤 Add filtered to contacts</button>
+          <button class="btn btn-outline btn-sm" id="otCopyEmailsBtn"
+                  title="Copy every email in the current filtered list to the clipboard — de-duplicated, comma-separated. Paste into a To/BCC field."
+                  style="align-self:flex-end; padding:6px 12px;">📧 Copy filtered emails</button>
+          <button class="btn btn-outline btn-sm" id="otBlastBtn"
+                  title="Email the blast template (Templates → Email blast) to everyone in the current filtered list who has an email — quota-checked, skips anyone already emailed for this campaign, sends a 3-email canary first."
+                  style="align-self:flex-end; padding:6px 12px;">📨 Email all in filter</button>
           <span id="otStatusLine" class="hint" style="align-self:center"></span>
         </div>
 
@@ -3555,7 +3561,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.259';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.265';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -5766,7 +5772,7 @@ function nrIntentRow(r) {
     + (_nr.capByIntent && _nr.capByIntent.has(r.id)
         ? '<div style="font-size:0.82rem;margin-top:2px">\ud83d\udc65 ' + _nr.capHtml(_nr.capByIntent.get(r.id)) + '</div>' : '')
     + (r.note ? '<div class="hint" style="margin-top:2px">' + esc(r.note) + '</div>' : '')
-    + '<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">' + btns + '</div>'
+    + '<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">' + btns + ' <button type="button" class="btn btn-outline btn-sm" data-intentedit="' + r.id + '">✎ edit</button></div>'
     + '</div>';
 }
 function nrRenderIntents() {
@@ -5786,7 +5792,131 @@ function nrRenderIntents() {
   box.querySelectorAll('button[data-intent]').forEach(b => {
     b.onclick = () => nrSetIntentStatus(Number(b.dataset.intent), b.dataset.status);
   });
+  box.querySelectorAll('button[data-intentedit]').forEach(b => {
+    b.onclick = () => nrEditIntent(Number(b.dataset.intentedit));
+  });
 }
+/* Operator edits a new-team intent's info + (Masters/Doubles) roster,
+   on behalf of the requester — these were ReRack-only before (3.261).
+   PATCH next_reg_new for the fields; roster is replace-all on intent_id
+   (team_id stays null per the table's XOR check) with an in-memory
+   snapshot restored on failure. The modal is built once; only the
+   roster sub-list re-renders on add/remove, so no field is ever wiped. */
+function nrEditIntent(id) {
+  const it = (_nr.intents || []).find(x => x.id === id);
+  if (!it) return;
+  const isRoster = /Masters|Doubles/i.test(it.format || '');
+  let roster = (((_nr.capByIntent && _nr.capByIntent.get(id)) || []).slice())
+    .sort((a, b) => a.position - b.position)
+    .map(x => ({ apa: x.apa || '', full_name: x.full_name || '' }));
+  const wrap = document.getElementById('nrModalWrap');
+  function collectRoster() {
+    const rows = [];
+    wrap.querySelectorAll('input[data-ediname]').forEach(inp => {
+      const i = inp.dataset.ediname;
+      const ap = wrap.querySelector('input[data-ediapa="' + i + '"]');
+      rows.push({ apa: (ap ? ap.value : '').trim(), full_name: inp.value.trim() });
+    });
+    return rows;
+  }
+  function rosterRowsHtml() {
+    return roster.map((m, i) =>
+      '<div style="display:flex;gap:6px;margin-bottom:4px">'
+      + '<input data-ediapa="' + i + '" placeholder="APA # (optional)" value="' + esc(m.apa) + '" style="max-width:130px">'
+      + '<input data-ediname="' + i + '" placeholder="Full name" value="' + esc(m.full_name) + '" style="flex:1">'
+      + '<button type="button" class="btn btn-outline btn-sm" data-edidel="' + i + '">&times;</button>'
+      + '</div>').join('');
+  }
+  function drawRoster() {
+    const el = document.getElementById('ediRoster');
+    if (el) el.innerHTML = rosterRowsHtml();
+    wrap.querySelectorAll('button[data-edidel]').forEach(b => b.onclick = () => {
+      roster = collectRoster(); roster.splice(Number(b.dataset.edidel), 1); drawRoster();
+    });
+  }
+  const field = (idAttr, label, val, ph, wide) =>
+    '<label style="display:block;font-size:0.82rem;font-weight:700;margin-top:6px">' + label + '</label>'
+    + (wide
+        ? '<textarea id="' + idAttr + '" class="ehq-paste-box" style="min-height:46px;width:100%" placeholder="' + esc(ph) + '">' + esc(val || '') + '</textarea>'
+        : '<input id="' + idAttr + '" style="width:100%" placeholder="' + esc(ph) + '" value="' + esc(val || '') + '">');
+  wrap.innerHTML = '<div style="position:fixed;inset:0;background:rgba(10,20,40,0.55);z-index:9998;display:flex;align-items:center;justify-content:center;padding:20px">'
+    + '<div style="background:#fff;border-radius:12px;padding:22px;max-width:560px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.35);max-height:88vh;overflow:auto">'
+    + '<div style="font-weight:800;font-size:1.05rem;margin-bottom:2px">Edit new team</div>'
+    + '<div class="hint" style="margin-bottom:6px">On behalf of the requester. Name and format are required.</div>'
+    + field('ediName', 'Contact name', it.contact_name, 'Full name')
+    + field('ediFormat', 'Format', it.format, 'e.g. 8-Ball Open, Masters, 9-Ball Doubles')
+    + '<div style="display:flex;gap:6px;flex-wrap:wrap">'
+    + '<div style="flex:1;min-width:120px">' + field('ediApa', 'APA #', it.contact_apa, 'optional') + '</div>'
+    + '<div style="flex:1;min-width:120px">' + field('ediDay', 'Day of play', it.day_of_play, 'e.g. Tuesday') + '</div>'
+    + '</div>'
+    + '<div style="display:flex;gap:6px;flex-wrap:wrap">'
+    + '<div style="flex:1;min-width:160px">' + field('ediPhone', 'Phone', it.contact_phone, 'optional') + '</div>'
+    + '<div style="flex:1;min-width:160px">' + field('ediEmail', 'Email', it.contact_email, 'optional') + '</div>'
+    + '</div>'
+    + field('ediHost', 'Host location', it.host_location, 'e.g. Rack Em, South Portland')
+    + field('ediPlayers', 'Players needed', it.players_needed, 'e.g. 2 players — an SL3 and an SL5')
+    + field('ediNote', 'Note', it.note, 'Anything else', true)
+    + (isRoster
+        ? '<div style="font-size:0.82rem;font-weight:700;margin-top:10px">Roster <span class="hint" style="font-weight:500">(APA optional; full name required)</span></div>'
+          + '<div id="ediRoster">' + rosterRowsHtml() + '</div>'
+          + '<button type="button" class="btn btn-outline btn-sm" id="ediAdd">+ player</button>'
+        : '')
+    + '<div class="status-line" id="ediStatus" style="margin-top:8px"></div>'
+    + '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px">'
+    + '<button type="button" class="btn btn-primary btn-sm" id="ediSave">Save</button>'
+    + '<button type="button" class="btn btn-outline btn-sm" id="ediCancel">Cancel</button>'
+    + '</div></div></div>';
+  document.getElementById('ediCancel').onclick = () => { wrap.innerHTML = ''; };
+  const add = document.getElementById('ediAdd');
+  if (add) add.onclick = () => { roster = collectRoster(); roster.push({ apa: '', full_name: '' }); drawRoster(); };
+  drawRoster();
+  document.getElementById('ediSave').onclick = async () => {
+    const name = document.getElementById('ediName').value.trim();
+    const format = document.getElementById('ediFormat').value.trim();
+    if (!name || !format) { setStatus('ediStatus', 'Name and format are required.', 'err'); return; }
+    const finalRoster = isRoster ? collectRoster().filter(m => m.full_name) : null;
+    const now = new Date().toISOString();
+    const patch = { contact_name: name, format: format,
+      contact_apa: document.getElementById('ediApa').value.trim() || null,
+      contact_phone: document.getElementById('ediPhone').value.trim() || null,
+      contact_email: document.getElementById('ediEmail').value.trim() || null,
+      day_of_play: document.getElementById('ediDay').value.trim() || null,
+      host_location: document.getElementById('ediHost').value.trim() || null,
+      players_needed: document.getElementById('ediPlayers').value.trim() || null,
+      note: document.getElementById('ediNote').value.trim() || null,
+      updated_at: now };
+    setStatus('ediStatus', 'Saving…', '');
+    try {
+      await sb('PATCH', 'next_reg_new?id=eq.' + id, patch);
+      if (isRoster) {
+        const snapshot = ((_nr.capByIntent && _nr.capByIntent.get(id)) || [])
+          .map(x => ({ apa: x.apa, full_name: x.full_name, position: x.position }));
+        try {
+          await sb('DELETE', 'next_reg_roster?target_session_id=eq.' + _nr.targetId + '&intent_id=eq.' + id);
+          if (finalRoster.length) {
+            await sb('POST', 'next_reg_roster',
+              finalRoster.map((m, i) => ({ target_session_id: _nr.targetId, intent_id: id,
+                apa: m.apa || null, full_name: m.full_name, position: i + 1, updated_at: now })),
+              { 'Prefer': 'return=minimal' });
+          }
+        } catch (rerr) {
+          try {
+            if (snapshot.length) await sb('POST', 'next_reg_roster',
+              snapshot.map(x => ({ target_session_id: _nr.targetId, intent_id: id,
+                apa: x.apa || null, full_name: x.full_name, position: x.position, updated_at: now })),
+              { 'Prefer': 'return=minimal' });
+          } catch (e2) { /* best-effort restore */ }
+          throw new Error('roster save failed (previous roster restored): ' + rerr.message);
+        }
+      }
+      wrap.innerHTML = '';
+    } catch (e) { setStatus('ediStatus', 'Save failed: ' + e.message, 'err'); return; }
+    await nrLoadTracker();
+    await nrLoadIntents();
+    setStatus('nrGridStatus', '✓ Saved new-team info for ' + esc(name) + '.', 'ok');
+  };
+}
+
 async function nrSetIntentStatus(id, status) {
   try {
     await sb('PATCH', 'next_reg_new?id=eq.' + id, { status: status, updated_at: new Date().toISOString() });
@@ -6464,6 +6594,7 @@ async function nrLoadTracker() {
             return '<tr>'
               + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">'
               + (t ? '<strong>' + esc(nrTeamKey(t.team_number)) + '</strong> ' + esc(t.team_name || '') : '#' + r.team_id)
+              + ' <button type="button" class="btn btn-outline btn-sm" data-trkedit="' + r.team_id + '" style="padding:0 6px;font-size:0.7rem" title="Edit changes / players needed / roster">✎ edit</button>'
               + (r.team_note ? '<div class="hint" style="font-size:0.74rem">\ud83d\udcdd ' + esc(r.team_note) + '</div>' : '')
               + (r.players_needed ? '<div class="hint" style="font-size:0.74rem">\ud83c\udfb1 needs ' + esc(r.players_needed) + '</div>' : '')
               + (_nr.capByTeam && _nr.capByTeam.has(r.team_id)
@@ -6482,6 +6613,9 @@ async function nrLoadTracker() {
     document.querySelectorAll('#nrGrid button[data-trkundo]').forEach(b => {
       b.onclick = () => nrTrkUndo(Number(b.dataset.trkundo));
     });
+    document.querySelectorAll('#nrGrid button[data-trkedit]').forEach(b => {
+      b.onclick = () => nrEditDetails(Number(b.dataset.trkedit));
+    });
     gs.className = 'status-line'; gs.innerHTML = '';
     nrRenderComingBack();
     nrRenderSegments();
@@ -6490,6 +6624,124 @@ async function nrLoadTracker() {
   } catch (e) {
     gs.className = 'status-line shown err'; gs.textContent = 'Tracker load failed: ' + e.message;
   }
+}
+
+/* Operator edits a team's change-note, players-needed, and — for
+   Masters/Doubles — the Fall roster, on their behalf (3.260). These
+   were captured only through ReRack before; Slate showed them but
+   couldn't edit. note/players are a merge-duplicates UPSERT of just
+   those columns (status/source preserved); roster is replace-all with
+   an in-memory snapshot restored on failure. Silent save (set-status
+   owns emailing); logged for audit. */
+function nrEditDetails(teamId) {
+  const reg = (_nr.regRowByTeam && _nr.regRowByTeam.get(teamId)) || {};
+  const team = _nr.teams.concat(_nr.teamsN1).find(t => t.id === teamId);
+  const isRoster = /Masters|Doubles/i.test(reg.format || (team && team.division && team.division.format) || '');
+  let roster = (((_nr.capByTeam && _nr.capByTeam.get(teamId)) || []).slice())
+    .sort((a, b) => a.position - b.position)
+    .map(x => ({ apa: x.apa || '', full_name: x.full_name || '' }));
+  /* note/players live in closure state too, so a roster add/remove
+     re-render doesn't wipe what the operator typed (bug caught in the
+     3.260 drill: render() reset these to the original DB values). */
+  let curNote = reg.team_note || '';
+  let curPlayers = reg.players_needed || '';
+  const wrap = document.getElementById('nrModalWrap');
+  const teamLabel = team ? ((team.team_name || '') + ' #' + nrTeamKey(team.team_number)) : ('#' + teamId);
+  function collectRoster() {
+    const rows = [];
+    wrap.querySelectorAll('input[data-edname]').forEach(inp => {
+      const i = inp.dataset.edname;
+      const ap = wrap.querySelector('input[data-edapa="' + i + '"]');
+      rows.push({ apa: (ap ? ap.value : '').trim(), full_name: inp.value.trim() });
+    });
+    return rows;
+  }
+  function rosterRowsHtml() {
+    return roster.map((m, i) =>
+      '<div style="display:flex;gap:6px;margin-bottom:4px">'
+      + '<input data-edapa="' + i + '" placeholder="APA # (optional)" value="' + esc(m.apa) + '" style="max-width:130px">'
+      + '<input data-edname="' + i + '" placeholder="Full name" value="' + esc(m.full_name) + '" style="flex:1">'
+      + '<button type="button" class="btn btn-outline btn-sm" data-eddel="' + i + '">&times;</button>'
+      + '</div>').join('');
+  }
+  function render() {
+    wrap.innerHTML = '<div style="position:fixed;inset:0;background:rgba(10,20,40,0.55);z-index:9998;display:flex;align-items:center;justify-content:center;padding:20px">'
+      + '<div style="background:#fff;border-radius:12px;padding:22px;max-width:540px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.35);max-height:85vh;overflow:auto">'
+      + '<div style="font-weight:800;font-size:1.05rem;margin-bottom:2px">Edit details — ' + esc(teamLabel) + '</div>'
+      + '<div class="hint" style="margin-bottom:10px">On behalf of the team. Saves silently — use a set-status button if you also want to email them.</div>'
+      + '<label style="display:block;font-size:0.82rem;font-weight:700;margin-top:4px">Anything changing? <span class="hint" style="font-weight:500">(captain, host, night)</span></label>'
+      + '<textarea id="edNote" class="ehq-paste-box" style="min-height:52px;width:100%" placeholder="e.g. New captain Jane; now hosting at Rack Em">' + esc(curNote) + '</textarea>'
+      + '<label style="display:block;font-size:0.82rem;font-weight:700;margin-top:8px">Need players? <span class="hint" style="font-weight:500">(how many, what skill levels)</span></label>'
+      + '<input id="edPlayers" style="width:100%" placeholder="e.g. 2 players — an SL3 and an SL5" value="' + esc(curPlayers) + '">'
+      + (isRoster
+          ? '<div style="font-size:0.82rem;font-weight:700;margin-top:10px">Roster <span class="hint" style="font-weight:500">(APA optional; full name required)</span></div>'
+            + '<div id="edRoster">' + rosterRowsHtml() + '</div>'
+            + '<button type="button" class="btn btn-outline btn-sm" id="edAdd">+ player</button>'
+          : '')
+      + '<div class="status-line" id="edStatus" style="margin-top:8px"></div>'
+      + '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px">'
+      + '<button type="button" class="btn btn-primary btn-sm" id="edSave">Save</button>'
+      + '<button type="button" class="btn btn-outline btn-sm" id="edCancel">Cancel</button>'
+      + '</div></div></div>';
+    document.getElementById('edCancel').onclick = () => { wrap.innerHTML = ''; };
+    const stash = () => {
+      curNote = document.getElementById('edNote').value;
+      curPlayers = document.getElementById('edPlayers').value;
+      roster = collectRoster();
+    };
+    const add = document.getElementById('edAdd');
+    if (add) add.onclick = () => { stash(); roster.push({ apa: '', full_name: '' }); render(); };
+    wrap.querySelectorAll('button[data-eddel]').forEach(b => b.onclick = () => {
+      stash(); roster.splice(Number(b.dataset.eddel), 1); render();
+    });
+    document.getElementById('edSave').onclick = save;
+  }
+  async function save() {
+    const note = document.getElementById('edNote').value.trim();
+    const players = document.getElementById('edPlayers').value.trim();
+    const finalRoster = isRoster ? collectRoster().filter(m => m.full_name) : null;
+    const now = new Date().toISOString();
+    setStatus('edStatus', 'Saving…', '');
+    try {
+      await sb('POST', 'next_reg?on_conflict=target_session_id,team_id',
+        [{ target_session_id: _nr.targetId, team_id: teamId,
+           team_note: note || null, players_needed: players || null, updated_at: now }],
+        { 'Prefer': 'resolution=merge-duplicates,return=minimal' });
+      await sb('POST', 'next_reg_log',
+        [{ target_session_id: _nr.targetId, team_id: teamId,
+           old_status: reg.status || null, new_status: reg.status || null,
+           actor_apa: null, actor_name: 'Michelle & Paul Soldan',
+           source: 'admin', note: 'details edited' }],
+        { 'Prefer': 'return=minimal' });
+      if (isRoster) {
+        const snapshot = ((_nr.capByTeam && _nr.capByTeam.get(teamId)) || [])
+          .map(x => ({ apa: x.apa, full_name: x.full_name, position: x.position }));
+        try {
+          await sb('DELETE', 'next_reg_roster?target_session_id=eq.' + _nr.targetId + '&team_id=eq.' + teamId);
+          if (finalRoster.length) {
+            await sb('POST', 'next_reg_roster',
+              finalRoster.map((m, i) => ({ target_session_id: _nr.targetId, team_id: teamId,
+                apa: m.apa || null, full_name: m.full_name, position: i + 1, updated_at: now })),
+              { 'Prefer': 'return=minimal' });
+          }
+        } catch (rerr) {
+          try {
+            if (snapshot.length) await sb('POST', 'next_reg_roster',
+              snapshot.map(x => ({ target_session_id: _nr.targetId, team_id: teamId,
+                apa: x.apa || null, full_name: x.full_name, position: x.position, updated_at: now })),
+              { 'Prefer': 'return=minimal' });
+          } catch (e2) { /* best-effort restore */ }
+          throw new Error('roster save failed (previous roster restored): ' + rerr.message);
+        }
+      }
+      wrap.innerHTML = '';
+    } catch (e) { setStatus('edStatus', 'Save failed: ' + e.message, 'err'); return; }
+    await nrLoadTracker();
+    /* after the reload — nrLoadTracker clears nrGridStatus, so the
+       confirmation goes last or it flashes and vanishes. */
+    setStatus('nrGridStatus', '✓ Saved details for ' + esc(teamLabel) + '.', 'ok');
+  }
+  render();
 }
 
 /* Undo an admin-set answer (3.253). Restores the previous status +
@@ -11542,6 +11794,164 @@ function otPollProgress(jobId) {
   };
   tick();
   return () => { stopped = true; };
+}
+
+/* ── Email all in filter (3.263, T1) — send the blast template to every
+   filtered person with an email, quota-gated (BLOCKS when the not-yet-
+   sent count exceeds the remaining Gmail quota — user's locked choice),
+   canary 3-then-confirm, skip-already-sent via slate.outreach_email_log
+   keyed on the campaign + env-suffixed kind (so a preprod test can never
+   suppress a prod send). Per-person send through GAS outreach_email_send;
+   preprod mails the operator only. Change the campaign key to re-blast a
+   new message to everyone. ── */
+/* Send-test (3.264) — mail the CURRENT editor template to the operator
+   inbox, filled with a real filtered candidate's values, so the operator
+   can preview the HTML formatting AND confirm the variables substitute.
+   Uses the outreach_email_send test_to path (forced operator inbox). */
+async function otBlastSendTest() {
+  const st = document.getElementById('otBlastTestStatus');
+  const subjEl = document.getElementById('otTplBlastSubject');
+  const bodyEl = document.getElementById('otTplBlastBody');
+  if (!subjEl || !bodyEl || !st) return;
+  const subjectTpl = subjEl.value.trim();
+  const bodyTpl = bodyEl.value.trim();
+  if (!subjectTpl || !bodyTpl) { st.textContent = 'Add a subject and body first.'; return; }
+  const sample = otFilteredCandidates().visible.find(c => String(c.email || '').trim() && c.member_number)
+    || { first_name: 'Sample', last_name: 'Player', nickname: '', member_number: '00000000', email: '', city: '', county: '', state: '' };
+  st.textContent = 'Sending test to your inbox…';
+  try {
+    const res = await nrGasJson({ action: 'outreach_email_send', admin_key: SB_KEY,
+      test_to: 'southportlandmetroapa@gmail.com',
+      subject: otSubstitute(subjectTpl, sample),
+      html_body: otSubstitute(bodyTpl, sample),
+      is_preprod: IS_PREPROD });
+    st.textContent = res && res.ok
+      ? '✓ Test sent to your inbox, filled with ' + (sample.first_name || 'the sample') + '’s info — check the formatting + variables.'
+      : 'Test failed: ' + ((res && res.error) || 'unknown');
+  } catch (e) { st.textContent = 'Test failed: ' + e.message; }
+}
+function otBlastKind() { return IS_PREPROD ? 'email_preprod' : 'email'; }
+async function otBlastAll() {
+  const stat = document.getElementById('otStatusLine');
+  const blast = _otTemplates.blast || {};
+  const subjectTpl = (blast.subject || '').trim();
+  const bodyTpl = (blast.body || '').trim();
+  if (!subjectTpl || !bodyTpl) { stat.textContent = 'Set the Email blast template first — Templates → Email blast.'; return; }
+  const campaign = (blast.campaign_key || '').trim() || 'outreach-blast';
+  const people = otFilteredCandidates().visible.filter(c => String(c.email || '').trim() && c.member_number);
+  if (!people.length) { stat.textContent = 'No filtered people with an email on file.'; return; }
+  stat.textContent = 'Checking who already got this campaign…';
+  let sentSet = new Set();
+  try {
+    const stamps = await sb('GET', 'outreach_email_log?campaign_key=eq.' + encodeURIComponent(campaign)
+      + '&kind=eq.' + otBlastKind() + '&select=member_number', null, { 'Accept-Profile': 'slate' });
+    sentSet = new Set((stamps || []).map(s => s.member_number));
+  } catch (e) { /* treat as none-sent if the read fails */ }
+  const toSend = people.filter(c => !sentSet.has(c.member_number));
+  if (!toSend.length) { stat.textContent = '✓ Everyone in this filter already got the “' + campaign + '” blast.'; return; }
+  let remaining = null;
+  try {
+    const q = await nrGasJson({ action: 'mailer_quota', admin_key: SB_KEY });
+    if (q && q.ok) remaining = Number(q.remaining);
+  } catch (e) { /* unknown */ }
+  if (remaining == null || isNaN(remaining)) { stat.textContent = 'Could not check the Gmail quota — try again.'; return; }
+  if (toSend.length > remaining) {
+    await nrModal({
+      title: 'Won’t fit in today’s quota',
+      body: '<strong>' + toSend.length + '</strong> to email, but only <strong>' + remaining + '</strong> Gmail send'
+        + (remaining === 1 ? '' : 's') + ' left today. Narrow the filter to ' + remaining + ' or fewer, or come back tomorrow — '
+        + 'already-emailed people are skipped, so a resume never double-sends.',
+      buttons: [{ label: 'OK', value: null, primary: true }]
+    });
+    stat.textContent = 'Blocked — ' + toSend.length + ' to send · ' + remaining + ' quota left. Narrow the filter.';
+    return;
+  }
+  const start = await nrModal({
+    title: 'Email ' + toSend.length + ' filtered player' + (toSend.length === 1 ? '' : 's') + '?',
+    body: 'Campaign “' + esc(campaign) + '”. Fits: ' + toSend.length + ' to send · ' + remaining + ' quota left today'
+      + (sentSet.size ? ' · ' + sentSet.size + ' already done, skipped' : '') + '.'
+      + (IS_PREPROD ? ' PREPROD: everything goes to your inbox only.' : '')
+      + (toSend.length > 3 ? ' The first 3 go out as a canary, then you confirm the rest.' : ''),
+    buttons: [{ label: toSend.length > 3 ? 'Send canary — first 3' : 'Send', value: 'go', primary: true },
+              { label: 'Cancel', value: null }]
+  });
+  if (!start) return;
+  window.slateBulkBusy = true;
+  let sent = 0; const failed = [];
+  for (let i = 0; i < toSend.length; i++) {
+    if (i === 3 && toSend.length > 3) {
+      const cont = await nrModal({
+        title: 'Canary done — ' + sent + ' sent' + (failed.length ? ', ' + failed.length + ' failed' : ''),
+        body: (IS_PREPROD ? 'Check your inbox for the three test emails.' : 'Spot-check delivery.')
+          + ' Continue with the remaining ' + (toSend.length - 3) + '?',
+        buttons: [{ label: 'Send the rest', value: 'go', primary: true }, { label: 'Stop here', value: null }]
+      });
+      if (!cont) break;
+    }
+    const c = toSend[i];
+    stat.textContent = 'Emailing ' + (i + 1) + '/' + toSend.length + '…';
+    const subject = otSubstitute(subjectTpl, c);
+    const htmlBody = otSubstitute(bodyTpl, c); /* body is already HTML (3.264 rich editor) */
+    try {
+      const res = await nrGasJson({ action: 'outreach_email_send', admin_key: SB_KEY,
+        member_number: c.member_number, subject: subject, html_body: htmlBody, is_preprod: IS_PREPROD });
+      if (res && res.ok) {
+        sent++;
+        await sb('POST', 'outreach_email_log?on_conflict=campaign_key,member_number,kind',
+          { campaign_key: campaign, member_number: c.member_number, kind: otBlastKind() },
+          { 'Accept-Profile': 'slate', 'Content-Profile': 'slate', 'Prefer': 'resolution=merge-duplicates,return=minimal' });
+      } else { failed.push(c.member_number + ' — ' + ((res && res.error) || 'unknown')); }
+    } catch (e) { failed.push(c.member_number + ' — ' + e.message); }
+  }
+  window.slateBulkBusy = false;
+  stat.textContent = '✓ Emailed ' + sent + ' of ' + toSend.length
+    + (failed.length ? ' · FAILED ' + failed.length + ': ' + failed.slice(0, 2).join('; ') + (failed.length > 2 ? ' …' : '') : '') + '.';
+}
+
+/* Copy every email in the current filtered list (3.262). Same
+   otFilteredCandidates().visible set the bulk-add uses, so it's exactly
+   what the list shows; de-duplicated case-insensitively (first-seen
+   casing kept), comma-joined for a To/BCC paste. Clipboard only. */
+function otCopyFilteredEmails() {
+  const stat = document.getElementById('otStatusLine');
+  const people = otFilteredCandidates().visible;
+  const seen = new Set();
+  const emails = [];
+  let none = 0;
+  for (const c of people) {
+    const em = String(c.email || '').trim();
+    if (!em) { none++; continue; }
+    const k = em.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k); emails.push(em);
+  }
+  if (!emails.length) { stat.textContent = 'No emails in the filtered list.'; return; }
+  const text = emails.join(', ');
+  const tail = (none ? ' · ' + none + ' had none on file' : '') + '.';
+  const done = () => { stat.textContent = '✓ Copied ' + emails.length + ' email' + (emails.length === 1 ? '' : 's') + tail; };
+  const fallback = () => {
+    otCopyFallbackModal(text, emails.length);
+    stat.textContent = emails.length + ' email' + (emails.length === 1 ? '' : 's') + ' ready — copy from the box' + tail;
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done).catch(fallback);
+  } else { fallback(); }
+}
+/* Fallback when the async Clipboard API is blocked (lost focus, denied
+   permission, non-secure context) — the emails go into a selectable box
+   so the operator can always copy manually. */
+function otCopyFallbackModal(text, count) {
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(10,20,40,0.55);z-index:9998;display:flex;align-items:center;justify-content:center;padding:20px';
+  ov.innerHTML = '<div style="background:#fff;border-radius:12px;padding:20px;max-width:560px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.35)">'
+    + '<div style="font-weight:800;margin-bottom:6px">' + count + ' email' + (count === 1 ? '' : 's') + ' — select all (Ctrl/Cmd-A) and copy</div>'
+    + '<textarea id="otCopyFallbackTa" readonly style="width:100%;min-height:160px;font-size:0.82rem"></textarea>'
+    + '<div style="display:flex;justify-content:flex-end;margin-top:10px"><button type="button" class="btn btn-primary btn-sm" data-otcpclose>Done</button></div>'
+    + '</div>';
+  document.body.appendChild(ov);
+  const ta = ov.querySelector('#otCopyFallbackTa');
+  ta.value = text; ta.focus(); ta.select();
+  ov.querySelector('[data-otcpclose]').onclick = () => ov.remove();
 }
 
 /* ── Bulk add: every currently-filtered Outreach person (3.185) ───────
@@ -17775,6 +18185,8 @@ async function otInit() {
 
   /* Bulk add-to-contacts (3.185) — operates on the current filtered list. */
   document.getElementById('otAddAllBtn').addEventListener('click', otAddAllContacts);
+  document.getElementById('otCopyEmailsBtn').addEventListener('click', otCopyFilteredEmails);
+  document.getElementById('otBlastBtn').addEventListener('click', otBlastAll);
 
   /* Undo button + Ctrl/⌘-Z hotkey. Hotkey fires only when the Outreach
      tab is the active tab — otherwise we'd hijack normal Ctrl-Z in
@@ -18782,7 +19194,7 @@ function otFmtLastAction(s) {
      {last_played_either}     — most recent of the two (raw MM/DD/YY)
    Unknown {variables} are left as-is so the operator notices typos.
    ════════════════════════════════════════════════════════════════════════ */
-const _otTemplates = { text: { body: '' }, email: { subject: '', body: '' } };
+const _otTemplates = { text: { body: '' }, email: { subject: '', body: '' }, blast: { subject: '', body: '', campaign_key: '' } };
 
 const OT_TEMPLATE_VARS = [
   'first_name','last_name','nickname','member_number',
@@ -18799,6 +19211,7 @@ async function otLoadTemplates() {
     for (const r of (rows || [])) {
       if (r.kind === 'text')  _otTemplates.text  = { body: r.body || '' };
       if (r.kind === 'email') _otTemplates.email = { subject: r.subject || '', body: r.body || '' };
+      if (r.kind === 'outreach_blast') _otTemplates.blast = { subject: r.subject || '', body: r.body || '', campaign_key: r.campaign_key || '' };
     }
   } catch (e) { console.error('templates load failed', e); }
 }
@@ -18870,6 +19283,7 @@ function otOpenTemplateEditor() {
       <div style="display:flex; gap:4px; border-bottom:2px solid var(--border); margin-bottom:14px;">
         <button type="button" class="ot-tpl-tab active" data-tab="text"  style="padding:8px 16px; background:none; border:0; border-bottom:3px solid transparent; font-weight:700; cursor:pointer; font-size:0.92rem;">💬 Text</button>
         <button type="button" class="ot-tpl-tab" data-tab="email" style="padding:8px 16px; background:none; border:0; border-bottom:3px solid transparent; font-weight:700; cursor:pointer; font-size:0.92rem;">📧 Email</button>
+        <button type="button" class="ot-tpl-tab" data-tab="blast" style="padding:8px 16px; background:none; border:0; border-bottom:3px solid transparent; font-weight:700; cursor:pointer; font-size:0.92rem;">📨 Email blast</button>
       </div>
       <div id="otTplTextPane">
         <label class="ot-prefs-label" style="display:block; margin-bottom:4px">Body</label>
@@ -18880,6 +19294,21 @@ function otOpenTemplateEditor() {
         <input type="text" id="otTplEmailSubject" style="width:100%; padding:8px 12px; border:1px solid var(--border); border-radius:6px; font-family:inherit; font-size:0.92rem; margin-bottom:10px;" value="${esc(_otTemplates.email.subject || '')}">
         <label class="ot-prefs-label" style="display:block; margin-bottom:4px">Body</label>
         <textarea id="otTplEmailBody" rows="10" style="width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:6px; font-family:inherit; font-size:0.92rem;">${esc(_otTemplates.email.body || '')}</textarea>
+      </div>
+      <div id="otTplBlastPane" style="display:none">
+        <div class="hint" style="margin-bottom:8px">The <strong>Email all in filter</strong> button sends THIS template — separate from the per-card email above. Paste or write <strong>raw HTML</strong> for advanced formatting — the preview below shows exactly what recipients see. Click a variable to insert it, then <strong>Send test email to me</strong> to confirm it fills in.</div>
+        <label class="ot-prefs-label" style="display:block; margin-bottom:4px">Subject</label>
+        <input type="text" id="otTplBlastSubject" style="width:100%; padding:8px 12px; border:1px solid var(--border); border-radius:6px; font-family:inherit; font-size:0.92rem; margin-bottom:10px;" value="${esc(_otTemplates.blast.subject || '')}">
+        <label class="ot-prefs-label" style="display:block; margin-bottom:4px">Body <span class="hint" style="font-weight:400">— paste or write raw HTML; the live preview below renders it.</span></label>
+        <textarea id="otTplBlastBody" rows="12" style="width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:6px; font-family:ui-monospace, SFMono-Regular, monospace; font-size:0.82rem;">${esc(_otTemplates.blast.body || '')}</textarea>
+        <label class="ot-prefs-label" style="display:block; margin:10px 0 4px">Live preview</label>
+        <div id="otTplBlastPreview" style="padding:10px 12px; border:1px solid var(--border); border-radius:6px; background:#fff; min-height:60px; font-size:0.9rem; overflow:auto"></div>
+        <label class="ot-prefs-label" style="display:block; margin:10px 0 4px">Campaign key <span class="hint" style="font-weight:400">— change this to start a fresh blast that reaches everyone again; keep it the same to skip anyone already emailed.</span></label>
+        <input type="text" id="otTplBlastCampaign" style="width:100%; padding:8px 12px; border:1px solid var(--border); border-radius:6px; font-family:ui-monospace, monospace; font-size:0.88rem;" placeholder="e.g. fall-2026-comeback" value="${esc(_otTemplates.blast.campaign_key || '')}">
+        <div style="margin-top:10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap">
+          <button type="button" class="btn btn-outline btn-sm" id="otBlastTestBtn">&#9993;&#65039; Send test email to me</button>
+          <span class="hint" id="otBlastTestStatus" style="font-size:0.78rem"></span>
+        </div>
       </div>
       <div style="margin-top:12px; padding:10px; background:#f9fafb; border:1px solid var(--border); border-radius:6px;">
         <div class="ot-prefs-label" style="display:block; margin-bottom:6px">Available variables — click to insert</div>
@@ -18892,6 +19321,21 @@ function otOpenTemplateEditor() {
       </div>
     </div>`;
   document.body.appendChild(back);
+  /* 3.265: blast body is a raw-HTML textarea with a live preview — the
+     operator writes or pastes real HTML (e.g. a ChatGPT-authored email)
+     and it's sent verbatim. (3.264 used a contenteditable, which ESCAPED
+     pasted HTML source so the tags arrived as literal text in the mail.) */
+  const otBlastBodyTa = document.getElementById('otTplBlastBody');
+  const otBlastPreview = document.getElementById('otTplBlastPreview');
+  const otRenderBlastPreview = () => {
+    if (!otBlastPreview) return;
+    otBlastPreview.innerHTML = (otBlastBodyTa && otBlastBodyTa.value.trim())
+      ? otBlastBodyTa.value
+      : '<span style="color:#9ca3af">Preview appears here as you type…</span>';
+  };
+  if (otBlastBodyTa) { otBlastBodyTa.addEventListener('input', otRenderBlastPreview); otRenderBlastPreview(); }
+  const otBlastTestBtn = document.getElementById('otBlastTestBtn');
+  if (otBlastTestBtn) otBlastTestBtn.addEventListener('click', otBlastSendTest);
   const close = () => back.remove();
   document.getElementById('otTplClose').addEventListener('click', close);
   document.getElementById('otTplCancel').addEventListener('click', close);
@@ -18907,26 +19351,38 @@ function otOpenTemplateEditor() {
       });
       document.getElementById('otTplTextPane').style.display  = btn.dataset.tab === 'text'  ? '' : 'none';
       document.getElementById('otTplEmailPane').style.display = btn.dataset.tab === 'email' ? '' : 'none';
+      document.getElementById('otTplBlastPane').style.display = btn.dataset.tab === 'blast' ? '' : 'none';
     });
   });
   /* Default-activate first tab */
   back.querySelector('.ot-tpl-tab.active').click();
 
-  /* Variable pill insertion — drops {var} at the cursor of whichever
-     textarea is currently focused (or the active tab's body). */
+  /* Variable pill insertion (3.264) — remembers the last editable the
+     operator touched (subject input, a body textarea, or the blast HTML
+     editor) and drops {var} at its caret; mousedown-preventDefault keeps
+     the caret from moving when a pill is clicked. The old version always
+     resolved the FIRST tab and only handled textareas, so it silently
+     inserted into the hidden text body — nothing appeared to happen. */
+  let otTplLastField = null;
+  back.querySelectorAll('input[type=text], textarea').forEach(el =>
+    el.addEventListener('focus', () => { otTplLastField = el; }));
   back.querySelectorAll('[data-var]').forEach(p => {
+    p.addEventListener('mousedown', e => e.preventDefault());
     p.addEventListener('click', () => {
-      const activeTab = back.querySelector('.ot-tpl-tab[data-tab]').dataset.tab;
-      const focused = document.activeElement;
-      const target = (focused && focused.tagName === 'TEXTAREA') ? focused
-        : (activeTab === 'text' ? document.getElementById('otTplTextBody') : document.getElementById('otTplEmailBody'));
-      if (!target) return;
       const insert = '{' + p.dataset.var + '}';
+      let target = otTplLastField;
+      if (!target || !back.contains(target)) {
+        const at = back.querySelector('.ot-tpl-tab.active');
+        const tab = at ? at.dataset.tab : 'text';
+        target = document.getElementById(tab === 'blast' ? 'otTplBlastBody' : tab === 'email' ? 'otTplEmailBody' : 'otTplTextBody');
+      }
+      if (!target) return;
       const start = target.selectionStart ?? target.value.length;
       const end   = target.selectionEnd   ?? target.value.length;
       target.value = target.value.slice(0, start) + insert + target.value.slice(end);
       target.focus();
       target.setSelectionRange(start + insert.length, start + insert.length);
+      target.dispatchEvent(new Event('input')); /* refresh the blast preview */
     });
   });
 
@@ -18944,8 +19400,15 @@ function otOpenTemplateEditor() {
       await sb('POST', 'outreach_templates?on_conflict=kind',
         { kind: 'email', subject: emailSubject, body: emailBody, updated_at: new Date().toISOString() },
         { 'Accept-Profile': 'slate', 'Content-Profile': 'slate', 'Prefer': 'resolution=merge-duplicates,return=minimal' });
+      const blastSubject = (document.getElementById('otTplBlastSubject') || {}).value || '';
+      const blastBody = (document.getElementById('otTplBlastBody') || {}).value || '';
+      const blastCampaign = ((document.getElementById('otTplBlastCampaign') || {}).value || '').trim();
+      await sb('POST', 'outreach_templates?on_conflict=kind',
+        { kind: 'outreach_blast', subject: blastSubject, body: blastBody, campaign_key: blastCampaign || null, updated_at: new Date().toISOString() },
+        { 'Accept-Profile': 'slate', 'Content-Profile': 'slate', 'Prefer': 'resolution=merge-duplicates,return=minimal' });
       _otTemplates.text = { body: textBody };
       _otTemplates.email = { subject: emailSubject, body: emailBody };
+      _otTemplates.blast = { subject: blastSubject, body: blastBody, campaign_key: blastCampaign };
       /* 3.98: Switchboard pre-bakes sms: URLs into <a href> tags at
          render time (per-team Text Captains / Co-Caps / Team buttons).
          Without re-rendering, the old template body stays baked into
