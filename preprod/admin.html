@@ -3556,7 +3556,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.256';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.257';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -6918,9 +6918,12 @@ function plOrDraw(poll) {
       + (em ? '' : '<span style="color:#b91c1c;font-size:0.72rem;font-weight:700">NO EMAIL</span>')
       + (_plOr.stamps.get(m.apa + '|' + plOrKind('email')) ? '<span style="background:#e8f0fe;color:#0031a1;border-radius:999px;padding:1px 8px;font-size:0.7rem;font-weight:700">EMAILED</span>' : '')
       + (_plOr.stamps.get(m.apa + '|' + plOrKind('text')) ? '<span style="background:#ede9fe;color:#6d28d9;border-radius:999px;padding:1px 8px;font-size:0.7rem;font-weight:700">TEXTED</span>' : '')
+      + (em
+          ? '<a href="#" data-ploremail1="' + m.apa + '" style="margin-left:auto;font-size:0.78rem">&#128231; email</a>'
+          : '<span style="margin-left:auto"></span>')
       + (digits
-          ? '<a href="' + otBuildSmsUrl(digits, smsBody) + '" data-plortext="' + m.apa + '" style="margin-left:auto;font-size:0.78rem">&#128172; text</a>'
-          : '<span class="hint" style="margin-left:auto;font-size:0.72rem">no phone</span>')
+          ? '<a href="' + otBuildSmsUrl(digits, smsBody) + '" data-plortext="' + m.apa + '" style="font-size:0.78rem">&#128172; text</a>'
+          : '<span class="hint" style="font-size:0.72rem">no phone</span>')
       + '<a href="#" data-plorrec="' + m.apa + '" style="font-size:0.78rem">&#9998; record</a>'
       + '</div>';
   }).join('');
@@ -6940,9 +6943,42 @@ function plOrDraw(poll) {
     a.addEventListener('click', () => plOrStampText(poll, a.dataset.plortext)));
   box.querySelectorAll('a[data-plorrec]').forEach(a =>
     a.addEventListener('click', ev => { ev.preventDefault(); plOrRecord(poll, a.dataset.plorrec); }));
+  box.querySelectorAll('a[data-ploremail1]').forEach(a =>
+    a.addEventListener('click', ev => { ev.preventDefault(); plOrEmailOne(poll, a.dataset.ploremail1); }));
   const eb = box.querySelector('[data-ploremail]'); if (eb) eb.onclick = () => plOrEmail(poll);
   const tb = box.querySelector('[data-plortest]'); if (tb) tb.onclick = () => plOrTest(poll);
 }
+/* One deliberate email to one player (3.257) — same template, magic
+   link, and stamp as the bulk flow, no canary (the click IS the
+   decision; opt-out per-row email precedent). Preprod mails the
+   operator only, as always. */
+async function plOrEmailOne(poll, apa) {
+  const x = poll.extras || {};
+  if (!x.email_subject || !x.email_body) { setStatus('plStatus', 'Set the invite subject + body in the poll editor first.', 'err'); return; }
+  const m = _plOr.all.find(p => p.apa === apa);
+  const p = _plOr.players.get(apa) || {};
+  if (!String(p.email || '').trim()) { setStatus('plStatus', 'No email on file for ' + (m ? m.name : apa) + '.', 'err'); return; }
+  const tok = _plOr.tokens && _plOr.tokens.get(apa);
+  const mv = { link: tok ? PL_APP_URL + '?t=' + tok : PL_APP_URL + '?p=' + poll.slug, poll_title: poll.title };
+  setStatus('plStatus', 'Emailing ' + (m ? m.name : apa) + '…', '');
+  try {
+    const res = await nrGasJson({ action: 'pulse_email_send', admin_key: SB_KEY,
+      member_number: apa,
+      subject: plOrFill(x.email_subject, mv), html_body: plOrFill(x.email_body, mv),
+      is_preprod: IS_PREPROD });
+    if (res && res.ok) {
+      await sb('POST', 'poll_outreach?on_conflict=poll_id,member_number,kind',
+        [{ poll_id: poll.id, member_number: apa, kind: plOrKind('email') }],
+        { 'Prefer': 'resolution=merge-duplicates,return=minimal' });
+      _plOr.stamps.set(apa + '|' + plOrKind('email'), true);
+      setStatus('plStatus', '✓ Emailed ' + (m ? m.name : apa) + '.', 'ok');
+      plOrDraw(poll);
+    } else {
+      setStatus('plStatus', 'Email failed: ' + ((res && res.error) || 'unknown'), 'err');
+    }
+  } catch (e) { setStatus('plStatus', 'Email failed: ' + e.message, 'err'); }
+}
+
 /* Operator records a player's answer for them (3.256) — same row their
    own vote would write (UPSERT on poll_id+member_number), denormalized
    from the outreach roster, marked extras.recorded_by='admin' so the
