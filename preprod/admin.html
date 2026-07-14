@@ -3555,7 +3555,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.252';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.253';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -6470,12 +6470,18 @@ async function nrLoadTracker() {
                   ? '<div style="font-size:0.74rem">\ud83d\udc65 ' + _nr.capHtml(_nr.capByTeam.get(r.team_id)) + '</div>' : '') + '</td>'
               + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)" class="hint">' + esc(r.format || '') + '</td>'
               + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">' + chip(r.status) + '</td>'
-              + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)" class="hint">' + esc(r.source) + '</td>'
+              + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)" class="hint">' + esc(r.source)
+              + (r.source === 'admin'
+                  ? ' <button type="button" class="btn btn-outline btn-sm" data-trkundo="' + r.team_id + '" style="padding:0 6px;font-size:0.7rem" title="Undo this admin update">&#8630; undo</button>'
+                  : '') + '</td>'
               + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)" class="hint">' + esc(String(r.updated_at || '').slice(0, 16).replace('T', ' ')) + '</td>'
               + '</tr>';
           }).join('')
         + '</table>'
       : '<p class="hint">Nothing tracked yet \u2014 paste a Nexus report above.</p>';
+    document.querySelectorAll('#nrGrid button[data-trkundo]').forEach(b => {
+      b.onclick = () => nrTrkUndo(Number(b.dataset.trkundo));
+    });
     gs.className = 'status-line'; gs.innerHTML = '';
     nrRenderComingBack();
     nrRenderSegments();
@@ -6484,6 +6490,58 @@ async function nrLoadTracker() {
   } catch (e) {
     gs.className = 'status-line shown err'; gs.textContent = 'Tracker load failed: ' + e.message;
   }
+}
+
+/* Undo an admin-set answer (3.253). Restores the previous status +
+   source from the newest log row (which must itself be source=admin —
+   anything newer means the admin update was already superseded). When
+   the prior source was rerack, the original answerer's attribution is
+   restored from the newest pre-admin rerack log row; restoring to
+   nexus nulls attribution. The undo is logged with note='undo' and
+   never sends email. */
+async function nrTrkUndo(teamId) {
+  const t = _nr.teams.concat(_nr.teamsN1).find(x => x.id === teamId);
+  const logs = await sb('GET', 'next_reg_log?team_id=eq.' + teamId
+    + '&target_session_id=eq.' + _nr.targetId
+    + '&order=id.desc&limit=8&select=old_status,new_status,old_source,source,actor_apa,actor_name,note');
+  const ev = (logs || [])[0];
+  if (!ev || ev.source !== 'admin') {
+    setStatus('nrGridStatus', 'Nothing to undo — the latest change was not an admin update.', 'err');
+    return;
+  }
+  const backStatus = ev.old_status || 'unanswered';
+  const backSource = ev.old_source || 'nexus';
+  const lblW = s => s === 'playing' ? 'PLAYING' : s === 'not_playing' ? 'NOT PLAYING'
+    : s === 'undecided' ? 'STILL DECIDING' : 'UNANSWERED';
+  const go = await nrModal({
+    title: 'Undo the admin update for ' + esc(t ? t.team_name || '' : '#' + teamId) + '?',
+    body: 'Restores ' + lblW(backStatus) + ' from ' + esc(backSource) + '. No email goes out.',
+    buttons: [{ label: 'Undo it', value: 'go', primary: true }, { label: 'Cancel', value: null }]
+  });
+  if (!go) return;
+  let byApa = null, byName = null;
+  if (backSource === 'rerack') {
+    const prev = (logs || []).slice(1).find(x => x.source === 'rerack');
+    if (prev) { byApa = prev.actor_apa || null; byName = prev.actor_name || null; }
+  }
+  const now = new Date().toISOString();
+  const patch = { target_session_id: _nr.targetId, team_id: teamId,
+    status: backStatus, source: backSource, prior_nexus_status: null,
+    answered_by_apa: byApa, answered_by_name: byName, updated_at: now };
+  if (backSource === 'nexus') patch.answered_at = null;
+  try {
+    await sb('POST', 'next_reg?on_conflict=target_session_id,team_id', [patch],
+      { 'Prefer': 'resolution=merge-duplicates,return=minimal' });
+    await sb('POST', 'next_reg_log',
+      [{ target_session_id: _nr.targetId, team_id: teamId,
+         old_status: ev.new_status, new_status: backStatus,
+         actor_apa: null, actor_name: 'Michelle & Paul Soldan',
+         source: 'admin', old_source: 'admin', note: 'undo' }],
+      { 'Prefer': 'return=minimal' });
+    setStatus('nrGridStatus', '✓ Undone — back to ' + lblW(backStatus) + ' from ' + esc(backSource) + '.', 'ok');
+  } catch (e) { setStatus('nrGridStatus', 'Undo failed: ' + e.message, 'err'); }
+  await nrLoadTracker();
+  await nrLoadOutreach();
 }
 
 /* ── PulseCheck results (brief 2026-07-13-pulsecheck.md) ──────────
