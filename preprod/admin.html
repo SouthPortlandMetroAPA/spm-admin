@@ -3561,7 +3561,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.264';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.265';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11814,7 +11814,7 @@ async function otBlastSendTest() {
   const bodyEl = document.getElementById('otTplBlastBody');
   if (!subjEl || !bodyEl || !st) return;
   const subjectTpl = subjEl.value.trim();
-  const bodyTpl = bodyEl.innerHTML.trim();
+  const bodyTpl = bodyEl.value.trim();
   if (!subjectTpl || !bodyTpl) { st.textContent = 'Add a subject and body first.'; return; }
   const sample = otFilteredCandidates().visible.find(c => String(c.email || '').trim() && c.member_number)
     || { first_name: 'Sample', last_name: 'Player', nickname: '', member_number: '00000000', email: '', city: '', county: '', state: '' };
@@ -19296,19 +19296,13 @@ function otOpenTemplateEditor() {
         <textarea id="otTplEmailBody" rows="10" style="width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:6px; font-family:inherit; font-size:0.92rem;">${esc(_otTemplates.email.body || '')}</textarea>
       </div>
       <div id="otTplBlastPane" style="display:none">
-        <div class="hint" style="margin-bottom:8px">The <strong>Email all in filter</strong> button sends THIS template — separate from the per-card email above. It's a real HTML email: format with the toolbar, click a variable to insert it, and hit <strong>Send test email to me</strong> to preview it filled in.</div>
+        <div class="hint" style="margin-bottom:8px">The <strong>Email all in filter</strong> button sends THIS template — separate from the per-card email above. Paste or write <strong>raw HTML</strong> for advanced formatting — the preview below shows exactly what recipients see. Click a variable to insert it, then <strong>Send test email to me</strong> to confirm it fills in.</div>
         <label class="ot-prefs-label" style="display:block; margin-bottom:4px">Subject</label>
         <input type="text" id="otTplBlastSubject" style="width:100%; padding:8px 12px; border:1px solid var(--border); border-radius:6px; font-family:inherit; font-size:0.92rem; margin-bottom:10px;" value="${esc(_otTemplates.blast.subject || '')}">
-        <label class="ot-prefs-label" style="display:block; margin-bottom:4px">Body</label>
-        <div id="otBlastToolbar" style="display:flex; gap:4px; flex-wrap:wrap; margin-bottom:4px">
-          <button type="button" data-otfmt="bold" title="Bold" style="padding:3px 9px; font-weight:700; background:#f3f4f6; border:1px solid var(--border); border-radius:6px; cursor:pointer">B</button>
-          <button type="button" data-otfmt="italic" title="Italic" style="padding:3px 9px; font-style:italic; background:#f3f4f6; border:1px solid var(--border); border-radius:6px; cursor:pointer">I</button>
-          <button type="button" data-otfmt="underline" title="Underline" style="padding:3px 9px; text-decoration:underline; background:#f3f4f6; border:1px solid var(--border); border-radius:6px; cursor:pointer">U</button>
-          <button type="button" data-otfmt="insertUnorderedList" title="Bulleted list" style="padding:3px 9px; background:#f3f4f6; border:1px solid var(--border); border-radius:6px; cursor:pointer">&bull; List</button>
-          <button type="button" data-otfmt="createLink" title="Insert link" style="padding:3px 9px; background:#f3f4f6; border:1px solid var(--border); border-radius:6px; cursor:pointer">&#128279; Link</button>
-          <button type="button" data-otfmt="removeFormat" title="Clear formatting" style="padding:3px 9px; background:#f3f4f6; border:1px solid var(--border); border-radius:6px; cursor:pointer">&#10006; Clear</button>
-        </div>
-        <div id="otTplBlastBody" contenteditable="true" style="min-height:180px; padding:10px 12px; border:1px solid var(--border); border-radius:6px; font-family:inherit; font-size:0.92rem; background:#fff; overflow:auto"></div>
+        <label class="ot-prefs-label" style="display:block; margin-bottom:4px">Body <span class="hint" style="font-weight:400">— paste or write raw HTML; the live preview below renders it.</span></label>
+        <textarea id="otTplBlastBody" rows="12" style="width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:6px; font-family:ui-monospace, SFMono-Regular, monospace; font-size:0.82rem;">${esc(_otTemplates.blast.body || '')}</textarea>
+        <label class="ot-prefs-label" style="display:block; margin:10px 0 4px">Live preview</label>
+        <div id="otTplBlastPreview" style="padding:10px 12px; border:1px solid var(--border); border-radius:6px; background:#fff; min-height:60px; font-size:0.9rem; overflow:auto"></div>
         <label class="ot-prefs-label" style="display:block; margin:10px 0 4px">Campaign key <span class="hint" style="font-weight:400">— change this to start a fresh blast that reaches everyone again; keep it the same to skip anyone already emailed.</span></label>
         <input type="text" id="otTplBlastCampaign" style="width:100%; padding:8px 12px; border:1px solid var(--border); border-radius:6px; font-family:ui-monospace, monospace; font-size:0.88rem;" placeholder="e.g. fall-2026-comeback" value="${esc(_otTemplates.blast.campaign_key || '')}">
         <div style="margin-top:10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap">
@@ -19327,31 +19321,19 @@ function otOpenTemplateEditor() {
       </div>
     </div>`;
   document.body.appendChild(back);
-  /* 3.264: the blast body is a contenteditable HTML editor — populate it
-     AFTER mount (avoids template-literal injection from saved HTML), wire
-     the formatting toolbar, and remember the last caret so a toolbar/var
-     click applies where the operator was typing. */
-  let otTplLastRange = null;
-  const otBlastEd = document.getElementById('otTplBlastBody');
-  if (otBlastEd) {
-    otBlastEd.innerHTML = _otTemplates.blast.body || '';
-    document.addEventListener('selectionchange', () => {
-      const sel = window.getSelection();
-      if (sel && sel.rangeCount && otBlastEd.contains(sel.anchorNode)) otTplLastRange = sel.getRangeAt(0).cloneRange();
-    });
-  }
-  back.querySelectorAll('[data-otfmt]').forEach(b => {
-    b.addEventListener('mousedown', e => e.preventDefault());
-    b.addEventListener('click', () => {
-      if (!otBlastEd) return;
-      otBlastEd.focus();
-      if (otTplLastRange) { const s = window.getSelection(); s.removeAllRanges(); s.addRange(otTplLastRange); }
-      const cmd = b.dataset.otfmt;
-      if (cmd === 'createLink') { const url = prompt('Link URL:', 'https://'); if (url) document.execCommand('createLink', false, url); }
-      else document.execCommand(cmd, false, null);
-      const s2 = window.getSelection(); otTplLastRange = s2.rangeCount ? s2.getRangeAt(0).cloneRange() : null;
-    });
-  });
+  /* 3.265: blast body is a raw-HTML textarea with a live preview — the
+     operator writes or pastes real HTML (e.g. a ChatGPT-authored email)
+     and it's sent verbatim. (3.264 used a contenteditable, which ESCAPED
+     pasted HTML source so the tags arrived as literal text in the mail.) */
+  const otBlastBodyTa = document.getElementById('otTplBlastBody');
+  const otBlastPreview = document.getElementById('otTplBlastPreview');
+  const otRenderBlastPreview = () => {
+    if (!otBlastPreview) return;
+    otBlastPreview.innerHTML = (otBlastBodyTa && otBlastBodyTa.value.trim())
+      ? otBlastBodyTa.value
+      : '<span style="color:#9ca3af">Preview appears here as you type…</span>';
+  };
+  if (otBlastBodyTa) { otBlastBodyTa.addEventListener('input', otRenderBlastPreview); otRenderBlastPreview(); }
   const otBlastTestBtn = document.getElementById('otBlastTestBtn');
   if (otBlastTestBtn) otBlastTestBtn.addEventListener('click', otBlastSendTest);
   const close = () => back.remove();
@@ -19382,7 +19364,7 @@ function otOpenTemplateEditor() {
      resolved the FIRST tab and only handled textareas, so it silently
      inserted into the hidden text body — nothing appeared to happen. */
   let otTplLastField = null;
-  back.querySelectorAll('input[type=text], textarea, [contenteditable]').forEach(el =>
+  back.querySelectorAll('input[type=text], textarea').forEach(el =>
     el.addEventListener('focus', () => { otTplLastField = el; }));
   back.querySelectorAll('[data-var]').forEach(p => {
     p.addEventListener('mousedown', e => e.preventDefault());
@@ -19395,25 +19377,12 @@ function otOpenTemplateEditor() {
         target = document.getElementById(tab === 'blast' ? 'otTplBlastBody' : tab === 'email' ? 'otTplEmailBody' : 'otTplTextBody');
       }
       if (!target) return;
-      if (target.isContentEditable) {
-        target.focus();
-        const sel = window.getSelection();
-        let range = (otTplLastRange && target.contains(otTplLastRange.startContainer)) ? otTplLastRange
-          : (sel.rangeCount && target.contains(sel.anchorNode)) ? sel.getRangeAt(0) : null;
-        if (!range) { range = document.createRange(); range.selectNodeContents(target); range.collapse(false); }
-        range.deleteContents();
-        const node = document.createTextNode(insert);
-        range.insertNode(node);
-        range.setStartAfter(node); range.setEndAfter(node);
-        sel.removeAllRanges(); sel.addRange(range);
-        otTplLastRange = range.cloneRange();
-      } else {
-        const start = target.selectionStart ?? target.value.length;
-        const end   = target.selectionEnd   ?? target.value.length;
-        target.value = target.value.slice(0, start) + insert + target.value.slice(end);
-        target.focus();
-        target.setSelectionRange(start + insert.length, start + insert.length);
-      }
+      const start = target.selectionStart ?? target.value.length;
+      const end   = target.selectionEnd   ?? target.value.length;
+      target.value = target.value.slice(0, start) + insert + target.value.slice(end);
+      target.focus();
+      target.setSelectionRange(start + insert.length, start + insert.length);
+      target.dispatchEvent(new Event('input')); /* refresh the blast preview */
     });
   });
 
@@ -19432,7 +19401,7 @@ function otOpenTemplateEditor() {
         { kind: 'email', subject: emailSubject, body: emailBody, updated_at: new Date().toISOString() },
         { 'Accept-Profile': 'slate', 'Content-Profile': 'slate', 'Prefer': 'resolution=merge-duplicates,return=minimal' });
       const blastSubject = (document.getElementById('otTplBlastSubject') || {}).value || '';
-      const blastBody = (document.getElementById('otTplBlastBody') || {}).innerHTML || '';
+      const blastBody = (document.getElementById('otTplBlastBody') || {}).value || '';
       const blastCampaign = ((document.getElementById('otTplBlastCampaign') || {}).value || '').trim();
       await sb('POST', 'outreach_templates?on_conflict=kind',
         { kind: 'outreach_blast', subject: blastSubject, body: blastBody, campaign_key: blastCampaign || null, updated_at: new Date().toISOString() },
