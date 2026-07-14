@@ -3430,6 +3430,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <h2 style="margin:0">PulseCheck results</h2>
           <select id="plSel"></select>
           <span class="hint" id="plCounts"></span>
+          <a id="plLink" target="_blank" style="font-size:0.8rem;font-weight:700;word-break:break-all"></a>
         </div>
         <div class="status-line" id="plStatus"></div>
         <div id="plTally" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"></div>
@@ -3555,7 +3556,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.253';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.254';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -6584,6 +6585,12 @@ async function plLoad() {
     const mismatch = sum !== (rows || []).length;
     document.getElementById('plCounts').textContent = (rows || []).length + ' responses'
       + (mismatch ? ' \u26a0 TALLY MISMATCH \u2014 sum ' + sum : '');
+    const plLinkEl = document.getElementById('plLink');
+    if (plLinkEl) {
+      const liveUrl = PL_APP_URL + '?p=' + poll.slug;
+      plLinkEl.href = liveUrl;
+      plLinkEl.textContent = liveUrl;
+    }
     document.getElementById('plTally').innerHTML =
       (poll.options || []).map(o =>
         '<span style="background:#e8f0fe;color:#0031a1;border:1px solid #afc6f0;padding:4px 12px;border-radius:999px;font-weight:700;font-size:0.82rem">'
