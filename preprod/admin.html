@@ -3555,7 +3555,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.260';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.261';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -5766,7 +5766,7 @@ function nrIntentRow(r) {
     + (_nr.capByIntent && _nr.capByIntent.has(r.id)
         ? '<div style="font-size:0.82rem;margin-top:2px">\ud83d\udc65 ' + _nr.capHtml(_nr.capByIntent.get(r.id)) + '</div>' : '')
     + (r.note ? '<div class="hint" style="margin-top:2px">' + esc(r.note) + '</div>' : '')
-    + '<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">' + btns + '</div>'
+    + '<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">' + btns + ' <button type="button" class="btn btn-outline btn-sm" data-intentedit="' + r.id + '">✎ edit</button></div>'
     + '</div>';
 }
 function nrRenderIntents() {
@@ -5786,7 +5786,131 @@ function nrRenderIntents() {
   box.querySelectorAll('button[data-intent]').forEach(b => {
     b.onclick = () => nrSetIntentStatus(Number(b.dataset.intent), b.dataset.status);
   });
+  box.querySelectorAll('button[data-intentedit]').forEach(b => {
+    b.onclick = () => nrEditIntent(Number(b.dataset.intentedit));
+  });
 }
+/* Operator edits a new-team intent's info + (Masters/Doubles) roster,
+   on behalf of the requester — these were ReRack-only before (3.261).
+   PATCH next_reg_new for the fields; roster is replace-all on intent_id
+   (team_id stays null per the table's XOR check) with an in-memory
+   snapshot restored on failure. The modal is built once; only the
+   roster sub-list re-renders on add/remove, so no field is ever wiped. */
+function nrEditIntent(id) {
+  const it = (_nr.intents || []).find(x => x.id === id);
+  if (!it) return;
+  const isRoster = /Masters|Doubles/i.test(it.format || '');
+  let roster = (((_nr.capByIntent && _nr.capByIntent.get(id)) || []).slice())
+    .sort((a, b) => a.position - b.position)
+    .map(x => ({ apa: x.apa || '', full_name: x.full_name || '' }));
+  const wrap = document.getElementById('nrModalWrap');
+  function collectRoster() {
+    const rows = [];
+    wrap.querySelectorAll('input[data-ediname]').forEach(inp => {
+      const i = inp.dataset.ediname;
+      const ap = wrap.querySelector('input[data-ediapa="' + i + '"]');
+      rows.push({ apa: (ap ? ap.value : '').trim(), full_name: inp.value.trim() });
+    });
+    return rows;
+  }
+  function rosterRowsHtml() {
+    return roster.map((m, i) =>
+      '<div style="display:flex;gap:6px;margin-bottom:4px">'
+      + '<input data-ediapa="' + i + '" placeholder="APA # (optional)" value="' + esc(m.apa) + '" style="max-width:130px">'
+      + '<input data-ediname="' + i + '" placeholder="Full name" value="' + esc(m.full_name) + '" style="flex:1">'
+      + '<button type="button" class="btn btn-outline btn-sm" data-edidel="' + i + '">&times;</button>'
+      + '</div>').join('');
+  }
+  function drawRoster() {
+    const el = document.getElementById('ediRoster');
+    if (el) el.innerHTML = rosterRowsHtml();
+    wrap.querySelectorAll('button[data-edidel]').forEach(b => b.onclick = () => {
+      roster = collectRoster(); roster.splice(Number(b.dataset.edidel), 1); drawRoster();
+    });
+  }
+  const field = (idAttr, label, val, ph, wide) =>
+    '<label style="display:block;font-size:0.82rem;font-weight:700;margin-top:6px">' + label + '</label>'
+    + (wide
+        ? '<textarea id="' + idAttr + '" class="ehq-paste-box" style="min-height:46px;width:100%" placeholder="' + esc(ph) + '">' + esc(val || '') + '</textarea>'
+        : '<input id="' + idAttr + '" style="width:100%" placeholder="' + esc(ph) + '" value="' + esc(val || '') + '">');
+  wrap.innerHTML = '<div style="position:fixed;inset:0;background:rgba(10,20,40,0.55);z-index:9998;display:flex;align-items:center;justify-content:center;padding:20px">'
+    + '<div style="background:#fff;border-radius:12px;padding:22px;max-width:560px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.35);max-height:88vh;overflow:auto">'
+    + '<div style="font-weight:800;font-size:1.05rem;margin-bottom:2px">Edit new team</div>'
+    + '<div class="hint" style="margin-bottom:6px">On behalf of the requester. Name and format are required.</div>'
+    + field('ediName', 'Contact name', it.contact_name, 'Full name')
+    + field('ediFormat', 'Format', it.format, 'e.g. 8-Ball Open, Masters, 9-Ball Doubles')
+    + '<div style="display:flex;gap:6px;flex-wrap:wrap">'
+    + '<div style="flex:1;min-width:120px">' + field('ediApa', 'APA #', it.contact_apa, 'optional') + '</div>'
+    + '<div style="flex:1;min-width:120px">' + field('ediDay', 'Day of play', it.day_of_play, 'e.g. Tuesday') + '</div>'
+    + '</div>'
+    + '<div style="display:flex;gap:6px;flex-wrap:wrap">'
+    + '<div style="flex:1;min-width:160px">' + field('ediPhone', 'Phone', it.contact_phone, 'optional') + '</div>'
+    + '<div style="flex:1;min-width:160px">' + field('ediEmail', 'Email', it.contact_email, 'optional') + '</div>'
+    + '</div>'
+    + field('ediHost', 'Host location', it.host_location, 'e.g. Rack Em, South Portland')
+    + field('ediPlayers', 'Players needed', it.players_needed, 'e.g. 2 players — an SL3 and an SL5')
+    + field('ediNote', 'Note', it.note, 'Anything else', true)
+    + (isRoster
+        ? '<div style="font-size:0.82rem;font-weight:700;margin-top:10px">Roster <span class="hint" style="font-weight:500">(APA optional; full name required)</span></div>'
+          + '<div id="ediRoster">' + rosterRowsHtml() + '</div>'
+          + '<button type="button" class="btn btn-outline btn-sm" id="ediAdd">+ player</button>'
+        : '')
+    + '<div class="status-line" id="ediStatus" style="margin-top:8px"></div>'
+    + '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px">'
+    + '<button type="button" class="btn btn-primary btn-sm" id="ediSave">Save</button>'
+    + '<button type="button" class="btn btn-outline btn-sm" id="ediCancel">Cancel</button>'
+    + '</div></div></div>';
+  document.getElementById('ediCancel').onclick = () => { wrap.innerHTML = ''; };
+  const add = document.getElementById('ediAdd');
+  if (add) add.onclick = () => { roster = collectRoster(); roster.push({ apa: '', full_name: '' }); drawRoster(); };
+  drawRoster();
+  document.getElementById('ediSave').onclick = async () => {
+    const name = document.getElementById('ediName').value.trim();
+    const format = document.getElementById('ediFormat').value.trim();
+    if (!name || !format) { setStatus('ediStatus', 'Name and format are required.', 'err'); return; }
+    const finalRoster = isRoster ? collectRoster().filter(m => m.full_name) : null;
+    const now = new Date().toISOString();
+    const patch = { contact_name: name, format: format,
+      contact_apa: document.getElementById('ediApa').value.trim() || null,
+      contact_phone: document.getElementById('ediPhone').value.trim() || null,
+      contact_email: document.getElementById('ediEmail').value.trim() || null,
+      day_of_play: document.getElementById('ediDay').value.trim() || null,
+      host_location: document.getElementById('ediHost').value.trim() || null,
+      players_needed: document.getElementById('ediPlayers').value.trim() || null,
+      note: document.getElementById('ediNote').value.trim() || null,
+      updated_at: now };
+    setStatus('ediStatus', 'Saving…', '');
+    try {
+      await sb('PATCH', 'next_reg_new?id=eq.' + id, patch);
+      if (isRoster) {
+        const snapshot = ((_nr.capByIntent && _nr.capByIntent.get(id)) || [])
+          .map(x => ({ apa: x.apa, full_name: x.full_name, position: x.position }));
+        try {
+          await sb('DELETE', 'next_reg_roster?target_session_id=eq.' + _nr.targetId + '&intent_id=eq.' + id);
+          if (finalRoster.length) {
+            await sb('POST', 'next_reg_roster',
+              finalRoster.map((m, i) => ({ target_session_id: _nr.targetId, intent_id: id,
+                apa: m.apa || null, full_name: m.full_name, position: i + 1, updated_at: now })),
+              { 'Prefer': 'return=minimal' });
+          }
+        } catch (rerr) {
+          try {
+            if (snapshot.length) await sb('POST', 'next_reg_roster',
+              snapshot.map(x => ({ target_session_id: _nr.targetId, intent_id: id,
+                apa: x.apa || null, full_name: x.full_name, position: x.position, updated_at: now })),
+              { 'Prefer': 'return=minimal' });
+          } catch (e2) { /* best-effort restore */ }
+          throw new Error('roster save failed (previous roster restored): ' + rerr.message);
+        }
+      }
+      wrap.innerHTML = '';
+    } catch (e) { setStatus('ediStatus', 'Save failed: ' + e.message, 'err'); return; }
+    await nrLoadTracker();
+    await nrLoadIntents();
+    setStatus('nrGridStatus', '✓ Saved new-team info for ' + esc(name) + '.', 'ok');
+  };
+}
+
 async function nrSetIntentStatus(id, status) {
   try {
     await sb('PATCH', 'next_reg_new?id=eq.' + id, { status: status, updated_at: new Date().toISOString() });
