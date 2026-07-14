@@ -3556,7 +3556,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.257';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.258';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -7043,15 +7043,34 @@ async function plOrStampText(poll, apa) {
 async function plOrTest(poll) {
   const x = poll.extras || {};
   if (!x.email_subject || !x.email_body) { setStatus('plStatus', 'Set the invite subject + body in the poll editor first.', 'err'); return; }
-  const link = PL_APP_URL + '?p=' + poll.slug;
-  const vals = { link: link, poll_title: poll.title };
+  /* 3.258: test AS a player — their greeting + their magic link — so the
+     operator can click through the exact auto-login a player would get.
+     Delivery is ALWAYS the operator inbox (GAS forces test recipients);
+     picking a player never emails them. */
+  const whoOpts = [{ value: '', label: 'Generic — plain link, no magic login' }]
+    .concat((_plOr.all || []).map(m => ({ value: m.apa, label: m.name + ' — their magic link' })));
+  const choice = await nrModal({
+    title: 'Send a test to your inbox',
+    body: 'Pick a player to preview their exact email — greeting and magic link — or generic. Always delivered to YOUR inbox, never theirs.',
+    select: { label: 'Test as', options: whoOpts },
+    buttons: [{ label: 'Send test', value: 'go', primary: true }, { label: 'Cancel', value: null }]
+  });
+  if (!choice) return;
+  const apa = choice.selected || null;
+  const m = apa ? (_plOr.all || []).find(p => p.apa === apa) : null;
+  const p = apa ? (_plOr.players.get(apa) || {}) : {};
+  const tok = apa && _plOr.tokens ? _plOr.tokens.get(apa) : null;
+  const vals = { link: tok ? PL_APP_URL + '?t=' + tok : PL_APP_URL + '?p=' + poll.slug, poll_title: poll.title };
+  if (m) vals.first_name = String(p.first_name || '').trim() || String(m.name).split(' ')[0];
   setStatus('plStatus', 'Sending test to your inbox…', '');
   try {
     const res = await nrGasJson({ action: 'pulse_email_send', admin_key: SB_KEY,
       test_to: 'southportlandmetroapa@gmail.com',
       subject: plOrFill(x.email_subject, vals), html_body: plOrFill(x.email_body, vals),
       is_preprod: IS_PREPROD });
-    setStatus('plStatus', res && res.ok ? '✓ Test sent to your inbox.' : 'Test failed: ' + ((res && res.error) || 'unknown'), res && res.ok ? 'ok' : 'err');
+    setStatus('plStatus', res && res.ok
+      ? '✓ Test sent to your inbox' + (m ? ' — as ' + m.name + ' with their magic link.' : '.')
+      : 'Test failed: ' + ((res && res.error) || 'unknown'), res && res.ok ? 'ok' : 'err');
   } catch (e) { setStatus('plStatus', 'Test failed: ' + e.message, 'err'); }
 }
 async function plOrEmail(poll) {
