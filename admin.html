@@ -3421,7 +3421,6 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         <div class="status-line" id="nrGridStatus"></div>
         <div id="nrGrid"></div>
       </details>
-      <div id="nrModalWrap"></div>
     </div>
 
     <div id="tab-polls" class="tab-panel">
@@ -3556,7 +3555,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.258';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.259';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -27384,5 +27383,9 @@ window.hpSaveNewTeam        = hpSaveNewTeam;
 //  document-level click listener threw on an empty <select> and is removed.)
 
 </script>
+<!-- House modal wrap — page level ON PURPOSE (3.259): modals open from
+     any tab; inside a tab panel they inherit display:none when that tab
+     is inactive. -->
+<div id="nrModalWrap"></div>
 </body>
 </html>
