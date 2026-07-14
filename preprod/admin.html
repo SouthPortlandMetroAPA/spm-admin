@@ -3561,7 +3561,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.263';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.264';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11804,6 +11804,32 @@ function otPollProgress(jobId) {
    suppress a prod send). Per-person send through GAS outreach_email_send;
    preprod mails the operator only. Change the campaign key to re-blast a
    new message to everyone. ── */
+/* Send-test (3.264) — mail the CURRENT editor template to the operator
+   inbox, filled with a real filtered candidate's values, so the operator
+   can preview the HTML formatting AND confirm the variables substitute.
+   Uses the outreach_email_send test_to path (forced operator inbox). */
+async function otBlastSendTest() {
+  const st = document.getElementById('otBlastTestStatus');
+  const subjEl = document.getElementById('otTplBlastSubject');
+  const bodyEl = document.getElementById('otTplBlastBody');
+  if (!subjEl || !bodyEl || !st) return;
+  const subjectTpl = subjEl.value.trim();
+  const bodyTpl = bodyEl.innerHTML.trim();
+  if (!subjectTpl || !bodyTpl) { st.textContent = 'Add a subject and body first.'; return; }
+  const sample = otFilteredCandidates().visible.find(c => String(c.email || '').trim() && c.member_number)
+    || { first_name: 'Sample', last_name: 'Player', nickname: '', member_number: '00000000', email: '', city: '', county: '', state: '' };
+  st.textContent = 'Sending test to your inbox…';
+  try {
+    const res = await nrGasJson({ action: 'outreach_email_send', admin_key: SB_KEY,
+      test_to: 'southportlandmetroapa@gmail.com',
+      subject: otSubstitute(subjectTpl, sample),
+      html_body: otSubstitute(bodyTpl, sample),
+      is_preprod: IS_PREPROD });
+    st.textContent = res && res.ok
+      ? '✓ Test sent to your inbox, filled with ' + (sample.first_name || 'the sample') + '’s info — check the formatting + variables.'
+      : 'Test failed: ' + ((res && res.error) || 'unknown');
+  } catch (e) { st.textContent = 'Test failed: ' + e.message; }
+}
 function otBlastKind() { return IS_PREPROD ? 'email_preprod' : 'email'; }
 async function otBlastAll() {
   const stat = document.getElementById('otStatusLine');
@@ -11865,7 +11891,7 @@ async function otBlastAll() {
     const c = toSend[i];
     stat.textContent = 'Emailing ' + (i + 1) + '/' + toSend.length + '…';
     const subject = otSubstitute(subjectTpl, c);
-    const htmlBody = otSubstitute(bodyTpl, c).replace(/\n/g, '<br>');
+    const htmlBody = otSubstitute(bodyTpl, c); /* body is already HTML (3.264 rich editor) */
     try {
       const res = await nrGasJson({ action: 'outreach_email_send', admin_key: SB_KEY,
         member_number: c.member_number, subject: subject, html_body: htmlBody, is_preprod: IS_PREPROD });
@@ -19270,13 +19296,25 @@ function otOpenTemplateEditor() {
         <textarea id="otTplEmailBody" rows="10" style="width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:6px; font-family:inherit; font-size:0.92rem;">${esc(_otTemplates.email.body || '')}</textarea>
       </div>
       <div id="otTplBlastPane" style="display:none">
-        <div class="hint" style="margin-bottom:8px">The <strong>Email all in filter</strong> button sends THIS template — separate from the per-card email above. Plain text is fine; line breaks become paragraphs.</div>
+        <div class="hint" style="margin-bottom:8px">The <strong>Email all in filter</strong> button sends THIS template — separate from the per-card email above. It's a real HTML email: format with the toolbar, click a variable to insert it, and hit <strong>Send test email to me</strong> to preview it filled in.</div>
         <label class="ot-prefs-label" style="display:block; margin-bottom:4px">Subject</label>
         <input type="text" id="otTplBlastSubject" style="width:100%; padding:8px 12px; border:1px solid var(--border); border-radius:6px; font-family:inherit; font-size:0.92rem; margin-bottom:10px;" value="${esc(_otTemplates.blast.subject || '')}">
         <label class="ot-prefs-label" style="display:block; margin-bottom:4px">Body</label>
-        <textarea id="otTplBlastBody" rows="10" style="width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:6px; font-family:inherit; font-size:0.92rem;">${esc(_otTemplates.blast.body || '')}</textarea>
+        <div id="otBlastToolbar" style="display:flex; gap:4px; flex-wrap:wrap; margin-bottom:4px">
+          <button type="button" data-otfmt="bold" title="Bold" style="padding:3px 9px; font-weight:700; background:#f3f4f6; border:1px solid var(--border); border-radius:6px; cursor:pointer">B</button>
+          <button type="button" data-otfmt="italic" title="Italic" style="padding:3px 9px; font-style:italic; background:#f3f4f6; border:1px solid var(--border); border-radius:6px; cursor:pointer">I</button>
+          <button type="button" data-otfmt="underline" title="Underline" style="padding:3px 9px; text-decoration:underline; background:#f3f4f6; border:1px solid var(--border); border-radius:6px; cursor:pointer">U</button>
+          <button type="button" data-otfmt="insertUnorderedList" title="Bulleted list" style="padding:3px 9px; background:#f3f4f6; border:1px solid var(--border); border-radius:6px; cursor:pointer">&bull; List</button>
+          <button type="button" data-otfmt="createLink" title="Insert link" style="padding:3px 9px; background:#f3f4f6; border:1px solid var(--border); border-radius:6px; cursor:pointer">&#128279; Link</button>
+          <button type="button" data-otfmt="removeFormat" title="Clear formatting" style="padding:3px 9px; background:#f3f4f6; border:1px solid var(--border); border-radius:6px; cursor:pointer">&#10006; Clear</button>
+        </div>
+        <div id="otTplBlastBody" contenteditable="true" style="min-height:180px; padding:10px 12px; border:1px solid var(--border); border-radius:6px; font-family:inherit; font-size:0.92rem; background:#fff; overflow:auto"></div>
         <label class="ot-prefs-label" style="display:block; margin:10px 0 4px">Campaign key <span class="hint" style="font-weight:400">— change this to start a fresh blast that reaches everyone again; keep it the same to skip anyone already emailed.</span></label>
         <input type="text" id="otTplBlastCampaign" style="width:100%; padding:8px 12px; border:1px solid var(--border); border-radius:6px; font-family:ui-monospace, monospace; font-size:0.88rem;" placeholder="e.g. fall-2026-comeback" value="${esc(_otTemplates.blast.campaign_key || '')}">
+        <div style="margin-top:10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap">
+          <button type="button" class="btn btn-outline btn-sm" id="otBlastTestBtn">&#9993;&#65039; Send test email to me</button>
+          <span class="hint" id="otBlastTestStatus" style="font-size:0.78rem"></span>
+        </div>
       </div>
       <div style="margin-top:12px; padding:10px; background:#f9fafb; border:1px solid var(--border); border-radius:6px;">
         <div class="ot-prefs-label" style="display:block; margin-bottom:6px">Available variables — click to insert</div>
@@ -19289,6 +19327,33 @@ function otOpenTemplateEditor() {
       </div>
     </div>`;
   document.body.appendChild(back);
+  /* 3.264: the blast body is a contenteditable HTML editor — populate it
+     AFTER mount (avoids template-literal injection from saved HTML), wire
+     the formatting toolbar, and remember the last caret so a toolbar/var
+     click applies where the operator was typing. */
+  let otTplLastRange = null;
+  const otBlastEd = document.getElementById('otTplBlastBody');
+  if (otBlastEd) {
+    otBlastEd.innerHTML = _otTemplates.blast.body || '';
+    document.addEventListener('selectionchange', () => {
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount && otBlastEd.contains(sel.anchorNode)) otTplLastRange = sel.getRangeAt(0).cloneRange();
+    });
+  }
+  back.querySelectorAll('[data-otfmt]').forEach(b => {
+    b.addEventListener('mousedown', e => e.preventDefault());
+    b.addEventListener('click', () => {
+      if (!otBlastEd) return;
+      otBlastEd.focus();
+      if (otTplLastRange) { const s = window.getSelection(); s.removeAllRanges(); s.addRange(otTplLastRange); }
+      const cmd = b.dataset.otfmt;
+      if (cmd === 'createLink') { const url = prompt('Link URL:', 'https://'); if (url) document.execCommand('createLink', false, url); }
+      else document.execCommand(cmd, false, null);
+      const s2 = window.getSelection(); otTplLastRange = s2.rangeCount ? s2.getRangeAt(0).cloneRange() : null;
+    });
+  });
+  const otBlastTestBtn = document.getElementById('otBlastTestBtn');
+  if (otBlastTestBtn) otBlastTestBtn.addEventListener('click', otBlastSendTest);
   const close = () => back.remove();
   document.getElementById('otTplClose').addEventListener('click', close);
   document.getElementById('otTplCancel').addEventListener('click', close);
@@ -19310,21 +19375,45 @@ function otOpenTemplateEditor() {
   /* Default-activate first tab */
   back.querySelector('.ot-tpl-tab.active').click();
 
-  /* Variable pill insertion — drops {var} at the cursor of whichever
-     textarea is currently focused (or the active tab's body). */
+  /* Variable pill insertion (3.264) — remembers the last editable the
+     operator touched (subject input, a body textarea, or the blast HTML
+     editor) and drops {var} at its caret; mousedown-preventDefault keeps
+     the caret from moving when a pill is clicked. The old version always
+     resolved the FIRST tab and only handled textareas, so it silently
+     inserted into the hidden text body — nothing appeared to happen. */
+  let otTplLastField = null;
+  back.querySelectorAll('input[type=text], textarea, [contenteditable]').forEach(el =>
+    el.addEventListener('focus', () => { otTplLastField = el; }));
   back.querySelectorAll('[data-var]').forEach(p => {
+    p.addEventListener('mousedown', e => e.preventDefault());
     p.addEventListener('click', () => {
-      const activeTab = back.querySelector('.ot-tpl-tab[data-tab]').dataset.tab;
-      const focused = document.activeElement;
-      const target = (focused && focused.tagName === 'TEXTAREA') ? focused
-        : (activeTab === 'text' ? document.getElementById('otTplTextBody') : document.getElementById('otTplEmailBody'));
-      if (!target) return;
       const insert = '{' + p.dataset.var + '}';
-      const start = target.selectionStart ?? target.value.length;
-      const end   = target.selectionEnd   ?? target.value.length;
-      target.value = target.value.slice(0, start) + insert + target.value.slice(end);
-      target.focus();
-      target.setSelectionRange(start + insert.length, start + insert.length);
+      let target = otTplLastField;
+      if (!target || !back.contains(target)) {
+        const at = back.querySelector('.ot-tpl-tab.active');
+        const tab = at ? at.dataset.tab : 'text';
+        target = document.getElementById(tab === 'blast' ? 'otTplBlastBody' : tab === 'email' ? 'otTplEmailBody' : 'otTplTextBody');
+      }
+      if (!target) return;
+      if (target.isContentEditable) {
+        target.focus();
+        const sel = window.getSelection();
+        let range = (otTplLastRange && target.contains(otTplLastRange.startContainer)) ? otTplLastRange
+          : (sel.rangeCount && target.contains(sel.anchorNode)) ? sel.getRangeAt(0) : null;
+        if (!range) { range = document.createRange(); range.selectNodeContents(target); range.collapse(false); }
+        range.deleteContents();
+        const node = document.createTextNode(insert);
+        range.insertNode(node);
+        range.setStartAfter(node); range.setEndAfter(node);
+        sel.removeAllRanges(); sel.addRange(range);
+        otTplLastRange = range.cloneRange();
+      } else {
+        const start = target.selectionStart ?? target.value.length;
+        const end   = target.selectionEnd   ?? target.value.length;
+        target.value = target.value.slice(0, start) + insert + target.value.slice(end);
+        target.focus();
+        target.setSelectionRange(start + insert.length, start + insert.length);
+      }
     });
   });
 
@@ -19343,7 +19432,7 @@ function otOpenTemplateEditor() {
         { kind: 'email', subject: emailSubject, body: emailBody, updated_at: new Date().toISOString() },
         { 'Accept-Profile': 'slate', 'Content-Profile': 'slate', 'Prefer': 'resolution=merge-duplicates,return=minimal' });
       const blastSubject = (document.getElementById('otTplBlastSubject') || {}).value || '';
-      const blastBody = (document.getElementById('otTplBlastBody') || {}).value || '';
+      const blastBody = (document.getElementById('otTplBlastBody') || {}).innerHTML || '';
       const blastCampaign = ((document.getElementById('otTplBlastCampaign') || {}).value || '').trim();
       await sb('POST', 'outreach_templates?on_conflict=kind',
         { kind: 'outreach_blast', subject: blastSubject, body: blastBody, campaign_key: blastCampaign || null, updated_at: new Date().toISOString() },
