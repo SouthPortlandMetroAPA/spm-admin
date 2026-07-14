@@ -2137,6 +2137,9 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <button class="btn btn-outline btn-sm" id="otCopyEmailsBtn"
                   title="Copy every email in the current filtered list to the clipboard — de-duplicated, comma-separated. Paste into a To/BCC field."
                   style="align-self:flex-end; padding:6px 12px;">📧 Copy filtered emails</button>
+          <button class="btn btn-outline btn-sm" id="otBlastBtn"
+                  title="Email the blast template (Templates → Email blast) to everyone in the current filtered list who has an email — quota-checked, skips anyone already emailed for this campaign, sends a 3-email canary first."
+                  style="align-self:flex-end; padding:6px 12px;">📨 Email all in filter</button>
           <span id="otStatusLine" class="hint" style="align-self:center"></span>
         </div>
 
@@ -3558,7 +3561,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.262';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.263';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11793,6 +11796,92 @@ function otPollProgress(jobId) {
   return () => { stopped = true; };
 }
 
+/* ── Email all in filter (3.263, T1) — send the blast template to every
+   filtered person with an email, quota-gated (BLOCKS when the not-yet-
+   sent count exceeds the remaining Gmail quota — user's locked choice),
+   canary 3-then-confirm, skip-already-sent via slate.outreach_email_log
+   keyed on the campaign + env-suffixed kind (so a preprod test can never
+   suppress a prod send). Per-person send through GAS outreach_email_send;
+   preprod mails the operator only. Change the campaign key to re-blast a
+   new message to everyone. ── */
+function otBlastKind() { return IS_PREPROD ? 'email_preprod' : 'email'; }
+async function otBlastAll() {
+  const stat = document.getElementById('otStatusLine');
+  const blast = _otTemplates.blast || {};
+  const subjectTpl = (blast.subject || '').trim();
+  const bodyTpl = (blast.body || '').trim();
+  if (!subjectTpl || !bodyTpl) { stat.textContent = 'Set the Email blast template first — Templates → Email blast.'; return; }
+  const campaign = (blast.campaign_key || '').trim() || 'outreach-blast';
+  const people = otFilteredCandidates().visible.filter(c => String(c.email || '').trim() && c.member_number);
+  if (!people.length) { stat.textContent = 'No filtered people with an email on file.'; return; }
+  stat.textContent = 'Checking who already got this campaign…';
+  let sentSet = new Set();
+  try {
+    const stamps = await sb('GET', 'outreach_email_log?campaign_key=eq.' + encodeURIComponent(campaign)
+      + '&kind=eq.' + otBlastKind() + '&select=member_number', null, { 'Accept-Profile': 'slate' });
+    sentSet = new Set((stamps || []).map(s => s.member_number));
+  } catch (e) { /* treat as none-sent if the read fails */ }
+  const toSend = people.filter(c => !sentSet.has(c.member_number));
+  if (!toSend.length) { stat.textContent = '✓ Everyone in this filter already got the “' + campaign + '” blast.'; return; }
+  let remaining = null;
+  try {
+    const q = await nrGasJson({ action: 'mailer_quota', admin_key: SB_KEY });
+    if (q && q.ok) remaining = Number(q.remaining);
+  } catch (e) { /* unknown */ }
+  if (remaining == null || isNaN(remaining)) { stat.textContent = 'Could not check the Gmail quota — try again.'; return; }
+  if (toSend.length > remaining) {
+    await nrModal({
+      title: 'Won’t fit in today’s quota',
+      body: '<strong>' + toSend.length + '</strong> to email, but only <strong>' + remaining + '</strong> Gmail send'
+        + (remaining === 1 ? '' : 's') + ' left today. Narrow the filter to ' + remaining + ' or fewer, or come back tomorrow — '
+        + 'already-emailed people are skipped, so a resume never double-sends.',
+      buttons: [{ label: 'OK', value: null, primary: true }]
+    });
+    stat.textContent = 'Blocked — ' + toSend.length + ' to send · ' + remaining + ' quota left. Narrow the filter.';
+    return;
+  }
+  const start = await nrModal({
+    title: 'Email ' + toSend.length + ' filtered player' + (toSend.length === 1 ? '' : 's') + '?',
+    body: 'Campaign “' + esc(campaign) + '”. Fits: ' + toSend.length + ' to send · ' + remaining + ' quota left today'
+      + (sentSet.size ? ' · ' + sentSet.size + ' already done, skipped' : '') + '.'
+      + (IS_PREPROD ? ' PREPROD: everything goes to your inbox only.' : '')
+      + (toSend.length > 3 ? ' The first 3 go out as a canary, then you confirm the rest.' : ''),
+    buttons: [{ label: toSend.length > 3 ? 'Send canary — first 3' : 'Send', value: 'go', primary: true },
+              { label: 'Cancel', value: null }]
+  });
+  if (!start) return;
+  window.slateBulkBusy = true;
+  let sent = 0; const failed = [];
+  for (let i = 0; i < toSend.length; i++) {
+    if (i === 3 && toSend.length > 3) {
+      const cont = await nrModal({
+        title: 'Canary done — ' + sent + ' sent' + (failed.length ? ', ' + failed.length + ' failed' : ''),
+        body: (IS_PREPROD ? 'Check your inbox for the three test emails.' : 'Spot-check delivery.')
+          + ' Continue with the remaining ' + (toSend.length - 3) + '?',
+        buttons: [{ label: 'Send the rest', value: 'go', primary: true }, { label: 'Stop here', value: null }]
+      });
+      if (!cont) break;
+    }
+    const c = toSend[i];
+    stat.textContent = 'Emailing ' + (i + 1) + '/' + toSend.length + '…';
+    const subject = otSubstitute(subjectTpl, c);
+    const htmlBody = otSubstitute(bodyTpl, c).replace(/\n/g, '<br>');
+    try {
+      const res = await nrGasJson({ action: 'outreach_email_send', admin_key: SB_KEY,
+        member_number: c.member_number, subject: subject, html_body: htmlBody, is_preprod: IS_PREPROD });
+      if (res && res.ok) {
+        sent++;
+        await sb('POST', 'outreach_email_log?on_conflict=campaign_key,member_number,kind',
+          { campaign_key: campaign, member_number: c.member_number, kind: otBlastKind() },
+          { 'Accept-Profile': 'slate', 'Content-Profile': 'slate', 'Prefer': 'resolution=merge-duplicates,return=minimal' });
+      } else { failed.push(c.member_number + ' — ' + ((res && res.error) || 'unknown')); }
+    } catch (e) { failed.push(c.member_number + ' — ' + e.message); }
+  }
+  window.slateBulkBusy = false;
+  stat.textContent = '✓ Emailed ' + sent + ' of ' + toSend.length
+    + (failed.length ? ' · FAILED ' + failed.length + ': ' + failed.slice(0, 2).join('; ') + (failed.length > 2 ? ' …' : '') : '') + '.';
+}
+
 /* Copy every email in the current filtered list (3.262). Same
    otFilteredCandidates().visible set the bulk-add uses, so it's exactly
    what the list shows; de-duplicated case-insensitively (first-seen
@@ -18071,6 +18160,7 @@ async function otInit() {
   /* Bulk add-to-contacts (3.185) — operates on the current filtered list. */
   document.getElementById('otAddAllBtn').addEventListener('click', otAddAllContacts);
   document.getElementById('otCopyEmailsBtn').addEventListener('click', otCopyFilteredEmails);
+  document.getElementById('otBlastBtn').addEventListener('click', otBlastAll);
 
   /* Undo button + Ctrl/⌘-Z hotkey. Hotkey fires only when the Outreach
      tab is the active tab — otherwise we'd hijack normal Ctrl-Z in
@@ -19078,7 +19168,7 @@ function otFmtLastAction(s) {
      {last_played_either}     — most recent of the two (raw MM/DD/YY)
    Unknown {variables} are left as-is so the operator notices typos.
    ════════════════════════════════════════════════════════════════════════ */
-const _otTemplates = { text: { body: '' }, email: { subject: '', body: '' } };
+const _otTemplates = { text: { body: '' }, email: { subject: '', body: '' }, blast: { subject: '', body: '', campaign_key: '' } };
 
 const OT_TEMPLATE_VARS = [
   'first_name','last_name','nickname','member_number',
@@ -19095,6 +19185,7 @@ async function otLoadTemplates() {
     for (const r of (rows || [])) {
       if (r.kind === 'text')  _otTemplates.text  = { body: r.body || '' };
       if (r.kind === 'email') _otTemplates.email = { subject: r.subject || '', body: r.body || '' };
+      if (r.kind === 'outreach_blast') _otTemplates.blast = { subject: r.subject || '', body: r.body || '', campaign_key: r.campaign_key || '' };
     }
   } catch (e) { console.error('templates load failed', e); }
 }
@@ -19166,6 +19257,7 @@ function otOpenTemplateEditor() {
       <div style="display:flex; gap:4px; border-bottom:2px solid var(--border); margin-bottom:14px;">
         <button type="button" class="ot-tpl-tab active" data-tab="text"  style="padding:8px 16px; background:none; border:0; border-bottom:3px solid transparent; font-weight:700; cursor:pointer; font-size:0.92rem;">💬 Text</button>
         <button type="button" class="ot-tpl-tab" data-tab="email" style="padding:8px 16px; background:none; border:0; border-bottom:3px solid transparent; font-weight:700; cursor:pointer; font-size:0.92rem;">📧 Email</button>
+        <button type="button" class="ot-tpl-tab" data-tab="blast" style="padding:8px 16px; background:none; border:0; border-bottom:3px solid transparent; font-weight:700; cursor:pointer; font-size:0.92rem;">📨 Email blast</button>
       </div>
       <div id="otTplTextPane">
         <label class="ot-prefs-label" style="display:block; margin-bottom:4px">Body</label>
@@ -19176,6 +19268,15 @@ function otOpenTemplateEditor() {
         <input type="text" id="otTplEmailSubject" style="width:100%; padding:8px 12px; border:1px solid var(--border); border-radius:6px; font-family:inherit; font-size:0.92rem; margin-bottom:10px;" value="${esc(_otTemplates.email.subject || '')}">
         <label class="ot-prefs-label" style="display:block; margin-bottom:4px">Body</label>
         <textarea id="otTplEmailBody" rows="10" style="width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:6px; font-family:inherit; font-size:0.92rem;">${esc(_otTemplates.email.body || '')}</textarea>
+      </div>
+      <div id="otTplBlastPane" style="display:none">
+        <div class="hint" style="margin-bottom:8px">The <strong>Email all in filter</strong> button sends THIS template — separate from the per-card email above. Plain text is fine; line breaks become paragraphs.</div>
+        <label class="ot-prefs-label" style="display:block; margin-bottom:4px">Subject</label>
+        <input type="text" id="otTplBlastSubject" style="width:100%; padding:8px 12px; border:1px solid var(--border); border-radius:6px; font-family:inherit; font-size:0.92rem; margin-bottom:10px;" value="${esc(_otTemplates.blast.subject || '')}">
+        <label class="ot-prefs-label" style="display:block; margin-bottom:4px">Body</label>
+        <textarea id="otTplBlastBody" rows="10" style="width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:6px; font-family:inherit; font-size:0.92rem;">${esc(_otTemplates.blast.body || '')}</textarea>
+        <label class="ot-prefs-label" style="display:block; margin:10px 0 4px">Campaign key <span class="hint" style="font-weight:400">— change this to start a fresh blast that reaches everyone again; keep it the same to skip anyone already emailed.</span></label>
+        <input type="text" id="otTplBlastCampaign" style="width:100%; padding:8px 12px; border:1px solid var(--border); border-radius:6px; font-family:ui-monospace, monospace; font-size:0.88rem;" placeholder="e.g. fall-2026-comeback" value="${esc(_otTemplates.blast.campaign_key || '')}">
       </div>
       <div style="margin-top:12px; padding:10px; background:#f9fafb; border:1px solid var(--border); border-radius:6px;">
         <div class="ot-prefs-label" style="display:block; margin-bottom:6px">Available variables — click to insert</div>
@@ -19203,6 +19304,7 @@ function otOpenTemplateEditor() {
       });
       document.getElementById('otTplTextPane').style.display  = btn.dataset.tab === 'text'  ? '' : 'none';
       document.getElementById('otTplEmailPane').style.display = btn.dataset.tab === 'email' ? '' : 'none';
+      document.getElementById('otTplBlastPane').style.display = btn.dataset.tab === 'blast' ? '' : 'none';
     });
   });
   /* Default-activate first tab */
@@ -19240,8 +19342,15 @@ function otOpenTemplateEditor() {
       await sb('POST', 'outreach_templates?on_conflict=kind',
         { kind: 'email', subject: emailSubject, body: emailBody, updated_at: new Date().toISOString() },
         { 'Accept-Profile': 'slate', 'Content-Profile': 'slate', 'Prefer': 'resolution=merge-duplicates,return=minimal' });
+      const blastSubject = (document.getElementById('otTplBlastSubject') || {}).value || '';
+      const blastBody = (document.getElementById('otTplBlastBody') || {}).value || '';
+      const blastCampaign = ((document.getElementById('otTplBlastCampaign') || {}).value || '').trim();
+      await sb('POST', 'outreach_templates?on_conflict=kind',
+        { kind: 'outreach_blast', subject: blastSubject, body: blastBody, campaign_key: blastCampaign || null, updated_at: new Date().toISOString() },
+        { 'Accept-Profile': 'slate', 'Content-Profile': 'slate', 'Prefer': 'resolution=merge-duplicates,return=minimal' });
       _otTemplates.text = { body: textBody };
       _otTemplates.email = { subject: emailSubject, body: emailBody };
+      _otTemplates.blast = { subject: blastSubject, body: blastBody, campaign_key: blastCampaign };
       /* 3.98: Switchboard pre-bakes sms: URLs into <a href> tags at
          render time (per-team Text Captains / Co-Caps / Team buttons).
          Without re-rendering, the old template body stays baked into
