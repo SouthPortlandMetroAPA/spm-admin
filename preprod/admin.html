@@ -3546,7 +3546,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.250';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.251';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -6198,12 +6198,23 @@ function nrModal(opts) {
       + '<div style="background:#fff;border-radius:12px;padding:22px;max-width:440px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.35)">'
       + '<div style="font-weight:800;font-size:1.05rem;margin-bottom:6px">' + opts.title + '</div>'
       + '<div class="hint" style="margin-bottom:14px">' + opts.body + '</div>'
+      + (opts.select
+          ? '<div style="margin:-4px 0 14px"><label style="font-size:0.82rem;font-weight:700">' + esc(opts.select.label)
+            + '<br><select id="nrModalSel" style="margin-top:4px;max-width:100%">'
+            + opts.select.options.map(o => '<option value="' + esc(String(o.value)) + '">' + esc(o.label) + '</option>').join('')
+            + '</select></label></div>'
+          : '')
       + '<div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">'
       + opts.buttons.map((b, i) => '<button type="button" class="btn ' + (b.primary ? 'btn-primary' : 'btn-outline')
           + ' btn-sm" data-modalbtn="' + i + '">' + b.label + '</button>').join('')
       + '</div></div></div>';
     wrap.querySelectorAll('[data-modalbtn]').forEach(btn => {
-      btn.onclick = () => { wrap.innerHTML = ''; resolve(opts.buttons[Number(btn.dataset.modalbtn)].value); };
+      btn.onclick = () => {
+        const v = opts.buttons[Number(btn.dataset.modalbtn)].value;
+        const sel = opts.select ? (document.getElementById('nrModalSel') || {}).value : undefined;
+        wrap.innerHTML = '';
+        resolve(v !== null && opts.select ? { value: v, selected: sel } : v);
+      };
     });
   });
 }
@@ -6212,13 +6223,28 @@ function nrModal(opts) {
    with a choice to email the roster about it. Email goes through the
    same keyless GAS action; admin_key (the service key already in this
    page's URL) bypasses the freshness gate, and preprod pages only ever
-   mail the operator. */
+   mail the operator. 3.251: the popup also asks WHO the answer came
+   from — the operator, or a roster member of the pair — and records it
+   in answered_by_apa/name (source stays admin per the user's locked
+   attribution decision: audit-true, with "by <member>" shown). */
 async function nrOrSetStatus(teamIds, status) {
   const word = status === 'playing' ? 'PLAYING' : status === 'not_playing' ? 'NOT playing' : 'STILL DECIDING';
   const first = _nr.teams.concat(_nr.teamsN1).find(t => t.id === teamIds[0]);
+  const seenWho = new Set();
+  const roster = teamIds.map(id => _nr.orRoster.get(id) || []).flat().filter(m => {
+    if (seenWho.has(m.member_number)) return false;
+    seenWho.add(m.member_number); return true;
+  });
+  const whoOpts = [{ value: '', label: 'You — record as admin' }].concat(roster.map(m => {
+    const p = m.player || {};
+    const nm = ((p.first_name || '') + ' ' + (p.last_name || '')).replace(/\s+/g, ' ').trim() || m.member_number;
+    return { value: m.member_number,
+             label: (m.role === 'Captain' ? '★ ' : m.role === 'Co-Captain' ? '☆ ' : '') + nm };
+  }));
   const choice = await nrModal({
     title: 'Mark ' + esc(first ? first.team_name || '' : '') + ' ' + word + '?',
-    body: 'For ' + esc(nrOrTargetName()) + '. Email the whole roster about it, or record silently?',
+    body: 'For ' + esc(nrOrTargetName()) + '. Pick who gave you this answer, then email the whole roster about it or record silently.',
+    select: { label: 'Answer from', options: whoOpts },
     buttons: [
       { label: 'Mark + email team', value: 'email', primary: true },
       { label: 'Mark silently', value: 'silent' },
@@ -6226,21 +6252,26 @@ async function nrOrSetStatus(teamIds, status) {
     ]
   });
   if (!choice) return;
-  const sendMail = choice === 'email';
+  const sendMail = choice.value === 'email';
+  const byApa = choice.selected || null;
+  const byM = byApa ? roster.find(m => m.member_number === byApa) : null;
+  const byName = byM
+    ? (((((byM.player || {}).first_name || '') + ' ' + ((byM.player || {}).last_name || '')).replace(/\s+/g, ' ').trim()) || byApa)
+    : 'Michelle & Paul Soldan';
   const now = new Date().toISOString();
   try {
     await sb('POST', 'next_reg?on_conflict=target_session_id,team_id',
       teamIds.map(id => ({
         target_session_id: _nr.targetId, team_id: id, status: status, source: 'admin',
-        prior_nexus_status: null, answered_by_apa: null,
-        answered_by_name: 'Michelle & Paul Soldan', answered_at: now, updated_at: now
+        prior_nexus_status: null, answered_by_apa: byApa,
+        answered_by_name: byName, answered_at: now, updated_at: now
       })),
       { 'Prefer': 'resolution=merge-duplicates,return=minimal' });
     await sb('POST', 'next_reg_log',
       teamIds.map(id => ({
         target_session_id: _nr.targetId, team_id: id,
         old_status: (_nr.regRowByTeam.get(id) || {}).status || null, new_status: status,
-        actor_apa: null, actor_name: 'Michelle & Paul Soldan', source: 'admin'
+        actor_apa: byApa, actor_name: byName, source: 'admin'
       })),
       { 'Prefer': 'return=minimal' });
     if (sendMail) {
