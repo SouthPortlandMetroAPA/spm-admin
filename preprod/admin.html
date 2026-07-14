@@ -3439,6 +3439,10 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <summary style="cursor:pointer;font-weight:700">Haven't voted yet</summary>
           <div id="plMissing" style="margin-top:6px"></div>
         </details>
+        <details style="margin-top:12px">
+          <summary style="cursor:pointer;font-weight:700">Invite players &mdash; email + text</summary>
+          <div id="plOr" style="margin-top:6px"><p class="hint">Loading&hellip;</p></div>
+        </details>
         <details id="plEdit" style="margin-top:12px;border-top:1px solid var(--border);padding-top:10px">
           <summary style="cursor:pointer;font-weight:700">New poll / edit selected</summary>
           <div style="display:grid;gap:8px;margin-top:8px;max-width:680px">
@@ -3464,6 +3468,11 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             </div>
             <input id="plfCheckbox" placeholder="Optional extra checkbox copy &mdash; blank for none">
             <input id="plfComment" placeholder="Comment-box placeholder &mdash; blank for generic">
+            <div style="font-weight:700;font-size:0.82rem;margin-top:2px">Invite templates
+              <span class="hint" style="font-weight:500">&mdash; vars {first_name} {link}; the mailer fills {first_name} per player and appends the signature</span></div>
+            <input id="plfEmailSubj" placeholder="Invite email subject">
+            <textarea id="plfEmailBody" class="ehq-paste-box" style="min-height:60px" placeholder="Invite email body &mdash; HTML ok"></textarea>
+            <textarea id="plfTextBody" class="ehq-paste-box" style="min-height:40px" placeholder="Invite text message"></textarea>
             <div style="display:flex;gap:8px;flex-wrap:wrap">
               <button type="button" class="btn btn-primary btn-sm" id="plfSaveNew">Create as NEW poll</button>
               <button type="button" class="btn btn-outline btn-sm" id="plfUpdate">Update selected</button>
@@ -3546,7 +3555,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.251';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.252';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -6547,6 +6556,7 @@ async function plLoad() {
     const roster = await plRosterByTeam(poll);
     plRenderTeams(poll, rows || [], roster);
     plRenderMissing(poll, rows || [], roster);
+    await plRenderOutreach(poll, rows || [], roster);
     plfFill(poll, (rows || []).length);
     st.className = 'status-line'; st.textContent = '';
   } catch (e) { st.className = 'status-line shown err'; st.textContent = 'Load failed: ' + e.message; }
@@ -6753,6 +6763,186 @@ function plRenderTeams(poll, rows, roster) {
     + rowsHtml + '</table>';
 }
 
+/* ── Participation outreach (3.252, T1 — brief
+     2026-07-13-pulsecheck-outreach.md). Recipients derive from the same
+     plRosterByTeam result the missing-voters list uses, so the two can
+     never disagree. Emails: one personal send per player through GAS
+     pulse_email_send (admin-key gated; preprod mails the operator only)
+     with the house canary — 3 sends, modal confirm, remainder — and a
+     poll_outreach stamp per success so re-runs skip already-emailed
+     players by default (checkbox overrides). Texts are operator-tapped
+     sms: links via otBuildSmsUrl; the tap stamps kind=text. Templates
+     live on the poll row (extras.email_subject/email_body/text_body). */
+let _plOr = { scope: 'missing', sel: new Map(), stamps: new Map(), players: new Map(), all: [] };
+/* Preprod stamps are '<kind>_preprod' — same DB as prod, so a preprod
+   canary must never mark a player EMAILED for the real prod send. */
+function plOrKind(k) { return IS_PREPROD ? k + '_preprod' : k; }
+const PL_APP_URL = 'https://southportlandmetroapa.github.io/pulsecheck/';
+function plOrFill(tpl, vals) {
+  let s = String(tpl);
+  for (const k of Object.keys(vals)) s = s.split('{' + k + '}').join(vals[k]);
+  return s;
+}
+async function plRenderOutreach(poll, rows, roster) {
+  const box = document.getElementById('plOr');
+  if (!roster || !roster.teams.length) {
+    box.innerHTML = '<p class="hint">Invites need a poll with a roster-based audience.</p>';
+    return;
+  }
+  const stamps = await sb('GET', 'poll_outreach?poll_id=eq.' + poll.id + '&select=member_number,kind') || [];
+  _plOr.stamps = new Map();
+  for (const s of stamps) _plOr.stamps.set(s.member_number + '|' + s.kind, true);
+  const voted = new Set(rows.map(r => r.member_number));
+  const seen = new Set();
+  const all = [];
+  for (const t of roster.teams) for (const m of t.members) {
+    if (seen.has(m.apa)) continue;
+    seen.add(m.apa);
+    all.push({ apa: m.apa, name: m.name, team: t.name, voted: voted.has(m.apa) });
+  }
+  _plOr.players = new Map();
+  for (let i = 0; i < all.length; i += 100) {
+    const chunk = all.slice(i, i + 100).map(x => x.apa);
+    const ps = await sb('GET', 'players?member_number=in.(' + chunk.join(',')
+      + ')&select=member_number,first_name,last_name,email,cell_phone,home_phone,alt_phone,work_phone') || [];
+    for (const p of ps) _plOr.players.set(p.member_number, p);
+  }
+  _plOr.all = all;
+  plOrDraw(poll);
+}
+function plOrDraw(poll) {
+  const box = document.getElementById('plOr');
+  const all = _plOr.all;
+  const list = _plOr.scope === 'missing' ? all.filter(x => !x.voted) : all;
+  const x = poll.extras || {};
+  const link = PL_APP_URL + '?p=' + poll.slug;
+  const pill = (key, label) =>
+    '<button type="button" class="btn ' + (_plOr.scope === key ? 'btn-primary' : 'btn-outline')
+    + ' btn-sm" data-plorscope="' + key + '">' + label + '</button>';
+  const rowsHtml = list.map(m => {
+    const p = _plOr.players.get(m.apa) || {};
+    const em = String(p.email || '').trim();
+    const ph = nrBestPhone(p);
+    const digits = ph ? String(ph).replace(/\D/g, '') : '';
+    const first = String(p.first_name || '').trim() || String(m.name).split(' ')[0];
+    const smsBody = plOrFill(x.text_body || 'Quick SPM poll: {link}',
+      { first_name: first, link: link, poll_title: poll.title });
+    const checked = _plOr.sel.has(m.apa) ? _plOr.sel.get(m.apa) : (!!em && !_plOr.stamps.get(m.apa + '|' + plOrKind('email')));
+    return '<div style="display:flex;gap:8px;align-items:center;padding:3px 0;font-size:0.84rem;flex-wrap:wrap">'
+      + '<input type="checkbox" data-plorsel="' + m.apa + '"' + (checked && em ? ' checked' : '') + (em ? '' : ' disabled') + '>'
+      + '<strong>' + esc(m.name) + '</strong>'
+      + '<span class="hint">' + esc(m.team) + '</span>'
+      + (m.voted ? '<span style="color:#15803d;font-size:0.72rem;font-weight:700">VOTED</span>' : '')
+      + (em ? '' : '<span style="color:#b91c1c;font-size:0.72rem;font-weight:700">NO EMAIL</span>')
+      + (_plOr.stamps.get(m.apa + '|' + plOrKind('email')) ? '<span style="background:#e8f0fe;color:#0031a1;border-radius:999px;padding:1px 8px;font-size:0.7rem;font-weight:700">EMAILED</span>' : '')
+      + (_plOr.stamps.get(m.apa + '|' + plOrKind('text')) ? '<span style="background:#ede9fe;color:#6d28d9;border-radius:999px;padding:1px 8px;font-size:0.7rem;font-weight:700">TEXTED</span>' : '')
+      + (digits
+          ? '<a href="' + otBuildSmsUrl(digits, smsBody) + '" data-plortext="' + m.apa + '" style="margin-left:auto;font-size:0.78rem">&#128172; text</a>'
+          : '<span class="hint" style="margin-left:auto;font-size:0.72rem">no phone</span>')
+      + '</div>';
+  }).join('');
+  box.innerHTML =
+    '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px">'
+      + pill('missing', 'Haven\'t voted') + pill('all', 'Everyone eligible')
+      + '<button type="button" class="btn btn-primary btn-sm" data-ploremail="1" style="margin-left:auto">&#128231; Email checked</button>'
+      + '<button type="button" class="btn btn-outline btn-sm" data-plortest="1">Send me a test email</button>'
+    + '</div>'
+    + '<div class="hint" style="margin-bottom:6px;font-size:0.76rem">Invite templates are edited in the poll editor below. One personal email per player; already-emailed players start unchecked'
+      + (IS_PREPROD ? '. PREPROD: every email goes to your inbox only.' : '.') + '</div>'
+    + (rowsHtml || '<p class="hint">Nobody in this scope.</p>');
+  box.querySelectorAll('[data-plorscope]').forEach(b => b.onclick = () => { _plOr.scope = b.dataset.plorscope; plOrDraw(poll); });
+  box.querySelectorAll('input[data-plorsel]').forEach(cb =>
+    cb.addEventListener('change', () => _plOr.sel.set(cb.dataset.plorsel, cb.checked)));
+  box.querySelectorAll('a[data-plortext]').forEach(a =>
+    a.addEventListener('click', () => plOrStampText(poll, a.dataset.plortext)));
+  const eb = box.querySelector('[data-ploremail]'); if (eb) eb.onclick = () => plOrEmail(poll);
+  const tb = box.querySelector('[data-plortest]'); if (tb) tb.onclick = () => plOrTest(poll);
+}
+async function plOrStampText(poll, apa) {
+  /* let the sms: navigation proceed; stamp in the background */
+  try {
+    await sb('POST', 'poll_outreach?on_conflict=poll_id,member_number,kind',
+      [{ poll_id: poll.id, member_number: apa, kind: plOrKind('text') }],
+      { 'Prefer': 'resolution=merge-duplicates,return=minimal' });
+    _plOr.stamps.set(apa + '|' + plOrKind('text'), true);
+    plOrDraw(poll);
+  } catch (e) { setStatus('plStatus', 'Text stamp failed: ' + e.message, 'err'); }
+}
+async function plOrTest(poll) {
+  const x = poll.extras || {};
+  if (!x.email_subject || !x.email_body) { setStatus('plStatus', 'Set the invite subject + body in the poll editor first.', 'err'); return; }
+  const link = PL_APP_URL + '?p=' + poll.slug;
+  const vals = { link: link, poll_title: poll.title };
+  setStatus('plStatus', 'Sending test to your inbox…', '');
+  try {
+    const res = await nrGasJson({ action: 'pulse_email_send', admin_key: SB_KEY,
+      test_to: 'southportlandmetroapa@gmail.com',
+      subject: plOrFill(x.email_subject, vals), html_body: plOrFill(x.email_body, vals),
+      is_preprod: IS_PREPROD });
+    setStatus('plStatus', res && res.ok ? '✓ Test sent to your inbox.' : 'Test failed: ' + ((res && res.error) || 'unknown'), res && res.ok ? 'ok' : 'err');
+  } catch (e) { setStatus('plStatus', 'Test failed: ' + e.message, 'err'); }
+}
+async function plOrEmail(poll) {
+  const x = poll.extras || {};
+  if (!x.email_subject || !x.email_body) { setStatus('plStatus', 'Set the invite subject + body in the poll editor first.', 'err'); return; }
+  const all = _plOr.all;
+  const link = PL_APP_URL + '?p=' + poll.slug;
+  const vals = { link: link, poll_title: poll.title };
+  const list = (_plOr.scope === 'missing' ? all.filter(m => !m.voted) : all).filter(m => {
+    const p = _plOr.players.get(m.apa) || {};
+    if (!String(p.email || '').trim()) return false;
+    return _plOr.sel.has(m.apa) ? _plOr.sel.get(m.apa) : !_plOr.stamps.get(m.apa + '|' + plOrKind('email'));
+  });
+  if (!list.length) { setStatus('plStatus', 'Nobody checked with an email on file.', 'err'); return; }
+  let quotaLine = '';
+  try {
+    const q = await nrGasJson({ action: 'mailer_quota', admin_key: SB_KEY });
+    if (q && q.ok) quotaLine = ' Gmail quota left today: ' + q.remaining + '.';
+  } catch (e) { /* quota display is best-effort */ }
+  const start = await nrModal({
+    title: 'Email ' + list.length + ' players about this poll?',
+    body: 'One personal email each, through the mailer.' + quotaLine
+      + (IS_PREPROD ? ' PREPROD: everything goes to your inbox only.' : '')
+      + (list.length > 3 ? ' The first 3 go out as a canary, then you confirm the rest.' : ''),
+    buttons: [{ label: list.length > 3 ? 'Send canary — first 3' : 'Send', value: 'go', primary: true },
+              { label: 'Cancel', value: null }]
+  });
+  if (!start) return;
+  let sent = 0;
+  const failed = [];
+  for (let i = 0; i < list.length; i++) {
+    if (i === 3 && list.length > 3) {
+      const cont = await nrModal({
+        title: 'Canary done — ' + sent + ' sent' + (failed.length ? ', ' + failed.length + ' failed' : ''),
+        body: (IS_PREPROD ? 'Check your inbox for the three test emails.' : 'Spot-check delivery.')
+          + ' Continue with the remaining ' + (list.length - 3) + '?',
+        buttons: [{ label: 'Send the rest', value: 'go', primary: true }, { label: 'Stop here', value: null }]
+      });
+      if (!cont) break;
+    }
+    const m = list[i];
+    setStatus('plStatus', 'Emailing ' + (i + 1) + '/' + list.length + ' — ' + m.name + '…', '');
+    try {
+      const res = await nrGasJson({ action: 'pulse_email_send', admin_key: SB_KEY,
+        member_number: m.apa,
+        subject: plOrFill(x.email_subject, vals), html_body: plOrFill(x.email_body, vals),
+        is_preprod: IS_PREPROD });
+      if (res && res.ok) {
+        sent++;
+        await sb('POST', 'poll_outreach?on_conflict=poll_id,member_number,kind',
+          [{ poll_id: poll.id, member_number: m.apa, kind: plOrKind('email') }],
+          { 'Prefer': 'resolution=merge-duplicates,return=minimal' });
+        _plOr.stamps.set(m.apa + '|' + plOrKind('email'), true);
+      } else {
+        failed.push(m.name + ' — ' + ((res && res.error) || 'unknown'));
+      }
+    } catch (e) { failed.push(m.name + ' — ' + e.message); }
+  }
+  setStatus('plStatus', '✓ Emailed ' + sent + ' of ' + list.length
+    + (failed.length ? ' · FAILED: ' + failed.join('; ') : '') + '.', failed.length ? 'err' : 'ok');
+  plOrDraw(poll);
+}
+
 /* ── Poll builder (0.2 generic draft). Options lock once responses
      exist (removing one would orphan votes); slugs are immutable and
      auto-generated per the house rule; there is no hard delete — close
@@ -6807,6 +6997,9 @@ function plfFill(poll, responseCount) {
   const x = poll ? (poll.extras || {}) : {};
   document.getElementById('plfCheckbox').value = x.checkbox || '';
   document.getElementById('plfComment').value = x.comment_placeholder || '';
+  document.getElementById('plfEmailSubj').value = x.email_subject || '';
+  document.getElementById('plfEmailBody').value = x.email_body || '';
+  document.getElementById('plfTextBody').value = x.text_body || '';
   plfRuleSync();
   plfDrawOpts();
 }
@@ -6833,6 +7026,12 @@ function plfCollect() {
   const cp = document.getElementById('plfComment').value.trim();
   if (cb) extras.checkbox = cb;
   if (cp) extras.comment_placeholder = cp;
+  const pes = document.getElementById('plfEmailSubj').value.trim();
+  const peb = document.getElementById('plfEmailBody').value.trim();
+  const ptb = document.getElementById('plfTextBody').value.trim();
+  if (pes) extras.email_subject = pes;
+  if (peb) extras.email_body = peb;
+  if (ptb) extras.text_body = ptb;
   return { title: title, body_html: document.getElementById('plfBody').value.trim() || null,
            options: opts, eligibility: el, extras: extras };
 }
