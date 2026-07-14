@@ -2134,6 +2134,9 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <button class="btn btn-outline btn-sm" id="otAddAllBtn"
                   title="Add every person in the current filtered list to Google Contacts (SPM APA group, soldans@). Already-added people are skipped; if a number matches one of your own contacts it's updated in place (league data wins); shared-number spouses become a combined household contact."
                   style="align-self:flex-end; padding:6px 12px;">👤 Add filtered to contacts</button>
+          <button class="btn btn-outline btn-sm" id="otCopyEmailsBtn"
+                  title="Copy every email in the current filtered list to the clipboard — de-duplicated, comma-separated. Paste into a To/BCC field."
+                  style="align-self:flex-end; padding:6px 12px;">📧 Copy filtered emails</button>
           <span id="otStatusLine" class="hint" style="align-self:center"></span>
         </div>
 
@@ -3555,7 +3558,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.261';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.262';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11790,6 +11793,52 @@ function otPollProgress(jobId) {
   return () => { stopped = true; };
 }
 
+/* Copy every email in the current filtered list (3.262). Same
+   otFilteredCandidates().visible set the bulk-add uses, so it's exactly
+   what the list shows; de-duplicated case-insensitively (first-seen
+   casing kept), comma-joined for a To/BCC paste. Clipboard only. */
+function otCopyFilteredEmails() {
+  const stat = document.getElementById('otStatusLine');
+  const people = otFilteredCandidates().visible;
+  const seen = new Set();
+  const emails = [];
+  let none = 0;
+  for (const c of people) {
+    const em = String(c.email || '').trim();
+    if (!em) { none++; continue; }
+    const k = em.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k); emails.push(em);
+  }
+  if (!emails.length) { stat.textContent = 'No emails in the filtered list.'; return; }
+  const text = emails.join(', ');
+  const tail = (none ? ' · ' + none + ' had none on file' : '') + '.';
+  const done = () => { stat.textContent = '✓ Copied ' + emails.length + ' email' + (emails.length === 1 ? '' : 's') + tail; };
+  const fallback = () => {
+    otCopyFallbackModal(text, emails.length);
+    stat.textContent = emails.length + ' email' + (emails.length === 1 ? '' : 's') + ' ready — copy from the box' + tail;
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done).catch(fallback);
+  } else { fallback(); }
+}
+/* Fallback when the async Clipboard API is blocked (lost focus, denied
+   permission, non-secure context) — the emails go into a selectable box
+   so the operator can always copy manually. */
+function otCopyFallbackModal(text, count) {
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(10,20,40,0.55);z-index:9998;display:flex;align-items:center;justify-content:center;padding:20px';
+  ov.innerHTML = '<div style="background:#fff;border-radius:12px;padding:20px;max-width:560px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.35)">'
+    + '<div style="font-weight:800;margin-bottom:6px">' + count + ' email' + (count === 1 ? '' : 's') + ' — select all (Ctrl/Cmd-A) and copy</div>'
+    + '<textarea id="otCopyFallbackTa" readonly style="width:100%;min-height:160px;font-size:0.82rem"></textarea>'
+    + '<div style="display:flex;justify-content:flex-end;margin-top:10px"><button type="button" class="btn btn-primary btn-sm" data-otcpclose>Done</button></div>'
+    + '</div>';
+  document.body.appendChild(ov);
+  const ta = ov.querySelector('#otCopyFallbackTa');
+  ta.value = text; ta.focus(); ta.select();
+  ov.querySelector('[data-otcpclose]').onclick = () => ov.remove();
+}
+
 /* ── Bulk add: every currently-filtered Outreach person (3.185) ───────
    One GAS call (contacts_add_bulk): a single existing-contacts scan,
    then batch-creates only the people not already there (APA#-keyed, so
@@ -18021,6 +18070,7 @@ async function otInit() {
 
   /* Bulk add-to-contacts (3.185) — operates on the current filtered list. */
   document.getElementById('otAddAllBtn').addEventListener('click', otAddAllContacts);
+  document.getElementById('otCopyEmailsBtn').addEventListener('click', otCopyFilteredEmails);
 
   /* Undo button + Ctrl/⌘-Z hotkey. Hotkey fires only when the Outreach
      tab is the active tab — otherwise we'd hijack normal Ctrl-Z in
