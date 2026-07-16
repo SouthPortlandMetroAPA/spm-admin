@@ -3586,7 +3586,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.272';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.273';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -12335,7 +12335,7 @@ async function spProjectManuals(reportId) {
     return row;
   });
   await spInsertChunks('sp_by_division_rows', rows, 400, 'manual SP projections');
-  console.log('[SP] projected', rows.length, 'manual SP(s) onto report', reportId);
+  console.log('[SP] projected', rows.length, 'manual SPs onto report', reportId);
   return rows.length;
 }
 
@@ -12942,7 +12942,7 @@ async function spComputePatches() {
         + '(player left the team after earning it).');
     }
     if (_spMinority.rows.length) {
-      bits.push('⚠ ' + _spMinority.rows.length + ' SP(s) in All-League that no team ever claimed '
+      bits.push('⚠ ' + _spMinority.rows.length + ' SPs in All-League that no team ever claimed '
         + '— see “Unclaimed SPs” below.');
     }
     if (_spMinority.skipped) bits.push('⚠ ' + _spMinority.skipped);
