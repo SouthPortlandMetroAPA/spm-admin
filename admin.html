@@ -3561,7 +3561,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.266';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.267';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -5429,16 +5429,25 @@ async function nrSave() {
       for (const r of (got || [])) oldByTeam.set(r.team_id, r);
     }
     const now = new Date().toISOString();
-    /* Guard (user rule 2026-07-12): Nexus is the record, but a paste
-       row still showing No/No must NOT clobber an answer collected in
-       ReRack that the operator hasn't clicked into Nexus yet. Those
-       rows skip the upsert and become the "pending Nexus entry" list. */
+    /* Guard (user rule 2026-07-12; WIDENED 2026-07-15): Nexus is the
+       record, but a paste row still showing No/No must NOT clobber a real
+       answer the operator hasn't clicked into Nexus yet. That means BOTH
+       source='rerack' (answered in ReRack) AND source='admin' (recorded
+       here by the operator, incl. the 3.251 "via player" path). 3.251
+       added the admin source but this guard still only knew 'rerack', so
+       every via-player mark was silently reverted by the next paste \u2014 15
+       real answers were lost that way before the fix. Those rows skip the
+       upsert and become the "pending Nexus entry" list. An ANSWERED paste
+       row still upserts normally, resolving the row to source='nexus'. */
     const pendingNexus = [];
     const saveRows = p.rows.filter(r => {
       const old = oldByTeam.get(r.team.id);
-      if (r.status === 'unanswered' && old && old.source === 'rerack' && old.status !== 'unanswered') {
+      if (r.status === 'unanswered' && old && old.status !== 'unanswered'
+          && (old.source === 'rerack' || old.source === 'admin')) {
         pendingNexus.push(nrTeamKey(r.team.team_number) + ' ' + (r.team.team_name || '')
-          + ' \u2014 ReRack says ' + (old.status === 'playing' ? 'PLAYING' : 'NOT PLAYING'));
+          + ' \u2014 ' + (old.source === 'admin' ? 'recorded by you' : 'ReRack') + ' says '
+          + (old.status === 'playing' ? 'PLAYING'
+             : old.status === 'not_playing' ? 'NOT PLAYING' : 'STILL DECIDING'));
         return false;
       }
       return true;
@@ -6484,9 +6493,15 @@ function nrComputeAttention() {
       && defn(r.prior_nexus_status) && r.prior_nexus_status !== r.status;
   });
   const changedIds = new Set(changed.map(t => t.id));
+  /* 2026-07-15: an 'admin' answer (recorded here by the operator, incl. the
+     3.251 "via player" path) is pending the Nexus click exactly like a ReRack
+     answer. This filter knew only 'rerack', so via-player marks never
+     surfaced here at all. 'undecided' stays excluded via defn() — there is
+     nothing to click into Nexus for a team that is still deciding. */
   const pending = spmN.filter(t => {
     const r = rowOf(t.id);
-    return r && r.source === 'rerack' && defn(r.status) && !changedIds.has(t.id);
+    return r && (r.source === 'rerack' || r.source === 'admin')
+      && defn(r.status) && !changedIds.has(t.id);
   });
   return { conflicts: conflicts, halves: halves, pending: pending, changed: changed };
 }
@@ -6517,7 +6532,7 @@ function nrRenderAttention() {
           return teamLine(t) + ' <span class="hint">' + esc(t.division.format) + ' \u00b7 Nexus has '
             + lbl(r.prior_nexus_status) + ', ReRack now says ' + lbl(r.status)
             + (r.answered_by_name ? ' \u00b7 by ' + esc(r.answered_by_name) : '') + '</span>'; })
-    + section('#a16207', '#fefce8', '\ud83d\udfe1 Answered in ReRack \u2014 click into Nexus, then re-paste', a.pending,
+    + section('#a16207', '#fefce8', '\ud83d\udfe1 Answered in ReRack / recorded by you \u2014 click into Nexus, then re-paste', a.pending,
         t => teamLine(t) + ' <span class="hint">' + esc(t.division.format) + ' \u00b7 ReRack says '
           + lbl(stOf(t.id)) + ((_nr.regRowByTeam.get(t.id) || {}).answered_by_name ? ' \u00b7 by ' + esc(_nr.regRowByTeam.get(t.id).answered_by_name) : '') + '</span>')
     + section('#a16207', '#fefce8', '\ud83d\udfe1 Half-entered pairs \u2014 finish the other Nexus row', a.halves, pairLine);
