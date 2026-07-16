@@ -1534,12 +1534,15 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         <div id="spPatchesList"></div>
         <details id="spManDetails" style="border-top:1px solid var(--border,#e5e7eb); margin-top:12px; padding-top:10px;">
           <summary style="cursor:pointer; font-weight:700; font-size:0.9rem;">&#65291; Manual SP &mdash; scotch doubles &amp; anything Nexus can't report</summary>
-          <p class="hint" style="margin:6px 0 8px;">Scotch-doubles specials never appear in a Nexus report. Adding one here creates the patch identity directly &mdash; it rides the next mail batch and shows in PatchCheck like any other patch. Compute never duplicates or removes it.</p>
+          <p class="hint" style="margin:6px 0 8px;">All-League and By-Division are <strong>not</strong> a superset of every SP &mdash; a special earned in a <strong>scotch-doubles match can't be entered into Nexus at all</strong>, so it appears in neither report and nothing can ever reconcile it. It only exists if you record it here. Adding one creates the patch identity directly &mdash; it rides the next mail batch, counts toward mini/grand slams, and shows in PatchCheck like any other patch. Compute never duplicates or removes it.</p>
+          <!-- Order matters: the CODE has to be chosen before we know how many
+               players to ask for. In a Doubles division the partners alternate
+               shots, so a break-and-run / rackless / skunk is earned by BOTH —
+               spManSyncPlayers() then renders two player pickers. -->
           <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
             <select id="spManDiv"><option value="">Division&hellip;</option></select>
             <select id="spManTeam" disabled><option value="">Team&hellip;</option></select>
-            <select id="spManPlayer" disabled><option value="">Player&hellip;</option></select>
-            <select id="spManCode">
+            <select id="spManCode" disabled>
               <option value="">SP code&hellip;</option>
               <option value="8">8 &mdash; 8 on the break</option>
               <option value="x">x &mdash; 8-ball break &amp; run</option>
@@ -1548,8 +1551,12 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
               <option value="r">r &mdash; rackless</option>
               <option value="k">k &mdash; 9-ball skunk</option>
             </select>
+            <span id="spManPlayerWrap" style="display:inline-flex; gap:8px; flex-wrap:wrap; align-items:center;">
+              <select id="spManPlayer" disabled><option value="">Player&hellip;</option></select>
+            </span>
             <button type="button" class="btn btn-outline" id="spManAddBtn" disabled>Add SP</button>
           </div>
+          <div class="hint" id="spManPairNote" style="margin:6px 0 0; display:none;"></div>
           <div class="status-line" id="spManStatus"></div>
         </details>
         <!-- Re-mail a lost patch: clear one patch's mailed stamp so it
@@ -3568,7 +3575,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.268';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.269';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11092,8 +11099,12 @@ function spOnEnterTab() {
     document.getElementById('spManDetails').addEventListener('toggle', ev => { if (ev.target.open) spManInit(); });
     document.getElementById('spManDiv').addEventListener('change', spManDivChange);
     document.getElementById('spManTeam').addEventListener('change', spManTeamChange);
-    document.getElementById('spManPlayer').addEventListener('change', spManSync);
-    document.getElementById('spManCode').addEventListener('change', spManSync);
+    /* The CODE drives how many players we ask for (scotch-doubles pair rule),
+       so it re-renders the player pickers rather than just re-validating.
+       The player selects themselves are (re)bound inside spManSyncPlayers —
+       it replaces those nodes, so a binding made here would be dropped on the
+       first re-render. */
+    document.getElementById('spManCode').addEventListener('change', spManSyncPlayers);
     document.getElementById('spManAddBtn').addEventListener('click', spManAdd);
     document.getElementById('spMailPatchesBtn').addEventListener('click', spMailPatches);
     document.getElementById('spRemailFindBtn').addEventListener('click', spRemailFind);
@@ -12108,9 +12119,11 @@ async function spManInit() {
 async function spManDivChange() {
   const divId = document.getElementById('spManDiv').value;
   const tSel = document.getElementById('spManTeam');
-  const pSel = document.getElementById('spManPlayer');
-  pSel.innerHTML = '<option value="">Player\u2026</option>'; pSel.disabled = true;
-  spManSync();
+  /* Changing division can flip pair mode (its FORMAT decides), so re-render
+     the player pickers rather than just clearing one select. */
+  _spMan.roster = [];
+  document.getElementById('spManCode').disabled = true;
+  spManSyncPlayers();
   if (!divId) { tSel.disabled = true; return; }
   _spMan.teams = await sb('GET', 'teams?division_id=eq.' + divId + '&select=id,team_number,team_name&order=team_number.asc');
   tSel.innerHTML = '<option value="">Team\u2026</option>' + _spMan.teams.map(t =>
@@ -12119,9 +12132,8 @@ async function spManDivChange() {
 }
 async function spManTeamChange() {
   const teamId = document.getElementById('spManTeam').value;
-  const pSel = document.getElementById('spManPlayer');
-  spManSync();
-  if (!teamId) { pSel.disabled = true; return; }
+  document.getElementById('spManCode').disabled = !teamId;
+  if (!teamId) { _spMan.roster = []; spManSyncPlayers(); return; }
   const tm = await sb('GET', 'team_memberships?team_id=eq.' + teamId + '&select=member_number,name_raw&order=id.asc');
   const nums = (tm || []).map(r => r.member_number).filter(Boolean);
   const byNum = new Map();
@@ -12134,38 +12146,119 @@ async function spManTeamChange() {
     const nm = p ? ((p.first_name || '') + ' ' + (p.last_name || '')).replace(/\s+/g, ' ').trim() : (r.name_raw || r.member_number);
     return { member_number: r.member_number, name: nm };
   });
-  pSel.innerHTML = '<option value="">Player\u2026</option>' + _spMan.roster.map(x =>
+  spManSyncPlayers();
+}
+
+/* \u2500\u2500 Scotch-doubles pair rule (user-locked 2026-07-15) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+   In a Doubles division the partners ALTERNATE shots, so who earned the SP
+   depends on the code:
+     8, 9        \u2014 literally ONE shot by ONE person (made the 8 / the 9 on the
+                   break) \u2192 the individual shooter.
+     x, n, r, k  \u2014 the pair alternates through the whole rack/match
+                   (break-and-run; rackless = every rack + the lag; 9-ball
+                   skunk) \u2192 BOTH players, each getting their own patch.
+   Keyed on division FORMAT, not a checkbox: in Open / Ladies / Masters an x is
+   one person's break-and-run and stays individual. \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */
+const SP_PAIR_CODES = ['x', 'n', 'r', 'k'];
+function spManIsPair() {
+  const div = _spMan.divs.find(d => String(d.id) === document.getElementById('spManDiv').value);
+  const code = document.getElementById('spManCode').value;
+  return !!div && /doubles/i.test(div.format || '') && SP_PAIR_CODES.indexOf(code) >= 0;
+}
+function spManPlayerOpts(sel) {
+  return '<option value="">' + esc(sel) + '\u2026</option>' + _spMan.roster.map(x =>
     '<option value="' + esc(x.member_number) + '">' + esc(x.name) + '</option>').join('');
-  pSel.disabled = false;
+}
+function spManSyncPlayers() {
+  const wrap = document.getElementById('spManPlayerWrap');
+  const note = document.getElementById('spManPairNote');
+  const pair = spManIsPair();
+  const have = _spMan.roster.length > 0;
+  wrap.innerHTML = pair
+    ? '<select id="spManPlayer" ' + (have ? '' : 'disabled') + '>' + spManPlayerOpts('Player 1') + '</select>'
+      + '<select id="spManPlayer2" ' + (have ? '' : 'disabled') + '>' + spManPlayerOpts('Player 2') + '</select>'
+    : '<select id="spManPlayer" ' + (have ? '' : 'disabled') + '>' + spManPlayerOpts('Player') + '</select>';
+  wrap.querySelectorAll('select').forEach(s => s.addEventListener('change', spManSync));
+  if (pair) {
+    const code = document.getElementById('spManCode').value;
+    note.style.display = '';
+    note.innerHTML = 'Scotch doubles: partners alternate shots, so <strong>'
+      + esc(SP_DISPLAY[code] || code) + '</strong> is earned by <strong>both</strong> players \u2014 '
+      + 'each gets their own patch. (8 and 9 are a single shot, so those go to one player.)';
+  } else { note.style.display = 'none'; note.innerHTML = ''; }
+  spManSync();
 }
 function spManSync() {
-  const ok = document.getElementById('spManDiv').value && document.getElementById('spManTeam').value
-    && document.getElementById('spManPlayer').value && document.getElementById('spManCode').value;
+  const p1 = document.getElementById('spManPlayer');
+  const p2 = document.getElementById('spManPlayer2');
+  const pair = spManIsPair();
+  let ok = document.getElementById('spManDiv').value && document.getElementById('spManTeam').value
+    && document.getElementById('spManCode').value && p1 && p1.value;
+  if (ok && pair) ok = !!(p2 && p2.value && p2.value !== p1.value);
   document.getElementById('spManAddBtn').disabled = !ok;
+  const note = document.getElementById('spManPairNote');
+  if (pair && p1 && p2 && p1.value && p2.value && p1.value === p2.value) {
+    note.style.display = '';
+    note.innerHTML = '<span style="color:#b91c1c;font-weight:700">Pick two different players \u2014 '
+      + 'a scotch pair is two people.</span>';
+  }
 }
 async function spManAdd() {
-  const div = _spMan.divs.find(d => String(d.id) === document.getElementById('spManDiv').value);
+  const div  = _spMan.divs.find(d => String(d.id) === document.getElementById('spManDiv').value);
   const team = _spMan.teams.find(t => String(t.id) === document.getElementById('spManTeam').value);
-  const mem = document.getElementById('spManPlayer').value;
-  const person = _spMan.roster.find(x => x.member_number === mem);
   const code = document.getElementById('spManCode').value;
-  if (!div || !team || !person || !code) return;
-  const localNum = String(mem).replace(/^972/, '');
-  const teamNum = String(parseInt(team.team_number, 10)).padStart(5, '0');
-  try {
-    const dup = await sb('GET', 'sp_patches?session_id=eq.' + currentSession.id
-      + '&member_number=eq.' + localNum + '&division_number=eq.' + encodeURIComponent(div.division_number)
-      + '&sp_type=eq.' + code + '&select=id&limit=1');
-    if (dup && dup.length) { setStatus('spManStatus', 'Already tracked \u2014 that player has this SP in this division.', 'err'); return; }
-    await sb('POST', 'sp_patches', {
-      session_id: currentSession.id, operator_id: div.operator_id,
-      member_number: localNum, member_name: person.name,
-      division_number: div.division_number, team_number: teamNum,
-      sp_type: code, is_slam: false, weight: 1, source_report_id: null
-    });
-    setStatus('spManStatus', '\u2713 Added ' + code + ' for ' + person.name + ' \u2014 it rides the next mail batch.', 'ok');
+  if (!div || !team || !code) return;
+
+  /* One member per patch: a scotch pair earns TWO patches (one each), not a
+     shared one \u2014 each player gets their own envelope and PatchCheck entry. */
+  const picked = [document.getElementById('spManPlayer')];
+  if (spManIsPair()) picked.push(document.getElementById('spManPlayer2'));
+  const people = picked.map(s => _spMan.roster.find(x => x.member_number === (s && s.value)))
+                       .filter(Boolean);
+  if (!people.length || (spManIsPair() && people.length < 2)) return;
+  if (people.length === 2 && people[0].member_number === people[1].member_number) return;
+
+  /* Masters remap \u2014 the compute stores m8/mx/m9/mn in a Masters division, so
+     the manual path must too or the same achievement lands under two different
+     codes depending on how it was entered. (Latent: Masters isn't scotch
+     doubles, but the inconsistency is real.) */
+  const isMasters = /masters/i.test(div.format || '') || /masters/i.test(div.name || '');
+  const storedSp  = (isMasters && MASTERS_REMAP[code]) ? MASTERS_REMAP[code] : code;
+  const teamNum   = String(parseInt(team.team_number, 10)).padStart(5, '0');
+
+  const added = [], skipped = [], failed = [];
+  for (const person of people) {
+    const localNum = String(person.member_number).replace(/^972/, '');
+    try {
+      const dup = await sb('GET', 'sp_patches?session_id=eq.' + currentSession.id
+        + '&member_number=eq.' + localNum + '&division_number=eq.' + encodeURIComponent(div.division_number)
+        + '&sp_type=eq.' + storedSp + '&select=id&limit=1');
+      if (dup && dup.length) { skipped.push(person.name); continue; }
+      await sb('POST', 'sp_patches', {
+        session_id: currentSession.id, operator_id: div.operator_id,
+        member_number: localNum, member_name: person.name,
+        division_number: div.division_number, team_number: teamNum,
+        sp_type: storedSp, is_slam: false, weight: SP_WEIGHT[storedSp] || 1,
+        source_report_id: null
+      });
+      added.push(person.name);
+    } catch (e) { failed.push(person.name + ' (' + e.message + ')'); }
+  }
+
+  /* Report per player. Never say "added" for a pair when only one landed \u2014
+     the operator has to know which half to retry. */
+  const bits = [];
+  if (added.length)   bits.push('\u2713 Added ' + (SP_DISPLAY[storedSp] || storedSp) + ' for ' + added.join(' + ')
+                                + ' \u2014 rides the next mail batch.');
+  if (skipped.length) bits.push('Already tracked: ' + skipped.join(', ') + '.');
+  if (failed.length)  bits.push('FAILED: ' + failed.join('; '));
+  setStatus('spManStatus', bits.join(' '),
+            failed.length ? 'err' : (added.length ? 'ok' : 'err'));
+  if (added.length) {
+    document.getElementById('spManCode').value = '';
+    spManSyncPlayers();
     await spLoadPatches();
-  } catch (e) { setStatus('spManStatus', 'Add failed: ' + e.message, 'err'); }
+  }
 }
 
 /* ── Unclaimed SPs — the "minority report" (2026-07-15) ─────────────────
@@ -12542,6 +12635,34 @@ async function spComputePatches() {
     if (_spMinority.recovered) {
       console.log('[patches] recovered from bd history:', _spMinority.recovered);
     }
+
+    /* ── Manual SPs feed the slam rule (2026-07-15) ──────────────────────
+       All-League + By-Division are NOT a superset of every SP: a special
+       earned in a SCOTCH-DOUBLES match cannot be entered into Nexus at all,
+       so it exists ONLY as a manual sp_patches row (source_report_id NULL).
+       memberAggByDiv is built purely from By-Division rows, so without this a
+       scotch-doubles 'x' could never complete 8m/9m/g — a player whose 4th
+       Grand-Slam code came from a scotch match would silently lose the slam.
+       Same hole as the bd_history recovery above; manual had it too.
+       Codes are un-mapped back to raw deps (mx→x) because SLAM_DEPS is keyed
+       on the raw code regardless of Masters. */
+    const MASTERS_UNMAP = { 'm8':'8', 'mx':'x', 'm9':'9', 'mn':'n' };
+    const manualRows = await sbGetAll('sp_patches?session_id=eq.' + currentSession.id
+      + '&operator_id=eq.' + opId
+      + '&source_report_id=is.null&is_slam=eq.false'
+      + '&select=member_number,member_name,team_number,sp_type');
+    for (const m of manualRows) {
+      const raw = MASTERS_UNMAP[m.sp_type] || m.sp_type;
+      if (raw !== 'x' && raw !== '8' && raw !== '9' && raw !== 'n') continue;
+      if (!memberAggByDiv.has(m.member_number))
+        memberAggByDiv.set(m.member_number, { name: m.member_name, sp: {} });
+      const agg = memberAggByDiv.get(m.member_number);
+      agg.sp[raw] = (agg.sp[raw] || 0) + 1;
+      if (!memberTeamByCode.has(m.member_number)) memberTeamByCode.set(m.member_number, {});
+      if (!memberTeamByCode.get(m.member_number)[raw]) memberTeamByCode.get(m.member_number)[raw] = [];
+      memberTeamByCode.get(m.member_number)[raw].push(m.team_number);
+    }
+    if (manualRows.length) console.log('[patches] manual SPs folded into slam deps:', manualRows.length);
 
     // Slam patches
     const slamMap = new Map(); // key: member|sp_type → row
