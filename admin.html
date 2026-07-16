@@ -3586,7 +3586,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.273';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.274';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -12240,7 +12240,7 @@ function spManSyncCodes() {
     note.style.display = div ? '' : 'none';
     note.innerHTML = !div ? ''
       : masters
-        ? 'Masters plays both 8- and 9-ball, so every code is offered — and each is recorded as a <strong>Masters</strong> SP (m8 / mx / m9 / mn).'
+        ? 'Masters plays both 8- and 9-ball, so every code is offered — and each is recorded as a <strong>Masters</strong> SP — m8 / mx / m9 / mn.'
         : ball
           ? 'Only <strong>' + ball + '-ball</strong> codes — you can’t earn a ' + (ball === '8' ? '9' : '8')
             + '-ball special in a ' + ball + '-ball match.'
