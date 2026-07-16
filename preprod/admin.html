@@ -1373,6 +1373,10 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         </div>
         <div class="hint" id="spManPairNote" style="margin:6px 0 0; display:none;"></div>
         <div class="status-line" id="spManStatus"></div>
+        <!-- Review list — every manually recorded SP, and the only way to undo
+             one. Manual SPs are invisible in the report PDFs by definition, so
+             without this there is no way to see or correct what was entered. -->
+        <div id="spManList" style="border-top:1px solid var(--border,#e5e7eb); margin-top:12px; padding-top:10px;"></div>
       </details>
 
       <!-- Expected reports — status checklist for the patch workflow -->
@@ -3585,7 +3589,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.270';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.271';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10785,6 +10789,14 @@ async function spSaveReport(kind, parsed, filename, dataThrough) {
     } else if (kind === 'bd') {
       const rows = parsed.rows.map(r => ({ ...r, report_id: reportId }));
       await spInsertChunks('sp_by_division_rows', rows, CHUNK, 'by-division rows');
+      /* Merge manual SPs into THIS report's counts, right here at ingest.
+         Every bd upload mints a new report_id with fresh rows — the
+         wipe-and-replace pattern that has destroyed tagged data in this
+         codebase before — so a scotch-doubles SP recorded weeks ago would
+         silently vanish from the counts on the next upload unless it is
+         re-projected every time. This is the "early in the process" step that
+         lets all nine downstream consumers stay ignorant of manual SPs. */
+      await spProjectManuals(reportId);
     } else if (kind === '8skunk') {
       const skunkRows = parsed.events.map(e => ({
         report_id: reportId,
@@ -12125,6 +12137,7 @@ async function spManInit() {
     sel.innerHTML = '<option value="">Division\u2026</option>' + _spMan.divs.map(d =>
       '<option value="' + d.id + '">' + esc(d.division_number + ' \u2014 ' + (d.name || '') + ' \u00b7 ' + (d.format || '')) + '</option>').join('');
   } catch (e) { setStatus('spManStatus', 'Divisions load failed: ' + e.message, 'err'); }
+  spRenderManualList();
 }
 async function spManDivChange() {
   const divId = document.getElementById('spManDiv').value;
@@ -12213,14 +12226,68 @@ function spManSync() {
       + 'a scotch pair is two people.</span>';
   }
 }
+/* \u2500\u2500 Manual SP \u2192 By-Division counts, merged at SOURCE (2026-07-15) \u2500\u2500\u2500\u2500\u2500\u2500
+   A manual SP is NOT written as a patch. It is recorded in slate.sp_manual_sp
+   (the durable truth + the review list) and PROJECTED as its own
+   sp_by_division_rows row carrying only its counts. Everything downstream \u2014
+   spComputePatches, ss_leaders, ss_admin_metrics, the three cert RPCs,
+   Leaderboard, PatchCheck, SpecialPerformanceViewer: NINE consumers \u2014 already
+   reads those rows and sums them, so none of them need to know manual SPs
+   exist. That is the whole point of merging early (user's call): a repeat SP
+   simply makes the division count 2, with no new concept anywhere downstream.
+
+   Consequences that fall out for free, rather than as special cases:
+     \u2022 a 2nd '9' for someone who already has one is a legitimate count, not a
+       collision \u2014 sp_patches' unique identity is untouched;
+     \u2022 slams work (projected rows ARE By-Division rows);
+     \u2022 the Masters remap works (we store the RAW code; the compute remaps by
+       division exactly as it does for parsed rows).
+
+   Parsed counts are NEVER mutated \u2014 a manual SP is always its own row \u2014 so it
+   can be un-applied exactly on delete, and a re-upload can't double it. \u2500\u2500\u2500\u2500 */
+async function spProjectManuals(reportId) {
+  const manuals = await sbGetAll('sp_manual_sp?session_id=eq.' + currentSession.id + '&select=*');
+  /* Idempotent by construction: drop this report's projections and re-lay them.
+     Every bd upload mints a NEW report_id with fresh rows (the wipe-and-replace
+     pattern that has destroyed tagged data here before), so projection re-runs
+     on every ingest \u2014 this must never double. */
+  await sb('DELETE', 'sp_by_division_rows?report_id=eq.' + reportId + '&manual_sp_id=not.is.null');
+  if (!manuals.length) return 0;
+  const divs = await sb('GET', 'divisions?session_id=eq.' + currentSession.id
+    + '&select=division_number,name');
+  const divName = new Map((divs || []).map(d => [d.division_number, d.name]));
+  const rows = manuals.map(m => {
+    const row = {
+      report_id: reportId, division_number: m.division_number,
+      division_name: divName.get(m.division_number) || null,
+      team_number: m.team_number, member_number: m.member_number,
+      member_name: m.member_name,
+      rackless: 0, eight_ob: 0, eight_br: 0, nine_os: 0, nine_br: 0, skunk: 0,
+      manual_sp_id: m.id
+    };
+    const field = SP_TYPE_TO_BD_FIELD[m.sp_type];
+    if (field) row[field] = m.qty || 1;
+    return row;
+  });
+  await spInsertChunks('sp_by_division_rows', rows, 400, 'manual SP projections');
+  console.log('[SP] projected', rows.length, 'manual SP(s) onto report', reportId);
+  return rows.length;
+}
+
+async function spLatestBdReportId() {
+  const r = await sb('GET', 'sp_reports?session_id=eq.' + currentSession.id
+    + '&report_kind=eq.bd&select=id&order=uploaded_at.desc&limit=1');
+  return (r && r[0] && r[0].id) || null;
+}
+
 async function spManAdd() {
   const div  = _spMan.divs.find(d => String(d.id) === document.getElementById('spManDiv').value);
   const team = _spMan.teams.find(t => String(t.id) === document.getElementById('spManTeam').value);
   const code = document.getElementById('spManCode').value;
   if (!div || !team || !code) return;
 
-  /* One member per patch: a scotch pair earns TWO patches (one each), not a
-     shared one \u2014 each player gets their own envelope and PatchCheck entry. */
+  /* One record per member: a scotch pair is TWO SPs (one each), not a shared
+     one \u2014 each player gets their own count, patch, envelope and PatchCheck row. */
   const picked = [document.getElementById('spManPlayer')];
   if (spManIsPair()) picked.push(document.getElementById('spManPlayer2'));
   const people = picked.map(s => _spMan.roster.find(x => x.member_number === (s && s.value)))
@@ -12228,47 +12295,92 @@ async function spManAdd() {
   if (!people.length || (spManIsPair() && people.length < 2)) return;
   if (people.length === 2 && people[0].member_number === people[1].member_number) return;
 
-  /* Masters remap \u2014 the compute stores m8/mx/m9/mn in a Masters division, so
-     the manual path must too or the same achievement lands under two different
-     codes depending on how it was entered. (Latent: Masters isn't scotch
-     doubles, but the inconsistency is real.) */
-  const isMasters = /masters/i.test(div.format || '') || /masters/i.test(div.name || '');
-  const storedSp  = (isMasters && MASTERS_REMAP[code]) ? MASTERS_REMAP[code] : code;
-  const teamNum   = String(parseInt(team.team_number, 10)).padStart(5, '0');
-
-  const added = [], skipped = [], failed = [];
+  const teamNum = String(parseInt(team.team_number, 10)).padStart(5, '0');
+  const added = [], failed = [];
   for (const person of people) {
     const localNum = String(person.member_number).replace(/^972/, '');
     try {
-      const dup = await sb('GET', 'sp_patches?session_id=eq.' + currentSession.id
-        + '&member_number=eq.' + localNum + '&division_number=eq.' + encodeURIComponent(div.division_number)
-        + '&sp_type=eq.' + storedSp + '&select=id&limit=1');
-      if (dup && dup.length) { skipped.push(person.name); continue; }
-      await sb('POST', 'sp_patches', {
+      /* Store the RAW code \u2014 it projects into a raw-code column and the compute
+         applies the Masters remap by division, same as any parsed row. */
+      await sb('POST', 'sp_manual_sp', {
         session_id: currentSession.id, operator_id: div.operator_id,
-        member_number: localNum, member_name: person.name,
         division_number: div.division_number, team_number: teamNum,
-        sp_type: storedSp, is_slam: false, weight: SP_WEIGHT[storedSp] || 1,
-        source_report_id: null
+        member_number: localNum, member_name: person.name,
+        sp_type: code, qty: 1, note: null
       });
       added.push(person.name);
     } catch (e) { failed.push(person.name + ' (' + e.message + ')'); }
   }
 
-  /* Report per player. Never say "added" for a pair when only one landed \u2014
-     the operator has to know which half to retry. */
+  /* Re-project onto the CURRENT report so it counts now, not next upload. */
+  let projectErr = null;
+  if (added.length) {
+    try {
+      const rid = await spLatestBdReportId();
+      if (rid) await spProjectManuals(rid);
+      else projectErr = 'recorded, but there is no By-Division report yet \u2014 it will count as soon as you upload one';
+    } catch (e) { projectErr = 'recorded, but adding it to the division count failed: ' + e.message; }
+  }
+
   const bits = [];
-  if (added.length)   bits.push('\u2713 Added ' + (SP_DISPLAY[storedSp] || storedSp) + ' for ' + added.join(' + ')
-                                + ' \u2014 rides the next mail batch.');
-  if (skipped.length) bits.push('Already tracked: ' + skipped.join(', ') + '.');
-  if (failed.length)  bits.push('FAILED: ' + failed.join('; '));
+  if (added.length) bits.push('\u2713 Recorded ' + (SP_DISPLAY[code] || code) + ' for ' + added.join(' + ')
+    + ' \u2014 added to their ' + esc(div.division_number) + ' count'
+    + (projectErr ? '' : '; it rides the next mail batch and counts toward slams.'));
+  if (projectErr) bits.push('\u26a0 ' + projectErr);
+  if (failed.length) bits.push('FAILED: ' + failed.join('; '));
   setStatus('spManStatus', bits.join(' '),
-            failed.length ? 'err' : (added.length ? 'ok' : 'err'));
+            (failed.length || projectErr) ? 'err' : 'ok');
   if (added.length) {
     document.getElementById('spManCode').value = '';
     spManSyncPlayers();
-    await spLoadPatches();
+    await spRenderManualList();
   }
+}
+
+/* \u2500\u2500 Review list \u2014 every manually added SP, and the only way to undo one \u2500\u2500 */
+async function spRenderManualList() {
+  const box = document.getElementById('spManList');
+  if (!box || !currentSession) return;
+  let rows = [];
+  try {
+    rows = await sbGetAll('sp_manual_sp?session_id=eq.' + currentSession.id
+      + '&select=*&order=created_at.desc');
+  } catch (e) { box.innerHTML = '<div class="hint">Could not load: ' + esc(e.message) + '</div>'; return; }
+  if (!rows.length) {
+    box.innerHTML = '<div class="hint">No manual SPs recorded this session.</div>';
+    return;
+  }
+  _spMan.manuals = rows;
+  box.innerHTML = '<div style="font-weight:700;font-size:0.84rem;margin:2px 0 4px">'
+    + 'Recorded manually \u2014 ' + rows.length + '</div>'
+    + '<p class="hint" style="margin:0 0 6px">These are added to each player\u2019s By-Division count, '
+    + 're-applied automatically every time you upload a new By-Division report. Removing one '
+    + 'takes it back out of the count.</p>'
+    + rows.map((r, i) =>
+        '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:0.83rem;'
+        + 'border-top:1px solid var(--border,#e5e7eb)">'
+        + '<span style="flex:1"><strong>' + esc(r.member_name) + '</strong> '
+        + '<span class="hint">' + esc(r.member_number) + ' \u00b7 ' + esc(r.division_number)
+        + ' \u00b7 team ' + esc(r.team_number) + ' \u00b7 <strong>' + esc(SP_DISPLAY[r.sp_type] || r.sp_type)
+        + '</strong>' + (r.qty > 1 ? ' \u00d7' + r.qty : '')
+        + ' \u00b7 ' + esc(String(r.created_at).slice(0, 10)) + '</span></span>'
+        + '<button type="button" class="btn btn-outline" style="padding:2px 8px;font-size:0.76rem" '
+        + 'onclick="spManRemove(' + i + ')">Remove</button></div>').join('')
+    + '<div class="status-line" id="spManListStatus" style="margin-top:6px"></div>';
+}
+
+async function spManRemove(i) {
+  const r = (_spMan.manuals || [])[i];
+  if (!r) return;
+  try {
+    /* The FK is ON DELETE CASCADE, so the projected By-Division rows go with
+       it and the count drops back on its own \u2014 no un-apply arithmetic. */
+    await sb('DELETE', 'sp_manual_sp?id=eq.' + r.id);
+    await spRenderManualList();
+    setStatus('spManListStatus', '\u2713 Removed ' + (SP_DISPLAY[r.sp_type] || r.sp_type)
+      + ' for ' + r.member_name + ' \u2014 taken back out of the ' + r.division_number + ' count. '
+      + 'Re-run Compute Patches if it had already produced a patch.', 'ok');
+  } catch (e) { setStatus('spManListStatus', 'Remove failed: ' + e.message, 'err'); }
 }
 
 /* ── Unclaimed SPs — the "minority report" (2026-07-15) ─────────────────
@@ -12646,33 +12758,15 @@ async function spComputePatches() {
       console.log('[patches] recovered from bd history:', _spMinority.recovered);
     }
 
-    /* ── Manual SPs feed the slam rule (2026-07-15) ──────────────────────
-       All-League + By-Division are NOT a superset of every SP: a special
-       earned in a SCOTCH-DOUBLES match cannot be entered into Nexus at all,
-       so it exists ONLY as a manual sp_patches row (source_report_id NULL).
-       memberAggByDiv is built purely from By-Division rows, so without this a
-       scotch-doubles 'x' could never complete 8m/9m/g — a player whose 4th
-       Grand-Slam code came from a scotch match would silently lose the slam.
-       Same hole as the bd_history recovery above; manual had it too.
-       Codes are un-mapped back to raw deps (mx→x) because SLAM_DEPS is keyed
-       on the raw code regardless of Masters. */
-    const MASTERS_UNMAP = { 'm8':'8', 'mx':'x', 'm9':'9', 'mn':'n' };
-    const manualRows = await sbGetAll('sp_patches?session_id=eq.' + currentSession.id
-      + '&operator_id=eq.' + opId
-      + '&source_report_id=is.null&is_slam=eq.false'
-      + '&select=member_number,member_name,team_number,sp_type');
-    for (const m of manualRows) {
-      const raw = MASTERS_UNMAP[m.sp_type] || m.sp_type;
-      if (raw !== 'x' && raw !== '8' && raw !== '9' && raw !== 'n') continue;
-      if (!memberAggByDiv.has(m.member_number))
-        memberAggByDiv.set(m.member_number, { name: m.member_name, sp: {} });
-      const agg = memberAggByDiv.get(m.member_number);
-      agg.sp[raw] = (agg.sp[raw] || 0) + 1;
-      if (!memberTeamByCode.has(m.member_number)) memberTeamByCode.set(m.member_number, {});
-      if (!memberTeamByCode.get(m.member_number)[raw]) memberTeamByCode.get(m.member_number)[raw] = [];
-      memberTeamByCode.get(m.member_number)[raw].push(m.team_number);
-    }
-    if (manualRows.length) console.log('[patches] manual SPs folded into slam deps:', manualRows.length);
+    /* NOTE (2026-07-15): there is deliberately NO manual-SP special case here.
+       Manual SPs (scotch doubles etc.) are PROJECTED into sp_by_division_rows
+       at ingest, so by the time we get here they are ordinary By-Division rows:
+       they are already in `rows`/`opRows`, already in perCodeMap, and already
+       in memberAggByDiv above. Slams, the Masters remap and the counts all work
+       with no extra code. An earlier build folded manual sp_patches rows in
+       here by hand — merging at source deleted that. If you find yourself
+       re-adding a manual branch anywhere downstream, the projection is broken;
+       fix it at ingest (spProjectManuals), not here. */
 
     // Slam patches
     const slamMap = new Map(); // key: member|sp_type → row
