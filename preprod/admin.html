@@ -1338,6 +1338,43 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         <div id="spDropStatus" class="status-line"></div>
       </div>
 
+      <!-- Manual SP — the OTHER way SP data gets in, so it lives next to the
+           report drop zone rather than buried under the patch list (it was at
+           the bottom of the Patches card until 3.270; that card is about
+           MAILING, this is about INPUT). Collapsed <details class="card"> is
+           the house pattern (see the Next Session tab) — heading always
+           visible, body out of the way since scotch specials are rare. -->
+      <details class="card" id="spManDetails" style="margin-bottom:14px;">
+        <summary style="cursor:pointer; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+          <h2 style="margin:0; font-size:1.05rem; display:inline;">Manual SP</h2>
+          <span class="hint">scotch doubles &amp; anything Nexus can't report</span>
+        </summary>
+        <p class="hint" style="margin:6px 0 8px;">All-League and By-Division are <strong>not</strong> a superset of every SP &mdash; a special earned in a <strong>scotch-doubles match can't be entered into Nexus at all</strong>, so it appears in neither report and nothing can ever reconcile it. It only exists if you record it here. Adding one creates the patch identity directly &mdash; it rides the next mail batch, counts toward mini/grand slams, and shows in PatchCheck like any other patch. Compute never duplicates or removes it.</p>
+        <!-- Order matters: the CODE has to be chosen before we know how many
+             players to ask for. In a Doubles division the partners alternate
+             shots, so a break-and-run / rackless / skunk is earned by BOTH —
+             spManSyncPlayers() then renders two player pickers. -->
+        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+          <select id="spManDiv"><option value="">Division&hellip;</option></select>
+          <select id="spManTeam" disabled><option value="">Team&hellip;</option></select>
+          <select id="spManCode" disabled>
+            <option value="">SP code&hellip;</option>
+            <option value="8">8 &mdash; 8 on the break</option>
+            <option value="x">x &mdash; 8-ball break &amp; run</option>
+            <option value="9">9 &mdash; 9 on the snap</option>
+            <option value="n">n &mdash; 9-ball break &amp; run</option>
+            <option value="r">r &mdash; rackless</option>
+            <option value="k">k &mdash; 9-ball skunk</option>
+          </select>
+          <span id="spManPlayerWrap" style="display:inline-flex; gap:8px; flex-wrap:wrap; align-items:center;">
+            <select id="spManPlayer" disabled><option value="">Player&hellip;</option></select>
+          </span>
+          <button type="button" class="btn btn-outline" id="spManAddBtn" disabled>Add SP</button>
+        </div>
+        <div class="hint" id="spManPairNote" style="margin:6px 0 0; display:none;"></div>
+        <div class="status-line" id="spManStatus"></div>
+      </details>
+
       <!-- Expected reports — status checklist for the patch workflow -->
       <div class="card" style="margin-bottom:14px;">
         <h2 style="margin:0 0 6px;">Expected reports</h2>
@@ -1532,33 +1569,6 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
              upload, and the operator can tell those apart at a glance. -->
         <div id="spMinority"></div>
         <div id="spPatchesList"></div>
-        <details id="spManDetails" style="border-top:1px solid var(--border,#e5e7eb); margin-top:12px; padding-top:10px;">
-          <summary style="cursor:pointer; font-weight:700; font-size:0.9rem;">&#65291; Manual SP &mdash; scotch doubles &amp; anything Nexus can't report</summary>
-          <p class="hint" style="margin:6px 0 8px;">All-League and By-Division are <strong>not</strong> a superset of every SP &mdash; a special earned in a <strong>scotch-doubles match can't be entered into Nexus at all</strong>, so it appears in neither report and nothing can ever reconcile it. It only exists if you record it here. Adding one creates the patch identity directly &mdash; it rides the next mail batch, counts toward mini/grand slams, and shows in PatchCheck like any other patch. Compute never duplicates or removes it.</p>
-          <!-- Order matters: the CODE has to be chosen before we know how many
-               players to ask for. In a Doubles division the partners alternate
-               shots, so a break-and-run / rackless / skunk is earned by BOTH —
-               spManSyncPlayers() then renders two player pickers. -->
-          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-            <select id="spManDiv"><option value="">Division&hellip;</option></select>
-            <select id="spManTeam" disabled><option value="">Team&hellip;</option></select>
-            <select id="spManCode" disabled>
-              <option value="">SP code&hellip;</option>
-              <option value="8">8 &mdash; 8 on the break</option>
-              <option value="x">x &mdash; 8-ball break &amp; run</option>
-              <option value="9">9 &mdash; 9 on the snap</option>
-              <option value="n">n &mdash; 9-ball break &amp; run</option>
-              <option value="r">r &mdash; rackless</option>
-              <option value="k">k &mdash; 9-ball skunk</option>
-            </select>
-            <span id="spManPlayerWrap" style="display:inline-flex; gap:8px; flex-wrap:wrap; align-items:center;">
-              <select id="spManPlayer" disabled><option value="">Player&hellip;</option></select>
-            </span>
-            <button type="button" class="btn btn-outline" id="spManAddBtn" disabled>Add SP</button>
-          </div>
-          <div class="hint" id="spManPairNote" style="margin:6px 0 0; display:none;"></div>
-          <div class="status-line" id="spManStatus"></div>
-        </details>
         <!-- Re-mail a lost patch: clear one patch's mailed stamp so it
              rides the next batch (to the updated mailing contact). -->
         <div style="border-top:1px solid var(--border,#e5e7eb); margin-top:12px; padding-top:10px;">
@@ -3575,7 +3585,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.269';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.270';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
