@@ -1338,6 +1338,44 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         <div id="spDropStatus" class="status-line"></div>
       </div>
 
+      <!-- Manual SP — the OTHER way SP data gets in, so it lives next to the
+           report drop zone rather than buried under the patch list (it was at
+           the bottom of the Patches card until 3.270; that card is about
+           MAILING, this is about INPUT). Collapsed <details class="card"> is
+           the house pattern (see the Next Session tab) — heading always
+           visible, body out of the way since scotch specials are rare. -->
+      <details class="card" id="spManDetails" style="margin-bottom:14px;">
+        <summary style="cursor:pointer; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+          <h2 style="margin:0; font-size:1.05rem; display:inline;">Manual SP</h2>
+          <span class="hint">scotch doubles &amp; anything Nexus can't report</span>
+        </summary>
+        <p class="hint" style="margin:6px 0 8px;">All-League and By-Division are <strong>not</strong> a superset of every SP &mdash; a special earned in a <strong>scotch-doubles match can't be entered into Nexus at all</strong>, so it appears in neither report and nothing can ever reconcile it. It only exists if you record it here. Adding one creates the patch identity directly &mdash; it rides the next mail batch, counts toward mini/grand slams, and shows in PatchCheck like any other patch. Compute never duplicates or removes it.</p>
+        <!-- Order matters: the CODE has to be chosen before we know how many
+             players to ask for. In a Doubles division the partners alternate
+             shots, so a break-and-run / rackless / skunk is earned by BOTH —
+             spManSyncPlayers() then renders two player pickers. -->
+        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+          <select id="spManDiv"><option value="">Division&hellip;</option></select>
+          <select id="spManTeam" disabled><option value="">Team&hellip;</option></select>
+          <!-- Options are built by spManSyncCodes() from the DIVISION's format —
+               8-ball divisions can't produce a 9-ball special and vice versa,
+               and Masters records the m8/mx/m9/mn variants. A static list here
+               would offer codes the division can't earn. -->
+          <select id="spManCode" disabled><option value="">SP code&hellip;</option></select>
+          <span id="spManPlayerWrap" style="display:inline-flex; gap:8px; flex-wrap:wrap; align-items:center;">
+            <select id="spManPlayer" disabled><option value="">Player&hellip;</option></select>
+          </span>
+          <button type="button" class="btn btn-outline" id="spManAddBtn" disabled>Add SP</button>
+        </div>
+        <div class="hint" id="spManBallNote" style="margin:6px 0 0; display:none;"></div>
+        <div class="hint" id="spManPairNote" style="margin:4px 0 0; display:none;"></div>
+        <div class="status-line" id="spManStatus"></div>
+        <!-- Review list — every manually recorded SP, and the only way to undo
+             one. Manual SPs are invisible in the report PDFs by definition, so
+             without this there is no way to see or correct what was entered. -->
+        <div id="spManList" style="border-top:1px solid var(--border,#e5e7eb); margin-top:12px; padding-top:10px;"></div>
+      </details>
+
       <!-- Expected reports — status checklist for the patch workflow -->
       <div class="card" style="margin-bottom:14px;">
         <h2 style="margin:0 0 6px;">Expected reports</h2>
@@ -1524,27 +1562,14 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           </div>
         </div>
         <div id="spPatchesBlocker" class="status-line"></div>
+        <!-- Unclaimed SPs (the "minority report"). Rendered by spRenderMinority()
+             only when the All-League ↔ By-Division reconciliation finds an SP
+             that no team ever claimed — i.e. the player was removed from the
+             team before By-Division saw it. Nothing here is ever auto-created:
+             one row is a dropped player, four hundred rows is a bad By-Division
+             upload, and the operator can tell those apart at a glance. -->
+        <div id="spMinority"></div>
         <div id="spPatchesList"></div>
-        <details id="spManDetails" style="border-top:1px solid var(--border,#e5e7eb); margin-top:12px; padding-top:10px;">
-          <summary style="cursor:pointer; font-weight:700; font-size:0.9rem;">&#65291; Manual SP &mdash; scotch doubles &amp; anything Nexus can't report</summary>
-          <p class="hint" style="margin:6px 0 8px;">Scotch-doubles specials never appear in a Nexus report. Adding one here creates the patch identity directly &mdash; it rides the next mail batch and shows in PatchCheck like any other patch. Compute never duplicates or removes it.</p>
-          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-            <select id="spManDiv"><option value="">Division&hellip;</option></select>
-            <select id="spManTeam" disabled><option value="">Team&hellip;</option></select>
-            <select id="spManPlayer" disabled><option value="">Player&hellip;</option></select>
-            <select id="spManCode">
-              <option value="">SP code&hellip;</option>
-              <option value="8">8 &mdash; 8 on the break</option>
-              <option value="x">x &mdash; 8-ball break &amp; run</option>
-              <option value="9">9 &mdash; 9 on the snap</option>
-              <option value="n">n &mdash; 9-ball break &amp; run</option>
-              <option value="r">r &mdash; rackless</option>
-              <option value="k">k &mdash; 9-ball skunk</option>
-            </select>
-            <button type="button" class="btn btn-outline" id="spManAddBtn" disabled>Add SP</button>
-          </div>
-          <div class="status-line" id="spManStatus"></div>
-        </details>
         <!-- Re-mail a lost patch: clear one patch's mailed stamp so it
              rides the next batch (to the updated mailing contact). -->
         <div style="border-top:1px solid var(--border,#e5e7eb); margin-top:12px; padding-top:10px;">
@@ -3561,7 +3586,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.267';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.272';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10761,6 +10786,14 @@ async function spSaveReport(kind, parsed, filename, dataThrough) {
     } else if (kind === 'bd') {
       const rows = parsed.rows.map(r => ({ ...r, report_id: reportId }));
       await spInsertChunks('sp_by_division_rows', rows, CHUNK, 'by-division rows');
+      /* Merge manual SPs into THIS report's counts, right here at ingest.
+         Every bd upload mints a new report_id with fresh rows — the
+         wipe-and-replace pattern that has destroyed tagged data in this
+         codebase before — so a scotch-doubles SP recorded weeks ago would
+         silently vanish from the counts on the next upload unless it is
+         re-projected every time. This is the "early in the process" step that
+         lets all nine downstream consumers stay ignorant of manual SPs. */
+      await spProjectManuals(reportId);
     } else if (kind === '8skunk') {
       const skunkRows = parsed.events.map(e => ({
         report_id: reportId,
@@ -11085,8 +11118,12 @@ function spOnEnterTab() {
     document.getElementById('spManDetails').addEventListener('toggle', ev => { if (ev.target.open) spManInit(); });
     document.getElementById('spManDiv').addEventListener('change', spManDivChange);
     document.getElementById('spManTeam').addEventListener('change', spManTeamChange);
-    document.getElementById('spManPlayer').addEventListener('change', spManSync);
-    document.getElementById('spManCode').addEventListener('change', spManSync);
+    /* The CODE drives how many players we ask for (scotch-doubles pair rule),
+       so it re-renders the player pickers rather than just re-validating.
+       The player selects themselves are (re)bound inside spManSyncPlayers —
+       it replaces those nodes, so a binding made here would be dropped on the
+       first re-render. */
+    document.getElementById('spManCode').addEventListener('change', spManSyncPlayers);
     document.getElementById('spManAddBtn').addEventListener('click', spManAdd);
     document.getElementById('spMailPatchesBtn').addEventListener('click', spMailPatches);
     document.getElementById('spRemailFindBtn').addEventListener('click', spRemailFind);
@@ -12097,13 +12134,19 @@ async function spManInit() {
     sel.innerHTML = '<option value="">Division\u2026</option>' + _spMan.divs.map(d =>
       '<option value="' + d.id + '">' + esc(d.division_number + ' \u2014 ' + (d.name || '') + ' \u00b7 ' + (d.format || '')) + '</option>').join('');
   } catch (e) { setStatus('spManStatus', 'Divisions load failed: ' + e.message, 'err'); }
+  spRenderManualList();
 }
 async function spManDivChange() {
   const divId = document.getElementById('spManDiv').value;
   const tSel = document.getElementById('spManTeam');
-  const pSel = document.getElementById('spManPlayer');
-  pSel.innerHTML = '<option value="">Player\u2026</option>'; pSel.disabled = true;
-  spManSync();
+  /* Changing division can flip pair mode (its FORMAT decides), so re-render
+     the player pickers rather than just clearing one select. */
+  _spMan.roster = [];
+  document.getElementById('spManCode').disabled = true;
+  /* The division decides WHICH codes exist (8-ball vs 9-ball vs Masters), so
+     rebuild the list before the players — pair mode reads the code. */
+  spManSyncCodes();
+  spManSyncPlayers();
   if (!divId) { tSel.disabled = true; return; }
   _spMan.teams = await sb('GET', 'teams?division_id=eq.' + divId + '&select=id,team_number,team_name&order=team_number.asc');
   tSel.innerHTML = '<option value="">Team\u2026</option>' + _spMan.teams.map(t =>
@@ -12112,9 +12155,8 @@ async function spManDivChange() {
 }
 async function spManTeamChange() {
   const teamId = document.getElementById('spManTeam').value;
-  const pSel = document.getElementById('spManPlayer');
-  spManSync();
-  if (!teamId) { pSel.disabled = true; return; }
+  document.getElementById('spManCode').disabled = !teamId;
+  if (!teamId) { _spMan.roster = []; spManSyncPlayers(); return; }
   const tm = await sb('GET', 'team_memberships?team_id=eq.' + teamId + '&select=member_number,name_raw&order=id.asc');
   const nums = (tm || []).map(r => r.member_number).filter(Boolean);
   const byNum = new Map();
@@ -12127,38 +12169,413 @@ async function spManTeamChange() {
     const nm = p ? ((p.first_name || '') + ' ' + (p.last_name || '')).replace(/\s+/g, ' ').trim() : (r.name_raw || r.member_number);
     return { member_number: r.member_number, name: nm };
   });
-  pSel.innerHTML = '<option value="">Player\u2026</option>' + _spMan.roster.map(x =>
+  spManSyncPlayers();
+}
+
+/* \u2500\u2500 Scotch-doubles pair rule (user-locked 2026-07-15) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+   In a Doubles division the partners ALTERNATE shots, so who earned the SP
+   depends on the code:
+     8, 9        \u2014 literally ONE shot by ONE person (made the 8 / the 9 on the
+                   break) \u2192 the individual shooter.
+     x, n, r, k  \u2014 the pair alternates through the whole rack/match
+                   (break-and-run; rackless = every rack + the lag; 9-ball
+                   skunk) \u2192 BOTH players, each getting their own patch.
+   Keyed on division FORMAT, not a checkbox: in Open / Ladies / Masters an x is
+   one person's break-and-run and stays individual. \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */
+const SP_PAIR_CODES = ['x', 'n', 'r', 'k'];
+
+/* ── Which SP codes a division can even produce (2026-07-15) ────────────
+   You cannot make a 9 on the snap in an 8-ball match. Offering every code in
+   every division invites a data-entry error that becomes a real, mailed patch
+   for something that never happened — and nothing downstream would catch it,
+   because a manual SP is invisible in the reports by definition.
+
+   Verified against the live By-Division report (1,344 rows, all 6 formats) —
+   the separation is absolute:
+     8-Ball Doubles/Ladies/Open : 8, x, r  (r=883)  · 9/n/k = 0
+     9-Ball Doubles/Open        : 9, n, k  (k=23)   · 8/x/r = 0
+     Masters                    : 8, x, 9, n        · r/k   = 0
+   So: r (Rackless) is 8-ball ONLY and k (Skunk) is 9-ball ONLY — matching the
+   domain reference's "don't conflate" note — and Masters plays BOTH but never
+   produces r/k (consistent with MASTERS_REMAP having no r/k variant).
+
+   Masters keeps the RAW code as the option value; spComputePatches applies
+   MASTERS_REMAP by division, exactly as it does for a parsed row. The LABEL
+   shows the masters code so the operator sees what will actually be recorded. */
+const SP_CODES_8BALL  = ['8', 'x', 'r'];
+const SP_CODES_9BALL  = ['9', 'n', 'k'];
+const SP_CODES_MASTERS = ['8', 'x', '9', 'n'];   // both balls; no masters r/k exists
+
+function spManDivBall(div) {
+  const s = (div && ((div.format || '') + ' ' + (div.name || ''))) || '';
+  if (/masters/i.test(s)) return 'masters';
+  if (/8[\s-]*ball/i.test(s)) return '8';
+  if (/9[\s-]*ball/i.test(s)) return '9';
+  return null;   // unknown format — don't block the operator, offer everything
+}
+function spManAllowedCodes() {
+  const div = _spMan.divs.find(d => String(d.id) === document.getElementById('spManDiv').value);
+  if (!div) return [];
+  const ball = spManDivBall(div);
+  if (ball === 'masters') return SP_CODES_MASTERS.slice();
+  if (ball === '8') return SP_CODES_8BALL.slice();
+  if (ball === '9') return SP_CODES_9BALL.slice();
+  return SP_CODES_8BALL.concat(SP_CODES_9BALL);
+}
+/* Rebuilds the code list for the chosen division. Only the <option>s are
+   replaced — the <select> element itself survives, so its change listener
+   (spManSyncPlayers) stays bound. */
+function spManSyncCodes() {
+  const sel = document.getElementById('spManCode');
+  const div = _spMan.divs.find(d => String(d.id) === document.getElementById('spManDiv').value);
+  const ball = spManDivBall(div);
+  const masters = ball === 'masters';
+  const codes = spManAllowedCodes();
+  sel.innerHTML = '<option value="">SP code…</option>' + codes.map(c => {
+    const shown = (masters && MASTERS_REMAP[c]) ? MASTERS_REMAP[c] : c;
+    return '<option value="' + c + '">' + esc(shown + ' — ' + (SP_FULL_NAME[shown] || shown)) + '</option>';
+  }).join('');
+  const note = document.getElementById('spManBallNote');
+  if (note) {
+    note.style.display = div ? '' : 'none';
+    note.innerHTML = !div ? ''
+      : masters
+        ? 'Masters plays both 8- and 9-ball, so every code is offered — and each is recorded as a <strong>Masters</strong> SP (m8 / mx / m9 / mn).'
+        : ball
+          ? 'Only <strong>' + ball + '-ball</strong> codes — you can’t earn a ' + (ball === '8' ? '9' : '8')
+            + '-ball special in a ' + ball + '-ball match.'
+          : '';
+  }
+}
+
+function spManIsPair() {
+  const div = _spMan.divs.find(d => String(d.id) === document.getElementById('spManDiv').value);
+  const code = document.getElementById('spManCode').value;
+  return !!div && /doubles/i.test(div.format || '') && SP_PAIR_CODES.indexOf(code) >= 0;
+}
+function spManPlayerOpts(sel) {
+  return '<option value="">' + esc(sel) + '\u2026</option>' + _spMan.roster.map(x =>
     '<option value="' + esc(x.member_number) + '">' + esc(x.name) + '</option>').join('');
-  pSel.disabled = false;
+}
+function spManSyncPlayers() {
+  const wrap = document.getElementById('spManPlayerWrap');
+  const note = document.getElementById('spManPairNote');
+  const pair = spManIsPair();
+  const have = _spMan.roster.length > 0;
+  wrap.innerHTML = pair
+    ? '<select id="spManPlayer" ' + (have ? '' : 'disabled') + '>' + spManPlayerOpts('Player 1') + '</select>'
+      + '<select id="spManPlayer2" ' + (have ? '' : 'disabled') + '>' + spManPlayerOpts('Player 2') + '</select>'
+    : '<select id="spManPlayer" ' + (have ? '' : 'disabled') + '>' + spManPlayerOpts('Player') + '</select>';
+  wrap.querySelectorAll('select').forEach(s => s.addEventListener('change', spManSync));
+  if (pair) {
+    const code = document.getElementById('spManCode').value;
+    note.style.display = '';
+    note.innerHTML = 'Scotch doubles: partners alternate shots, so <strong>'
+      + esc(SP_DISPLAY[code] || code) + '</strong> is earned by <strong>both</strong> players \u2014 '
+      + 'each gets their own patch. (8 and 9 are a single shot, so those go to one player.)';
+  } else { note.style.display = 'none'; note.innerHTML = ''; }
+  spManSync();
 }
 function spManSync() {
-  const ok = document.getElementById('spManDiv').value && document.getElementById('spManTeam').value
-    && document.getElementById('spManPlayer').value && document.getElementById('spManCode').value;
+  const p1 = document.getElementById('spManPlayer');
+  const p2 = document.getElementById('spManPlayer2');
+  const pair = spManIsPair();
+  let ok = document.getElementById('spManDiv').value && document.getElementById('spManTeam').value
+    && document.getElementById('spManCode').value && p1 && p1.value;
+  if (ok && pair) ok = !!(p2 && p2.value && p2.value !== p1.value);
   document.getElementById('spManAddBtn').disabled = !ok;
+  const note = document.getElementById('spManPairNote');
+  if (pair && p1 && p2 && p1.value && p2.value && p1.value === p2.value) {
+    note.style.display = '';
+    note.innerHTML = '<span style="color:#b91c1c;font-weight:700">Pick two different players \u2014 '
+      + 'a scotch pair is two people.</span>';
+  }
 }
+/* \u2500\u2500 Manual SP \u2192 By-Division counts, merged at SOURCE (2026-07-15) \u2500\u2500\u2500\u2500\u2500\u2500
+   A manual SP is NOT written as a patch. It is recorded in slate.sp_manual_sp
+   (the durable truth + the review list) and PROJECTED as its own
+   sp_by_division_rows row carrying only its counts. Everything downstream \u2014
+   spComputePatches, ss_leaders, ss_admin_metrics, the three cert RPCs,
+   Leaderboard, PatchCheck, SpecialPerformanceViewer: NINE consumers \u2014 already
+   reads those rows and sums them, so none of them need to know manual SPs
+   exist. That is the whole point of merging early (user's call): a repeat SP
+   simply makes the division count 2, with no new concept anywhere downstream.
+
+   Consequences that fall out for free, rather than as special cases:
+     \u2022 a 2nd '9' for someone who already has one is a legitimate count, not a
+       collision \u2014 sp_patches' unique identity is untouched;
+     \u2022 slams work (projected rows ARE By-Division rows);
+     \u2022 the Masters remap works (we store the RAW code; the compute remaps by
+       division exactly as it does for parsed rows).
+
+   Parsed counts are NEVER mutated \u2014 a manual SP is always its own row \u2014 so it
+   can be un-applied exactly on delete, and a re-upload can't double it. \u2500\u2500\u2500\u2500 */
+async function spProjectManuals(reportId) {
+  const manuals = await sbGetAll('sp_manual_sp?session_id=eq.' + currentSession.id + '&select=*');
+  /* Idempotent by construction: drop this report's projections and re-lay them.
+     Every bd upload mints a NEW report_id with fresh rows (the wipe-and-replace
+     pattern that has destroyed tagged data here before), so projection re-runs
+     on every ingest \u2014 this must never double. */
+  await sb('DELETE', 'sp_by_division_rows?report_id=eq.' + reportId + '&manual_sp_id=not.is.null');
+  if (!manuals.length) return 0;
+  const divs = await sb('GET', 'divisions?session_id=eq.' + currentSession.id
+    + '&select=division_number,name');
+  const divName = new Map((divs || []).map(d => [d.division_number, d.name]));
+  const rows = manuals.map(m => {
+    const row = {
+      report_id: reportId, division_number: m.division_number,
+      division_name: divName.get(m.division_number) || null,
+      team_number: m.team_number, member_number: m.member_number,
+      member_name: m.member_name,
+      rackless: 0, eight_ob: 0, eight_br: 0, nine_os: 0, nine_br: 0, skunk: 0,
+      manual_sp_id: m.id
+    };
+    const field = SP_TYPE_TO_BD_FIELD[m.sp_type];
+    if (field) row[field] = m.qty || 1;
+    return row;
+  });
+  await spInsertChunks('sp_by_division_rows', rows, 400, 'manual SP projections');
+  console.log('[SP] projected', rows.length, 'manual SP(s) onto report', reportId);
+  return rows.length;
+}
+
+async function spLatestBdReportId() {
+  const r = await sb('GET', 'sp_reports?session_id=eq.' + currentSession.id
+    + '&report_kind=eq.bd&select=id&order=uploaded_at.desc&limit=1');
+  return (r && r[0] && r[0].id) || null;
+}
+
 async function spManAdd() {
-  const div = _spMan.divs.find(d => String(d.id) === document.getElementById('spManDiv').value);
+  const div  = _spMan.divs.find(d => String(d.id) === document.getElementById('spManDiv').value);
   const team = _spMan.teams.find(t => String(t.id) === document.getElementById('spManTeam').value);
-  const mem = document.getElementById('spManPlayer').value;
-  const person = _spMan.roster.find(x => x.member_number === mem);
   const code = document.getElementById('spManCode').value;
-  if (!div || !team || !person || !code) return;
-  const localNum = String(mem).replace(/^972/, '');
+  if (!div || !team || !code) return;
+
+  /* Belt-and-braces on the ball-type rule. spManSyncCodes only OFFERS legal
+     codes, but a stale dropdown (division changed after the code was picked)
+     would sail straight through and mail a patch for something that cannot
+     physically happen \u2014 and a manual SP is invisible in the reports, so nothing
+     downstream would ever catch it. Re-check at write time. */
+  if (spManAllowedCodes().indexOf(code) < 0) {
+    setStatus('spManStatus', 'That code isn\u2019t possible in ' + esc(div.division_number)
+      + ' (' + esc(div.format || '') + ') \u2014 pick the code again.', 'err');
+    spManSyncCodes(); spManSyncPlayers();
+    return;
+  }
+
+  /* One record per member: a scotch pair is TWO SPs (one each), not a shared
+     one \u2014 each player gets their own count, patch, envelope and PatchCheck row. */
+  const picked = [document.getElementById('spManPlayer')];
+  if (spManIsPair()) picked.push(document.getElementById('spManPlayer2'));
+  const people = picked.map(s => _spMan.roster.find(x => x.member_number === (s && s.value)))
+                       .filter(Boolean);
+  if (!people.length || (spManIsPair() && people.length < 2)) return;
+  if (people.length === 2 && people[0].member_number === people[1].member_number) return;
+
   const teamNum = String(parseInt(team.team_number, 10)).padStart(5, '0');
+  const added = [], failed = [];
+  for (const person of people) {
+    const localNum = String(person.member_number).replace(/^972/, '');
+    try {
+      /* Store the RAW code \u2014 it projects into a raw-code column and the compute
+         applies the Masters remap by division, same as any parsed row. */
+      await sb('POST', 'sp_manual_sp', {
+        session_id: currentSession.id, operator_id: div.operator_id,
+        division_number: div.division_number, team_number: teamNum,
+        member_number: localNum, member_name: person.name,
+        sp_type: code, qty: 1, note: null
+      });
+      added.push(person.name);
+    } catch (e) { failed.push(person.name + ' (' + e.message + ')'); }
+  }
+
+  /* Re-project onto the CURRENT report so it counts now, not next upload. */
+  let projectErr = null;
+  if (added.length) {
+    try {
+      const rid = await spLatestBdReportId();
+      if (rid) await spProjectManuals(rid);
+      else projectErr = 'recorded, but there is no By-Division report yet \u2014 it will count as soon as you upload one';
+    } catch (e) { projectErr = 'recorded, but adding it to the division count failed: ' + e.message; }
+  }
+
+  const bits = [];
+  if (added.length) bits.push('\u2713 Recorded ' + (SP_DISPLAY[code] || code) + ' for ' + added.join(' + ')
+    + ' \u2014 added to their ' + esc(div.division_number) + ' count'
+    + (projectErr ? '' : '; it rides the next mail batch and counts toward slams.'));
+  if (projectErr) bits.push('\u26a0 ' + projectErr);
+  if (failed.length) bits.push('FAILED: ' + failed.join('; '));
+  setStatus('spManStatus', bits.join(' '),
+            (failed.length || projectErr) ? 'err' : 'ok');
+  if (added.length) {
+    document.getElementById('spManCode').value = '';
+    spManSyncPlayers();
+    await spRenderManualList();
+  }
+}
+
+/* \u2500\u2500 Review list \u2014 every manually added SP, and the only way to undo one \u2500\u2500 */
+async function spRenderManualList() {
+  const box = document.getElementById('spManList');
+  if (!box || !currentSession) return;
+  let rows = [];
   try {
-    const dup = await sb('GET', 'sp_patches?session_id=eq.' + currentSession.id
-      + '&member_number=eq.' + localNum + '&division_number=eq.' + encodeURIComponent(div.division_number)
-      + '&sp_type=eq.' + code + '&select=id&limit=1');
-    if (dup && dup.length) { setStatus('spManStatus', 'Already tracked \u2014 that player has this SP in this division.', 'err'); return; }
+    rows = await sbGetAll('sp_manual_sp?session_id=eq.' + currentSession.id
+      + '&select=*&order=created_at.desc');
+  } catch (e) { box.innerHTML = '<div class="hint">Could not load: ' + esc(e.message) + '</div>'; return; }
+  if (!rows.length) {
+    box.innerHTML = '<div class="hint">No manual SPs recorded this session.</div>';
+    return;
+  }
+  _spMan.manuals = rows;
+  box.innerHTML = '<div style="font-weight:700;font-size:0.84rem;margin:2px 0 4px">'
+    + 'Recorded manually \u2014 ' + rows.length + '</div>'
+    + '<p class="hint" style="margin:0 0 6px">These are added to each player\u2019s By-Division count, '
+    + 're-applied automatically every time you upload a new By-Division report. Removing one '
+    + 'takes it back out of the count.</p>'
+    + rows.map((r, i) =>
+        '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:0.83rem;'
+        + 'border-top:1px solid var(--border,#e5e7eb)">'
+        + '<span style="flex:1"><strong>' + esc(r.member_name) + '</strong> '
+        + '<span class="hint">' + esc(r.member_number) + ' \u00b7 ' + esc(r.division_number)
+        + ' \u00b7 team ' + esc(r.team_number) + ' \u00b7 <strong>' + esc(SP_DISPLAY[r.sp_type] || r.sp_type)
+        + '</strong>' + (r.qty > 1 ? ' \u00d7' + r.qty : '')
+        + ' \u00b7 ' + esc(String(r.created_at).slice(0, 10)) + '</span></span>'
+        + '<button type="button" class="btn btn-outline" style="padding:2px 8px;font-size:0.76rem" '
+        + 'onclick="spManRemove(' + i + ')">Remove</button></div>').join('')
+    + '<div class="status-line" id="spManListStatus" style="margin-top:6px"></div>';
+}
+
+async function spManRemove(i) {
+  const r = (_spMan.manuals || [])[i];
+  if (!r) return;
+  try {
+    /* The FK is ON DELETE CASCADE, so the projected By-Division rows go with
+       it and the count drops back on its own \u2014 no un-apply arithmetic. */
+    await sb('DELETE', 'sp_manual_sp?id=eq.' + r.id);
+    await spRenderManualList();
+    setStatus('spManListStatus', '\u2713 Removed ' + (SP_DISPLAY[r.sp_type] || r.sp_type)
+      + ' for ' + r.member_name + ' \u2014 taken back out of the ' + r.division_number + ' count. '
+      + 'Re-run Compute Patches if it had already produced a patch.', 'ok');
+  } catch (e) { setStatus('spManListStatus', 'Remove failed: ' + e.message, 'err'); }
+}
+
+/* ── Unclaimed SPs — the "minority report" (2026-07-15) ─────────────────
+   Populated by spComputePatches' All-League ↔ By-Division reconciliation. A
+   row here means All-League — the truth for WHETHER an SP exists — shows a
+   code that NO By-Division row ever attributed to a team, i.e. the player was
+   removed from the team before BD saw it. By-Division is the only thing that
+   ties an SP to a team, and team drives all three of: does a patch get made,
+   which mailing contact the envelope uses, and what PatchCheck says. So these
+   can't be auto-attributed — the operator decides.
+
+   "Give it" creates the patch with the unknown sentinels (team '00000',
+   division ''), so the envelope uses the player's OWN address and PatchCheck
+   says "unknown team". If a later report finally attributes that same SP to a
+   real team, spComputePatches UPGRADES this row in place instead of inserting
+   a second one — nobody gets mailed the same patch twice.
+   ──────────────────────────────────────────────────────────────────────── */
+let _spMinority = { rows: [], visible: [], skipped: null, recovered: 0, pair: null, opShort: null };
+const SP_UNKNOWN_TEAM = '00000';
+const SP_UNKNOWN_DIV  = '';
+
+async function spMinorityDismissed() {
+  const opId = SP_OPERATOR_SHORTS[_spOperatorFilter];
+  if (!currentSession || !opId) return new Set();
+  const rows = await sb('GET', 'sp_attribution_dismissals?session_id=eq.' + currentSession.id
+    + '&operator_id=eq.' + opId + '&select=member_number,sp_type');
+  return new Set((rows || []).map(r => r.member_number + '|' + r.sp_type));
+}
+
+async function spRenderMinority() {
+  const box = document.getElementById('spMinority');
+  if (!box) return;
+  const m = _spMinority || { rows: [], skipped: null };
+  if (m.skipped) {
+    box.innerHTML = '<div style="border-left:4px solid #a16207;background:#fefce8;'
+      + 'border-radius:0 8px 8px 0;padding:8px 10px;margin:8px 0;font-size:0.84rem">'
+      + '<strong>Unclaimed-SP check skipped.</strong> ' + esc(m.skipped) + '</div>';
+    return;
+  }
+  let rows = m.rows || [];
+  if (!rows.length) { box.innerHTML = ''; return; }
+  let dismissed = new Set();
+  try { dismissed = await spMinorityDismissed(); } catch (e) { /* show everything */ }
+  rows = rows.filter(r => !dismissed.has(r.member_number + '|' + r.sp_type));
+  if (!rows.length) { box.innerHTML = ''; return; }
+  _spMinority.visible = rows;
+
+  /* A handful = real dropped players. Hundreds = the By-Division upload is
+     wrong (truncated / mis-parsed / wrong session), and giving them all out
+     would mail hundreds of envelopes to individual addresses. Say so plainly
+     rather than guessing on the operator's behalf. */
+  const many = rows.length > 25;
+  const warn = many
+    ? '<div style="border-left:4px solid #b91c1c;background:#fef2f2;border-radius:0 8px 8px 0;'
+      + 'padding:8px 10px;margin:6px 0;font-size:0.83rem;color:#b91c1c"><strong>⚠ ' + rows.length
+      + ' unclaimed SPs.</strong> That is almost certainly a By-Division upload problem — a '
+      + 'truncated, mis-parsed, or wrong-session file — not ' + rows.length + ' players who left '
+      + 'their teams. Re-run and re-upload By-Division for ' + esc(m.pair || 'this date') + ' first.</div>'
+    : '';
+  box.innerHTML = '<div style="border-left:4px solid #a16207;background:#fefce8;'
+    + 'border-radius:0 8px 8px 0;padding:10px;margin:8px 0">'
+    + '<div style="font-weight:700;font-size:0.86rem;color:#a16207">🟡 Unclaimed SPs — ' + rows.length + '</div>'
+    + '<p class="hint" style="margin:4px 0 8px">All-League shows these, but no team ever claimed them — '
+    + 'the player was off the team by the time By-Division ran. Giving one creates the patch with '
+    + '<strong>no team</strong>: the envelope goes to the player’s own address and PatchCheck shows '
+    + '“unknown team”.</p>'
+    + warn
+    + rows.map((r, i) =>
+        '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:0.84rem;'
+        + 'border-top:1px solid #fde68a">'
+        + '<span style="flex:1"><strong>' + esc(r.member_name || r.member_number) + '</strong> '
+        + '<span class="hint">' + esc(r.member_number) + ' · '
+        + esc(SP_DISPLAY[r.sp_type] || r.sp_type)
+        + (r.ever_seen ? '' : ' · never in any By-Division report') + '</span></span>'
+        + '<button type="button" class="btn btn-primary" style="padding:3px 8px;font-size:0.78rem" '
+        + 'onclick="spMinorityGive(' + i + ')">Give it — unknown team</button>'
+        + '<button type="button" class="btn btn-outline" style="padding:3px 8px;font-size:0.78rem" '
+        + 'onclick="spMinorityDismiss(' + i + ')">Dismiss</button>'
+        + '</div>').join('')
+    + '<div id="spMinorityStatus" class="status-line" style="margin-top:6px"></div>'
+    + '</div>';
+}
+
+async function spMinorityGive(i) {
+  const r = (_spMinority.visible || [])[i];
+  const opId = SP_OPERATOR_SHORTS[_spOperatorFilter];
+  if (!r || !currentSession || !opId) return;
+  try {
     await sb('POST', 'sp_patches', {
-      session_id: currentSession.id, operator_id: div.operator_id,
-      member_number: localNum, member_name: person.name,
-      division_number: div.division_number, team_number: teamNum,
-      sp_type: code, is_slam: false, weight: 1, source_report_id: null
+      session_id: currentSession.id, operator_id: opId,
+      member_number: r.member_number, member_name: r.member_name || r.member_number,
+      division_number: SP_UNKNOWN_DIV, team_number: SP_UNKNOWN_TEAM,
+      sp_type: r.sp_type, is_slam: false, weight: SP_WEIGHT[r.sp_type] || 1,
+      attribution: 'unknown', source_report_id: null
     });
-    setStatus('spManStatus', '\u2713 Added ' + code + ' for ' + person.name + ' \u2014 it rides the next mail batch.', 'ok');
+    _spMinority.rows = _spMinority.rows.filter(x =>
+      !(x.member_number === r.member_number && x.sp_type === r.sp_type));
+    await spRenderMinority();
+    setStatus('spMinorityStatus', '✓ Patch created for ' + (r.member_name || r.member_number)
+      + ' — no team; the envelope goes to their own address.', 'ok');
     await spLoadPatches();
-  } catch (e) { setStatus('spManStatus', 'Add failed: ' + e.message, 'err'); }
+  } catch (e) { setStatus('spMinorityStatus', 'Failed: ' + e.message, 'err'); }
+}
+
+async function spMinorityDismiss(i) {
+  const r = (_spMinority.visible || [])[i];
+  const opId = SP_OPERATOR_SHORTS[_spOperatorFilter];
+  if (!r || !currentSession || !opId) return;
+  try {
+    await sb('POST', 'sp_attribution_dismissals', {
+      session_id: currentSession.id, operator_id: opId,
+      member_number: r.member_number, sp_type: r.sp_type, reason: null
+    });
+    _spMinority.rows = _spMinority.rows.filter(x =>
+      !(x.member_number === r.member_number && x.sp_type === r.sp_type));
+    await spRenderMinority();
+    setStatus('spMinorityStatus', 'Dismissed — it won’t be raised again this session.', 'ok');
+  } catch (e) { setStatus('spMinorityStatus', 'Dismiss failed: ' + e.message, 'err'); }
 }
 
 async function spComputePatches() {
@@ -12188,6 +12605,26 @@ async function spComputePatches() {
       throw new Error('No By-Division report uploaded for this session. Drop one first.');
     }
     const bdReport = bdReports[0];
+
+    /* ── Pair-gate (2026-07-15; brief 2026-07-15-sp-attribution-minority-report)
+       All-League is the truth for WHETHER an SP exists; By-Division is the only
+       thing that attaches it to a TEAM (and team drives patch / mailing contact
+       / PatchCheck). Reconciling the two catches SPs earned by a player who was
+       dropped from the team before BD ever saw them — today those vanish.
+
+       The diff is only meaningful when both reports cover the SAME date range.
+       If the LL was run later than the BD, every SP scored in between shows in
+       LL and not BD — both files perfectly valid, just skewed — and it looks
+       IDENTICAL to a dropped player. So reconcile ONLY against the LL whose
+       data_through matches this BD's. (Operator runs them together: 13/13
+       paired historically.) No match → skip reconciliation, compute normally,
+       and say why. */
+    const llReports = await sb('GET',
+      'sp_reports?session_id=eq.' + currentSession.id
+      + '&report_kind=eq.ll'
+      + '&select=id,data_through,uploaded_at&order=uploaded_at.desc&limit=20');
+    const llReport = (llReports || []).find(l =>
+      l.data_through && bdReport.data_through && l.data_through === bdReport.data_through) || null;
     // Paged — a By-Division report holds ~2300 member×division rows,
     // well past the 1000-row single-response cap. An unpaged read would
     // compute patches from under half the report.
@@ -12253,6 +12690,7 @@ async function spComputePatches() {
             sp_type:         storedSp,
             is_slam:         false,
             weight:          1,
+            attribution:     'bd',
             source_report_id: bdReport.id
           });
         }
@@ -12267,6 +12705,145 @@ async function spComputePatches() {
         }
       }
     }
+
+    /* ── Reconcile All-League ↔ By-Division (2026-07-15) ─────────────────
+       Per (member, code) EXISTENCE — not counts. The patch model is ONE patch
+       per (member, division, sp_type) however many times they hit it, so the
+       only question is: does All-League show a code that NO By-Division row
+       attributed to them? That happens when the player was removed from the
+       team before BD saw the SP — today the SP silently vanishes.
+
+       Tier 2 (auto, silent): an EARLIER BD snapshot this session shows the
+         member WITH this code on a real team in one of our divisions. That is
+         observed fact, not a guess — they were dropped later. Attribute to
+         that team/division; normal mailing contact; attribution='bd_history'.
+       Tier 3 (operator): no BD ever attributed it → Minority Report. NEVER
+         auto-created. A 400-row Tier 3 means a bad BD upload, not 400 dropped
+         players — which is exactly why this is a list, not an auto-insert.
+
+       All-League is league-wide (SPM+CRA, no division), so existence is tested
+       against BD rows for ALL operators; we only SURFACE members we can tie to
+       our operator (or who appear in no BD at all). */
+    _spMinority = { rows: [], skipped: null, recovered: 0,
+                    pair: bdReport.data_through || null, opShort: opShort };
+    if (!llReport) {
+      _spMinority.skipped = 'No All-League report matches this By-Division report’s date range ('
+        + (bdReport.data_through || 'no date on file') + '), so SPs that no team claimed can’t '
+        + 'be detected. Run both reports for the same date and re-upload.';
+      console.warn('[patches] reconciliation skipped — no LL paired on data_through');
+    } else {
+      const llRows = await sbGetAll('sp_all_league_rows?report_id=eq.' + llReport.id + '&select=*');
+      /* Attributed-by-anyone, from THIS bd. Uses the same inactive-team rule
+         the compute uses, so a pulled team's SPs SURFACE here rather than
+         being silently discarded. */
+      const attributed = new Map();
+      for (const r of rows) {
+        if (spIsInactiveTeam(r.team_number)) continue;
+        for (const [sp, field] of Object.entries(SP_TYPE_TO_BD_FIELD)) {
+          if ((+r[field] || 0) < 1) continue;
+          if (!attributed.has(r.member_number)) attributed.set(r.member_number, new Set());
+          attributed.get(r.member_number).add(sp);
+        }
+      }
+      const gaps = [];
+      for (const lr of llRows) {
+        const have = attributed.get(lr.member_number) || new Set();
+        const missing = Object.keys(SP_TYPE_TO_BD_FIELD).filter(sp =>
+          (+lr[SP_TYPE_TO_BD_FIELD[sp]] || 0) >= 1 && !have.has(sp));
+        if (missing.length) gaps.push({ member_number: lr.member_number,
+                                        member_name: lr.member_name, codes: missing });
+      }
+      console.log('[patches] LL-vs-BD unattributed members:', gaps.length);
+
+      if (gaps.length) {
+        /* Targeted history fetch — ONLY the gap members. On a clean week gaps
+           is empty and this costs nothing. */
+        const bdHist = await sb('GET', 'sp_reports?session_id=eq.' + currentSession.id
+          + '&report_kind=eq.bd&select=id&order=uploaded_at.desc');
+        const histIds = (bdHist || []).map(r => r.id);
+        const rank = new Map(histIds.map((id, i) => [id, i]));   // 0 = newest
+        const hist = histIds.length ? await sbGetAll(
+          'sp_by_division_rows?report_id=in.(' + histIds.join(',') + ')'
+          + '&member_number=in.(' + gaps.map(g => g.member_number).join(',') + ')'
+          + '&select=report_id,member_number,member_name,division_number,division_name,team_number,'
+          + Object.values(SP_TYPE_TO_BD_FIELD).join(',')) : [];
+
+        for (const g of gaps) {
+          const seenAnywhere = hist.some(h => h.member_number === g.member_number);
+          const seenInOurs   = hist.some(h => h.member_number === g.member_number
+            && _spDivisionMeta.get(h.division_number) === opId);
+          for (const sp of g.codes) {
+            const field = SP_TYPE_TO_BD_FIELD[sp];
+            let best = null;   // newest snapshot showing this member WITH this code, ours, real team
+            for (const h of hist) {
+              if (h.member_number !== g.member_number) continue;
+              if ((+h[field] || 0) < 1) continue;
+              if (spIsInactiveTeam(h.team_number)) continue;
+              if (_spDivisionMeta.get(h.division_number) !== opId) continue;
+              if (!best || rank.get(h.report_id) < rank.get(best.report_id)) best = h;
+            }
+            if (best) {
+              const isMasters = /masters/i.test(best.division_name || '');
+              const storedSp  = (isMasters && MASTERS_REMAP[sp]) ? MASTERS_REMAP[sp] : sp;
+              const key = g.member_number + '|' + best.division_number + '|' + storedSp;
+              if (!perCodeMap.has(key)) {
+                perCodeMap.set(key, {
+                  session_id:      currentSession.id,
+                  operator_id:     opId,
+                  member_number:   g.member_number,
+                  member_name:     best.member_name || g.member_name,
+                  division_number: best.division_number,
+                  team_number:     best.team_number,
+                  sp_type:         storedSp,
+                  is_slam:         false,
+                  weight:          1,
+                  attribution:     'bd_history',
+                  source_report_id: bdReport.id
+                });
+                _spMinority.recovered++;
+              }
+              /* A recovered code must still feed the slam rule, or a player
+                 whose 4th Grand-Slam code landed in the dropped window loses
+                 the slam. Keyed on the RAW code, like the main loop. */
+              if (sp === 'x' || sp === '8' || sp === '9' || sp === 'n') {
+                if (!memberAggByDiv.has(g.member_number))
+                  memberAggByDiv.set(g.member_number,
+                    { name: best.member_name || g.member_name, sp: {} });
+                const agg = memberAggByDiv.get(g.member_number);
+                agg.sp[sp] = (agg.sp[sp] || 0) + 1;
+                if (!memberTeamByCode.has(g.member_number)) memberTeamByCode.set(g.member_number, {});
+                if (!memberTeamByCode.get(g.member_number)[sp]) memberTeamByCode.get(g.member_number)[sp] = [];
+                memberTeamByCode.get(g.member_number)[sp].push(best.team_number);
+              }
+            } else if (seenInOurs || !seenAnywhere) {
+              /* Tier 3 — nothing ever attributed it. Surface it if the member
+                 is plausibly ours (seen in our divisions) or appears in NO bd
+                 at all (operator will recognise the name). A member seen ONLY
+                 in the other operator's divisions is not ours to patch. */
+              _spMinority.rows.push({
+                member_number: g.member_number,
+                member_name:   g.member_name,
+                sp_type:       sp,
+                ever_seen:     seenAnywhere
+              });
+            }
+          }
+        }
+      }
+    }
+    if (_spMinority.recovered) {
+      console.log('[patches] recovered from bd history:', _spMinority.recovered);
+    }
+
+    /* NOTE (2026-07-15): there is deliberately NO manual-SP special case here.
+       Manual SPs (scotch doubles etc.) are PROJECTED into sp_by_division_rows
+       at ingest, so by the time we get here they are ordinary By-Division rows:
+       they are already in `rows`/`opRows`, already in perCodeMap, and already
+       in memberAggByDiv above. Slams, the Masters remap and the counts all work
+       with no extra code. An earlier build folded manual sp_patches rows in
+       here by hand — merging at source deleted that. If you find yourself
+       re-adding a manual branch anywhere downstream, the projection is broken;
+       fix it at ingest (spProjectManuals), not here. */
 
     // Slam patches
     const slamMap = new Map(); // key: member|sp_type → row
@@ -12302,6 +12879,7 @@ async function spComputePatches() {
           sp_type:         slamType,
           is_slam:         true,
           weight:          SP_WEIGHT[slamType],
+          attribution:     'bd',
           source_report_id: bdReport.id
         });
       }
@@ -12319,20 +12897,57 @@ async function spComputePatches() {
     const existing = await sbGetAll(
       'sp_patches?session_id=eq.' + currentSession.id
       + '&operator_id=eq.' + opId
-      + '&select=member_number,division_number,sp_type,is_slam&order=id.asc');
+      + '&select=id,member_number,division_number,sp_type,is_slam,attribution,team_number&order=id.asc');
     const existingSet = new Set(existing.map(e =>
       e.member_number + '|' + (e.division_number || 'null') + '|' + e.sp_type));
-    const toInsert = allCandidates.filter(c =>
-      !existingSet.has(c.member_number + '|' + (c.division_number || 'null') + '|' + c.sp_type));
 
+    /* Upgrade path (2026-07-15). An operator-approved 'unknown' row carries
+       division_number='' + team_number='00000'. If a later report finally
+       attributes that SAME SP to a real team, the identity key differs
+       ('' vs '092'), so a plain insert would create a SECOND patch and the
+       player would be mailed the same patch twice. Instead UPDATE the unknown
+       row in place. Matched on (member, sp_type) — that pair IS the SP;
+       division/team are precisely what we're filling in. Per-code only: slams
+       are derived and never 'unknown'. */
+    const unknownByKey = new Map();
+    for (const e of existing) {
+      if (e.attribution === 'unknown') unknownByKey.set(e.member_number + '|' + e.sp_type, e);
+    }
+    const toUpgrade = [], toInsert = [];
+    for (const c of allCandidates) {
+      if (existingSet.has(c.member_number + '|' + (c.division_number || 'null') + '|' + c.sp_type)) continue;
+      const unk = !c.is_slam && unknownByKey.get(c.member_number + '|' + c.sp_type);
+      if (unk) { toUpgrade.push({ id: unk.id, row: c }); continue; }
+      toInsert.push(c);
+    }
+
+    for (const u of toUpgrade) {
+      await sb('PATCH', 'sp_patches?id=eq.' + u.id, {
+        division_number:  u.row.division_number,
+        team_number:      u.row.team_number,
+        attribution:      u.row.attribution,
+        source_report_id: u.row.source_report_id
+      });
+    }
     if (toInsert.length) {
       await spInsertChunks('sp_patches', toInsert, 400, 'patches');
     }
 
-    setStatus('spPatchesBlocker',
-      'Computed ' + allCandidates.length + ' patch identities ('
-      + toInsert.length + ' new, ' + (allCandidates.length - toInsert.length)
-      + ' already tracked).', 'ok');
+    const bits = ['Computed ' + allCandidates.length + ' patch identities ('
+      + toInsert.length + ' new, ' + (allCandidates.length - toInsert.length - toUpgrade.length)
+      + ' already tracked'
+      + (toUpgrade.length ? ', ' + toUpgrade.length + ' unknown→team upgraded' : '') + ').'];
+    if (_spMinority.recovered) {
+      bits.push(_spMinority.recovered + ' recovered from an earlier By-Division report '
+        + '(player left the team after earning it).');
+    }
+    if (_spMinority.rows.length) {
+      bits.push('⚠ ' + _spMinority.rows.length + ' SP(s) in All-League that no team ever claimed '
+        + '— see “Unclaimed SPs” below.');
+    }
+    if (_spMinority.skipped) bits.push('⚠ ' + _spMinority.skipped);
+    setStatus('spPatchesBlocker', bits.join(' '), _spMinority.rows.length || _spMinority.skipped ? '' : 'ok');
+    spRenderMinority();
     await spLoadPatches();
   } catch (e) {
     console.error('[patches] compute failed:', e);
