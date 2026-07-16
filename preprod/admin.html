@@ -1357,21 +1357,18 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
           <select id="spManDiv"><option value="">Division&hellip;</option></select>
           <select id="spManTeam" disabled><option value="">Team&hellip;</option></select>
-          <select id="spManCode" disabled>
-            <option value="">SP code&hellip;</option>
-            <option value="8">8 &mdash; 8 on the break</option>
-            <option value="x">x &mdash; 8-ball break &amp; run</option>
-            <option value="9">9 &mdash; 9 on the snap</option>
-            <option value="n">n &mdash; 9-ball break &amp; run</option>
-            <option value="r">r &mdash; rackless</option>
-            <option value="k">k &mdash; 9-ball skunk</option>
-          </select>
+          <!-- Options are built by spManSyncCodes() from the DIVISION's format —
+               8-ball divisions can't produce a 9-ball special and vice versa,
+               and Masters records the m8/mx/m9/mn variants. A static list here
+               would offer codes the division can't earn. -->
+          <select id="spManCode" disabled><option value="">SP code&hellip;</option></select>
           <span id="spManPlayerWrap" style="display:inline-flex; gap:8px; flex-wrap:wrap; align-items:center;">
             <select id="spManPlayer" disabled><option value="">Player&hellip;</option></select>
           </span>
           <button type="button" class="btn btn-outline" id="spManAddBtn" disabled>Add SP</button>
         </div>
-        <div class="hint" id="spManPairNote" style="margin:6px 0 0; display:none;"></div>
+        <div class="hint" id="spManBallNote" style="margin:6px 0 0; display:none;"></div>
+        <div class="hint" id="spManPairNote" style="margin:4px 0 0; display:none;"></div>
         <div class="status-line" id="spManStatus"></div>
         <!-- Review list — every manually recorded SP, and the only way to undo
              one. Manual SPs are invisible in the report PDFs by definition, so
@@ -3589,7 +3586,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.271';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.272';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -12146,6 +12143,9 @@ async function spManDivChange() {
      the player pickers rather than just clearing one select. */
   _spMan.roster = [];
   document.getElementById('spManCode').disabled = true;
+  /* The division decides WHICH codes exist (8-ball vs 9-ball vs Masters), so
+     rebuild the list before the players — pair mode reads the code. */
+  spManSyncCodes();
   spManSyncPlayers();
   if (!divId) { tSel.disabled = true; return; }
   _spMan.teams = await sb('GET', 'teams?division_id=eq.' + divId + '&select=id,team_number,team_name&order=team_number.asc');
@@ -12183,6 +12183,71 @@ async function spManTeamChange() {
    Keyed on division FORMAT, not a checkbox: in Open / Ladies / Masters an x is
    one person's break-and-run and stays individual. \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */
 const SP_PAIR_CODES = ['x', 'n', 'r', 'k'];
+
+/* ── Which SP codes a division can even produce (2026-07-15) ────────────
+   You cannot make a 9 on the snap in an 8-ball match. Offering every code in
+   every division invites a data-entry error that becomes a real, mailed patch
+   for something that never happened — and nothing downstream would catch it,
+   because a manual SP is invisible in the reports by definition.
+
+   Verified against the live By-Division report (1,344 rows, all 6 formats) —
+   the separation is absolute:
+     8-Ball Doubles/Ladies/Open : 8, x, r  (r=883)  · 9/n/k = 0
+     9-Ball Doubles/Open        : 9, n, k  (k=23)   · 8/x/r = 0
+     Masters                    : 8, x, 9, n        · r/k   = 0
+   So: r (Rackless) is 8-ball ONLY and k (Skunk) is 9-ball ONLY — matching the
+   domain reference's "don't conflate" note — and Masters plays BOTH but never
+   produces r/k (consistent with MASTERS_REMAP having no r/k variant).
+
+   Masters keeps the RAW code as the option value; spComputePatches applies
+   MASTERS_REMAP by division, exactly as it does for a parsed row. The LABEL
+   shows the masters code so the operator sees what will actually be recorded. */
+const SP_CODES_8BALL  = ['8', 'x', 'r'];
+const SP_CODES_9BALL  = ['9', 'n', 'k'];
+const SP_CODES_MASTERS = ['8', 'x', '9', 'n'];   // both balls; no masters r/k exists
+
+function spManDivBall(div) {
+  const s = (div && ((div.format || '') + ' ' + (div.name || ''))) || '';
+  if (/masters/i.test(s)) return 'masters';
+  if (/8[\s-]*ball/i.test(s)) return '8';
+  if (/9[\s-]*ball/i.test(s)) return '9';
+  return null;   // unknown format — don't block the operator, offer everything
+}
+function spManAllowedCodes() {
+  const div = _spMan.divs.find(d => String(d.id) === document.getElementById('spManDiv').value);
+  if (!div) return [];
+  const ball = spManDivBall(div);
+  if (ball === 'masters') return SP_CODES_MASTERS.slice();
+  if (ball === '8') return SP_CODES_8BALL.slice();
+  if (ball === '9') return SP_CODES_9BALL.slice();
+  return SP_CODES_8BALL.concat(SP_CODES_9BALL);
+}
+/* Rebuilds the code list for the chosen division. Only the <option>s are
+   replaced — the <select> element itself survives, so its change listener
+   (spManSyncPlayers) stays bound. */
+function spManSyncCodes() {
+  const sel = document.getElementById('spManCode');
+  const div = _spMan.divs.find(d => String(d.id) === document.getElementById('spManDiv').value);
+  const ball = spManDivBall(div);
+  const masters = ball === 'masters';
+  const codes = spManAllowedCodes();
+  sel.innerHTML = '<option value="">SP code…</option>' + codes.map(c => {
+    const shown = (masters && MASTERS_REMAP[c]) ? MASTERS_REMAP[c] : c;
+    return '<option value="' + c + '">' + esc(shown + ' — ' + (SP_FULL_NAME[shown] || shown)) + '</option>';
+  }).join('');
+  const note = document.getElementById('spManBallNote');
+  if (note) {
+    note.style.display = div ? '' : 'none';
+    note.innerHTML = !div ? ''
+      : masters
+        ? 'Masters plays both 8- and 9-ball, so every code is offered — and each is recorded as a <strong>Masters</strong> SP (m8 / mx / m9 / mn).'
+        : ball
+          ? 'Only <strong>' + ball + '-ball</strong> codes — you can’t earn a ' + (ball === '8' ? '9' : '8')
+            + '-ball special in a ' + ball + '-ball match.'
+          : '';
+  }
+}
+
 function spManIsPair() {
   const div = _spMan.divs.find(d => String(d.id) === document.getElementById('spManDiv').value);
   const code = document.getElementById('spManCode').value;
@@ -12285,6 +12350,18 @@ async function spManAdd() {
   const team = _spMan.teams.find(t => String(t.id) === document.getElementById('spManTeam').value);
   const code = document.getElementById('spManCode').value;
   if (!div || !team || !code) return;
+
+  /* Belt-and-braces on the ball-type rule. spManSyncCodes only OFFERS legal
+     codes, but a stale dropdown (division changed after the code was picked)
+     would sail straight through and mail a patch for something that cannot
+     physically happen \u2014 and a manual SP is invisible in the reports, so nothing
+     downstream would ever catch it. Re-check at write time. */
+  if (spManAllowedCodes().indexOf(code) < 0) {
+    setStatus('spManStatus', 'That code isn\u2019t possible in ' + esc(div.division_number)
+      + ' (' + esc(div.format || '') + ') \u2014 pick the code again.', 'err');
+    spManSyncCodes(); spManSyncPlayers();
+    return;
+  }
 
   /* One record per member: a scotch pair is TWO SPs (one each), not a shared
      one \u2014 each player gets their own count, patch, envelope and PatchCheck row. */
