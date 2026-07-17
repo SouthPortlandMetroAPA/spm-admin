@@ -2445,6 +2445,33 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
          app reads those rows via the apa-mailer GAS endpoint.
          ══════════════════════════════════════════════════════════════ -->
     <div id="tab-rolodex" class="tab-panel">
+
+      <!-- ══ Admin send: any captain list → any player (T1, blocklist-gated) ══
+           Overrides the player-facing self-service restriction (a captain only
+           gets THEIR division). Sends via the mailer's admin_send_captain_pdf →
+           safeMailSend, so the email ban list gates it automatically.
+           Brief: tools/claude/briefs/2026-07-17-rolodex-admin-send.md ══ -->
+      <div class="card" style="margin-bottom:14px">
+        <h2 style="margin:0 0 6px;">Send a captain list</h2>
+        <p class="hint" style="margin:0 0 10px;">
+          Email any division's captain-contact PDF to any player — no captain restriction.
+          Banned recipients are blocked automatically (and flagged before you send).
+        </p>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-start;">
+          <select id="rsDivision" style="min-width:240px"><option value="">Loading lists…</option></select>
+          <div style="position:relative; width:260px;">
+            <input type="text" id="rsPlayer" autocomplete="off"
+                   placeholder="Send to — name, nickname, or APA #" style="width:100%">
+            <div id="rsPickBox" class="card" style="display:none; position:absolute; z-index:40; left:0; right:0;
+                 top:100%; margin-top:2px; padding:4px; max-height:240px; overflow:auto;
+                 box-shadow:0 8px 24px rgba(0,0,0,.14);"></div>
+          </div>
+          <button type="button" class="btn btn-primary" id="rsSendBtn" disabled>Send</button>
+        </div>
+        <div class="status-line" id="rsStatus"></div>
+        <div id="rsRecent" style="margin-top:10px"></div>
+      </div>
+
       <div class="card">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
           <h2 style="margin:0">Rolodex — Captain Contacts</h2>
@@ -3728,7 +3755,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.282';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.283';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -24368,6 +24395,136 @@ function rolInit() {
   }
   rolRenderList();
   rolLogRender();
+  rsInit();
+}
+
+/* ══ Rolodex admin-send: any captain list → any player ══════════════════
+   T1 send via the mailer's admin_send_captain_pdf action (blocklist-gated by
+   safeMailSend). The player picker reuses lf_search_players (built 3.279). */
+/* Same GAS /exec endpoint. Reference OPTOUT_CONFIRM_MAILER_URL (declared ~12521,
+   BEFORE this line) not TCQ_MAILER_URL (~24471, AFTER) — the latter is a
+   temporal-dead-zone ReferenceError at load, a trap already noted in-file. */
+const ROLODEX_MAILER_URL = OPTOUT_CONFIRM_MAILER_URL;
+let _rs = { picked: null, hits: [], timer: null, seq: 0, sending: false };
+
+async function rsInit() {
+  const sendBtn = document.getElementById('rsSendBtn');
+  if (!sendBtn.dataset.wired) {
+    sendBtn.addEventListener('click', rsSend);
+    const inp = document.getElementById('rsPlayer');
+    inp.addEventListener('input', () => {
+      _rs.picked = null; rsSyncSendBtn();
+      clearTimeout(_rs.timer); _rs.timer = setTimeout(rsSearch, 180);
+    });
+    inp.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); if (_rs.hits.length) rsPick(0); }
+      if (e.key === 'Escape') document.getElementById('rsPickBox').style.display = 'none';
+    });
+    document.getElementById('rsPickBox').addEventListener('click', e => {
+      const row = e.target.closest('.rs-pick'); if (row) rsPick(+row.dataset.i);
+    });
+    document.getElementById('rsDivision').addEventListener('change', rsSyncSendBtn);
+    sendBtn.dataset.wired = '1';
+  }
+  await rsLoadDivisions();
+}
+
+async function rsLoadDivisions() {
+  const sel = document.getElementById('rsDivision');
+  try {
+    /* Every captain PDF on file — any session, any division. Newest per division. */
+    const rows = await sbGetAll('captain_pdfs?select=id,division_number,division_name,session_id,uploaded_at&order=division_number,uploaded_at.desc');
+    if (!rows.length) { sel.innerHTML = '<option value="">No captain lists uploaded yet</option>'; return; }
+    sel.innerHTML = '<option value="">Pick a division…</option>' + rows.map(r =>
+      '<option value="' + r.id + '">' + esc(r.division_number) + ' — ' + esc(r.division_name)
+      + ' (' + String(r.uploaded_at).slice(0, 10) + ')</option>').join('');
+  } catch (e) { sel.innerHTML = '<option value="">Failed to load lists</option>'; }
+  rsSyncSendBtn();
+}
+
+async function rsSearch() {
+  const q = (document.getElementById('rsPlayer').value || '').trim();
+  const box = document.getElementById('rsPickBox');
+  if (q.length < 2) { box.style.display = 'none'; return; }
+  const seq = ++_rs.seq;
+  try {
+    const rows = await sb('POST', 'rpc/lf_search_players', { p_q: q, p_limit: 5 });
+    if (seq !== _rs.seq) return;
+    _rs.hits = rows || [];
+    box.innerHTML = _rs.hits.length
+      ? _rs.hits.map((r, i) => '<div class="rs-pick" data-i="' + i + '" style="padding:6px 8px;cursor:pointer;border-radius:6px">'
+          + '<div style="font-weight:700">' + esc(r.display) + '</div>'
+          + '<div class="hint">' + esc(r.member_number) + ' · ' + esc(r.why) + '</div></div>').join('')
+      : '<div class="hint" style="padding:6px">No match.</div>';
+    box.style.display = '';
+  } catch (e) { box.innerHTML = '<div class="hint" style="padding:6px">Search failed.</div>'; box.style.display = ''; }
+}
+
+async function rsPick(i) {
+  const r = _rs.hits[i]; if (!r) return;
+  _rs.picked = r;
+  document.getElementById('rsPlayer').value = r.display;
+  document.getElementById('rsPickBox').style.display = 'none';
+  rsSyncSendBtn();
+  /* Heads-up if the recipient is on the email ban list — the send would be
+     blocked anyway, but say so before the click, not after. */
+  try {
+    const em = (await sb('GET', 'players?member_number=eq.' + r.member_number + '&select=email'))[0];
+    if (em && em.email) {
+      const blocked = await sb('POST', 'rpc/email_is_blocked', { p_emails: [em.email] });
+      if (blocked && blocked.length)
+        setStatus('rsStatus', '⚠ ' + esc(r.display.replace(/\s*\(".*"\)\s*$/, '')) + ' is on the email ban list — a send will be blocked.', 'err');
+      else if (!em.email) setStatus('rsStatus', 'No email on file for this player.', 'err');
+      else hideStatus('rsStatus');
+    } else {
+      setStatus('rsStatus', 'No email on file for this player — cannot send.', 'err');
+    }
+  } catch (e) { /* the mailer still enforces the ban; this is just a pre-warning */ }
+}
+
+function rsSyncSendBtn() {
+  const div = document.getElementById('rsDivision').value;
+  document.getElementById('rsSendBtn').disabled = !(div && _rs.picked) || _rs.sending;
+}
+
+async function rsSend() {
+  if (_rs.sending) return;
+  const pdfId = document.getElementById('rsDivision').value;
+  const p = _rs.picked;
+  if (!pdfId || !p) { setStatus('rsStatus', 'Pick a division and a player first.', 'err'); return; }
+  const divLabel = document.getElementById('rsDivision').selectedOptions[0].textContent;
+  const name = String(p.display || '').replace(/\s*\(".*"\)\s*$/, '').trim();
+  if (!confirm('Send the captain list\n  ' + divLabel + '\nto\n  ' + name + ' (APA ' + p.member_number + ')?')) return;
+
+  _rs.sending = true; rsSyncSendBtn();
+  setStatus('rsStatus', 'Sending…', 'progress');
+  try {
+    const res = await fetch(ROLODEX_MAILER_URL, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'admin_send_captain_pdf', admin_key: SB_KEY,
+                             captain_pdf_id: Number(pdfId), to_apa_number: p.member_number })
+    });
+    const j = await res.json();
+    if (!j.ok)            setStatus('rsStatus', '⚠ ' + esc(j.error || 'send failed'), 'err');
+    else if (j.blocked)   setStatus('rsStatus', '🚫 ' + esc(j.note || (name + ' is on the ban list — not sent.')), 'err');
+    else {
+      setStatus('rsStatus', '✓ Sent the ' + esc(j.division) + ' captain list to ' + esc(j.player_name || name) + '.', 'ok');
+      document.getElementById('rsPlayer').value = ''; _rs.picked = null;
+      rsPushRecent(j.division, j.player_name || name);
+    }
+  } catch (e) {
+    setStatus('rsStatus', 'Send failed: ' + esc(e.message), 'err');
+  } finally {
+    _rs.sending = false; rsSyncSendBtn();
+  }
+}
+
+let _rsRecent = [];
+function rsPushRecent(division, player) {
+  _rsRecent.unshift({ division, player, at: new Date().toLocaleTimeString() });
+  _rsRecent = _rsRecent.slice(0, 8);
+  document.getElementById('rsRecent').innerHTML = '<div class="hint" style="font-weight:700;margin-bottom:2px">Sent this session:</div>'
+    + _rsRecent.map(r => '<div class="hint">' + r.at + ' — ' + esc(r.division) + ' → ' + esc(r.player) + '</div>').join('');
 }
 
 function rolBindUpload() {
