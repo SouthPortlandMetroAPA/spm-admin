@@ -3519,17 +3519,22 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           these have outlived sessions, which is the whole problem. Marking one delivered drops
           it out of the plan immediately.
         </p>
-        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px;">
-          <input type="text" id="lfMember" placeholder="APA # (5 or 8 digit)" style="width:150px">
-          <select id="lfType">
-            <option value="trophy">Trophy</option>
-            <option value="coin">Coin</option>
-            <option value="jacket">Jacket</option>
-            <option value="patch">Patch</option>
-            <option value="plaque">Plaque</option>
-            <option value="other">Other</option>
-          </select>
-          <input type="text" id="lfDesc" placeholder="Description (optional)" style="flex:1; min-width:180px">
+        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-start; margin-bottom:8px;">
+          <!-- Who. Type a name or an APA # — the picker resolves it to one player,
+               because the ITEM must attach to a real person, not to whatever you
+               typed. Nothing is added until you pick from the list. -->
+          <div style="position:relative; width:260px;">
+            <input type="text" id="lfMember" autocomplete="off"
+                   placeholder="Name, nickname, or APA #" style="width:100%">
+            <div id="lfPickBox" class="card" style="display:none; position:absolute; z-index:40;
+                 left:0; right:0; top:100%; margin-top:2px; padding:4px; max-height:260px;
+                 overflow:auto; box-shadow:0 8px 24px rgba(0,0,0,.14);"></div>
+          </div>
+          <span class="hint" id="lfPicked" style="align-self:center; min-width:150px"></span>
+          <select id="lfType" title="Item type" style="text-transform:capitalize"></select>
+          <button type="button" class="btn btn-outline btn-sm" id="lfAddTypeBtn"
+                  title="Add a new item type">+ type</button>
+          <input type="text" id="lfDesc" placeholder="Description (optional)" style="flex:1; min-width:160px">
           <input type="number" id="lfQty" value="1" min="1" style="width:70px" title="Quantity">
           <button type="button" class="btn btn-primary" id="lfAddBtn">Add item</button>
         </div>
@@ -3679,7 +3684,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.278';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.279';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -7662,7 +7667,8 @@ async function plfToggle() {
    Owner in person only (user-locked): no captain proxy. We must catch the
    player personally, so only nights THEY are scheduled count.
    ═════════════════════════════════════════════════════════════════════ */
-let _lf = { inv: [], filter: 'held', plan: null, stranded: [], sig: null, timer: null, busy: false };
+let _lf = { inv: [], filter: 'held', plan: null, stranded: [], sig: null, timer: null, busy: false,
+            types: [], hits: [], picked: null };
 
 const LF_TYPE_LABEL = { trophy:'Trophy', coin:'Coin', jacket:'Jacket', patch:'Patch', plaque:'Plaque', other:'Other' };
 const LF_TODAY = () => new Date().toISOString().slice(0, 10);
@@ -7679,7 +7685,27 @@ function lfEffectiveDate(m) {
 async function lfInit() {
   if (_lf.timer) return;          // already live
   document.getElementById('lfAddBtn').addEventListener('click', lfAdd);
-  document.getElementById('lfMember').addEventListener('keydown', e => { if (e.key === 'Enter') lfAdd(); });
+  document.getElementById('lfAddTypeBtn').addEventListener('click', lfAddType);
+  const mem = document.getElementById('lfMember');
+  mem.addEventListener('input', lfOnSearchInput);
+  /* Enter picks the top hit rather than submitting: the old handler called
+     lfAdd() directly, which now has nothing to add because nothing is picked. */
+  mem.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); if ((_lf.hits || []).length) lfPick(0); }
+    if (e.key === 'Escape') document.getElementById('lfPickBox').style.display = 'none';
+  });
+  document.getElementById('lfPickBox').addEventListener('click', e => {
+    const row = e.target.closest('.lf-pick');
+    if (row) lfPick(parseInt(row.dataset.i, 10));
+  });
+  /* Click-away closes the picker. */
+  document.addEventListener('click', e => {
+    if (!e.target.closest('#lfPickBox') && e.target.id !== 'lfMember') {
+      const b = document.getElementById('lfPickBox');
+      if (b) b.style.display = 'none';
+    }
+  });
+  await lfLoadTypes();
   document.querySelectorAll('#lfFilterSeg .seg-btn-slate').forEach(b =>
     b.addEventListener('click', () => {
       _lf.filter = b.dataset.lff;
@@ -8073,27 +8099,106 @@ function lfRenderList() {
     + '<div class="status-line" id="lfListStatus" style="margin-top:6px"></div>';
 }
 
-async function lfAdd() {
-  const raw = (document.getElementById('lfMember').value || '').trim();
-  if (!raw) { setStatus('lfAddStatus', 'Enter an APA number.', 'err'); return; }
-  /* Accept either form on input, but ALWAYS store the canonical 8-digit number
-     off the players row — never a locally-assembled one. slate carries two
-     member_number conventions (players/team_memberships are 8-digit; sp_patches
-     /sp_labels are 5-digit local), and this table joins team_memberships, so
-     storing the 5-digit form makes every join miss with no error at all — it
-     just reports "not on any SPM roster" for someone with a full schedule. */
-  const local = raw.replace(/^972/, '').padStart(5, '0');
+/* ── Item types — operator-managed, not hard-coded ──────────────────────
+   slate.item_types is the list; the CHECK that used to live on
+   item_inventory.item_type is now an FK to it, and a case-insensitive unique
+   index there stops "Trophy"/"trophy"/" trophy " becoming three types. */
+async function lfLoadTypes() {
+  _lf.types = await sbGetAll('item_types?select=id,name,sort_order&order=sort_order,name');
+  const sel = document.getElementById('lfType');
+  const keep = sel.value;
+  sel.innerHTML = _lf.types.map(t =>
+    '<option value="' + esc(t.name) + '">' + esc(t.name) + '</option>').join('');
+  if (keep && _lf.types.some(t => t.name === keep)) sel.value = keep;
+}
+
+async function lfAddType() {
+  const raw = (prompt('New item type (e.g. "Cue case"):') || '').trim();
+  if (!raw) return;
+  /* Check case-insensitively BEFORE writing so the operator gets a sentence
+     instead of a raw 23505 from the unique index. The index is still the real
+     guard — this is just manners. */
+  const hit = _lf.types.find(t => t.name.toLowerCase() === raw.toLowerCase());
+  if (hit) {
+    await lfLoadTypes();
+    document.getElementById('lfType').value = hit.name;
+    setStatus('lfAddStatus', '"' + esc(hit.name) + '" already exists — selected it.', 'ok');
+    return;
+  }
   try {
-    let person = (await sb('GET', 'players?member_number=eq.' + encodeURIComponent(raw)
-      + '&select=member_number,first_name,last_name'))[0];
-    if (!person) {
-      person = (await sb('GET', 'players?member_number=eq.' + encodeURIComponent('972' + local)
-        + '&select=member_number,first_name,last_name'))[0];
+    await sb('POST', 'item_types', { name: raw, sort_order: 500 });
+    await lfLoadTypes();
+    document.getElementById('lfType').value = raw;
+    setStatus('lfAddStatus', '✓ Added item type "' + esc(raw) + '".', 'ok');
+  } catch (e) { setStatus('lfAddStatus', 'Could not add that type: ' + esc(e.message), 'err'); }
+}
+
+/* ── Owner picker ───────────────────────────────────────────────────────
+   Type a name / nickname / APA #; slate.lf_search_players ranks the top 5.
+   The item attaches to the PICKED player — never to raw typed text. That is
+   the same rule as before (store the number the players row hands you, never
+   one assembled locally), just enforced at the UI now: no pick, no add. */
+let _lfSearchTimer = null, _lfSearchSeq = 0;
+
+function lfOnSearchInput() {
+  _lf.picked = null;
+  document.getElementById('lfPicked').textContent = '';
+  clearTimeout(_lfSearchTimer);
+  _lfSearchTimer = setTimeout(lfRunSearch, 180);   // debounce: it fires per keystroke
+}
+
+async function lfRunSearch() {
+  const q = (document.getElementById('lfMember').value || '').trim();
+  const box = document.getElementById('lfPickBox');
+  if (q.length < 2) { box.style.display = 'none'; return; }
+  const seq = ++_lfSearchSeq;
+  try {
+    const rows = await sb('POST', 'rpc/lf_search_players', { p_q: q, p_limit: 5 });
+    /* Drop a stale response: typing "sold" fires 4 requests and they can land
+       out of order, so without this the list can end up showing results for a
+       prefix the operator has already moved past. */
+    if (seq !== _lfSearchSeq) return;
+    if (!rows || !rows.length) {
+      box.innerHTML = '<div class="hint" style="padding:6px">No match for "' + esc(q) + '".</div>';
+      box.style.display = ''; return;
     }
-    if (!person) { setStatus('lfAddStatus', 'No player with that APA number — check the digits.', 'err'); return; }
-    const name = ((person.first_name || '') + ' ' + (person.last_name || '')).replace(/\s+/g, ' ').trim();
+    box.innerHTML = rows.map((r, i) =>
+      '<div class="lf-pick" data-i="' + i + '" style="padding:6px 8px; cursor:pointer; border-radius:6px">'
+      + '<div style="font-weight:700">' + esc(r.display) + '</div>'
+      + '<div class="hint">' + esc(r.member_number) + ' · matched on ' + esc(r.why) + '</div></div>'
+    ).join('');
+    box.style.display = '';
+    _lf.hits = rows;
+  } catch (e) {
+    box.innerHTML = '<div class="hint" style="padding:6px">Search failed: ' + esc(e.message) + '</div>';
+    box.style.display = '';
+  }
+}
+
+function lfPick(i) {
+  const r = (_lf.hits || [])[i];
+  if (!r) return;
+  _lf.picked = r;
+  document.getElementById('lfMember').value = r.display;
+  document.getElementById('lfPickBox').style.display = 'none';
+  document.getElementById('lfPicked').innerHTML = '✓ ' + esc(r.member_number);
+  hideStatus('lfAddStatus');
+}
+
+async function lfAdd() {
+  /* No pick, no add. The member_number must come off the players row the
+     operator SAW and chose — never parsed out of the box, which is how you end
+     up storing a number that matches nothing. */
+  if (!_lf.picked) {
+    setStatus('lfAddStatus', 'Pick a player from the list first — search by name, nickname, or APA #.', 'err');
+    document.getElementById('lfMember').focus();
+    return;
+  }
+  const p = _lf.picked;
+  const name = String(p.display || '').replace(/\s*\(".*"\)\s*$/, '').trim() || p.member_number;
+  try {
     await sb('POST', 'item_inventory', {
-      member_number: person.member_number, member_name: name || person.member_number,
+      member_number: p.member_number, member_name: name,
       item_type: document.getElementById('lfType').value,
       description: (document.getElementById('lfDesc').value || '').trim() || null,
       qty: Math.max(1, parseInt(document.getElementById('lfQty').value, 10) || 1),
@@ -8102,9 +8207,11 @@ async function lfAdd() {
     document.getElementById('lfMember').value = '';
     document.getElementById('lfDesc').value = '';
     document.getElementById('lfQty').value = '1';
-    setStatus('lfAddStatus', '✓ Added for ' + name + ' — the plan below just updated.', 'ok');
+    document.getElementById('lfPicked').textContent = '';
+    _lf.picked = null;
+    setStatus('lfAddStatus', '✓ Added for ' + esc(name) + ' — the plan below just updated.', 'ok');
     await lfReload();
-  } catch (e) { setStatus('lfAddStatus', 'Add failed: ' + e.message, 'err'); }
+  } catch (e) { setStatus('lfAddStatus', 'Add failed: ' + esc(e.message), 'err'); }
 }
 async function lfDeliver(id) {
   try { await sb('PATCH', 'item_inventory?id=eq.' + id, { status: 'delivered', delivered_at: new Date().toISOString() }); await lfReload(); }
