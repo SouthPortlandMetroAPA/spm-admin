@@ -1205,6 +1205,33 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           </table>
         </div>
       </div>
+
+      <!-- ── Schedules → slate.matches (the RackTime bridge) ─────────────
+           RackTime uploads schedule PDFs to the `racktime` bucket, but writes
+           only the `racktime` schema (hosts/venues). NOTHING ever carried them
+           into slate.matches — that table was filled once by a script on
+           2026-05-24 and never again, so 10 divisions sat with a full schedule
+           in storage and zero matches for 7 weeks. This is the missing bridge.
+           Read-only until Apply: the preview is the safety gate, because a
+           reissued PDF is authoritative and can move real nights.
+           Brief: tools/claude/briefs/2026-07-16-schedule-reimport-bridge.md ── -->
+      <div class="card" style="margin-top:14px">
+        <h2 style="margin:0 0 6px;">Schedules</h2>
+        <p class="hint" style="margin:0 0 10px;">
+          Upload revised schedules in <strong>RackTime</strong> as usual, then scan here to pull them
+          into the match schedule that PaperTrail and Lost &amp; Found read.
+          A reissued PDF <strong>wins</strong> — it is APA's system of record — but
+          <strong>matches that already happened are never touched</strong>, and nothing is written
+          until you press Apply.
+        </p>
+        <div class="form-row" style="align-items:center;gap:8px">
+          <button class="btn btn-outline btn-sm" id="schScanBtn">Scan for schedule changes</button>
+          <button class="btn btn-sm" id="schApplyBtn" style="display:none">Apply changes</button>
+          <span class="hint" id="schSummary" style="margin-left:auto"></span>
+        </div>
+        <div id="schStatus" class="status-line"></div>
+        <div id="schPreview" style="margin-top:12px"></div>
+      </div>
     </div>
 
     <!-- ══════════════════════════════════════════════════════════════
@@ -3652,7 +3679,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.277';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.278';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -9008,6 +9035,388 @@ function _renderDivisionsRows() {
     body.addEventListener('click', onDivisionOperatorButtonClick);
     body.dataset.delegationWired = '1';
   }
+  schWire();
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   SCHEDULES — the RackTime → slate.matches bridge
+   Brief: tools/claude/briefs/2026-07-16-schedule-reimport-bridge.md
+
+   WHY THIS EXISTS. RackTime uploads a schedule PDF per division into the
+   `racktime` storage bucket and writes the `racktime` schema (hosts, venues).
+   It has NEVER written slate.matches. That table was filled once, by a one-off
+   script, on 2026-05-24 — a month BEFORE RackTime replaced every PDF in the
+   bucket on 06-26. Nothing reconciled the two, so 10 divisions (9 of them
+   9-Ball) carried a complete schedule in storage and zero matches in the DB for
+   seven weeks, and nothing noticed. Uploads always worked; there was simply no
+   consumer. This is that consumer.
+
+   THE TWO RULES, both user-locked 2026-07-16:
+   1. "the new pdf should precedence" — APA reissues the WHOLE schedule, so a
+      reissue IS the system of record. A manual reschedule is a local annotation
+      on top of it and the PDF supersedes it. But every cleared reschedule is
+      REPORTED: precedence was the ask, silent loss was not.
+   2. "i will never delete a match that happened in the schedule" — enforced
+      here by construction, not by discipline (see schIsFrozen).
+   ══════════════════════════════════════════════════════════════════════ */
+
+let _sch = { plan: null, scanning: false };
+
+/* A match is FROZEN once it has happened. Frozen rows are never updated and
+   never deleted, whatever a new PDF says.
+
+   This one predicate does three jobs:
+     - it makes the user's "never delete a match that happened" rule true by
+       construction;
+     - it is the ONLY thing standing between an import and
+       `papertrail.photos.match_id → slate.matches ON DELETE CASCADE`. A photo
+       means the match was played, played means frozen, frozen means no delete
+       can ever reach a scoresheet. ~662 photos depend on this holding;
+     - it holds the whole feature at T2, because everything still reachable by a
+       write is regenerable from the PDF that was just read.
+   Effective date, not scheduled_date: a match moved to next week has NOT
+   happened yet, and a match moved out of the past has. */
+function schIsFrozen(m, todayISO, photoMatchIds) {
+  if (photoMatchIds.has(m.id)) return true;             // scoresheet ⇒ played
+  const eff = m.rescheduled ? (m.rescheduled_to || null) : m.scheduled_date;
+  if (!eff) return true;   // limbo reschedule: operator-owned, PDF can't judge it
+  return eff < todayISO;
+}
+
+/* Fold a bare continuation line of pairs into the week row above it — the PDFs
+   wrap weeks 2/6/10 inconsistently. Ported verbatim from the Node parser that
+   was two-path verified against div010 (77/78, the 1 diff a real host swap). */
+function schFoldWrapped(lines) {
+  const out = [];
+  for (const L of lines) {
+    if (/^\d{1,2}\s+\d{2}\/\d{2}\/\d{4}/.test(L)) { out.push(L); continue; }
+    if (/^(\d+-\d+)(\s+\d+-\d+)*$/.test(L.trim()) && out.length) {
+      out[out.length - 1] += ' ' + L.trim();
+      continue;
+    }
+    out.push(L);
+  }
+  return out;
+}
+
+/* The PDF names its own session ("Summer 2026") and division ("043 - Northwest
+   9 Ball"). Read BOTH from the page: bucket paths are keyed on division number
+   alone (`012/…`), and division 012 exists in Summer AND Fall. Trusting the
+   path would import a Fall schedule over Summer. Reading the session out of the
+   PDF is also what makes Fall work with no code change when its PDFs land. */
+function schParse(lines) {
+  const folded = schFoldWrapped(lines);
+  const all = folded.join('\n');
+  const head = all.match(/^(\d{3})\s*-\s*(.+)$/m);
+  const weeks = [];
+  for (const L of folded) {
+    const m = L.match(/^(\d{1,2})\s+(\d{2})\/(\d{2})\/(\d{4})\s*(.*)$/);
+    if (!m) continue;
+    weeks.push({
+      week: +m[1],
+      date: m[4] + '-' + m[2] + '-' + m[3],
+      pairs: [...m[5].matchAll(/(\d+)-(\d+)/g)].map(p => ({ home: +p[1], away: +p[2] }))
+    });
+  }
+  return {
+    session_name:    (all.match(/^((?:Spring|Summer|Fall|Winter)\s+\d{4})$/m) || [, null])[1],
+    division_number: head ? head[1] : null,
+    division_name:   head ? head[2].trim() : null,
+    day_of_play:     (all.match(/Day of Play:\s*(\w+)/) || [, null])[1],
+    weeks
+  };
+}
+
+async function schFetchPdfBlob(path) {
+  const res = await fetch(SB_URL + '/storage/v1/object/racktime/' + path, { headers: HEADERS_READ });
+  if (!res.ok) throw new Error('storage ' + res.status + ' for ' + path);
+  return await res.blob();
+}
+
+/* Files in one division's bucket folder, NEWEST FIRST.
+   RackTime names uploads `<epoch>-racktime-…pdf`, so name-desc is time-desc.
+   Newest-first matters: a folder accumulates uploads across sessions, and the
+   caller walks it until the PDF's own session matches the division it is
+   importing for. */
+async function schListFolder(divnum) {
+  const res = await fetch(SB_URL + '/storage/v1/object/list/racktime', {
+    method: 'POST',
+    headers: { ...HEADERS_READ, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prefix: divnum + '/', limit: 100,
+                           sortBy: { column: 'name', order: 'desc' } })
+  });
+  if (!res.ok) return [];
+  const rows = await res.json();
+  return (rows || []).filter(r => r.name && /\.pdf$/i.test(r.name))
+                     .map(r => ({ path: divnum + '/' + r.name,
+                                  /* When this PDF was uploaded — decides whether it is
+                                     newer than a hand-set reschedule. Real timestamp from
+                                     the API, not the epoch in the filename: the name is a
+                                     RackTime convention and a convention is not evidence. */
+                                  at: r.created_at || r.updated_at || null }));
+}
+
+/* papertrail.photos is a DIFFERENT schema, so it needs its own Accept-Profile.
+   NOTE: sbGetAll(path) takes ONE argument — passing headers to it does nothing
+   and silently reads the wrong schema. sb() is the one that accepts headers. */
+async function schPhotoMatchIds(matchIds) {
+  const out = new Set();
+  if (!matchIds.length) return out;
+  for (let i = 0; i < matchIds.length; i += 200) {
+    const chunk = matchIds.slice(i, i + 200);
+    const rows = await sb('GET', 'photos?select=match_id&match_id=in.(' + chunk.join(',') + ')',
+                          null, { 'Accept-Profile': 'papertrail' });
+    for (const p of (rows || [])) out.add(p.match_id);
+  }
+  return out;
+}
+
+/* Scan: read every PDF in the bucket, resolve it to a real SPM division, and
+   diff it against slate.matches. Writes NOTHING. */
+async function schScan() {
+  if (_sch.scanning) return;
+  _sch.scanning = true;
+  document.getElementById('schApplyBtn').style.display = 'none';
+  document.getElementById('schPreview').innerHTML = '';
+  setStatus('schStatus', 'Reading schedules from RackTime…', 'progress');
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+
+    /* Drive from SPM divisions, not from the bucket. The bucket holds every
+       operator's divisions (CRA too) keyed on division number ALONE, and a
+       number is reused across sessions — div 012 exists in both Summer and
+       Fall. Walking divisions and demanding the PDF name the SAME session is
+       what keeps a Fall reissue from landing on Summer's matches, and it is
+       also why Fall imports itself with no code change once its PDFs arrive. */
+    const divs = await sbGetAll('divisions?operator_id=eq.1&select=id,division_number,name,session_id&order=id');
+    const sessions = await sbGetAll('sessions?select=id,name&order=id');
+    const sessNameById = new Map(sessions.map(s => [s.id, String(s.name || '').trim().toLowerCase()]));
+
+    const plan = { divisions: [], skipped: [], counts: { ins: 0, upd: 0, del: 0, clr: 0, frozen: 0, drop: 0 } };
+    let done = 0;
+
+    for (const div of divs) {
+      done++;
+      setStatus('schStatus', 'Checking ' + done + ' / ' + divs.length + ' — ' + esc(div.name) + '…', 'progress');
+      const wantSession = sessNameById.get(div.session_id);
+      const files = await schListFolder(div.division_number);
+      if (!files.length) continue;                 // no PDF for this division — silent, it's normal
+
+      /* Newest-first until one names THIS division's session. */
+      let parsed = null, pdf = null, tried = 0;
+      for (const f of files) {
+        if (++tried > 4) break;                    // bound the work; folders are small
+        try {
+          const pages = await spPdfPageLines(await schFetchPdfBlob(f.path));  // canonical helper — do not re-derive
+          const p = schParse(pages.flat());
+          if (p.session_name && p.session_name.toLowerCase() === wantSession
+              && p.division_number === div.division_number) { parsed = p; pdf = f; break; }
+        } catch (e) {
+          plan.skipped.push({ path: f.path, why: 'could not read the PDF — ' + e.message });
+        }
+      }
+      if (!parsed) continue;                       // no PDF for this session yet — normal for Fall
+
+      const d = await schDiffDivision(div, parsed, pdf, today);
+      if (d.ins.length || d.upd.length || d.del.length) plan.divisions.push(d);
+      plan.counts.ins += d.ins.length; plan.counts.upd += d.upd.length;
+      plan.counts.del += d.del.length; plan.counts.clr += d.upd.filter(u => u.clearsReschedule).length;
+      plan.counts.frozen += d.frozen; plan.counts.drop += d.dropped.length;
+    }
+
+    _sch.plan = plan;
+    schRenderPreview();
+    hideStatus('schStatus');
+  } catch (e) {
+    setStatus('schStatus', 'Scan failed: ' + esc(e.message), 'err');
+  } finally {
+    _sch.scanning = false;
+  }
+}
+
+/* Diff ONE division's PDF against its live matches. Pure — no writes. */
+async function schDiffDivision(div, parsed, pdf, today) {
+  const teams = await sbGetAll('teams?division_id=eq.' + div.id + '&select=id,team_number&order=id');
+  const base = parseInt(div.division_number, 10) * 100;
+  const teamAt = new Map(teams.map(t => [parseInt(t.team_number, 10) - base, t.id]));
+
+  const live = await sbGetAll('matches?division_id=eq.' + div.id
+    + '&select=id,week_number,scheduled_date,row_type,home_position,away_position,'
+    + 'rescheduled,rescheduled_to,rescheduled_at&order=id');
+  const photoIds = await schPhotoMatchIds(live.map(m => m.id));
+
+  const out = { div, path: pdf.path, parsed, ins: [], upd: [], del: [], dropped: [], frozen: 0 };
+
+  /* The PDF only has an opinion about weeks it still governs — the ones whose
+     OWN date is in the future. Everything else has happened as far as the PDF
+     is concerned, and history is not the PDF's to rewrite.
+
+     Keying the comparison on WEEK NUMBER (not just the pairing) is what makes
+     that true. Without it, a match rescheduled OUT of a past week — 883 wk10
+     moved 07-09 → 07-21 — is still unplayed, so it survives the frozen filter,
+     but its week is skipped as past, so it never appears in the PDF side of the
+     diff and gets marked for DELETION. The first live scan wanted to delete 6
+     real matches exactly this way. */
+  const govWeeks = new Set(parsed.weeks.filter(w => w.pairs.length && w.date >= today)
+                                       .map(w => w.week));
+
+  const byKey = new Map();                     // wk|home-away → live row, still in play
+  /* Frozen rows must be INVISIBLE to update/delete but still VISIBLE to the
+     insert check — otherwise the PDF can't find them and happily inserts a
+     second copy. That is not hypothetical: match 838 (887 wk11, 7 hosts 6) has
+     a scoresheet, so it froze, so the first build wanted to insert a duplicate
+     of a match that had already been PLAYED. "Leave it alone" and "pretend it
+     doesn't exist" are different instructions. */
+  const frozenKeys = new Set();
+  for (const m of live) {
+    if (m.row_type !== 'regular') continue;
+    const key = m.week_number + '|' + m.home_position + '-' + m.away_position;
+    if (schIsFrozen(m, today, photoIds)) { out.frozen++; frozenKeys.add(key); continue; }
+    if (!govWeeks.has(m.week_number)) { out.frozen++; frozenKeys.add(key); continue; } // PDF has no say
+    byKey.set(key, m);
+  }
+
+  const seen = new Set();
+  for (const w of parsed.weeks) {
+    if (!w.pairs.length) continue;             // playoff week — no positions
+    if (w.date < today) continue;              // already happened; not the PDF's to rewrite
+    let idx = 0;
+    for (const p of w.pairs) {
+      idx++;
+      const key = w.week + '|' + p.home + '-' + p.away;
+      seen.add(key);
+      if (frozenKeys.has(key)) continue;        // already played — not ours to add, change, or remove
+      const h = teamAt.get(p.home), a = teamAt.get(p.away);
+      if (!h || !a) { out.dropped.push('wk' + w.week + ' ' + w.date + ' ' + p.home + '-' + p.away); continue; }
+      const cur = byKey.get(key);
+      if (!cur) {
+        out.ins.push({ week: w.week, idx, date: w.date, hp: p.home, ap: p.away, h, a });
+        continue;
+      }
+      /* "The new pdf should precedence" means a NEWER pdf. This one has sat in
+         the bucket since 06-26; the operator's reschedules came after it. A
+         stale PDF re-asserting itself would silently revert their moves on
+         every scan — and would do it again every time. Precedence is about
+         which is more RECENT, not which is a PDF. */
+      const pdfNewer = !!(pdf.at && cur.rescheduled_at
+                          && new Date(pdf.at) > new Date(cur.rescheduled_at));
+      const clears = !!cur.rescheduled && pdfNewer;
+      const movedByPdf = cur.scheduled_date !== w.date;
+      if (cur.rescheduled && !pdfNewer) continue;      // their move is the newer fact — leave it
+      if (movedByPdf || clears)
+        out.upd.push({ id: cur.id, week: w.week, date: w.date, from: cur.scheduled_date,
+                       hp: p.home, ap: p.away, clearsReschedule: clears,
+                       wasMovedTo: cur.rescheduled_to });
+    }
+  }
+  /* In the DB, gone from a week the PDF still governs, not yet played → APA
+     dropped it from the schedule. */
+  for (const [key, m] of byKey)
+    if (!seen.has(key)) out.del.push({ id: m.id, date: m.scheduled_date, key });
+
+  return out;
+}
+
+function schRenderPreview() {
+  const p = _sch.plan, host = document.getElementById('schPreview');
+  const c = p.counts;
+  document.getElementById('schSummary').textContent =
+    c.ins + ' new · ' + c.upd + ' changed · ' + c.del + ' removed · ' + c.frozen + ' already played — untouched';
+
+  if (!p.divisions.length) {
+    host.innerHTML = '<p class="hint">Everything already matches the uploaded schedules — nothing to apply.'
+      + (p.skipped.length ? ' <span class="hint">(' + p.skipped.length + ' PDF(s) skipped — see below.)</span>' : '')
+      + '</p>' + schSkippedHtml();
+    document.getElementById('schApplyBtn').style.display = 'none';
+    return;
+  }
+
+  let h = '';
+  if (c.clr) h += '<p class="hint" style="color:var(--warn,#a05a00);font-weight:700">⚠ ' + c.clr
+    + ' of these clear a reschedule you set by hand. The new PDF wins — your call — but they are listed'
+    + ' per-division below so you can re-enter any that were real agreements with captains.</p>';
+
+  for (const d of p.divisions) {
+    h += '<details class="card" style="margin-bottom:8px"><summary style="cursor:pointer;font-weight:700">'
+      + esc(d.div.division_number) + ' ' + esc(d.div.name)
+      + ' — <span class="hint">' + d.ins.length + ' new, ' + d.upd.length + ' changed, '
+      + d.del.length + ' removed' + (d.frozen ? ', ' + d.frozen + ' played' : '') + '</span></summary>'
+      + '<div style="padding:8px 0 2px">';
+    for (const r of d.ins)
+      h += '<div class="hint">+ new — wk' + r.week + ' ' + esc(r.date) + ' · ' + r.hp + ' hosts ' + r.ap + '</div>';
+    for (const r of d.upd)
+      h += '<div class="hint">~ changed — wk' + r.week + ' · ' + r.hp + ' hosts ' + r.ap + ' · '
+        + esc(r.from) + ' → ' + esc(r.date)
+        + (r.clearsReschedule ? ' <strong style="color:var(--warn,#a05a00)">(clears your reschedule'
+            + (r.wasMovedTo ? ' to ' + esc(r.wasMovedTo) : ' — no new date was set') + ')</strong>' : '')
+        + '</div>';
+    for (const r of d.del)
+      h += '<div class="hint">− removed — ' + esc(r.date) + ' · ' + esc(r.key)
+        + ' (no longer on APA\'s schedule)</div>';
+    for (const r of d.dropped)
+      h += '<div class="hint">· skipped — ' + esc(r) + ' (a team in this matchup has no roster)</div>';
+    h += '</div></details>';
+  }
+  host.innerHTML = h + schSkippedHtml();
+  document.getElementById('schApplyBtn').style.display = '';
+}
+
+function schSkippedHtml() {
+  if (!_sch.plan.skipped.length) return '';
+  return '<details style="margin-top:8px"><summary class="hint" style="cursor:pointer">'
+    + _sch.plan.skipped.length + ' PDF(s) not imported — why</summary><div style="padding:6px 0">'
+    + _sch.plan.skipped.map(s => '<div class="hint">' + esc(s.path.split('/')[0]) + ' — ' + esc(s.why) + '</div>').join('')
+    + '</div></details>';
+}
+
+async function schApply() {
+  const p = _sch.plan;
+  if (!p || !p.divisions.length) return;
+  const btn = document.getElementById('schApplyBtn');
+  btn.disabled = true;
+  try {
+    let n = 0;
+    for (const d of p.divisions) {
+      setStatus('schStatus', 'Applying ' + (++n) + ' / ' + p.divisions.length + ' — ' + esc(d.div.name) + '…', 'progress');
+      const src = d.path + '|slate-import';
+      if (d.ins.length) {
+        await sb('POST', 'matches', d.ins.map(r => ({
+          division_id: d.div.id, week_number: r.week, match_index: r.idx, scheduled_date: r.date,
+          row_type: 'regular', home_team_id: r.h, away_team_id: r.a,
+          home_position: r.hp, away_position: r.ap,
+          source_pdf_path: src, source_parsed_at: new Date().toISOString()
+        })));
+      }
+      for (const r of d.upd) {
+        /* PDF precedence: its date wins AND it clears a manual reschedule.
+           PATCH by id — never delete-then-insert, which would cascade to any
+           scoresheet photo. (Frozen rows never reach here anyway.) */
+        await sb('PATCH', 'matches?id=eq.' + r.id, {
+          scheduled_date: r.date, week_number: r.week,
+          rescheduled: false, rescheduled_to: null, rescheduled_at: null,
+          source_pdf_path: src, source_parsed_at: new Date().toISOString()
+        });
+      }
+      for (const r of d.del) await sb('DELETE', 'matches?id=eq.' + r.id);
+    }
+    setStatus('schStatus', '✓ Schedules updated. Lost &amp; Found and PaperTrail now see the new dates.', 'ok');
+    _sch.plan = null;
+    document.getElementById('schPreview').innerHTML = '';
+    document.getElementById('schSummary').textContent = '';
+    btn.style.display = 'none';
+  } catch (e) {
+    setStatus('schStatus', 'Apply failed: ' + esc(e.message) + ' — re-scan to see what is still outstanding.', 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function schWire() {
+  const s = document.getElementById('schScanBtn'), a = document.getElementById('schApplyBtn');
+  if (!s || s.dataset.wired) return;
+  s.addEventListener('click', schScan);
+  a.addEventListener('click', schApply);
+  s.dataset.wired = '1';
 }
 
 async function onDivisionOperatorButtonClick(ev) {
