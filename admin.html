@@ -3684,7 +3684,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.279';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.280';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -8113,7 +8113,7 @@ async function lfLoadTypes() {
 }
 
 async function lfAddType() {
-  const raw = (prompt('New item type (e.g. "Cue case"):') || '').trim();
+  const raw = (prompt('New item type — e.g. Cue case') || '').trim();
   if (!raw) return;
   /* Check case-insensitively BEFORE writing so the operator gets a sentence
      instead of a raw 23505 from the unique index. The index is still the real
