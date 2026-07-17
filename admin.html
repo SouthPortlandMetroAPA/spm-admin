@@ -1025,6 +1025,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="contacts">Contacts</button>
       <button class="tab" data-tab="nextreg">Next Session</button>
       <button class="tab" data-tab="polls">PulseCheck</button>
+      <button class="tab" data-tab="lostfound">Lost &amp; Found</button>
     </div>
 
     <div id="globalStatus" class="status-line"></div>
@@ -3454,6 +3455,71 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       </details>
     </div>
 
+    <!-- ── Lost & Found ─────────────────────────────────────────────────
+         Trophies/coins/jackets sitting at the operator's house. The INVENTORY
+         is the only stored state; the delivery PLAN is derived on every render
+         from the live schedule, so a reschedule or a handover changes it with
+         no manual step. A stored plan would rot — 21 matches are rescheduled
+         right now — and a stale plan is worse than none, because it sends you
+         out on a night nothing is happening. ───────────────────────────── -->
+    <div id="tab-lostfound" class="tab-panel">
+
+      <div class="card" style="margin-bottom:14px;">
+        <h2 style="margin:0 0 6px;">Delivery plan</h2>
+        <p class="hint" style="margin:0 0 10px;">
+          Recalculated live from the schedule and the inventory below — nothing here is saved.
+          Optimised for the <strong>fewest days out</strong> first, then the
+          <strong>fewest places to drive</strong>. Rescheduled matches follow their new date;
+          matches rescheduled with no new date are excluded (you can't catch anyone at a match
+          that isn't happening).
+        </p>
+        <div id="lfPlan"><div class="hint">Loading…</div></div>
+      </div>
+
+      <div class="card" style="margin-bottom:14px;">
+        <h2 style="margin:0 0 6px;">Can't be planned</h2>
+        <p class="hint" style="margin:0 0 10px;">
+          People holding items who have no known future match — always shown with the reason,
+          never quietly dropped.
+        </p>
+        <div id="lfStranded"><div class="hint">Loading…</div></div>
+      </div>
+
+      <div class="card">
+        <h2 style="margin:0 0 6px;">Inventory</h2>
+        <p class="hint" style="margin:0 0 10px;">
+          Everything sitting at the house. Items are <strong>not</strong> tied to a session —
+          these have outlived sessions, which is the whole problem. Marking one delivered drops
+          it out of the plan immediately.
+        </p>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px;">
+          <input type="text" id="lfMember" placeholder="APA # (5 or 8 digit)" style="width:150px">
+          <select id="lfType">
+            <option value="trophy">Trophy</option>
+            <option value="coin">Coin</option>
+            <option value="jacket">Jacket</option>
+            <option value="patch">Patch</option>
+            <option value="plaque">Plaque</option>
+            <option value="other">Other</option>
+          </select>
+          <input type="text" id="lfDesc" placeholder="Description (optional)" style="flex:1; min-width:180px">
+          <input type="number" id="lfQty" value="1" min="1" style="width:70px" title="Quantity">
+          <button type="button" class="btn btn-primary" id="lfAddBtn">Add item</button>
+        </div>
+        <div class="status-line" id="lfAddStatus"></div>
+        <div style="display:flex; gap:8px; align-items:center; margin:8px 0 4px;">
+          <div class="seg" id="lfFilterSeg" style="display:inline-flex; gap:0;">
+            <button type="button" class="seg-btn-slate active" data-lff="held">Still here</button>
+            <button type="button" class="seg-btn-slate" data-lff="delivered">Delivered</button>
+            <button type="button" class="seg-btn-slate" data-lff="all">All</button>
+          </div>
+          <span class="hint" id="lfCounts"></span>
+        </div>
+        <div id="lfList"></div>
+      </div>
+
+    </div>
+
     <div id="tab-polls" class="tab-panel">
       <div class="card">
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
@@ -3586,7 +3652,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.274';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.275';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -7549,6 +7615,440 @@ async function plfToggle() {
   } catch (e) { setStatus('plfStatus', e.message, 'err'); }
 }
 
+/* ══ Lost & Found — unclaimed items + live delivery planner ══════════════
+   Brief: tools/claude/briefs/2026-07-15-lostfound-delivery-planner.md
+
+   THE PLAN IS DERIVED, NEVER STORED (user-locked): "i do not want you to create
+   the plan right now, i want you to create code that will recalculate a plan as
+   the schedule changes and the inventory changes". slate.item_inventory is the
+   only persisted state; everything below is recomputed from live data on every
+   render. A stored plan rots the moment a match moves — 21 are rescheduled
+   right now — and a stale delivery plan is worse than none, because it sends
+   the operator out on a night nothing is happening.
+
+   Chain: item → player → team_memberships → teams → matches (home OR away) →
+   the HOME team's venue (host_plan_teams.summer_venue → host_venues).
+
+   Objective (user-locked): LEXICOGRAPHIC — fewest DAYS first, then fewest
+   PLACES. A 2-day/5-stop plan beats a 3-day/3-stop plan.
+
+   Owner in person only (user-locked): no captain proxy. We must catch the
+   player personally, so only nights THEY are scheduled count.
+   ═════════════════════════════════════════════════════════════════════ */
+let _lf = { inv: [], filter: 'held', plan: null, stranded: [], sig: null, timer: null, busy: false };
+
+const LF_TYPE_LABEL = { trophy:'Trophy', coin:'Coin', jacket:'Jacket', patch:'Patch', plaque:'Plaque', other:'Other' };
+const LF_TODAY = () => new Date().toISOString().slice(0, 10);
+
+/* A match's EFFECTIVE date. Rescheduled-with-a-date moves; rescheduled with NO
+   date is in limbo (7 live right now) and must be dropped — planning on it
+   would send you out on a night the match isn't happening, which is precisely
+   the wasted trip this tab exists to prevent. Returns null = unusable. */
+function lfEffectiveDate(m) {
+  if (m.rescheduled) return m.rescheduled_to || null;
+  return m.scheduled_date || null;
+}
+
+async function lfInit() {
+  if (_lf.timer) return;          // already live
+  document.getElementById('lfAddBtn').addEventListener('click', lfAdd);
+  document.getElementById('lfMember').addEventListener('keydown', e => { if (e.key === 'Enter') lfAdd(); });
+  document.querySelectorAll('#lfFilterSeg .seg-btn-slate').forEach(b =>
+    b.addEventListener('click', () => {
+      _lf.filter = b.dataset.lff;
+      document.querySelectorAll('#lfFilterSeg .seg-btn-slate')
+        .forEach(x => x.classList.toggle('active', x === b));
+      lfRenderList();
+    }));
+  await lfReload();
+  /* Live recompute (house rule: no stale views). Every signal below is a REAL
+     update trigger — verified, not assumed, because the house pattern is that
+     updated_at is often INSERT-only and would leave this silently frozen. */
+  _lf.timer = setInterval(lfPollChanges, 20000);
+}
+
+async function lfSignature() {
+  const parts = await Promise.all([
+    sb('GET', 'item_inventory?select=updated_at&order=updated_at.desc&limit=1'),
+    sb('GET', 'matches?select=updated_at&order=updated_at.desc&limit=1'),
+    sb('GET', 'team_memberships?select=updated_at&order=updated_at.desc&limit=1'),
+    sb('GET', 'host_plan_teams?select=updated_at&order=updated_at.desc&limit=1')
+  ]);
+  return parts.map(p => (p && p[0] && p[0].updated_at) || '-').join('|')
+       + '|' + _lf.inv.length;
+}
+async function lfPollChanges() {
+  if (_lf.busy) return;
+  const pane = document.getElementById('tab-lostfound');
+  if (!pane || !pane.classList.contains('active')) return;   // don't poll a hidden tab
+  try {
+    const sig = await lfSignature();
+    if (sig !== _lf.sig) await lfReload();
+  } catch (e) { /* transient — try again next tick */ }
+}
+
+async function lfReload() {
+  if (_lf.busy) return;
+  _lf.busy = true;
+  try {
+    _lf.inv = await sbGetAll('item_inventory?select=*&order=created_at.desc,id.desc');
+    await lfBuildPlan();
+    lfRenderAll();
+    _lf.sig = await lfSignature();
+  } catch (e) {
+    const box = document.getElementById('lfPlan');
+    if (box) box.innerHTML = '<div class="status-line err">Load failed: ' + esc(e.message) + '</div>';
+  } finally { _lf.busy = false; }
+}
+
+/* Derive candidate stops from LIVE data. Everything here is recomputed; no
+   intermediate is cached beyond this call. */
+async function lfBuildPlan() {
+  _lf.plan = null; _lf.stranded = [];
+  const held = _lf.inv.filter(i => i.status === 'held');
+  if (!held.length) { _lf.plan = { stops: [], days: [], optimal: true, none: true }; return; }
+
+  const owners = [...new Set(held.map(i => i.member_number))];
+  const byOwner = new Map(owners.map(o => [o, held.filter(i => i.member_number === o)]));
+
+  /* Owner → their SPM teams, across EVERY session — deliberately NOT scoped to
+     currentSession. A session flips (Fall becomes current ~Jul 28) while the
+     old session is still playing its last matches (Summer runs to Aug 02), so
+     scoping to the current session would strand every owner for that final
+     week — the exact week you'd most want to catch them. The future-date
+     filter on matches below already does the real work: a team whose matches
+     are all in the past drops out on its own, whatever session it belongs to.
+     This also picks up a player who's on both a Summer and a Fall roster.
+
+     NOTE: every sbGetAll path MUST carry &order= — it pages with limit/offset
+     and unordered paging silently duplicates and drops rows. matches alone is
+     ~1000 rows, i.e. at PostgREST's cap, so this is not theoretical: without
+     the order the plan would quietly lose matches. */
+  const mems = await sbGetAll('team_memberships?member_number=in.(' + owners.join(',') + ')'
+    + '&select=member_number,team_id&order=id');
+  const teamIds = [...new Set(mems.map(m => m.team_id))];
+  const divs = await sbGetAll('divisions?operator_id=eq.1'
+    + '&select=id,division_number,name,night_of_play,session_id&order=id');
+  const divById = new Map(divs.map(d => [d.id, d]));
+  const ownerTeams = teamIds.length
+    ? await sbGetAll('teams?id=in.(' + teamIds.join(',') + ')&select=id,team_number,team_name,division_id&order=id')
+    : [];
+  const ourTeams = ownerTeams.filter(t => divById.has(t.division_id));   // SPM only
+  const teamToOwners = new Map();
+  for (const m of mems) {
+    if (!ourTeams.some(t => t.id === m.team_id)) continue;
+    if (!teamToOwners.has(m.team_id)) teamToOwners.set(m.team_id, new Set());
+    teamToOwners.get(m.team_id).add(m.member_number);
+  }
+
+  /* Future regular matches in any division our owners play in. */
+  const divIds = [...new Set(ourTeams.map(t => t.division_id))];
+  const matches = divIds.length
+    ? await sbGetAll('matches?division_id=in.(' + divIds.join(',') + ')&row_type=eq.regular'
+      + '&select=id,division_id,scheduled_date,rescheduled,rescheduled_to,home_team_id,away_team_id&order=id')
+    : [];
+
+  /* Venue for every HOME team involved (a player is at the HOME team's venue
+     whether they host or travel). */
+  const homeIds = [...new Set(matches.map(m => m.home_team_id).filter(Boolean))];
+  const homeTeams = homeIds.length
+    ? await sbGetAll('teams?id=in.(' + homeIds.join(',') + ')&select=id,team_number,team_name&order=id')
+    : [];
+  const hpt = await sbGetAll('host_plan_teams?select=summer_team_number,summer_venue&order=id');
+  const venueByTeamNum = new Map();
+  for (const h of hpt) {
+    if (h.summer_team_number && h.summer_venue)
+      venueByTeamNum.set(String(parseInt(h.summer_team_number, 10)), h.summer_venue);
+  }
+  const venueOfTeamId = new Map(homeTeams.map(t =>
+    [t.id, venueByTeamNum.get(String(parseInt(t.team_number, 10))) || null]));
+
+  /* Candidate stops: (venue, effective date) → the owners reachable there. */
+  const today = LF_TODAY();
+  const stopMap = new Map();
+  const ownerChances = new Map(owners.map(o => [o, 0]));
+  for (const m of matches) {
+    const eff = lfEffectiveDate(m);
+    if (!eff || eff < today) continue;                       // limbo, or already past
+    const venue = venueOfTeamId.get(m.home_team_id);
+    if (!venue) continue;                                    // no venue known → can't drive to it
+    const here = new Set();
+    for (const tid of [m.home_team_id, m.away_team_id]) {
+      for (const o of (teamToOwners.get(tid) || [])) here.add(o);
+    }
+    if (!here.size) continue;
+    const key = venue + '|' + eff;
+    if (!stopMap.has(key)) stopMap.set(key, { venue, date: eff, owners: new Set(), divs: new Set() });
+    const s = stopMap.get(key);
+    for (const o of here) { s.owners.add(o); ownerChances.set(o, (ownerChances.get(o) || 0) + 1); }
+    const d = divById.get(m.division_id);
+    if (d) s.divs.add(d.division_number + (d.name ? ' ' + d.name : ''));
+  }
+  const stops = [...stopMap.values()];
+
+  /* Anyone we can't reach — always surfaced WITH a reason, never dropped. */
+  const reachable = new Set();
+  for (const s of stops) for (const o of s.owners) reachable.add(o);
+  for (const o of owners) {
+    if (reachable.has(o)) continue;
+    const t = ourTeams.filter(x => (teamToOwners.get(x.id) || new Set()).has(o));
+    let why;
+    if (!t.length) why = 'not on any SPM roster';
+    else {
+      const dnames = t.map(x => (divById.get(x.division_id) || {}).division_number).filter(Boolean);
+      const anySched = matches.some(m => t.some(x => m.home_team_id === x.id || m.away_team_id === x.id));
+      why = !anySched
+        ? 'no schedule uploaded for division ' + [...new Set(dnames)].join(', ') + ' — add the PDF in RackTime'
+        : 'no future match left (season ends 08-02), or their remaining matches are rescheduled with no new date';
+    }
+    _lf.stranded.push({ member_number: o, member_name: (byOwner.get(o)[0] || {}).member_name || o,
+                        items: byOwner.get(o), why });
+  }
+
+  const plannable = owners.filter(o => reachable.has(o));
+  const res = lfOptimize(stops, plannable);
+  _lf.plan = { ...res, byOwner, ownerChances, totalHeld: held.length };
+}
+
+/* ── The optimiser ────────────────────────────────────────────────────────
+   LEXICOGRAPHIC: fewest DAYS, then fewest PLACES (user-locked priority order).
+   Exact, not greedy — the ask was to optimise, and greedy set cover would
+   quietly return a worse answer while looking authoritative. Sizes are tiny
+   (≤17 candidate nights), so iterative deepening proves the optimum. If a
+   pathological input ever blows the budget we fall back to greedy and SAY so;
+   we never claim an optimum we didn't prove. */
+function lfOptimize(stops, plannable) {
+  const T = new Set(plannable);
+  if (!T.size) return { days: [], stops: [], optimal: true, none: true };
+
+  const byDay = new Map();
+  for (const s of stops) {
+    if (!byDay.has(s.date)) byDay.set(s.date, { date: s.date, owners: new Set(), stops: [] });
+    const d = byDay.get(s.date);
+    d.stops.push(s);
+    for (const o of s.owners) d.owners.add(o);
+  }
+  const days = [...byDay.values()].sort((a, b) => a.date < b.date ? -1 : 1);
+
+  const covers = (sets, need) => {
+    const seen = new Set();
+    for (const x of sets) for (const o of x.owners) if (need.has(o)) seen.add(o);
+    return seen.size === need.size;
+  };
+  /* Budget-capped k-subset enumeration. fn returning true ABORTS the walk —
+     phase 2 only wants the first cover at a given size, and without the abort
+     it would keep enumerating every remaining C(n,j) subset and burn the
+     budget it needs for the later day-sets. */
+  let budget = 400000;
+  const combos = (arr, k, fn) => {
+    const pick = [];
+    const rec = (start) => {
+      if (budget <= 0) return true;
+      if (pick.length === k) { budget--; return fn(pick) === true; }
+      for (let i = start; i < arr.length; i++) {
+        if (arr.length - i < k - pick.length) break;
+        pick.push(arr[i]);
+        const stop = rec(i + 1);
+        pick.pop();
+        if (stop) return true;
+      }
+      return false;
+    };
+    rec(0);
+  };
+
+  /* Phase 1 — fewest DAYS. A day's coverage is everyone playing anywhere that
+     night, because minimising days first means accepting any number of stops
+     within a chosen day. */
+  let kMin = null; const dayCombos = [];
+  for (let k = 1; k <= days.length && kMin === null; k++) {
+    combos(days, k, (pick) => { if (covers(pick, T)) { if (kMin === null) kMin = k; dayCombos.push(pick.slice()); } });
+    if (kMin !== null) break;
+  }
+  if (kMin === null) {
+    /* Budget blew or genuinely impossible — greedy, and labelled honestly. */
+    return { ...lfGreedy(stops, T), optimal: false };
+  }
+
+  /* Phase 2 — among the equally-short day-sets, fewest PLACES. This matters:
+     two different 2-day plans can need 5 stops vs 2. Each chosen day must
+     contribute ≥1 stop (else a smaller day-set would cover, contradicting
+     kMin), so the search starts at j = kMin. */
+  let best = null;
+  for (const combo of dayCombos) {
+    const cand = combo.flatMap(d => d.stops).sort((a, b) => b.owners.size - a.owners.size);
+    let found = null;
+    for (let j = combo.length; j <= cand.length && !found; j++) {
+      combos(cand, j, (pick) => { if (covers(pick, T)) { found = pick.slice(); return true; } });
+    }
+    if (found && (!best || found.length < best.stops.length)) best = { days: combo, stops: found };
+    if (budget <= 0) break;
+  }
+  if (!best) return { ...lfGreedy(stops, T), optimal: false };
+  return { days: best.days.map(d => d.date).sort(), stops: best.stops, optimal: budget > 0 };
+}
+
+function lfGreedy(stops, T) {
+  const need = new Set(T), chosen = [];
+  const pool = stops.slice();
+  while (need.size && pool.length) {
+    pool.sort((a, b) => [...b.owners].filter(o => need.has(o)).length
+                      - [...a.owners].filter(o => need.has(o)).length);
+    const s = pool.shift();
+    const gain = [...s.owners].filter(o => need.has(o));
+    if (!gain.length) break;
+    chosen.push(s); gain.forEach(o => need.delete(o));
+  }
+  return { days: [...new Set(chosen.map(s => s.date))].sort(), stops: chosen };
+}
+
+function lfRenderAll() { lfRenderPlan(); lfRenderStranded(); lfRenderList(); }
+
+function lfRenderPlan() {
+  const box = document.getElementById('lfPlan');
+  if (!box) return;
+  const p = _lf.plan;
+  if (!p) { box.innerHTML = '<div class="hint">Loading…</div>'; return; }
+  if (p.none || !p.stops.length) {
+    box.innerHTML = '<div class="hint">'
+      + (_lf.inv.some(i => i.status === 'held')
+          ? 'Nothing plannable — see “Can’t be planned” below.'
+          : 'No items are waiting. Add some below and a plan appears here.')
+      + '</div>';
+    return;
+  }
+  const byDate = new Map();
+  for (const s of p.stops) {
+    if (!byDate.has(s.date)) byDate.set(s.date, []);
+    byDate.get(s.date).push(s);
+  }
+  const dates = [...byDate.keys()].sort();
+  const nOwners = new Set(p.stops.flatMap(s => [...s.owners])).size;
+  box.innerHTML =
+    '<div style="font-weight:800;font-size:1.02rem;margin-bottom:2px">'
+      + dates.length + (dates.length === 1 ? ' day out' : ' days out') + ' · '
+      + p.stops.length + (p.stops.length === 1 ? ' place' : ' places') + ' · '
+      + nOwners + ' ' + (nOwners === 1 ? 'person' : 'people') + '</div>'
+    + '<div class="hint" style="margin-bottom:8px">'
+      + (p.optimal ? 'Proven the fewest possible days, then the fewest places within that.'
+                   : '⚠ Best found — too many combinations to prove this is the minimum.')
+      + ' Expected, not guaranteed: a rostered player might not turn out.</div>'
+    + dates.map(d => {
+        const stops = byDate.get(d);
+        return '<div style="border-left:4px solid var(--spm-blue,#0031A1);background:#f7f9ff;'
+          + 'border-radius:0 8px 8px 0;padding:8px 10px;margin-bottom:8px">'
+          + '<div style="font-weight:700">' + esc(lfNiceDate(d)) + '</div>'
+          + stops.map(s => {
+              const people = [...s.owners].sort();
+              return '<div style="margin-top:6px">'
+                + '<div style="font-weight:700;font-size:0.9rem">' + esc(s.venue) + '</div>'
+                + '<div class="hint" style="margin-bottom:2px">' + esc([...s.divs].join(' · ')) + '</div>'
+                + people.map(o => {
+                    const items = (_lf.plan.byOwner.get(o) || []);
+                    const chances = _lf.plan.ownerChances.get(o) || 0;
+                    return '<div style="font-size:0.84rem;padding:1px 0">• <strong>'
+                      + esc((items[0] || {}).member_name || o) + '</strong> '
+                      + '<span class="hint">' + esc(o) + ' — '
+                      + esc(items.map(i => (i.qty > 1 ? i.qty + '× ' : '')
+                          + (LF_TYPE_LABEL[i.item_type] || i.item_type)
+                          + (i.description ? ' (' + i.description + ')' : '')).join(', '))
+                      + (chances === 1 ? ' · <strong>only chance left</strong>' : '')
+                      + '</span></div>';
+                  }).join('')
+                + '</div>';
+            }).join('')
+          + '</div>';
+      }).join('');
+}
+
+function lfNiceDate(d) {
+  const dt = new Date(d + 'T12:00:00');
+  return dt.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+}
+
+function lfRenderStranded() {
+  const box = document.getElementById('lfStranded');
+  if (!box) return;
+  if (!_lf.stranded.length) { box.innerHTML = '<div class="hint">Everyone with an item can be reached.</div>'; return; }
+  box.innerHTML = _lf.stranded.map(s =>
+    '<div style="border-left:4px solid #a16207;background:#fefce8;border-radius:0 8px 8px 0;'
+    + 'padding:6px 10px;margin-bottom:6px;font-size:0.84rem">'
+    + '<strong>' + esc(s.member_name) + '</strong> <span class="hint">' + esc(s.member_number) + '</span> — '
+    + esc(s.items.map(i => (i.qty > 1 ? i.qty + '× ' : '') + (LF_TYPE_LABEL[i.item_type] || i.item_type)).join(', '))
+    + '<div class="hint" style="margin-top:2px">' + esc(s.why) + '</div></div>').join('');
+}
+
+function lfRenderList() {
+  const box = document.getElementById('lfList');
+  if (!box) return;
+  const rows = _lf.inv.filter(i => _lf.filter === 'all' ? true : i.status === _lf.filter);
+  const counts = document.getElementById('lfCounts');
+  if (counts) counts.textContent = _lf.inv.filter(i => i.status === 'held').length + ' still here · '
+    + _lf.inv.filter(i => i.status === 'delivered').length + ' delivered';
+  if (!rows.length) { box.innerHTML = '<div class="hint">Nothing here.</div>'; return; }
+  box.innerHTML = rows.map(i =>
+    '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:0.85rem;'
+    + 'border-top:1px solid var(--border,#e5e7eb)">'
+    + '<span style="flex:1"><strong>' + esc(i.member_name) + '</strong> '
+    + '<span class="hint">' + esc(i.member_number) + ' · '
+    + (i.qty > 1 ? i.qty + '× ' : '') + esc(LF_TYPE_LABEL[i.item_type] || i.item_type)
+    + (i.description ? ' — ' + esc(i.description) : '')
+    + (i.status === 'delivered' ? ' · delivered ' + esc(String(i.delivered_at || '').slice(0, 10)) : '')
+    + '</span></span>'
+    + (i.status === 'held'
+        ? '<button type="button" class="btn btn-primary" style="padding:2px 8px;font-size:0.76rem" onclick="lfDeliver(' + i.id + ')">Delivered</button>'
+        : '<button type="button" class="btn btn-outline" style="padding:2px 8px;font-size:0.76rem" onclick="lfUnDeliver(' + i.id + ')">Undo</button>')
+    + '<button type="button" class="btn btn-outline" style="padding:2px 8px;font-size:0.76rem" onclick="lfDelete(' + i.id + ')">✕</button>'
+    + '</div>').join('')
+    + '<div class="status-line" id="lfListStatus" style="margin-top:6px"></div>';
+}
+
+async function lfAdd() {
+  const raw = (document.getElementById('lfMember').value || '').trim();
+  if (!raw) { setStatus('lfAddStatus', 'Enter an APA number.', 'err'); return; }
+  /* Accept either form on input, but ALWAYS store the canonical 8-digit number
+     off the players row — never a locally-assembled one. slate carries two
+     member_number conventions (players/team_memberships are 8-digit; sp_patches
+     /sp_labels are 5-digit local), and this table joins team_memberships, so
+     storing the 5-digit form makes every join miss with no error at all — it
+     just reports "not on any SPM roster" for someone with a full schedule. */
+  const local = raw.replace(/^972/, '').padStart(5, '0');
+  try {
+    let person = (await sb('GET', 'players?member_number=eq.' + encodeURIComponent(raw)
+      + '&select=member_number,first_name,last_name'))[0];
+    if (!person) {
+      person = (await sb('GET', 'players?member_number=eq.' + encodeURIComponent('972' + local)
+        + '&select=member_number,first_name,last_name'))[0];
+    }
+    if (!person) { setStatus('lfAddStatus', 'No player with that APA number — check the digits.', 'err'); return; }
+    const name = ((person.first_name || '') + ' ' + (person.last_name || '')).replace(/\s+/g, ' ').trim();
+    await sb('POST', 'item_inventory', {
+      member_number: person.member_number, member_name: name || person.member_number,
+      item_type: document.getElementById('lfType').value,
+      description: (document.getElementById('lfDesc').value || '').trim() || null,
+      qty: Math.max(1, parseInt(document.getElementById('lfQty').value, 10) || 1),
+      received_at: LF_TODAY(), status: 'held'
+    });
+    document.getElementById('lfMember').value = '';
+    document.getElementById('lfDesc').value = '';
+    document.getElementById('lfQty').value = '1';
+    setStatus('lfAddStatus', '✓ Added for ' + name + ' — the plan below just updated.', 'ok');
+    await lfReload();
+  } catch (e) { setStatus('lfAddStatus', 'Add failed: ' + e.message, 'err'); }
+}
+async function lfDeliver(id) {
+  try { await sb('PATCH', 'item_inventory?id=eq.' + id, { status: 'delivered', delivered_at: new Date().toISOString() }); await lfReload(); }
+  catch (e) { setStatus('lfListStatus', 'Failed: ' + e.message, 'err'); }
+}
+async function lfUnDeliver(id) {
+  try { await sb('PATCH', 'item_inventory?id=eq.' + id, { status: 'held', delivered_at: null }); await lfReload(); }
+  catch (e) { setStatus('lfListStatus', 'Failed: ' + e.message, 'err'); }
+}
+async function lfDelete(id) {
+  try { await sb('DELETE', 'item_inventory?id=eq.' + id); await lfReload(); }
+  catch (e) { setStatus('lfListStatus', 'Failed: ' + e.message, 'err'); }
+}
+
 const TAB_LABEL = {
   sessions:      'Sessions',
   uploads:       'Uploads',
@@ -7567,7 +8067,8 @@ const TAB_LABEL = {
   dolphin:       'Dolphin',
   contacts:      'Contacts',
   nextreg:       'Next Session Reg',
-  polls:         'PulseCheck'
+  polls:         'PulseCheck',
+  lostfound:     'Lost & Found'
 };
 
 function switchTab(name) {
@@ -7593,6 +8094,7 @@ function switchTab(name) {
   if (name === 'hostplan')    hpInit();
   if (name === 'nextreg')     nrInit();
   if (name === 'polls')       plInit();
+  if (name === 'lostfound')   lfInit();
 }
 
 /* ══════════════════════════════════════════════════════════════════════
