@@ -3728,7 +3728,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.281';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.282';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -18931,7 +18931,7 @@ async function cpCopyEmails(emails, groupIndex) {
   if (r.ok) {
     if (btn) {
       const old = btn.textContent;
-      btn.textContent = r.removed ? ('✓ Copied (−' + r.removed + ' banned)') : '✓ Copied';
+      btn.textContent = r.removed ? ('✓ Copied —' + r.removed + ' banned') : '✓ Copied';
       btn.style.background = '#16a34a';
       setTimeout(() => { btn.textContent = old; btn.style.background = ''; }, 1800);
     }
