@@ -3652,7 +3652,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.276';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.277';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -7836,7 +7836,11 @@ async function lfBuildPlan() {
       else if (!divHasAny)
         why = 'division ' + dnums.join(', ') + ' has no schedule in Slate — check the RackTime import';
       else if (!teamHasAny)
-        why = 'their team is not in the division ' + dnums.join(', ') + ' schedule (dropped or withdrawn)';
+        /* No " (" after a bare word here — validate_admin_js's undefined-call
+           heuristic reads `schedule (…)` in a STRING as a call to schedule().
+           Same trap that made 3.274 reword a note that parsed as SP(). */
+        why = 'their team is not in the division ' + dnums.join(', ')
+            + ' schedule — dropped or withdrawn';
       else
         why = 'no match left this season (ends 08-02), or every remaining match is rescheduled with no new date';
     }
