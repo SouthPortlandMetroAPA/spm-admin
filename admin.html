@@ -1026,6 +1026,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="nextreg">Next Session</button>
       <button class="tab" data-tab="polls">PulseCheck</button>
       <button class="tab" data-tab="lostfound">Lost &amp; Found</button>
+      <button class="tab" data-tab="banlist">Email Ban List</button>
     </div>
 
     <div id="globalStatus" class="status-line"></div>
@@ -3552,6 +3553,49 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 
     </div>
 
+    <!-- ══════════════════════════════════════════════════════════════
+         TAB: EMAIL BAN LIST — the suppression list. "This cannot fail."
+         Adding someone here blocks every SEND (via the mailer's safeSend)
+         and every email COPY button (via sbCopyEmails), and logs each
+         prevention. Brief: 2026-07-17-email-blocklist.md
+         ══════════════════════════════════════════════════════════════ -->
+    <div id="tab-banlist" class="tab-panel">
+      <div class="card" style="margin-bottom:14px">
+        <h2 style="margin:0 0 6px;">Email ban list</h2>
+        <p class="hint" style="margin:0 0 10px;">
+          Anyone here will <strong>never</strong> be emailed or copied to the clipboard from any Slate
+          tool — automated sends and click-to-copy both check this list first, and every prevention is
+          logged below. Ban a <strong>person</strong> (covers every email address they have now or
+          later) or a single <strong>email address</strong>.
+        </p>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-start;">
+          <div style="position:relative; width:280px;">
+            <input type="text" id="blPerson" autocomplete="off"
+                   placeholder="Ban a person — name, nickname, or APA #" style="width:100%">
+            <div id="blPickBox" class="card" style="display:none; position:absolute; z-index:40; left:0; right:0;
+                 top:100%; margin-top:2px; padding:4px; max-height:240px; overflow:auto;
+                 box-shadow:0 8px 24px rgba(0,0,0,.14);"></div>
+          </div>
+          <span style="align-self:center; color:var(--muted)">or</span>
+          <input type="email" id="blEmail" placeholder="Ban an email address" style="width:230px">
+          <input type="text" id="blReason" placeholder="Reason (optional)" style="flex:1; min-width:150px">
+          <button type="button" class="btn btn-primary" id="blAddBtn">Add to ban list</button>
+        </div>
+        <div class="status-line" id="blAddStatus"></div>
+      </div>
+
+      <div class="card" style="margin-bottom:14px">
+        <h2 style="margin:0 0 6px;">Currently banned</h2>
+        <div id="blList"><p class="hint">Loading…</p></div>
+      </div>
+
+      <div class="card">
+        <h2 style="margin:0 0 6px;">Prevention log</h2>
+        <p class="hint" style="margin:0 0 8px;">Every time a send or copy was stopped because the address is on the list.</p>
+        <div id="blLog"><p class="hint">Loading…</p></div>
+      </div>
+    </div>
+
     <div id="tab-polls" class="tab-panel">
       <div class="card">
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
@@ -3684,7 +3728,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.280';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.281';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -8245,7 +8289,8 @@ const TAB_LABEL = {
   contacts:      'Contacts',
   nextreg:       'Next Session Reg',
   polls:         'PulseCheck',
-  lostfound:     'Lost & Found'
+  lostfound:     'Lost & Found',
+  banlist:       'Email Ban List'
 };
 
 function switchTab(name) {
@@ -8272,6 +8317,7 @@ function switchTab(name) {
   if (name === 'nextreg')     nrInit();
   if (name === 'polls')       plInit();
   if (name === 'lostfound')   lfInit();
+  if (name === 'banlist')     blInit();
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -10461,19 +10507,201 @@ function _updateEhqCount() {
   }
 }
 
+/* ══════════════════════════════════════════════════════════════════════
+   EMAIL-COPY CHOKEPOINT — "this cannot fail" (client side)
+   Brief: tools/claude/briefs/2026-07-17-email-blocklist.md
+
+   Every button that copies EMAIL ADDRESSES to the clipboard goes through
+   sbCopyEmails — never navigator.clipboard.writeText directly. It strips
+   blocked addresses BEFORE they reach the clipboard, which is the ONLY defense
+   for the manual copy→paste-into-Gmail path (once it's on the clipboard we've
+   lost control). Logs every removal. FAILS CLOSED: if the ban list can't be
+   checked, nothing is copied. `_sbClip` is the single real clipboard write for
+   email content; validate-email-blocklist.mjs enforces both. */
+async function _sbClip(text) {
+  try { await navigator.clipboard.writeText(text); }
+  catch (e) {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); } finally { document.body.removeChild(ta); }
+  }
+}
+async function sbCopyEmails(text, context) {
+  const raw = String(text == null ? '' : text);
+  const emails = [...new Set(raw.match(/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g) || [])];
+  if (!emails.length) { await _sbClip(raw); return { ok: true, copied: 0, removed: 0, text: raw }; }
+  let blocked;
+  try {
+    blocked = await sb('POST', 'rpc/email_is_blocked', { p_emails: emails });
+  } catch (e) {
+    return { ok: false, copied: 0, removed: 0, text: '',
+             error: 'Ban list could not be verified — nothing was copied. Try again.' };
+  }
+  const bset = new Set((blocked || []).map(b => String(b.email).toLowerCase()));
+  if (!bset.size) { await _sbClip(raw); return { ok: true, copied: emails.length, removed: 0, text: raw }; }
+  let out = raw; const removed = [];
+  for (const e of emails) {
+    if (!bset.has(e.toLowerCase())) continue;
+    removed.push(e);
+    const esc = e.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&');
+    /* drop the whole delimited token (one recipient) that contains the address */
+    out = out.replace(new RegExp('[^\\n,;]*' + esc + '[^\\n,;]*(\\s*[,;]\\s*)?', 'gi'), '');
+  }
+  out = out.replace(/\n{2,}/g, '\n').replace(/(,\s*){2,}/g, ', ').replace(/^[\s,;]+|[\s,;]+$/g, '');
+  await _sbClip(out);
+  for (const e of removed) {
+    sb('POST', 'rpc/email_log_block', { p_email: e, p_member_number: null, p_medium: 'copy',
+        p_context: context || 'slate:copy', p_reason: 'blocklist', p_attempted_by: 'slate' }).catch(() => {});
+  }
+  return { ok: true, copied: emails.length - removed.length, removed: removed.length, text: out };
+}
+/* Shared toast helper so every routed caller reports removals consistently. */
+function _sbCopyMsg(r, unit) {
+  if (!r.ok) return '⚠ ' + r.error;
+  const n = r.copied, u = unit || 'email';
+  return 'Copied ' + n + ' ' + u + (n === 1 ? '' : 's')
+    + (r.removed ? ' — ' + r.removed + ' on the ban list omitted' : '') + (r.copied ? '!' : '.');
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   EMAIL BAN LIST TAB — manage slate.email_blocklist + view the prevention log.
+   Reuses the lf_search_players picker for person-bans. */
+let _bl = { picked: null, hits: [], timer: null, seq: 0 };
+
+async function blInit() {
+  const add = document.getElementById('blAddBtn');
+  if (!add.dataset.wired) {
+    add.addEventListener('click', blAdd);
+    const p = document.getElementById('blPerson');
+    p.addEventListener('input', () => {
+      _bl.picked = null;
+      clearTimeout(_bl.timer); _bl.timer = setTimeout(blSearch, 180);
+    });
+    p.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); if (_bl.hits.length) blPick(0); }
+      if (e.key === 'Escape') document.getElementById('blPickBox').style.display = 'none';
+    });
+    document.getElementById('blPickBox').addEventListener('click', e => {
+      const row = e.target.closest('.bl-pick'); if (row) blPick(+row.dataset.i);
+    });
+    document.getElementById('blEmail').addEventListener('input', () => {
+      /* typing an email clears a person pick — one target per add */
+      if (document.getElementById('blEmail').value.trim()) { _bl.picked = null;
+        document.getElementById('blPerson').value = ''; }
+    });
+    add.dataset.wired = '1';
+  }
+  await blReload();
+}
+
+async function blSearch() {
+  const q = (document.getElementById('blPerson').value || '').trim();
+  const box = document.getElementById('blPickBox');
+  if (q.length < 2) { box.style.display = 'none'; return; }
+  const seq = ++_bl.seq;
+  try {
+    const rows = await sb('POST', 'rpc/lf_search_players', { p_q: q, p_limit: 5 });
+    if (seq !== _bl.seq) return;
+    _bl.hits = rows || [];
+    box.innerHTML = _bl.hits.length
+      ? _bl.hits.map((r, i) => '<div class="bl-pick" data-i="' + i + '" style="padding:6px 8px;cursor:pointer;border-radius:6px">'
+          + '<div style="font-weight:700">' + esc(r.display) + '</div>'
+          + '<div class="hint">' + esc(r.member_number) + ' · ' + esc(r.why) + '</div></div>').join('')
+      : '<div class="hint" style="padding:6px">No match.</div>';
+    box.style.display = '';
+  } catch (e) { box.innerHTML = '<div class="hint" style="padding:6px">Search failed.</div>'; box.style.display = ''; }
+}
+function blPick(i) {
+  const r = _bl.hits[i]; if (!r) return;
+  _bl.picked = r;
+  document.getElementById('blPerson').value = r.display;
+  document.getElementById('blEmail').value = '';
+  document.getElementById('blPickBox').style.display = 'none';
+}
+
+async function blAdd() {
+  const email = (document.getElementById('blEmail').value || '').trim();
+  const reason = (document.getElementById('blReason').value || '').trim() || null;
+  let row;
+  if (_bl.picked) {
+    row = { member_number: _bl.picked.member_number, reason: reason, added_by: 'slate-admin' };
+  } else if (email) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setStatus('blAddStatus', 'That does not look like an email address.', 'err'); return; }
+    row = { email: email.toLowerCase(), reason: reason, added_by: 'slate-admin' };
+  } else {
+    setStatus('blAddStatus', 'Pick a person or type an email address to ban.', 'err'); return;
+  }
+  try {
+    await sb('POST', 'email_blocklist', row);
+    document.getElementById('blPerson').value = '';
+    document.getElementById('blEmail').value = '';
+    document.getElementById('blReason').value = '';
+    _bl.picked = null;
+    setStatus('blAddStatus', '✓ Added to the ban list — they will no longer be emailed or copied.', 'ok');
+    await blReload();
+  } catch (e) {
+    const dup = /23505|duplicate/.test(e.message);
+    setStatus('blAddStatus', dup ? 'That person/address is already on the ban list.' : ('Failed: ' + esc(e.message)), 'err');
+  }
+}
+
+async function blRemove(id, label) {
+  if (!confirm('Remove the ban on ' + label + '?\n\nThey will be emailable and copyable again.')) return;
+  try {
+    await sb('PATCH', 'email_blocklist?id=eq.' + id,
+      { active: false, removed_at: new Date().toISOString(), removed_by: 'slate-admin' });
+    await blReload();
+  } catch (e) { setStatus('blAddStatus', 'Remove failed: ' + esc(e.message), 'err'); }
+}
+
+async function blReload() {
+  let bans = [], log = [];
+  try {
+    bans = await sb('GET', 'email_blocklist?active=eq.true&select=id,member_number,email,reason,added_by,added_at&order=added_at.desc');
+  } catch (e) {}
+  /* resolve member names for person-bans */
+  const mns = [...new Set(bans.map(b => b.member_number).filter(Boolean))];
+  let nameByMn = new Map();
+  if (mns.length) {
+    try {
+      const players = await sb('GET', 'players?member_number=in.(' + mns.join(',') + ')&select=member_number,first_name,last_name,email');
+      players.forEach(p => nameByMn.set(p.member_number,
+        ((p.first_name || '') + ' ' + (p.last_name || '')).trim() + (p.email ? ' · ' + p.email : '')));
+    } catch (e) {}
+  }
+  const listEl = document.getElementById('blList');
+  listEl.innerHTML = bans.length ? bans.map(b => {
+    const label = b.member_number ? (nameByMn.get(b.member_number) || ('APA ' + b.member_number)) : b.email;
+    const kind = b.member_number ? 'person' : 'address';
+    return '<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">'
+      + '<div style="flex:1"><strong>' + esc(label) + '</strong> '
+      + '<span class="hint">· ' + kind + (b.reason ? ' · ' + esc(b.reason) : '') + '</span></div>'
+      + '<button class="btn btn-outline btn-sm" onclick="blRemove(' + b.id + ',' + JSON.stringify(String(label)).replace(/"/g, '&quot;') + ')">Remove</button></div>';
+  }).join('') : '<p class="hint">No one is banned. Add a person or address above.</p>';
+
+  try {
+    log = await sb('GET', 'email_block_log?select=email,medium,context,reason,at&order=at.desc&limit=100');
+  } catch (e) {}
+  const logEl = document.getElementById('blLog');
+  logEl.innerHTML = log.length ? '<div class="table-wrap"><table class="table"><thead><tr>'
+    + '<th>When</th><th>Address</th><th>Blocked from</th><th>Where</th></tr></thead><tbody>'
+    + log.map(l => '<tr><td>' + esc(String(l.at).replace('T', ' ').slice(0, 16))
+        + '</td><td>' + esc(l.email) + '</td><td>' + (l.medium === 'send' ? 'a send' : 'a copy')
+        + '</td><td class="hint">' + esc(l.context || '') + '</td></tr>').join('')
+    + '</tbody></table></div>'
+    : '<p class="hint">Nothing prevented yet — this fills in as bans take effect.</p>';
+}
+window.blRemove = blRemove;
+
 async function ehqCopyEmails() {
   const emails = _ehqCollectEmails();
   if (!emails.length) return;
-  const text = emails.join(', ');
-  try {
-    await navigator.clipboard.writeText(text);
-    const fb = document.getElementById('ehqCopyFeedback');
-    fb.textContent = 'Copied ' + emails.length + ' email' + (emails.length === 1 ? '' : 's') + '!';
-    fb.classList.add('shown');
-    setTimeout(() => fb.classList.remove('shown'), 2000);
-  } catch (e) {
-    alert('Copy failed: ' + e.message + '\n\nEmails:\n' + text);
-  }
+  const r = await sbCopyEmails(emails.join(', '), 'slate:ehq-all');
+  const fb = document.getElementById('ehqCopyFeedback');
+  fb.textContent = _sbCopyMsg(r);
+  fb.classList.add('shown');
+  setTimeout(() => fb.classList.remove('shown'), 2600);
 }
 
 // v2.3: copy a single chunk of EHQ_GROUP_SIZE emails. groupIndex is 0-based.
@@ -10483,17 +10711,14 @@ async function ehqCopyEmailGroup(groupIndex) {
   const endIdx = Math.min(startIdx + EHQ_GROUP_SIZE, all.length);
   const slice = all.slice(startIdx, endIdx);
   if (!slice.length) return;
-  const text = slice.join(', ');
-  try {
-    await navigator.clipboard.writeText(text);
-    const fb = document.getElementById('ehqCopyFeedback');
-    fb.textContent = 'Copied ' + (startIdx + 1) + '–' + endIdx
-                   + ' (' + slice.length + ' email' + (slice.length === 1 ? '' : 's') + ')!';
-    fb.classList.add('shown');
-    setTimeout(() => fb.classList.remove('shown'), 2000);
-  } catch (e) {
-    alert('Copy failed: ' + e.message + '\n\nEmails:\n' + text);
-  }
+  const r = await sbCopyEmails(slice.join(', '), 'slate:ehq-group');
+  const fb = document.getElementById('ehqCopyFeedback');
+  fb.textContent = r.ok
+    ? ('Copied ' + (startIdx + 1) + '–' + endIdx + ' (' + r.copied + ' email' + (r.copied === 1 ? '' : 's') + ')'
+       + (r.removed ? ' — ' + r.removed + ' on ban list omitted' : '') + '!')
+    : ('⚠ ' + r.error);
+  fb.classList.add('shown');
+  setTimeout(() => fb.classList.remove('shown'), 2600);
 }
 
 /* ═══════ Paste team numbers → narrow universe to those teams ═══════
@@ -10694,13 +10919,11 @@ async function ehqCopyNameEmails() {
   const ta = document.getElementById('ehqNameEmailsOut');
   const fb = document.getElementById('ehqNameCopyFb');
   if (!ta) return;
-  try {
-    await navigator.clipboard.writeText(ta.value);
-    if (fb) { fb.textContent = 'Copied!'; fb.className = 'ehq-paste-feedback ok'; }
-  } catch (e) {
-    ta.select();
-    document.execCommand('copy');
-    if (fb) { fb.textContent = 'Copied!'; fb.className = 'ehq-paste-feedback ok'; }
+  const r = await sbCopyEmails(ta.value, 'slate:ehq-name-emails');
+  if (fb) {
+    fb.textContent = r.ok ? ('Copied!' + (r.removed ? ' (' + r.removed + ' on ban list omitted)' : ''))
+                          : ('⚠ ' + r.error);
+    fb.className = 'ehq-paste-feedback ' + (r.ok ? 'ok' : 'err');
   }
 }
 
@@ -10832,12 +11055,13 @@ function ehqOnHideEmptyToggle() {
   renderEmailHQ();
 }
 
-function copyEmail(em, btn) {
-  navigator.clipboard.writeText(em).then(() => {
-    const old = btn.textContent;
-    btn.textContent = '✓';
-    setTimeout(() => { btn.textContent = old; }, 1200);
-  });
+async function copyEmail(em, btn) {
+  const r = await sbCopyEmails(em, 'slate:copy-one');
+  const old = btn.textContent;
+  if (!r.ok)          { btn.textContent = '⚠'; btn.title = r.error; }
+  else if (r.removed) { btn.textContent = '🚫'; btn.title = 'On the ban list — not copied'; }
+  else                { btn.textContent = '✓'; }
+  setTimeout(() => { btn.textContent = old; btn.title = ''; }, 1600);
 }
 window.copyEmail = copyEmail;
 
@@ -12833,33 +13057,19 @@ function otCopyFilteredEmails() {
     seen.add(k); emails.push(em);
   }
   if (!emails.length) { stat.textContent = 'No emails in the filtered list.'; return; }
-  const text = emails.join(', ');
   const tail = (none ? ' · ' + none + ' had none on file' : '') + '.';
-  const done = () => { stat.textContent = '✓ Copied ' + emails.length + ' email' + (emails.length === 1 ? '' : 's') + tail; };
-  const fallback = () => {
-    otCopyFallbackModal(text, emails.length);
-    stat.textContent = emails.length + ' email' + (emails.length === 1 ? '' : 's') + ' ready — copy from the box' + tail;
-  };
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(text).then(done).catch(fallback);
-  } else { fallback(); }
+  /* Route through the chokepoint. Its _sbClip already has a textarea fallback
+     for blocked/insecure clipboard contexts, so the old custom fallback modal —
+     which would have shown UNFILTERED emails, a ban-list hole — is gone. */
+  sbCopyEmails(emails.join(', '), 'slate:outreach-copy').then(r => {
+    stat.textContent = r.ok
+      ? ('✓ Copied ' + r.copied + ' email' + (r.copied === 1 ? '' : 's')
+         + (r.removed ? ' — ' + r.removed + ' on ban list omitted' : '') + tail)
+      : ('⚠ ' + r.error);
+  });
 }
-/* Fallback when the async Clipboard API is blocked (lost focus, denied
-   permission, non-secure context) — the emails go into a selectable box
-   so the operator can always copy manually. */
-function otCopyFallbackModal(text, count) {
-  const ov = document.createElement('div');
-  ov.style.cssText = 'position:fixed;inset:0;background:rgba(10,20,40,0.55);z-index:9998;display:flex;align-items:center;justify-content:center;padding:20px';
-  ov.innerHTML = '<div style="background:#fff;border-radius:12px;padding:20px;max-width:560px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.35)">'
-    + '<div style="font-weight:800;margin-bottom:6px">' + count + ' email' + (count === 1 ? '' : 's') + ' — select all (Ctrl/Cmd-A) and copy</div>'
-    + '<textarea id="otCopyFallbackTa" readonly style="width:100%;min-height:160px;font-size:0.82rem"></textarea>'
-    + '<div style="display:flex;justify-content:flex-end;margin-top:10px"><button type="button" class="btn btn-primary btn-sm" data-otcpclose>Done</button></div>'
-    + '</div>';
-  document.body.appendChild(ov);
-  const ta = ov.querySelector('#otCopyFallbackTa');
-  ta.value = text; ta.focus(); ta.select();
-  ov.querySelector('[data-otcpclose]').onclick = () => ov.remove();
-}
+/* otCopyFallbackModal removed 3.281 — it wrote UNFILTERED emails to a selectable
+   box, bypassing the blocklist. sbCopyEmails/_sbClip own the fallback now. */
 
 /* ── Bulk add: every currently-filtered Outreach person (3.185) ───────
    One GAS call (contacts_add_bulk): a single existing-contacts scan,
@@ -18714,22 +18924,23 @@ function cpRenderApaNumbers() {
 }
 
 async function cpCopyEmails(emails, groupIndex) {
-  const text = emails.join(', ');
   const btn = (typeof groupIndex === 'number')
     ? document.querySelector(`#cpEmailCopyBtnArea button[data-cp-grp="${groupIndex}"]`) || document.getElementById('cpCopyEmailsBtn')
     : document.getElementById('cpCopyEmailsBtn');
-  try {
-    await navigator.clipboard.writeText(text);
+  const r = await sbCopyEmails(emails.join(', '), 'slate:tms-roster-copy');
+  if (r.ok) {
     if (btn) {
       const old = btn.textContent;
-      btn.textContent = '✓ Copied';
+      btn.textContent = r.removed ? ('✓ Copied (−' + r.removed + ' banned)') : '✓ Copied';
       btn.style.background = '#16a34a';
-      setTimeout(() => { btn.textContent = old; btn.style.background = ''; }, 1600);
+      setTimeout(() => { btn.textContent = old; btn.style.background = ''; }, 1800);
     }
-  } catch (e) {
+    return;
+  }
+  {
     const ta = document.getElementById('cpEmailOut');
-    if (ta) { ta.value = text; ta.select(); }
-    if (btn) btn.textContent = '⚠ Select then ⌘+C';
+    if (ta) { ta.value = ''; }
+    if (btn) { btn.textContent = '⚠ ' + r.error; }
   }
 }
 
@@ -19151,23 +19362,25 @@ function rptRenderBucket(title, chipClass, rows, opts) {
     </div>`;
 }
 
-function rptCopy(btn) {
+async function rptCopy(btn) {
   const txt = btn.dataset.copy;
   if (!txt) return;
-  navigator.clipboard.writeText(txt).then(() => {
-    const old = btn.textContent;
-    btn.textContent = '✓';
-    setTimeout(() => { btn.textContent = old; }, 900);
-  });
+  /* A report cell can be an email, so this routes through the chokepoint too;
+     non-email text passes through sbCopyEmails unchanged. */
+  const r = await sbCopyEmails(txt, 'slate:report-cell-copy');
+  const old = btn.textContent;
+  btn.textContent = r.ok ? (r.removed ? '🚫' : '✓') : '⚠';
+  if (!r.ok) btn.title = r.error;
+  setTimeout(() => { btn.textContent = old; btn.title = ''; }, 1000);
 }
-function rptCopyAllEmails(btn) {
+async function rptCopyAllEmails(btn) {
   const txt = btn.dataset.copyAll;
   if (!txt) { alert('No emails to copy.'); return; }
-  navigator.clipboard.writeText(txt).then(() => {
-    const old = btn.textContent;
-    btn.textContent = '✓ Copied';
-    setTimeout(() => { btn.textContent = old; }, 1200);
-  });
+  const r = await sbCopyEmails(txt, 'slate:report-copy-all');
+  const old = btn.textContent;
+  btn.textContent = r.ok ? ('✓ Copied' + (r.removed ? ' (−' + r.removed + ' banned)' : '')) : '⚠ ban check failed';
+  if (!r.ok) btn.title = r.error;
+  setTimeout(() => { btn.textContent = old; btn.title = ''; }, 1800);
 }
 
 window.rptInit = rptInit;
@@ -23176,16 +23389,12 @@ function rtShowEmailList(assignments) {
 
   document.getElementById('rtCopyEmailsBtn').onclick = async () => {
     const ta = document.getElementById('rtEmailTextarea');
-    try {
-      await navigator.clipboard.writeText(ta.value);
-      document.getElementById('rtCopyEmailsBtn').textContent = '✓ Copied';
-      setTimeout(() => {
-        const btn = document.getElementById('rtCopyEmailsBtn');
-        if (btn) btn.textContent = 'Copy all (' + emails.length + ')';
-      }, 2000);
-    } catch (_) {
-      // Fallback: select + execCommand
-      ta.focus(); ta.select(); document.execCommand('copy');
+    const r = await sbCopyEmails(ta.value, 'slate:redtape-email-list');
+    const btn = document.getElementById('rtCopyEmailsBtn');
+    if (btn) {
+      btn.textContent = r.ok ? ('✓ Copied' + (r.removed ? ' (−' + r.removed + ' banned)' : '')) : '⚠ ban check failed';
+      if (!r.ok) btn.title = r.error;
+      setTimeout(() => { if (btn) { btn.textContent = 'Copy all (' + emails.length + ')'; btn.title = ''; } }, 2200);
     }
   };
 }
@@ -26265,13 +26474,13 @@ async function tcqCopyAllEmails() {
   setTimeout(() => { ta.focus(); ta.select(); }, 50);
   document.getElementById('tcqAllEmailsCopy').onclick = async () => {
     const statusEl = document.getElementById('tcqAllEmailsStatus');
-    try {
-      await navigator.clipboard.writeText(list);
-      statusEl.textContent = '✓ Copied ' + recipients.length + ' email(s) to clipboard.';
+    const r = await sbCopyEmails(list, 'slate:tcq-all-emails');
+    if (r.ok) {
+      statusEl.textContent = '✓ Copied ' + r.copied + ' email(s)'
+        + (r.removed ? ' — ' + r.removed + ' on the ban list omitted' : '') + '.';
       statusEl.style.color = '#0a6b3a';
-    } catch (e) {
-      ta.focus(); ta.select();
-      statusEl.textContent = '⚠ Browser blocked auto-copy — press Ctrl+C to copy the selected text.';
+    } else {
+      statusEl.textContent = '⚠ ' + r.error;
       statusEl.style.color = '#c0392b';
     }
   };
