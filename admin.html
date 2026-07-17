@@ -3755,7 +3755,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.283';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.284';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -24499,8 +24499,13 @@ async function rsSend() {
   _rs.sending = true; rsSyncSendBtn();
   setStatus('rsStatus', 'Sending…', 'progress');
   try {
+    /* text/plain, NOT application/json: a JSON content-type makes the browser
+       fire a CORS preflight OPTIONS, which Apps Script cannot answer → the fetch
+       dies as "Failed to fetch". text/plain is a CORS "simple request" (no
+       preflight); GAS reads the raw postData.contents and JSON.parses it anyway.
+       This mirrors every other Slate→GAS send in this file (optout, cert, patch).*/
     const res = await fetch(ROLODEX_MAILER_URL, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action: 'admin_send_captain_pdf', admin_key: SB_KEY,
                              captain_pdf_id: Number(pdfId), to_apa_number: p.member_number })
     });
