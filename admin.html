@@ -3652,7 +3652,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.275';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.276';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -7730,6 +7730,13 @@ async function lfBuildPlan() {
   const divs = await sbGetAll('divisions?operator_id=eq.1'
     + '&select=id,division_number,name,night_of_play,session_id&order=id');
   const divById = new Map(divs.map(d => [d.id, d]));
+  /* Session names, for the stranded reasons. A division with no matches means
+     something completely different depending on its session: the CURRENT
+     session unscheduled is a broken import, a FUTURE session unscheduled is
+     just "not built yet" (Fall divisions land in Nexus ~Jul 28). Same absence,
+     opposite operator action — so the reason has to know which. */
+  const sessions = await sbGetAll('sessions?select=id,name,is_current,start_date&order=id');
+  const sessById = new Map(sessions.map(s => [s.id, s]));
   const ownerTeams = teamIds.length
     ? await sbGetAll('teams?id=in.(' + teamIds.join(',') + ')&select=id,team_number,team_name,division_id&order=id')
     : [];
@@ -7795,11 +7802,43 @@ async function lfBuildPlan() {
     let why;
     if (!t.length) why = 'not on any SPM roster';
     else {
-      const dnames = t.map(x => (divById.get(x.division_id) || {}).division_number).filter(Boolean);
-      const anySched = matches.some(m => t.some(x => m.home_team_id === x.id || m.away_team_id === x.id));
-      why = !anySched
-        ? 'no schedule uploaded for division ' + [...new Set(dnames)].join(', ') + ' — add the PDF in RackTime'
-        : 'no future match left (season ends 08-02), or their remaining matches are rescheduled with no new date';
+      /* Three DIFFERENT causes, and they must not be conflated — the reason
+         shown here is an instruction the operator acts on, so a wrong one wastes
+         their evening or sends them chasing a non-problem.
+           - the DIVISION has no matches at all  → the schedule really is missing
+           - the division is scheduled but the TEAM is in no match → that team was
+             dropped/withdrawn; no PDF will fix it
+           - the team plays, but nothing remains → the season simply ran out
+         The 3.275 version tested the TEAM and blamed the DIVISION, telling the
+         operator to "add the PDF in RackTime" for divisions that were fully
+         scheduled. Same false-inference as escape 0716-racktime-upload-gap:
+         an absence does not name its own cause. */
+      const tDivs = t.map(x => divById.get(x.division_id)).filter(Boolean);
+      const dnums = [...new Set(tDivs.map(d => d.division_number))];
+      const divHasAny  = matches.some(m => t.some(x => m.division_id === x.division_id));
+      const teamHasAny = matches.some(m => t.some(x => m.home_team_id === x.id || m.away_team_id === x.id));
+      /* Past vs future session — compare START DATES, never is_current and never
+         the id. `!is_current` lumps a finished session in with an unbuilt one and
+         they need opposite words ("they've left the league" vs "wait two weeks").
+         And sessions.id is NOT chronological (id 1 = Summer 2026, id 5 = Fall
+         2026), so ordering by it silently reverses this. */
+      const curStart = (currentSession && currentSession.start_date) || '';
+      const tSess = [...new Set(tDivs.map(d => sessById.get(d.session_id)).filter(Boolean))];
+      const allPast   = tSess.length && tSess.every(s => !s.is_current && (s.start_date || '') < curStart);
+      const allFuture = tSess.length && tSess.every(s => !s.is_current && (s.start_date || '') > curStart);
+      const sessNames = [...new Set(tSess.map(s => s.name))];
+      if (allPast)
+        why = 'last rostered in ' + sessNames.join(', ')
+            + ' — not on a current team, so there is nowhere to catch them';
+      else if (allFuture)
+        why = 'only rostered in ' + sessNames.join(', ')
+            + ', which has no schedule yet — nothing to do until those divisions are built';
+      else if (!divHasAny)
+        why = 'division ' + dnums.join(', ') + ' has no schedule in Slate — check the RackTime import';
+      else if (!teamHasAny)
+        why = 'their team is not in the division ' + dnums.join(', ') + ' schedule (dropped or withdrawn)';
+      else
+        why = 'no match left this season (ends 08-02), or every remaining match is rescheduled with no new date';
     }
     _lf.stranded.push({ member_number: o, member_name: (byOwner.get(o)[0] || {}).member_name || o,
                         items: byOwner.get(o), why });
