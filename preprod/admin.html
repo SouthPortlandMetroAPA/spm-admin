@@ -3634,6 +3634,24 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         <div id="ehItems"><div class="hint">Press &ldquo;Load pending changes&rdquo; to see the diff.</div></div>
       </div>
 
+      <div class="card" style="margin-top:14px;">
+        <h2 style="margin:0 0 6px;">On the calendar, not from poolplayers</h2>
+        <p class="hint" style="margin:0 0 10px;">
+          Events Event Horizon did <strong>not</strong> create &mdash; added by hand in Google
+          Calendar, left over from the old sync, or added by anyone else with access. The
+          automated sync <strong>never</strong> touches these; removing them is entirely your call,
+          one at a time.
+        </p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+          <button type="button" class="btn btn-primary btn-sm" id="ehLoadForeign">Load</button>
+          <button type="button" class="btn btn-outline btn-sm" id="ehFgnAll">Select all</button>
+          <button type="button" class="btn btn-outline btn-sm" id="ehFgnNone">Select none</button>
+          <button type="button" class="btn btn-danger btn-sm" id="ehFgnDelete" disabled>Delete selected</button>
+        </div>
+        <div id="ehFgnStatus" class="status-line"></div>
+        <div id="ehForeign"><div class="hint">Press Load to see what is on the calendar that poolplayers did not put there.</div></div>
+      </div>
+
     </div>
 
     <div id="tab-banlist" class="tab-panel">
@@ -3805,7 +3823,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.285';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.286';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -29776,6 +29794,10 @@ async function ehInit() {
     document.getElementById('ehApply').addEventListener('click', ehApply);
     document.getElementById('ehSelAll').addEventListener('click', function () { ehToggleAll(true); });
     document.getElementById('ehSelNone').addEventListener('click', function () { ehToggleAll(false); });
+    document.getElementById('ehLoadForeign').addEventListener('click', ehLoadForeign);
+    document.getElementById('ehFgnDelete').addEventListener('click', ehDeleteForeign);
+    document.getElementById('ehFgnAll').addEventListener('click', function () { ehFgnToggleAll(true); });
+    document.getElementById('ehFgnNone').addEventListener('click', function () { ehFgnToggleAll(false); });
     _eh.bound = true;
   }
   await ehLoadConn();
@@ -29954,6 +29976,94 @@ async function ehApply() {
     await ehLoadPlan();          // re-read so the list reflects reality
   } catch (e) {
     setStatus('ehStatus', 'Apply failed: ' + esc(e.message), 'err');
+  }
+}
+
+/* ── Foreign events ────────────────────────────────────────────────────
+   Everything on the calendar that EH did NOT stamp. The automated sync is
+   structurally incapable of deleting these (it only ever sees its own
+   stamped events), so this panel is the ONLY path that removes them — and
+   it requires an explicit per-event selection plus a confirm naming the
+   count. No "delete everything" shortcut by design. */
+let _ehFgn = [];
+
+async function ehLoadForeign() {
+  setStatus('ehFgnStatus', 'Reading the calendar…', 'progress');
+  document.getElementById('ehForeign').innerHTML = '<div class="hint">Working…</div>';
+  try {
+    const j = await ehCall('/foreign', 'GET');
+    _ehFgn = j.foreign || [];
+    ehRenderForeign();
+    setStatus('ehFgnStatus', _ehFgn.length
+      ? _ehFgn.length + ' event' + (_ehFgn.length === 1 ? '' : 's') + ' on the calendar did not come from poolplayers.'
+      : 'Nothing extra — every upcoming event on the calendar came from poolplayers.',
+      _ehFgn.length ? 'warn' : 'ok');
+  } catch (e) {
+    _ehFgn = [];
+    document.getElementById('ehForeign').innerHTML = '';
+    setStatus('ehFgnStatus', 'Could not load: ' + esc(e.message), 'err');
+  }
+  ehSyncFgnBtn();
+}
+
+function ehRenderForeign() {
+  const host = document.getElementById('ehForeign');
+  if (!_ehFgn.length) {
+    host.innerHTML = '<div class="hint">Nothing to show.</div>';
+    return;
+  }
+  host.innerHTML = _ehFgn.map(function (f, i) {
+    return '<label style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid #eee">' +
+      '<input type="checkbox" class="eh-fgn" data-idx="' + i + '" style="margin-top:4px">' +
+      '<div style="flex:1">' +
+        '<div>' + esc(f.title || '(untitled)') + '</div>' +
+        '<div class="hint">' + ehWhen(f.start) +
+          (f.creator ? ' · added by ' + esc(f.creator) : '') + '</div>' +
+      '</div></label>';
+  }).join('');
+  host.querySelectorAll('.eh-fgn').forEach(function (cb) {
+    cb.addEventListener('change', ehSyncFgnBtn);
+  });
+}
+
+function ehFgnToggleAll(on) {
+  document.querySelectorAll('#ehForeign .eh-fgn').forEach(function (cb) { cb.checked = on; });
+  ehSyncFgnBtn();
+}
+function ehFgnPicked() {
+  const out = [];
+  document.querySelectorAll('#ehForeign .eh-fgn:checked').forEach(function (cb) {
+    const f = _ehFgn[+cb.dataset.idx];
+    if (f) out.push(f);
+  });
+  return out;
+}
+function ehSyncFgnBtn() {
+  const n = ehFgnPicked().length;
+  const btn = document.getElementById('ehFgnDelete');
+  btn.disabled = n === 0;
+  btn.textContent = n ? 'Delete ' + n + ' selected' : 'Delete selected';
+}
+
+async function ehDeleteForeign() {
+  const picked = ehFgnPicked();
+  if (!picked.length) return;
+  /* Name what is going, not just how many — a count alone is easy to mis-click. */
+  const names = picked.slice(0, 6).map(function (f) { return '  • ' + (f.title || '(untitled)'); }).join('\n');
+  const more = picked.length > 6 ? '\n  …and ' + (picked.length - 6) + ' more' : '';
+  if (!confirm('Delete ' + picked.length + ' event' + (picked.length > 1 ? 's' : '') +
+               ' from the Google Calendar?\n\n' + names + more +
+               '\n\nThis removes them from the calendar. Event Horizon will not recreate them — ' +
+               'they did not come from poolplayers.')) return;
+  setStatus('ehFgnStatus', 'Deleting ' + picked.length + '…', 'progress');
+  try {
+    const j = await ehCall('/foreign/delete', 'POST', { ids: picked.map(function (f) { return f.id; }) });
+    setStatus('ehFgnStatus', '✓ Deleted ' + j.deleted +
+      ((j.failed && j.failed.length) ? ' — ' + j.failed.length + ' failed' : ''),
+      (j.failed && j.failed.length) ? 'warn' : 'ok');
+    await ehLoadForeign();      // re-read so the list shows reality
+  } catch (e) {
+    setStatus('ehFgnStatus', 'Delete failed: ' + esc(e.message), 'err');
   }
 }
 
