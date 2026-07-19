@@ -1027,6 +1027,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="polls">PulseCheck</button>
       <button class="tab" data-tab="lostfound">Lost &amp; Found</button>
       <button class="tab" data-tab="banlist">Email Ban List</button>
+      <button class="tab" data-tab="eventhorizon">Event Horizon</button>
     </div>
 
     <div id="globalStatus" class="status-line"></div>
@@ -3586,6 +3587,74 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
          and every email COPY button (via sbCopyEmails), and logs each
          prevention. Brief: 2026-07-17-email-blocklist.md
          ══════════════════════════════════════════════════════════════ -->
+    <!-- ══════════════════════════════════════════════════════════════
+         EVENT HORIZON — poolplayers → Google Calendar sync.
+         Review the pending diff and apply changes ONE AT A TIME. The tab
+         sends only {action, key}; the Worker rebuilds every event's content
+         from poolplayers server-side, so nothing here can inject calendar
+         content. Holidays are the sole exception to poolplayers-as-source.
+         ══════════════════════════════════════════════════════════════ -->
+    <div id="tab-eventhorizon" class="tab-panel">
+
+      <div class="card" style="margin-bottom:14px;">
+        <h2 style="margin:0 0 6px;">Connection</h2>
+        <p class="hint" style="margin:0 0 10px;">
+          The sync engine runs as a Cloudflare Worker on an hourly schedule &mdash; this tab
+          watches it and triggers it. The admin key must match the Worker's
+          <code>EH_ADMIN_KEY</code> secret.
+        </p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+          <label style="flex:1;min-width:280px">Worker URL
+            <input id="ehUrl" placeholder="https://eventhorizon.spmapa.workers.dev">
+          </label>
+          <label style="flex:1;min-width:220px">Admin key
+            <input id="ehKey" type="password" placeholder="matches EH_ADMIN_KEY">
+          </label>
+          <button type="button" class="btn btn-outline btn-sm" id="ehSaveConn">Save</button>
+        </div>
+        <div id="ehConnStatus" class="status-line"></div>
+      </div>
+
+      <div class="card">
+        <h2 style="margin:0 0 6px;">Pending changes</h2>
+        <p class="hint" style="margin:0 0 10px;">
+          Everything the sync <em>would</em> do, compared against what is already on the calendar.
+          Nothing is written until you tick items and press Apply. Re-running is safe &mdash;
+          identical data produces an empty list.
+        </p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+          <button type="button" class="btn btn-primary btn-sm" id="ehLoadPlan">Load pending changes</button>
+          <button type="button" class="btn btn-outline btn-sm" id="ehSelAll">Select all</button>
+          <button type="button" class="btn btn-outline btn-sm" id="ehSelNone">Select none</button>
+          <button type="button" class="btn btn-primary btn-sm" id="ehApply" disabled>Apply selected</button>
+        </div>
+        <div id="ehCounts" class="hint"></div>
+        <div id="ehVenues"></div>
+        <div id="ehWarn"></div>
+        <div id="ehStatus" class="status-line"></div>
+        <div id="ehItems"><div class="hint">Press &ldquo;Load pending changes&rdquo; to see the diff.</div></div>
+      </div>
+
+      <div class="card" style="margin-top:14px;">
+        <h2 style="margin:0 0 6px;">On the calendar, not from poolplayers</h2>
+        <p class="hint" style="margin:0 0 10px;">
+          Events Event Horizon did <strong>not</strong> create &mdash; added by hand in Google
+          Calendar, left over from the old sync, or added by anyone else with access. The
+          automated sync <strong>never</strong> touches these; removing them is entirely your call,
+          one at a time.
+        </p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+          <button type="button" class="btn btn-primary btn-sm" id="ehLoadForeign">Load</button>
+          <button type="button" class="btn btn-outline btn-sm" id="ehFgnAll">Select all</button>
+          <button type="button" class="btn btn-outline btn-sm" id="ehFgnNone">Select none</button>
+          <button type="button" class="btn btn-danger btn-sm" id="ehFgnDelete" disabled>Delete selected</button>
+        </div>
+        <div id="ehFgnStatus" class="status-line"></div>
+        <div id="ehForeign"><div class="hint">Press Load to see what is on the calendar that poolplayers did not put there.</div></div>
+      </div>
+
+    </div>
+
     <div id="tab-banlist" class="tab-panel">
       <div class="card" style="margin-bottom:14px">
         <h2 style="margin:0 0 6px;">Email ban list</h2>
@@ -3755,7 +3824,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.284';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.288';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -8345,6 +8414,7 @@ function switchTab(name) {
   if (name === 'polls')       plInit();
   if (name === 'lostfound')   lfInit();
   if (name === 'banlist')     blInit();
+  if (name === 'eventhorizon') ehInit();
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -29700,6 +29770,547 @@ window.hpSaveNewTeam        = hpSaveNewTeam;
 // (Session loading is triggered by switchTab('certs') → certsAdminInit(),
 //  matching how every other Slate tab lazy-loads its data. The earlier
 //  document-level click listener threw on an empty <select> and is removed.)
+
+
+/* ══════════════════════════════════════════════════════════════════════
+   EVENT HORIZON — poolplayers → Google Calendar sync control surface.
+
+   Talks to the Cloudflare Worker (Apps/EventHorizon/worker). Two calls:
+     GET  /plan   → the pending diff, each item with a stable key
+     POST /apply  → apply ONLY the {action, key} pairs ticked here
+
+   The tab never sends event content. The Worker recomputes every event
+   from poolplayers when applying, so a compromised page cannot inject
+   calendar entries — it can only choose among changes the source already
+   justifies. Connection settings live in slate.eventhorizon_settings
+   (service-role only; anon has no grant on that table).
+   ══════════════════════════════════════════════════════════════════════ */
+const EH_DEFAULT_URL = 'https://eventhorizon.spmapa.workers.dev';
+let _eh = { bound: false, conn: null, items: [] };
+
+async function ehInit() {
+  if (!_eh.bound) {
+    document.getElementById('ehSaveConn').addEventListener('click', ehSaveConn);
+    document.getElementById('ehLoadPlan').addEventListener('click', ehLoadPlan);
+    document.getElementById('ehApply').addEventListener('click', ehApply);
+    document.getElementById('ehSelAll').addEventListener('click', function () { ehToggleAll(true); });
+    document.getElementById('ehSelNone').addEventListener('click', function () { ehToggleAll(false); });
+    document.getElementById('ehLoadForeign').addEventListener('click', ehLoadForeign);
+    document.getElementById('ehFgnDelete').addEventListener('click', ehDeleteForeign);
+    document.getElementById('ehFgnAll').addEventListener('click', function () { ehFgnToggleAll(true); });
+    document.getElementById('ehFgnNone').addEventListener('click', function () { ehFgnToggleAll(false); });
+    _eh.bound = true;
+  }
+  await ehLoadConn();
+}
+
+async function ehLoadConn() {
+  try {
+    const rows = await sb('GET', 'eventhorizon_settings?id=eq.1&select=worker_url,admin_key,calendar_id');
+    _eh.conn = (rows && rows[0]) || { worker_url: EH_DEFAULT_URL, admin_key: '' };
+    document.getElementById('ehUrl').value = _eh.conn.worker_url || EH_DEFAULT_URL;
+    document.getElementById('ehKey').value = _eh.conn.admin_key || '';
+    setStatus('ehConnStatus',
+      _eh.conn.admin_key ? 'Connected settings loaded.' : 'No admin key saved yet — paste it and Save.',
+      _eh.conn.admin_key ? 'ok' : 'warn');
+  } catch (e) {
+    setStatus('ehConnStatus', 'Could not load settings: ' + esc(e.message), 'err');
+  }
+}
+
+async function ehSaveConn() {
+  const worker_url = document.getElementById('ehUrl').value.trim() || EH_DEFAULT_URL;
+  const admin_key  = document.getElementById('ehKey').value.trim();
+  try {
+    await sb('PATCH', 'eventhorizon_settings?id=eq.1',
+             { worker_url: worker_url, admin_key: admin_key, updated_at: new Date().toISOString() });
+    _eh.conn = { worker_url: worker_url, admin_key: admin_key };
+    setStatus('ehConnStatus', 'Saved.', 'ok');
+  } catch (e) {
+    setStatus('ehConnStatus', 'Save failed: ' + esc(e.message), 'err');
+  }
+}
+
+/* Worker call. Returns parsed JSON or throws with a readable message. */
+async function ehCall(path, method, body) {
+  if (!_eh.conn || !_eh.conn.admin_key) throw new Error('No admin key saved — fill in Connection first.');
+  const opts = { method: method || 'GET', headers: { 'X-EH-Key': _eh.conn.admin_key } };
+  if (body) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+  const res = await fetch((_eh.conn.worker_url || EH_DEFAULT_URL) + path, opts);
+  const j = await res.json().catch(function () { return { ok: false, error: 'HTTP ' + res.status }; });
+  if (!res.ok || j.ok === false) throw new Error(j.error || ('HTTP ' + res.status));
+  return j;
+}
+
+const EH_ACTION_STYLE = {
+  create: { label: 'CREATE', color: '#0a7d32' },
+  update: { label: 'UPDATE', color: '#9a6700' },
+  'delete': { label: 'DELETE', color: '#b42318' },
+};
+
+/* "2026-11-06T09:00:00" → "Fri Nov 6, 9:00 AM"; date-only → "Fri Nov 6 (all day)" */
+function ehWhen(s, allDay) {
+  if (!s) return '';
+  const d = new Date(s.length <= 10 ? s + 'T12:00:00' : s);
+  if (isNaN(d)) return esc(s);
+  const day = d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  if (allDay || s.length <= 10) return day + ' — all day';
+  return day + ', ' + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+
+async function ehLoadPlan() {
+  setStatus('ehStatus', 'Loading the pending diff…', 'progress');
+  document.getElementById('ehItems').innerHTML = '<div class="hint">Working…</div>';
+  try {
+    const j = await ehCall('/plan', 'GET');
+    _eh.items = j.items || [];
+    ehRenderCounts(j);
+    await ehLoadTypes();
+    ehRenderUnassigned(j);
+    ehRenderItems();
+    setStatus('ehStatus', 'Loaded — nothing has been written.', 'ok');
+  } catch (e) {
+    _eh.items = [];
+    document.getElementById('ehItems').innerHTML = '';
+    setStatus('ehStatus', 'Could not load: ' + esc(e.message), 'err');
+  }
+  ehSyncApplyBtn();
+}
+
+function ehRenderCounts(j) {
+  const c = j.counts || {};
+  document.getElementById('ehCounts').innerHTML =
+    '<strong>' + (c.create || 0) + '</strong> to create · ' +
+    '<strong>' + (c.update || 0) + '</strong> to update · ' +
+    '<strong>' + (c['delete'] || 0) + '</strong> to remove · ' +
+    (c.noop || 0) + ' already correct';
+}
+
+/* Untyped and ambiguous entries are NEVER synced — they are surfaced here so
+   the operator fixes the poolplayers entry. Silence would be the bug. */
+/* Unassigned events — the ONLY thing standing between an event and the calendar.
+   An assignment (source_id, child_key) → type is the source of truth; keyword
+   matching only pre-fills the dropdown. Assigning is keyed by the poolplayers
+   id, so it survives renames and can never affect a different event. */
+let _ehTypes = [];
+
+async function ehLoadTypes() {
+  if (_ehTypes.length) return;
+  _ehTypes = await sb('GET', 'eventhorizon_types?select=key,label,grp&enabled=is.true&order=sort');
+}
+
+/* ── Venue picker ──────────────────────────────────────────────────────────
+   A day line like "8/29 - Midway and Wichita" names venues in the operator's
+   shorthand. The event's OWN primary address resolves for free, so only the
+   other venue reaches this panel.
+
+   It is a PICKER, never a matcher. League 553 holds 66 records named some
+   variant of "Wichita Town Pub" (56 of them misspelled "Pib"), the APA search
+   is a whole-string prefix match, and it is literal about punctuation —
+   "Dr Feelgoods" returns nothing while "Dr Feelgood" returns one of two real,
+   different bars. No automatic rule survives that. A human picks once and we
+   store the AddressID.
+
+   Candidates are grouped by street-number + city + ZIP: duplicates that agree
+   on the place collapse to one row, so the operator only ever chooses between
+   genuinely different locations. */
+const EH_ADDR_API = 'https://api.poolplayers.com/address/GetAddressByName/';
+const EH_LEAGUE = '553';
+let _ehVenueRows = [];
+
+function ehVenuePlaceKey(a) {
+  const num = (String(a.Address1 || '').match(/\d+/) || [''])[0];
+  return [num, a.City, String(a.Zip || '').replace(/-_+$/, '')]
+    .map(function (x) { return String(x || '').toLowerCase().trim(); }).join('|');
+}
+function ehVenueLabel(a) {
+  return [a.Name, a.Address1, a.City, String(a.Zip || '').replace(/-_+$/, '')]
+    .filter(Boolean).join(', ');
+}
+
+document.addEventListener('click', function (ev) {
+  const sBtn = ev.target.closest && ev.target.closest('.eh-venue-search');
+  if (sBtn) { ehVenueSearch(sBtn.getAttribute('data-name')); return; }
+  const pBtn = ev.target.closest && ev.target.closest('.eh-venue-pick');
+  if (pBtn) { ehVenuePick(pBtn); }
+});
+
+function ehRenderVenues(rows) {
+  _ehVenueRows = rows;
+  const host = document.getElementById('ehVenues');
+  if (!host) return;
+  if (!rows.length) { host.innerHTML = ''; return; }
+
+  /* One venue NAME may block several events (Midway blocks both Summer
+     triannuals). Ask once per name, not once per event. */
+  const byName = {};
+  rows.forEach(function (r) {
+    const k = String(r.venueName || '').trim();
+    if (!k) return;
+    (byName[k] = byName[k] || []).push(r);
+  });
+  const names = Object.keys(byName);
+
+  host.innerHTML =
+    '<div style="margin:10px 0;padding:10px 12px;border:1px solid #9ec5fe;background:#f4f9ff;border-radius:8px">' +
+      '<div style="font-weight:700;margin-bottom:2px">' + names.length +
+        ' venue' + (names.length === 1 ? ' needs' : 's need') + ' an address</div>' +
+      '<div class="hint" style="margin-bottom:8px">These names appear in a day line but are not the ' +
+        'event&rsquo;s own venue, so there is nothing to resolve them against. Search APA and pick once &mdash; ' +
+        'the choice is remembered and reused everywhere that name appears.</div>' +
+      names.map(function (n) {
+        const blocked = byName[n];
+        return '<div style="padding:8px 0;border-top:1px solid #dbeafe">' +
+          '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+            '<div style="font-weight:600;min-width:110px">' + esc(n) + '</div>' +
+            '<input class="eh-venue-q" data-name="' + esc(n) + '" value="' + esc(n) + '" ' +
+              'placeholder="start of the venue name" style="flex:1;min-width:170px;max-width:280px">' +
+            '<button type="button" class="btn btn-outline btn-sm eh-venue-search" data-name="' + esc(n) + '">Search</button>' +
+            '<span class="hint">blocks ' + blocked.length + ' event' + (blocked.length === 1 ? '' : 's') + '</span>' +
+          '</div>' +
+          '<div class="hint" style="margin-top:3px">' +
+            blocked.map(function (b) { return esc(b.title); }).join('<br>') + '</div>' +
+          '<div class="eh-venue-hits" data-name="' + esc(n) + '" style="margin-top:6px"></div>' +
+        '</div>';
+      }).join('') +
+    '</div>';
+}
+
+async function ehVenueSearch(name) {
+  const box = document.querySelector('.eh-venue-hits[data-name="' + name.replace(/"/g, '&quot;') + '"]');
+  const input = document.querySelector('.eh-venue-q[data-name="' + name.replace(/"/g, '&quot;') + '"]');
+  if (!box) return;
+  const q = (input && input.value || name).trim();
+  if (!q) { box.innerHTML = '<span class="hint">Type something to search.</span>'; return; }
+  box.innerHTML = '<span class="hint">Searching APA&hellip;</span>';
+  let rows;
+  try {
+    const res = await fetch(EH_ADDR_API + encodeURIComponent(q) + '/' + EH_LEAGUE);
+    if (!res.ok) throw new Error('APA ' + res.status);
+    rows = await res.json();
+  } catch (e) {
+    box.innerHTML = '<span class="status-line shown err">Search failed: ' + esc(e.message) + '</span>';
+    return;
+  }
+  if (!rows.length) {
+    /* The prefix-match trap, stated plainly rather than left as a mystery. */
+    box.innerHTML = '<span class="hint">No matches. APA matches the <b>start</b> of the name only, ' +
+      'and punctuation counts &mdash; try a shorter prefix &mdash; &ldquo;Dr&rdquo; rather than ' +
+      '&ldquo;Dr Feelgoods&rdquo;).</span>';
+    return;
+  }
+  const groups = {};
+  rows.forEach(function (a) { const k = ehVenuePlaceKey(a); (groups[k] = groups[k] || []).push(a); });
+  const keys = Object.keys(groups);
+  box.innerHTML =
+    '<div class="hint" style="margin-bottom:4px">' + rows.length + ' record' + (rows.length === 1 ? '' : 's') +
+      ' &rarr; ' + keys.length + ' distinct location' + (keys.length === 1 ? '' : 's') +
+      (keys.length === 1 ? ' (the duplicates agree, any is correct)' : ' &mdash; these differ, pick carefully') + '</div>' +
+    keys.map(function (k) {
+      const g = groups[k];
+      /* Prefer the fullest name in the group for display; the address is
+         identical across it by construction. */
+      const best = g.slice().sort(function (x, y) {
+        return String(y.Name || '').length - String(x.Name || '').length; })[0];
+      return '<div style="display:flex;gap:8px;align-items:center;padding:3px 0">' +
+        '<button type="button" class="btn btn-primary btn-sm eh-venue-pick" ' +
+          'data-name="' + esc(name) + '" data-id="' + esc(best.AddressID) + '" ' +
+          'data-label="' + esc(ehVenueLabel(best)) + '" ' +
+          'data-dn="' + esc(best.Name || name) + '" ' +
+          'data-addr="' + esc([best.Address1, best.City, String(best.Zip || '').replace(/-_+$/, '')].filter(Boolean).join(', ')) + '">Use this</button>' +
+        '<span>' + esc(ehVenueLabel(best)) +
+          (g.length > 1 ? ' <span class="hint">(' + g.length + ' identical records)</span>' : '') + '</span>' +
+      '</div>';
+    }).join('');
+}
+
+async function ehVenuePick(btn) {
+  const key = String(btn.getAttribute('data-name') || '').trim().toLowerCase();
+  const id = parseInt(btn.getAttribute('data-id'), 10);
+  if (!key || !Number.isFinite(id)) return;
+  setStatus('ehStatus', 'Saving venue&hellip;', 'progress');
+  try {
+    await sb('POST', 'eventhorizon_venues?on_conflict=key', [{
+      key: key,
+      apa_address_id: id,
+      display_name: btn.getAttribute('data-dn') || null,
+      address: btn.getAttribute('data-addr') || null,
+      status: 'confirmed',
+      confirmed_by: 'slate',
+      confirmed_at: new Date().toISOString(),
+      note: 'picked in Slate from the APA address book',
+    }], { Prefer: 'resolution=merge-duplicates,return=representation' });
+    setStatus('ehStatus', 'Venue saved — reloading the plan…', 'ok');
+    await ehLoadPlan();
+  } catch (e) {
+    setStatus('ehStatus', 'Could not save venue: ' + esc(e.message), 'err');
+  }
+}
+
+function ehRenderUnassigned(j) {
+  /* Two different blockers arrive in the same array. A missing TYPE needs a
+     dropdown of known types; a missing VENUE needs an address search against
+     APA. Rendering them in one list would offer the wrong control for half
+     the rows. */
+  const allRows = j.unassigned || [];
+  const venueRows = allRows.filter(function (r) { return r.venueStatus === 'unknown'; });
+  ehRenderVenues(venueRows);
+  const rows = allRows.filter(function (r) { return r.venueStatus !== 'unknown'; });
+  const host = document.getElementById('ehWarn');
+  if (!rows.length) { host.innerHTML = ''; return; }
+
+  const opts = function (sel) {
+    return '<option value="">— pick a type —</option>' + _ehTypes.map(function (t) {
+      return '<option value="' + esc(t.key) + '"' + (t.key === sel ? ' selected' : '') + '>' +
+             esc(t.label) + '</option>';
+    }).join('');
+  };
+  const withGuess = rows.filter(function (r) { return r.suggestedType; }).length;
+
+  const list = rows.map(function (r, i) {
+    /* Say WHY there is no suggestion — a bare "untyped" tells the operator
+       nothing about what to do next. */
+    let why;
+    if (r.suggestedType)             why = 'suggested from its name';
+    else if (r.why === 'AMBIGUOUS')  why = 'two keywords match (' + esc((r.hits || []).join(' + ')) + ') — pick the right one';
+    else                             why = 'no keyword matched — pick one';
+    return '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:7px 0;border-bottom:1px solid #eee">' +
+      '<div style="flex:1;min-width:220px">' +
+        '<div>' + esc(r.title) + '</div>' +
+        '<div class="hint">' + ehWhen(r.start) + (r.location ? ' · ' + esc(r.location) : '') +
+        ' &mdash; ' + why + '</div>' +
+      '</div>' +
+      '<select class="eh-assign-type" data-idx="' + i + '" style="max-width:230px">' + opts(r.suggestedType) + '</select>' +
+      '<button type="button" class="btn btn-outline btn-sm eh-assign-go" data-idx="' + i + '">Assign</button>' +
+    '</div>';
+  }).join('');
+
+  host.innerHTML =
+    '<div style="margin:10px 0;padding:10px 12px;border:1px solid #f0c36d;background:#fffaf0;border-radius:8px">' +
+      '<div style="font-weight:700;margin-bottom:2px">' + rows.length +
+        ' event' + (rows.length === 1 ? '' : 's') + ' need a type before they can sync</div>' +
+      '<div class="hint" style="margin-bottom:8px">Assigning is remembered against the poolplayers entry, ' +
+        'so it survives renames and never affects any other event.</div>' +
+      (withGuess ? '<button type="button" class="btn btn-primary btn-sm" id="ehAcceptAll">Accept all ' +
+        withGuess + ' suggestions</button>' : '') +
+      '<div style="margin-top:8px">' + list + '</div>' +
+    '</div>';
+
+  host.querySelectorAll('.eh-assign-go').forEach(function (b) {
+    b.addEventListener('click', function () { ehAssignOne(+b.dataset.idx); });
+  });
+  const all = document.getElementById('ehAcceptAll');
+  if (all) all.addEventListener('click', ehAcceptAllSuggestions);
+  _ehUnassigned = rows;
+}
+let _ehUnassigned = [];
+
+/* Upsert. PostgREST needs BOTH ?on_conflict= and resolution=merge-duplicates —
+   without the Prefer header it plain-INSERTs and 23505s on a re-assign. */
+async function ehWriteAssignments(rows, label) {
+  await sb('POST', 'eventhorizon_assignments?on_conflict=source_id,child_key', rows,
+           { Prefer: 'resolution=merge-duplicates,return=representation' });
+  setStatus('ehStatus', '✓ ' + label + ' — reloading the diff…', 'ok');
+  await ehLoadPlan();
+}
+
+async function ehAssignOne(idx) {
+  const r = _ehUnassigned[idx];
+  const sel = document.querySelector('.eh-assign-type[data-idx="' + idx + '"]');
+  if (!r || !sel || !sel.value) { setStatus('ehStatus', 'Pick a type first.', 'warn'); return; }
+  try {
+    await ehWriteAssignments([{
+      source_id: String(r.sourceId), child_key: r.childKey || '',
+      type_key: sel.value, area_key: r.area || null,
+      source: sel.value === r.suggestedType ? 'accepted-suggestion' : 'operator',
+      assigned_by: 'slate',
+    }], 'assigned ' + r.title);
+  } catch (e) {
+    setStatus('ehStatus', 'Assign failed: ' + esc(e.message), 'err');
+  }
+}
+
+async function ehAcceptAllSuggestions() {
+  const rows = _ehUnassigned.filter(function (r) { return r.suggestedType; });
+  if (!rows.length) return;
+  if (!confirm('Accept the suggested type for ' + rows.length + ' event' +
+               (rows.length > 1 ? 's' : '') + '?\n\nYou can change any of them later.')) return;
+  try {
+    await ehWriteAssignments(rows.map(function (r) {
+      return { source_id: String(r.sourceId), child_key: r.childKey || '',
+               type_key: r.suggestedType, area_key: r.area || null,
+               source: 'accepted-suggestion', assigned_by: 'slate' };
+    }), 'accepted ' + rows.length + ' suggestions');
+  } catch (e) {
+    setStatus('ehStatus', 'Accept failed: ' + esc(e.message), 'err');
+  }
+}
+
+function ehRenderItems() {
+  const host = document.getElementById('ehItems');
+  if (!_eh.items.length) {
+    host.innerHTML = '<div class="hint">Nothing pending — the calendar matches poolplayers.</div>';
+    return;
+  }
+  const rows = _eh.items.map(function (it, i) {
+    const st = EH_ACTION_STYLE[it.action] || { label: it.action, color: '#555' };
+    let detail = '<div class="hint">' + ehWhen(it.start, it.allDay) +
+                 (it.end ? ' → ' + ehWhen(it.end, it.allDay) : '') +
+                 (it.location ? ' · ' + esc(it.location) : '') +
+                 (it.type ? ' · ' + esc(it.type) : '') + '</div>';
+    if (it.action === 'update' && (it.changes || []).length) {
+      detail += '<div class="hint" style="margin-top:2px">' + it.changes.map(function (c) {
+        return '<span style="color:#9a6700">' + esc(c.field) + '</span>: ' +
+               esc(String(c.from == null ? '(none)' : c.from)) + ' → <strong>' +
+               esc(String(c.to == null ? '(none)' : c.to)) + '</strong>';
+      }).join('<br>') + '</div>';
+    }
+    if (it.action === 'delete' && it.reason) {
+      detail += '<div class="hint" style="margin-top:2px">' + esc(it.reason) + '</div>';
+    }
+    return '<label style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid #eee">' +
+      '<input type="checkbox" class="eh-pick" data-idx="' + i + '" style="margin-top:4px">' +
+      '<div style="flex:1">' +
+        '<div><span style="font-weight:700;font-size:0.72rem;color:' + st.color + '">' + st.label + '</span> ' +
+        esc(it.title) + '</div>' + detail +
+      '</div></label>';
+  }).join('');
+  host.innerHTML = rows;
+  host.querySelectorAll('.eh-pick').forEach(function (cb) {
+    cb.addEventListener('change', ehSyncApplyBtn);
+  });
+}
+
+function ehToggleAll(on) {
+  document.querySelectorAll('#ehItems .eh-pick').forEach(function (cb) { cb.checked = on; });
+  ehSyncApplyBtn();
+}
+function ehPicked() {
+  const out = [];
+  document.querySelectorAll('#ehItems .eh-pick:checked').forEach(function (cb) {
+    const it = _eh.items[+cb.dataset.idx];
+    if (it) out.push({ action: it.action, key: it.key });
+  });
+  return out;
+}
+function ehSyncApplyBtn() {
+  const n = ehPicked().length;
+  const btn = document.getElementById('ehApply');
+  btn.disabled = n === 0;
+  btn.textContent = n ? 'Apply ' + n + ' selected' : 'Apply selected';
+}
+
+async function ehApply() {
+  const picked = ehPicked();
+  if (!picked.length) return;
+  const dels = picked.filter(function (p) { return p.action === 'delete'; }).length;
+  const msg = 'Apply ' + picked.length + ' change' + (picked.length > 1 ? 's' : '') +
+              ' to the Google Calendar?' + (dels ? '\n\nThis removes ' + dels + ' event' +
+              (dels > 1 ? 's' : '') + '.' : '');
+  if (!confirm(msg)) return;
+  setStatus('ehStatus', 'Applying ' + picked.length + '…', 'progress');
+  try {
+    const j = await ehCall('/apply', 'POST', { items: picked });
+    const bits = [];
+    if (j.created) bits.push(j.created + ' created');
+    if (j.updated) bits.push(j.updated + ' updated');
+    if (j.deleted) bits.push(j.deleted + ' removed');
+    setStatus('ehStatus', '✓ ' + (bits.join(' · ') || 'nothing changed') +
+      ((j.errors && j.errors.length) ? ' — ' + j.errors.length + ' failed' : ''),
+      (j.errors && j.errors.length) ? 'warn' : 'ok');
+    await ehLoadPlan();          // re-read so the list reflects reality
+  } catch (e) {
+    setStatus('ehStatus', 'Apply failed: ' + esc(e.message), 'err');
+  }
+}
+
+/* ── Foreign events ────────────────────────────────────────────────────
+   Everything on the calendar that EH did NOT stamp. The automated sync is
+   structurally incapable of deleting these (it only ever sees its own
+   stamped events), so this panel is the ONLY path that removes them — and
+   it requires an explicit per-event selection plus a confirm naming the
+   count. No "delete everything" shortcut by design. */
+let _ehFgn = [];
+
+async function ehLoadForeign() {
+  setStatus('ehFgnStatus', 'Reading the calendar…', 'progress');
+  document.getElementById('ehForeign').innerHTML = '<div class="hint">Working…</div>';
+  try {
+    const j = await ehCall('/foreign', 'GET');
+    _ehFgn = j.foreign || [];
+    ehRenderForeign();
+    setStatus('ehFgnStatus', _ehFgn.length
+      ? _ehFgn.length + ' event' + (_ehFgn.length === 1 ? '' : 's') + ' on the calendar did not come from poolplayers.'
+      : 'Nothing extra — every upcoming event on the calendar came from poolplayers.',
+      _ehFgn.length ? 'warn' : 'ok');
+  } catch (e) {
+    _ehFgn = [];
+    document.getElementById('ehForeign').innerHTML = '';
+    setStatus('ehFgnStatus', 'Could not load: ' + esc(e.message), 'err');
+  }
+  ehSyncFgnBtn();
+}
+
+function ehRenderForeign() {
+  const host = document.getElementById('ehForeign');
+  if (!_ehFgn.length) {
+    host.innerHTML = '<div class="hint">Nothing to show.</div>';
+    return;
+  }
+  host.innerHTML = _ehFgn.map(function (f, i) {
+    return '<label style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid #eee">' +
+      '<input type="checkbox" class="eh-fgn" data-idx="' + i + '" style="margin-top:4px">' +
+      '<div style="flex:1">' +
+        '<div>' + esc(f.title || '(untitled)') + '</div>' +
+        '<div class="hint">' + ehWhen(f.start) +
+          (f.creator ? ' · added by ' + esc(f.creator) : '') + '</div>' +
+      '</div></label>';
+  }).join('');
+  host.querySelectorAll('.eh-fgn').forEach(function (cb) {
+    cb.addEventListener('change', ehSyncFgnBtn);
+  });
+}
+
+function ehFgnToggleAll(on) {
+  document.querySelectorAll('#ehForeign .eh-fgn').forEach(function (cb) { cb.checked = on; });
+  ehSyncFgnBtn();
+}
+function ehFgnPicked() {
+  const out = [];
+  document.querySelectorAll('#ehForeign .eh-fgn:checked').forEach(function (cb) {
+    const f = _ehFgn[+cb.dataset.idx];
+    if (f) out.push(f);
+  });
+  return out;
+}
+function ehSyncFgnBtn() {
+  const n = ehFgnPicked().length;
+  const btn = document.getElementById('ehFgnDelete');
+  btn.disabled = n === 0;
+  btn.textContent = n ? 'Delete ' + n + ' selected' : 'Delete selected';
+}
+
+async function ehDeleteForeign() {
+  const picked = ehFgnPicked();
+  if (!picked.length) return;
+  /* Name what is going, not just how many — a count alone is easy to mis-click. */
+  const names = picked.slice(0, 6).map(function (f) { return '  • ' + (f.title || '(untitled)'); }).join('\n');
+  const more = picked.length > 6 ? '\n  …and ' + (picked.length - 6) + ' more' : '';
+  if (!confirm('Delete ' + picked.length + ' event' + (picked.length > 1 ? 's' : '') +
+               ' from the Google Calendar?\n\n' + names + more +
+               '\n\nThis removes them from the calendar. Event Horizon will not recreate them — ' +
+               'they did not come from poolplayers.')) return;
+  setStatus('ehFgnStatus', 'Deleting ' + picked.length + '…', 'progress');
+  try {
+    const j = await ehCall('/foreign/delete', 'POST', { ids: picked.map(function (f) { return f.id; }) });
+    setStatus('ehFgnStatus', '✓ Deleted ' + j.deleted +
+      ((j.failed && j.failed.length) ? ' — ' + j.failed.length + ' failed' : ''),
+      (j.failed && j.failed.length) ? 'warn' : 'ok');
+    await ehLoadForeign();      // re-read so the list shows reality
+  } catch (e) {
+    setStatus('ehFgnStatus', 'Delete failed: ' + esc(e.message), 'err');
+  }
+}
 
 </script>
 <!-- House modal wrap — page level ON PURPOSE (3.259): modals open from
