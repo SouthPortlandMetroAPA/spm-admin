@@ -3823,7 +3823,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.286';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.287';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -29864,7 +29864,8 @@ async function ehLoadPlan() {
     const j = await ehCall('/plan', 'GET');
     _eh.items = j.items || [];
     ehRenderCounts(j);
-    ehRenderWarnings(j);
+    await ehLoadTypes();
+    ehRenderUnassigned(j);
     ehRenderItems();
     setStatus('ehStatus', 'Loaded — nothing has been written.', 'ok');
   } catch (e) {
@@ -29886,19 +29887,107 @@ function ehRenderCounts(j) {
 
 /* Untyped and ambiguous entries are NEVER synced — they are surfaced here so
    the operator fixes the poolplayers entry. Silence would be the bug. */
-function ehRenderWarnings(j) {
-  const parts = [];
-  (j.ambiguous || []).forEach(function (a) {
-    parts.push('<div class="hint" style="color:#b42318">⚠ <strong>' + esc(a.title) +
-      '</strong> matches two types — ' + esc((a.hits || []).join(' + ')) +
-      '. Split it into two poolplayers entries. Not synced.</div>');
+/* Unassigned events — the ONLY thing standing between an event and the calendar.
+   An assignment (source_id, child_key) → type is the source of truth; keyword
+   matching only pre-fills the dropdown. Assigning is keyed by the poolplayers
+   id, so it survives renames and can never affect a different event. */
+let _ehTypes = [];
+
+async function ehLoadTypes() {
+  if (_ehTypes.length) return;
+  _ehTypes = await sb('GET', 'eventhorizon_types?select=key,label,grp&enabled=is.true&order=sort');
+}
+
+function ehRenderUnassigned(j) {
+  const rows = j.unassigned || [];
+  const host = document.getElementById('ehWarn');
+  if (!rows.length) { host.innerHTML = ''; return; }
+
+  const opts = function (sel) {
+    return '<option value="">— pick a type —</option>' + _ehTypes.map(function (t) {
+      return '<option value="' + esc(t.key) + '"' + (t.key === sel ? ' selected' : '') + '>' +
+             esc(t.label) + '</option>';
+    }).join('');
+  };
+  const withGuess = rows.filter(function (r) { return r.suggestedType; }).length;
+
+  const list = rows.map(function (r, i) {
+    /* Say WHY there is no suggestion — a bare "untyped" tells the operator
+       nothing about what to do next. */
+    let why;
+    if (r.suggestedType)             why = 'suggested from its name';
+    else if (r.why === 'AMBIGUOUS')  why = 'two keywords match (' + esc((r.hits || []).join(' + ')) + ') — pick the right one';
+    else                             why = 'no keyword matched — pick one';
+    return '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:7px 0;border-bottom:1px solid #eee">' +
+      '<div style="flex:1;min-width:220px">' +
+        '<div>' + esc(r.title) + '</div>' +
+        '<div class="hint">' + ehWhen(r.start) + (r.location ? ' · ' + esc(r.location) : '') +
+        ' &mdash; ' + why + '</div>' +
+      '</div>' +
+      '<select class="eh-assign-type" data-idx="' + i + '" style="max-width:230px">' + opts(r.suggestedType) + '</select>' +
+      '<button type="button" class="btn btn-outline btn-sm eh-assign-go" data-idx="' + i + '">Assign</button>' +
+    '</div>';
+  }).join('');
+
+  host.innerHTML =
+    '<div style="margin:10px 0;padding:10px 12px;border:1px solid #f0c36d;background:#fffaf0;border-radius:8px">' +
+      '<div style="font-weight:700;margin-bottom:2px">' + rows.length +
+        ' event' + (rows.length === 1 ? '' : 's') + ' need a type before they can sync</div>' +
+      '<div class="hint" style="margin-bottom:8px">Assigning is remembered against the poolplayers entry, ' +
+        'so it survives renames and never affects any other event.</div>' +
+      (withGuess ? '<button type="button" class="btn btn-primary btn-sm" id="ehAcceptAll">Accept all ' +
+        withGuess + ' suggestions</button>' : '') +
+      '<div style="margin-top:8px">' + list + '</div>' +
+    '</div>';
+
+  host.querySelectorAll('.eh-assign-go').forEach(function (b) {
+    b.addEventListener('click', function () { ehAssignOne(+b.dataset.idx); });
   });
-  (j.untyped || []).forEach(function (u) {
-    parts.push('<div class="hint" style="color:#b42318">⚠ <strong>' + esc(u.title) +
-      '</strong> matches no type keyword. Add a keyword or rename it. Not synced.</div>');
-  });
-  document.getElementById('ehWarn').innerHTML =
-    parts.length ? '<div style="margin:8px 0">' + parts.join('') + '</div>' : '';
+  const all = document.getElementById('ehAcceptAll');
+  if (all) all.addEventListener('click', ehAcceptAllSuggestions);
+  _ehUnassigned = rows;
+}
+let _ehUnassigned = [];
+
+/* Upsert. PostgREST needs BOTH ?on_conflict= and resolution=merge-duplicates —
+   without the Prefer header it plain-INSERTs and 23505s on a re-assign. */
+async function ehWriteAssignments(rows, label) {
+  await sb('POST', 'eventhorizon_assignments?on_conflict=source_id,child_key', rows,
+           { Prefer: 'resolution=merge-duplicates,return=representation' });
+  setStatus('ehStatus', '✓ ' + label + ' — reloading the diff…', 'ok');
+  await ehLoadPlan();
+}
+
+async function ehAssignOne(idx) {
+  const r = _ehUnassigned[idx];
+  const sel = document.querySelector('.eh-assign-type[data-idx="' + idx + '"]');
+  if (!r || !sel || !sel.value) { setStatus('ehStatus', 'Pick a type first.', 'warn'); return; }
+  try {
+    await ehWriteAssignments([{
+      source_id: String(r.sourceId), child_key: r.childKey || '',
+      type_key: sel.value, area_key: r.area || null,
+      source: sel.value === r.suggestedType ? 'accepted-suggestion' : 'operator',
+      assigned_by: 'slate',
+    }], 'assigned ' + r.title);
+  } catch (e) {
+    setStatus('ehStatus', 'Assign failed: ' + esc(e.message), 'err');
+  }
+}
+
+async function ehAcceptAllSuggestions() {
+  const rows = _ehUnassigned.filter(function (r) { return r.suggestedType; });
+  if (!rows.length) return;
+  if (!confirm('Accept the suggested type for ' + rows.length + ' event' +
+               (rows.length > 1 ? 's' : '') + '?\n\nYou can change any of them later.')) return;
+  try {
+    await ehWriteAssignments(rows.map(function (r) {
+      return { source_id: String(r.sourceId), child_key: r.childKey || '',
+               type_key: r.suggestedType, area_key: r.area || null,
+               source: 'accepted-suggestion', assigned_by: 'slate' };
+    }), 'accepted ' + rows.length + ' suggestions');
+  } catch (e) {
+    setStatus('ehStatus', 'Accept failed: ' + esc(e.message), 'err');
+  }
 }
 
 function ehRenderItems() {
