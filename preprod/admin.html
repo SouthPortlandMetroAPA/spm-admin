@@ -3629,6 +3629,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <button type="button" class="btn btn-primary btn-sm" id="ehApply" disabled>Apply selected</button>
         </div>
         <div id="ehCounts" class="hint"></div>
+        <div id="ehVenues"></div>
         <div id="ehWarn"></div>
         <div id="ehStatus" class="status-line"></div>
         <div id="ehItems"><div class="hint">Press &ldquo;Load pending changes&rdquo; to see the diff.</div></div>
@@ -3823,7 +3824,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.287';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.288';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -29898,8 +29899,163 @@ async function ehLoadTypes() {
   _ehTypes = await sb('GET', 'eventhorizon_types?select=key,label,grp&enabled=is.true&order=sort');
 }
 
+/* ── Venue picker ──────────────────────────────────────────────────────────
+   A day line like "8/29 - Midway and Wichita" names venues in the operator's
+   shorthand. The event's OWN primary address resolves for free, so only the
+   other venue reaches this panel.
+
+   It is a PICKER, never a matcher. League 553 holds 66 records named some
+   variant of "Wichita Town Pub" (56 of them misspelled "Pib"), the APA search
+   is a whole-string prefix match, and it is literal about punctuation —
+   "Dr Feelgoods" returns nothing while "Dr Feelgood" returns one of two real,
+   different bars. No automatic rule survives that. A human picks once and we
+   store the AddressID.
+
+   Candidates are grouped by street-number + city + ZIP: duplicates that agree
+   on the place collapse to one row, so the operator only ever chooses between
+   genuinely different locations. */
+const EH_ADDR_API = 'https://api.poolplayers.com/address/GetAddressByName/';
+const EH_LEAGUE = '553';
+let _ehVenueRows = [];
+
+function ehVenuePlaceKey(a) {
+  const num = (String(a.Address1 || '').match(/\d+/) || [''])[0];
+  return [num, a.City, String(a.Zip || '').replace(/-_+$/, '')]
+    .map(function (x) { return String(x || '').toLowerCase().trim(); }).join('|');
+}
+function ehVenueLabel(a) {
+  return [a.Name, a.Address1, a.City, String(a.Zip || '').replace(/-_+$/, '')]
+    .filter(Boolean).join(', ');
+}
+
+document.addEventListener('click', function (ev) {
+  const sBtn = ev.target.closest && ev.target.closest('.eh-venue-search');
+  if (sBtn) { ehVenueSearch(sBtn.getAttribute('data-name')); return; }
+  const pBtn = ev.target.closest && ev.target.closest('.eh-venue-pick');
+  if (pBtn) { ehVenuePick(pBtn); }
+});
+
+function ehRenderVenues(rows) {
+  _ehVenueRows = rows;
+  const host = document.getElementById('ehVenues');
+  if (!host) return;
+  if (!rows.length) { host.innerHTML = ''; return; }
+
+  /* One venue NAME may block several events (Midway blocks both Summer
+     triannuals). Ask once per name, not once per event. */
+  const byName = {};
+  rows.forEach(function (r) {
+    const k = String(r.venueName || '').trim();
+    if (!k) return;
+    (byName[k] = byName[k] || []).push(r);
+  });
+  const names = Object.keys(byName);
+
+  host.innerHTML =
+    '<div style="margin:10px 0;padding:10px 12px;border:1px solid #9ec5fe;background:#f4f9ff;border-radius:8px">' +
+      '<div style="font-weight:700;margin-bottom:2px">' + names.length +
+        ' venue' + (names.length === 1 ? '' : 's') + ' need an address</div>' +
+      '<div class="hint" style="margin-bottom:8px">These names appear in a day line but are not the ' +
+        'event&rsquo;s own venue, so there is nothing to resolve them against. Search APA and pick once &mdash; ' +
+        'the choice is remembered and reused everywhere that name appears.</div>' +
+      names.map(function (n) {
+        const blocked = byName[n];
+        return '<div style="padding:8px 0;border-top:1px solid #dbeafe">' +
+          '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+            '<div style="font-weight:600;min-width:110px">' + esc(n) + '</div>' +
+            '<input class="eh-venue-q" data-name="' + esc(n) + '" value="' + esc(n) + '" ' +
+              'placeholder="start of the venue name" style="flex:1;min-width:170px;max-width:280px">' +
+            '<button type="button" class="btn btn-outline btn-sm eh-venue-search" data-name="' + esc(n) + '">Search</button>' +
+            '<span class="hint">blocks ' + blocked.length + ' event' + (blocked.length === 1 ? '' : 's') + '</span>' +
+          '</div>' +
+          '<div class="hint" style="margin-top:3px">' +
+            blocked.map(function (b) { return esc(b.title); }).join('<br>') + '</div>' +
+          '<div class="eh-venue-hits" data-name="' + esc(n) + '" style="margin-top:6px"></div>' +
+        '</div>';
+      }).join('') +
+    '</div>';
+}
+
+async function ehVenueSearch(name) {
+  const box = document.querySelector('.eh-venue-hits[data-name="' + name.replace(/"/g, '&quot;') + '"]');
+  const input = document.querySelector('.eh-venue-q[data-name="' + name.replace(/"/g, '&quot;') + '"]');
+  if (!box) return;
+  const q = (input && input.value || name).trim();
+  if (!q) { box.innerHTML = '<span class="hint">Type something to search.</span>'; return; }
+  box.innerHTML = '<span class="hint">Searching APA&hellip;</span>';
+  let rows;
+  try {
+    const res = await fetch(EH_ADDR_API + encodeURIComponent(q) + '/' + EH_LEAGUE);
+    if (!res.ok) throw new Error('APA ' + res.status);
+    rows = await res.json();
+  } catch (e) {
+    box.innerHTML = '<span class="status-line shown err">Search failed: ' + esc(e.message) + '</span>';
+    return;
+  }
+  if (!rows.length) {
+    /* The prefix-match trap, stated plainly rather than left as a mystery. */
+    box.innerHTML = '<span class="hint">No matches. APA matches the <b>start</b> of the name only, ' +
+      'and punctuation counts &mdash; try a shorter prefix (&ldquo;Dr&rdquo; rather than ' +
+      '&ldquo;Dr Feelgoods&rdquo;).</span>';
+    return;
+  }
+  const groups = {};
+  rows.forEach(function (a) { const k = ehVenuePlaceKey(a); (groups[k] = groups[k] || []).push(a); });
+  const keys = Object.keys(groups);
+  box.innerHTML =
+    '<div class="hint" style="margin-bottom:4px">' + rows.length + ' record' + (rows.length === 1 ? '' : 's') +
+      ' &rarr; ' + keys.length + ' distinct location' + (keys.length === 1 ? '' : 's') +
+      (keys.length === 1 ? ' (the duplicates agree, any is correct)' : ' &mdash; these differ, pick carefully') + '</div>' +
+    keys.map(function (k) {
+      const g = groups[k];
+      /* Prefer the fullest name in the group for display; the address is
+         identical across it by construction. */
+      const best = g.slice().sort(function (x, y) {
+        return String(y.Name || '').length - String(x.Name || '').length; })[0];
+      return '<div style="display:flex;gap:8px;align-items:center;padding:3px 0">' +
+        '<button type="button" class="btn btn-primary btn-sm eh-venue-pick" ' +
+          'data-name="' + esc(name) + '" data-id="' + esc(best.AddressID) + '" ' +
+          'data-label="' + esc(ehVenueLabel(best)) + '" ' +
+          'data-dn="' + esc(best.Name || name) + '" ' +
+          'data-addr="' + esc([best.Address1, best.City, String(best.Zip || '').replace(/-_+$/, '')].filter(Boolean).join(', ')) + '">Use this</button>' +
+        '<span>' + esc(ehVenueLabel(best)) +
+          (g.length > 1 ? ' <span class="hint">(' + g.length + ' identical records)</span>' : '') + '</span>' +
+      '</div>';
+    }).join('');
+}
+
+async function ehVenuePick(btn) {
+  const key = String(btn.getAttribute('data-name') || '').trim().toLowerCase();
+  const id = parseInt(btn.getAttribute('data-id'), 10);
+  if (!key || !Number.isFinite(id)) return;
+  setStatus('ehStatus', 'Saving venue&hellip;', 'progress');
+  try {
+    await sb('POST', 'eventhorizon_venues?on_conflict=key', [{
+      key: key,
+      apa_address_id: id,
+      display_name: btn.getAttribute('data-dn') || null,
+      address: btn.getAttribute('data-addr') || null,
+      status: 'confirmed',
+      confirmed_by: 'slate',
+      confirmed_at: new Date().toISOString(),
+      note: 'picked in Slate from the APA address book',
+    }], { Prefer: 'resolution=merge-duplicates,return=representation' });
+    setStatus('ehStatus', 'Venue saved — reloading the plan…', 'ok');
+    await ehLoadPlan();
+  } catch (e) {
+    setStatus('ehStatus', 'Could not save venue: ' + esc(e.message), 'err');
+  }
+}
+
 function ehRenderUnassigned(j) {
-  const rows = j.unassigned || [];
+  /* Two different blockers arrive in the same array. A missing TYPE needs a
+     dropdown of known types; a missing VENUE needs an address search against
+     APA. Rendering them in one list would offer the wrong control for half
+     the rows. */
+  const all = j.unassigned || [];
+  const venueRows = all.filter(function (r) { return r.venueStatus === 'unknown'; });
+  ehRenderVenues(venueRows);
+  const rows = all.filter(function (r) { return r.venueStatus !== 'unknown'; });
   const host = document.getElementById('ehWarn');
   if (!rows.length) { host.innerHTML = ''; return; }
 
