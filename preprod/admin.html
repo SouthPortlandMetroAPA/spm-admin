@@ -29995,7 +29995,7 @@ async function ehVenueSearch(name) {
   if (!rows.length) {
     /* The prefix-match trap, stated plainly rather than left as a mystery. */
     box.innerHTML = '<span class="hint">No matches. APA matches the <b>start</b> of the name only, ' +
-      'and punctuation counts &mdash; try a shorter prefix (&ldquo;Dr&rdquo; rather than ' +
+      'and punctuation counts &mdash; try a shorter prefix &mdash; &ldquo;Dr&rdquo; rather than ' +
       '&ldquo;Dr Feelgoods&rdquo;).</span>';
     return;
   }
@@ -30052,10 +30052,10 @@ function ehRenderUnassigned(j) {
      dropdown of known types; a missing VENUE needs an address search against
      APA. Rendering them in one list would offer the wrong control for half
      the rows. */
-  const all = j.unassigned || [];
-  const venueRows = all.filter(function (r) { return r.venueStatus === 'unknown'; });
+  const allRows = j.unassigned || [];
+  const venueRows = allRows.filter(function (r) { return r.venueStatus === 'unknown'; });
   ehRenderVenues(venueRows);
-  const rows = all.filter(function (r) { return r.venueStatus !== 'unknown'; });
+  const rows = allRows.filter(function (r) { return r.venueStatus !== 'unknown'; });
   const host = document.getElementById('ehWarn');
   if (!rows.length) { host.innerHTML = ''; return; }
 
