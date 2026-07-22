@@ -5637,7 +5637,10 @@ async function nrLoadTeams() {
   /* PostgREST caps one response at 1000 rows and the two sessions
      together exceed that — page via sbGetAll (needs a stable order). */
   const rows = await sbGetAll(
-    'teams?select=id,team_number,team_name,division:divisions!inner(id,session_id,name,format,operator_id)'
+    /* division_number + night_of_play are for the Session metrics division
+       table (3.291). Without them that table renders blank identifiers — the
+       columns an operator needs to know WHICH division is thin. */
+    'teams?select=id,team_number,team_name,division:divisions!inner(id,session_id,name,format,operator_id,division_number,night_of_play)'
     + '&division.session_id=in.(' + ids.join(',') + ')&order=id.asc');
   const all = rows || [];
   _nr.teams   = all.filter(t => t.division.session_id === currentSession.id);
@@ -7094,7 +7097,7 @@ async function nrRenderMetrics(rows) {
   let h = '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">'
     + tile(floor, 'confirmed for next session',
         'teams that have said yes' + (newConfirmed ? ', incl. ' + newConfirmed + ' new' : '') + '. <strong>Plan on this number.</strong>')
-    + tile(ceiling, 'ceiling — <em>projected</em>',
+    + tile(ceiling, 'ceiling — projected',
         'only if <strong>every</strong> undecided and silent team returns', true)
     + tile(yesRate + '%', 'said yes, of those who answered',
         answered + ' of ' + tracked + ' teams have given a definitive answer')
