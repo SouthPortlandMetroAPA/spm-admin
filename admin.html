@@ -556,6 +556,19 @@ input:focus, select:focus, textarea:focus {
   color: var(--spm-accent);
   margin-bottom: 2px;
 }
+/* Click-to-record affordances in the Polls tab. A player's NAME stays looking
+   like text until hovered — the results table is read far more often than it is
+   edited, so an always-on button treatment on every row would shout over the
+   data. Focus state is always visible, because keyboard users get no hover. */
+.pl-rec {
+  background: none; border: 0; padding: 0; font: inherit; color: inherit;
+  cursor: pointer; text-align: left; border-bottom: 1px dashed transparent;
+}
+.pl-rec:hover { color: var(--spm-accent, #0031a1); border-bottom-color: currentColor; }
+.pl-rec:focus-visible,
+.pl-sq:focus-visible { outline: 2px solid var(--spm-accent, #0031a1); outline-offset: 2px; }
+.pl-sq:hover { transform: scale(1.35); }
+
 .ehq-paste-box {
   width: 100%;
   min-height: 72px;
@@ -3824,7 +3837,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.288';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.289';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -7138,7 +7151,8 @@ async function plLoad() {
         + '<th style="text-align:left;padding:6px 8px;border-bottom:2px solid var(--border)">Comment</th>'
         + '<th style="text-align:left;padding:6px 8px;border-bottom:2px solid var(--border)">Updated</th></tr>'
         + rows.map(r => '<tr>'
-            + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)"><strong>' + esc(r.member_name) + '</strong></td>'
+            + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)"><strong>'
+              + plRecordBtn(r.member_number, r.member_name, 'Change ' + r.member_name + '’s answer') + '</strong></td>'
             + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)" class="hint">' + esc(r.team_name || '') + '</td>'
             + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">' + esc(lbl(r.choice))
             + (r.extras && r.extras.recorded_by ? ' <span class="hint" style="font-size:0.72rem">recorded by M&amp;P</span>' : '') + '</td>'
@@ -7148,6 +7162,7 @@ async function plLoad() {
             + '</tr>').join('')
         + '</table>'
       : '<p class="hint">No responses yet.</p>';
+    plWireRecord(document.getElementById('plVoters'), poll);
     const roster = await plRosterByTeam(poll);
     plRenderTeams(poll, rows || [], roster);
     plRenderMissing(poll, rows || [], roster);
@@ -7165,13 +7180,37 @@ function plRenderMissing(poll, rows, roster) {
   const missing = [];
   for (const t of roster.teams) for (const m of t.members) {
     if (voted.has(m.apa) || seen.has(m.apa)) continue;
-    seen.add(m.apa); missing.push({ name: m.name, team: t.name });
+    seen.add(m.apa); missing.push({ apa: m.apa, name: m.name, team: t.name });
   }
+  /* Each name records that player's answer — this is the ADD path, for the
+     ones who answer by text or in the bar. plRecordBtn keeps every entry
+     point in the tab looking and behaving the same. */
   box.innerHTML = missing.length
     ? '<div class="hint" style="margin-bottom:4px">Still to hear from ' + missing.length + ':</div>'
-      + missing.map(m => '<div style="font-size:0.82rem;padding:2px 0">' + esc(m.name)
+      + missing.map(m => '<div style="font-size:0.82rem;padding:2px 0">'
+          + plRecordBtn(m.apa, m.name, 'Record an answer for ' + m.name)
           + ' <span class="hint">' + esc(m.team || '') + '</span></div>').join('')
     : '<p class="hint">✓ Everyone eligible has voted.</p>';
+  plWireRecord(box, poll);
+}
+
+/* ── click-to-record wiring (shared by all three results views) ──────────────
+   ONE modal, ONE upsert: every entry point calls the same plOrRecord() the
+   Invite list uses, so an answer recorded from the team view is byte-identical
+   to one recorded from the outreach row. Rendering is string-concatenation
+   here, so the handler is attached afterwards by scanning for the data
+   attribute rather than with inline onclick — inline handlers would need the
+   player's name escaped for JS inside HTML inside a template string, which is
+   exactly how quoting bugs get in. */
+function plRecordBtn(apa, label, title) {
+  return '<button type="button" class="pl-rec" data-plrec="' + esc(String(apa)) + '"'
+    + ' title="' + esc(title || ('Record an answer for ' + label)) + '">' + esc(label) + '</button>';
+}
+function plWireRecord(root, poll) {
+  if (!root) return;
+  root.querySelectorAll('[data-plrec]').forEach(el => {
+    el.onclick = (e) => { e.preventDefault(); e.stopPropagation(); plOrRecord(poll, el.dataset.plrec); };
+  });
 }
 
 /* ── Team view, 3.250. One row per roster team, one square per rostered
@@ -7259,7 +7298,7 @@ function plRenderTeams(poll, rows, roster) {
   }
   const models = [];
   for (const t of roster.teams) {
-    const mem = t.members.map(m => ({ name: m.name, vote: voteByApa.get(m.apa) || null }));
+    const mem = t.members.map(m => ({ apa: m.apa, name: m.name, vote: voteByApa.get(m.apa) || null }));
     const counts = {}; let votes = 0, tue = 0;
     for (const m of mem) if (m.vote) {
       votes++; counts[m.vote.choice] = (counts[m.vote.choice] || 0) + 1;
@@ -7272,7 +7311,7 @@ function plRenderTeams(poll, rows, roster) {
     const counts = {}; let tue = 0;
     for (const r of list) { counts[r.choice] = (counts[r.choice] || 0) + 1; if (r.extras && r.extras.tuesday) tue++; }
     models.push({ name: name + ' — not on the division roster', number: '',
-                  mem: list.map(r => ({ name: r.member_name, vote: r })),
+                  mem: list.map(r => ({ apa: r.member_number, name: r.member_name, vote: r })),
                   counts, votes: list.length, roster: list.length, tue,
                   badge: plTeamBadge(counts, list.length, poles) });
   }
@@ -7313,9 +7352,23 @@ function plRenderTeams(poll, rows, roster) {
         + '<span style="width:11px;height:11px;border-radius:3px;background:' + color[k] + '"></span>' + esc(lbl(k)) + '</span>').join('')
     + '<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:11px;height:11px;border-radius:3px;border:1px solid #b9b7ae;background:transparent;box-sizing:border-box"></span>no vote yet</span>'
     + '</div>';
-  const sqHtml = (name, choice) => choice
-    ? '<span title="' + esc(name) + ' — ' + esc(lbl(choice)) + '" style="display:inline-block;width:13px;height:13px;border-radius:3px;margin:0 2px 2px 0;background:' + (color[choice] || PL_NEUTRAL) + '"></span>'
-    : '<span title="' + esc(name) + ' — no vote yet" style="display:inline-block;width:13px;height:13px;border-radius:3px;margin:0 2px 2px 0;border:1px solid #b9b7ae;background:transparent;box-sizing:border-box"></span>';
+  /* Each square is a button for that one player: filled = change their answer,
+     empty = add one. The title carries the name because the square itself is
+     13px and carries no text — it is the only label a mouse user or a screen
+     reader gets, so it must say who AND what clicking does. Squares without an
+     apa (shouldn't happen; belt and braces) stay inert spans rather than
+     rendering a button that would open the modal for `undefined`. */
+  const sqBase = 'display:inline-block;width:13px;height:13px;border-radius:3px;margin:0 2px 2px 0;padding:0;';
+  const sqHtml = (apa, name, choice) => {
+    const fill = choice
+      ? 'background:' + (color[choice] || PL_NEUTRAL) + ';border:0;'
+      : 'border:1px solid #b9b7ae;background:transparent;box-sizing:border-box;';
+    const what = choice ? esc(lbl(choice)) + ' — click to change' : 'no vote yet — click to record one';
+    const t = esc(name) + ' — ' + what;
+    if (!apa) return '<span title="' + t + '" style="' + sqBase + fill + '"></span>';
+    return '<button type="button" class="pl-sq" data-plrec="' + esc(String(apa)) + '"'
+      + ' title="' + t + '" aria-label="' + t + '" style="' + sqBase + fill + 'cursor:pointer"></button>';
+  };
   const badgeHtml = b => {
     if (b.kind === 'none') return '<span class="hint">no votes yet</span>';
     if (b.kind === 'flex') return '<span style="font-weight:700;color:#52514e">Flexible</span>';
@@ -7336,7 +7389,7 @@ function plRenderTeams(poll, rows, roster) {
     const td = c => '<td style="padding:6px 8px;' + bd + '">' + c + '</td>';
     return '<tr>'
       + td('<strong>' + esc(m.name) + '</strong>' + (m.number ? ' <span class="hint">#' + esc(String(m.number)) + '</span>' : ''))
-      + td(sorted.map(p => sqHtml(p.name, p.vote ? p.vote.choice : null)).join(''))
+      + td(sorted.map(p => sqHtml(p.apa, p.name, p.vote ? p.vote.choice : null)).join(''))
       + td('<span class="hint">' + (order.filter(k => m.counts[k]).map(k => m.counts[k] + ' ' + esc(k)).join(' · ') || '—') + '</span>')
       + td(m.votes + '/' + m.roster)
       + td(badgeHtml(m.badge))
@@ -7347,7 +7400,7 @@ function plRenderTeams(poll, rows, roster) {
           + sorted.filter(p => p.vote).map(p =>
               '<span style="display:inline-flex;align-items:center;gap:5px;margin-right:14px;font-size:0.78rem">'
               + '<span style="width:9px;height:9px;border-radius:2px;background:' + (color[p.vote.choice] || PL_NEUTRAL) + '"></span>'
-              + esc(p.name) + ' — ' + esc(String(p.vote.choice)) + '</span>').join('')
+              + plRecordBtn(p.apa, p.name, 'Change ' + p.name + '’s answer') + ' — ' + esc(String(p.vote.choice)) + '</span>').join('')
           + '</td></tr>'
         : '');
   }).join('');
@@ -7356,6 +7409,7 @@ function plRenderTeams(poll, rows, roster) {
     + '<table style="width:100%;border-collapse:collapse;font-size:0.84rem">'
     + '<tr>' + th('Team') + th('Ballots') + th('Tally') + th('Voted') + th('Read') + (hasTue ? th('Tue?') : '') + '</tr>'
     + rowsHtml + '</table>';
+  plWireRecord(box, poll);
 }
 
 /* ── Participation outreach (3.252, T1 — brief
@@ -7516,11 +7570,14 @@ async function plOrEmailOne(poll, apa) {
 function plOrRecord(poll, apa) {
   const m = _plOr.all.find(x => x.apa === apa);
   const prev = _plOr.resp && _plOr.resp.get(apa);
+  /* One name, resolved once, used by the heading, the status line and the
+     saved row — so they can never disagree about who was just edited. */
+  const who = (m && m.name) || (prev && prev.member_name) || apa;
   const x = poll.extras || {};
   const wrap = document.getElementById('nrModalWrap');
   wrap.innerHTML = '<div style="position:fixed;inset:0;background:rgba(10,20,40,0.55);z-index:9998;display:flex;align-items:center;justify-content:center;padding:20px">'
     + '<div style="background:#fff;border-radius:12px;padding:22px;max-width:480px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.35)">'
-    + '<div style="font-weight:800;font-size:1.05rem;margin-bottom:4px">Record answer — ' + esc(m ? m.name : apa) + '</div>'
+    + '<div style="font-weight:800;font-size:1.05rem;margin-bottom:4px">Record answer — ' + esc(who) + '</div>'
     + '<div class="hint" style="margin-bottom:10px">Saves exactly like their own vote, marked as recorded by you. They can still change it later.</div>'
     + (poll.options || []).map(o =>
         '<label style="display:block;padding:4px 0"><input type="radio" name="plorRec" value="' + esc(o.key) + '"'
@@ -7547,14 +7604,22 @@ function plOrRecord(poll, apa) {
     if (x.checkbox) extras.tuesday = !!(document.getElementById('plorRecTue') || {}).checked;
     wrap.innerHTML = '';
     try {
+      /* Name/team fall back to the EXISTING response before the APA number.
+         This UPSERT rewrites the whole row, and _plOr.all only holds the
+         division roster. Called from the outreach list that was always a hit;
+         called from the voters table it is reachable for an OFF-ROSTER voter,
+         where `m` is undefined and the old code wrote member_name = the APA
+         number and nulled the team — silently degrading the very row the
+         operator was trying to correct. Prefer roster (freshest), then what
+         the row already says, then the number as a last resort. */
       await sb('POST', 'poll_responses?on_conflict=poll_id,member_number', [{
         poll_id: poll.id, member_number: apa,
-        member_name: m ? m.name : apa,
-        team_id: m && m.teamId ? m.teamId : null,
-        team_name: m ? m.team : null,
+        member_name: who,
+        team_id: (m && m.teamId) || (prev && prev.team_id) || null,
+        team_name: (m && m.team) || (prev && prev.team_name) || null,
         choice: sel.value, extras: extras, updated_at: new Date().toISOString()
       }], { 'Prefer': 'resolution=merge-duplicates,return=minimal' });
-      setStatus('plStatus', '✓ Recorded for ' + (m ? m.name : apa) + '.', 'ok');
+      setStatus('plStatus', '✓ Recorded for ' + who + '.', 'ok');
     } catch (e) { setStatus('plStatus', 'Record failed: ' + e.message, 'err'); }
     await plLoad();
   };
