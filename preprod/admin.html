@@ -3845,7 +3845,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.291';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.292';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -7076,6 +7076,29 @@ async function nrRenderMetrics(rows) {
      returning base, so they are added on top, never mixed into the rates. */
   let intents = [];
   try { intents = await sb('GET', 'next_reg_new?select=id,status') || []; } catch (e) { /* additive only */ }
+
+  /* DATA-COMPLETENESS CHECK — must run before any count is shown.
+     A division with no Team Screen loaded has ZERO team rows, so it is
+     INVISIBLE in _nr.teams: "this session" and every projection silently
+     undercount by exactly those teams, and the drop reads as teams leaving
+     when it is really a missing upload. This is the 0716 escape class — an
+     absence must never name its own cause — so we fetch the division LIST
+     directly (not derived from teams) to see which exist but are empty, and
+     size the gap from the SAME divisions' prior-session rosters. */
+  const curSid = (currentSession && currentSession.id)
+    || (_nr.teams[0] && _nr.teams[0].division && _nr.teams[0].division.session_id);
+  let allCurDivs = [];
+  try {
+    allCurDivs = await sb('GET', 'divisions?select=id,division_number,name,night_of_play,format'
+      + '&operator_id=eq.1&session_id=eq.' + curSid + '&order=division_number') || [];
+  } catch (e) { /* fall back to teams-derived divisions below */ }
+  const curTeamCount = new Map();
+  for (const t of _nr.teams) if (t.division) curTeamCount.set(t.division.id, (curTeamCount.get(t.division.id) || 0) + 1);
+  const priorByDivNo = {};
+  for (const t of _nr.teamsN1) if (t.division)
+    priorByDivNo[t.division.division_number] = (priorByDivNo[t.division.division_number] || 0) + 1;
+  const gapDivs = allCurDivs.filter(d => !curTeamCount.get(d.id));
+  const gapPriorTeams = gapDivs.reduce((s, d) => s + (priorByDivNo[d.division_number] || 0), 0);
   const newConfirmed = intents.filter(i => i.status === 'confirmed').length;
   const newOpen = intents.filter(i => i.status === 'new' || i.status === 'contacted').length;
 
@@ -7094,7 +7117,26 @@ async function nrRenderMetrics(rows) {
     + '<div style="font-weight:700;font-size:0.8rem">' + esc(label) + '</div>'
     + '<div class="hint" style="font-size:0.74rem;margin-top:2px">' + sub + '</div></div>';
 
-  let h = '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">'
+  let h = '';
+  /* Some divisions ran last session but have zero teams this session. That has
+     TWO possible causes I cannot tell apart from here — the division was
+     dropped, or its Team Screen simply isn't loaded yet — so the note states
+     only what is observable (ran then, not now) and names both, rather than
+     asserting one. It does NOT claim the current numbers are wrong: if the
+     division was dropped, they are exactly right. It exists so the prior→this
+     drop is not mistaken for teams quietly leaving continuing divisions. */
+  if (gapDivs.length) {
+    h += '<div style="border-left:4px solid #6b7280;background:#f7f7f8;padding:8px 12px;margin-bottom:12px;border-radius:0 6px 6px 0">'
+      + '<div style="font-weight:800;font-size:0.85rem">' + gapDivs.length + ' division'
+      + (gapDivs.length === 1 ? '' : 's') + ' ran last session but ' + (gapDivs.length === 1 ? 'is' : 'are') + ' not running this session</div>'
+      + '<div class="hint" style="font-size:0.78rem;margin-top:2px">'
+      + 'Either dropped for this session, or the Team Screen isn’t loaded yet — Slate can’t tell which. '
+      + (gapPriorTeams ? 'They held <strong>' + gapPriorTeams + ' teams</strong> last session, so ' : 'So ')
+      + 'part of the prior→this drop below is these divisions leaving, not teams quitting the ones still running: '
+      + gapDivs.map(d => esc(String(d.division_number)) + ' ' + esc(d.name || '')).join(' · ')
+      + '.</div></div>';
+  }
+  h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">'
     + tile(floor, 'confirmed for next session',
         'teams that have said yes' + (newConfirmed ? ', incl. ' + newConfirmed + ' new' : '') + '. <strong>Plan on this number.</strong>')
     + tile(ceiling, 'ceiling — projected',
@@ -7141,7 +7183,15 @@ async function nrRenderMetrics(rows) {
   }
   const famNames = Object.keys(fams).sort();
   const maxV = Math.max(1, ...famNames.map(k => Math.max(fams[k].prior, fams[k].cur, fams[k].ceil)));
-  const w = (n) => Math.round(n / maxV * 100);
+  /* PIXELS, not percent — this is load-bearing. The three data columns are
+     table cells of DIFFERENT widths (the "Next session" header is far longer),
+     so a bar sized as a % of its own cell put the same value at different pixel
+     lengths per column: 218 in the wide next-column rendered LONGER than 254 in
+     the narrow prior-column. That defeats the whole reason the three sit side
+     by side. A fixed pixel scale shared across all three makes a value map to
+     the same length everywhere — the one-axis rule. */
+  const BARPX = 150;
+  const w = (n) => Math.round(n / maxV * BARPX);
   h += '<div style="font-weight:700;font-size:0.85rem;margin-bottom:2px">By format</div>'
     + '<div class="hint" style="font-size:0.75rem;margin-bottom:6px">Solid = actually happened. '
     + '<span style="display:inline-block;width:22px;height:9px;vertical-align:middle;border:1px solid #c9c9c9;'
@@ -7156,14 +7206,14 @@ async function nrRenderMetrics(rows) {
     const f = fams[k];
     const cell = (n, style) => '<td style="padding:4px 8px;border-bottom:1px solid var(--border)">'
       + '<div style="display:flex;align-items:center;gap:6px">'
-      + '<div style="width:' + Math.max(w(n), n ? 2 : 0) + '%;height:11px;border-radius:2px;' + style + '"></div>'
+      + '<div style="width:' + Math.max(w(n), n ? 3 : 0) + 'px;height:11px;border-radius:2px;flex:none;' + style + '"></div>'
       + '<span style="font-variant-numeric:tabular-nums">' + n + '</span></div></td>';
     h += '<tr><td style="padding:4px 8px;border-bottom:1px solid var(--border)"><strong>' + esc(k) + '</strong></td>'
       + cell(f.prior, 'background:#c8ccd2')
       + cell(f.cur, 'background:#0031a1')
       + '<td style="padding:4px 8px;border-bottom:1px solid var(--border)">'
       + '<div style="display:flex;align-items:center;gap:6px">'
-      + '<div style="width:' + Math.max(w(f.ceil), f.ceil ? 2 : 0) + '%;height:11px;border-radius:2px;position:relative;'
+      + '<div style="width:' + Math.max(w(f.ceil), f.ceil ? 3 : 0) + 'px;height:11px;border-radius:2px;position:relative;flex:none;'
       + 'background:repeating-linear-gradient(45deg,#fff,#fff 4px,#bcd0f0 4px,#bcd0f0 8px);border:1px solid #9fb8e0">'
       + '<div style="position:absolute;left:0;top:0;bottom:0;width:' + (f.ceil ? Math.round(f.floor / f.ceil * 100) : 0)
       + '%;background:#16a34a;border-radius:1px"></div></div>'
@@ -7174,10 +7224,13 @@ async function nrRenderMetrics(rows) {
     + '8-Ball and 9-Ball are counted together per family: the same players enter both, so splitting them '
     + 'would make a shift in format mix look like a change in size.</div>';
 
-  /* Divisions — the unit that actually gets scheduled, and the one that fails. */
-  const cur = _nr.teams.filter(t => t.division && t.division.operator_id === 1);
+  /* Divisions — the unit that actually gets scheduled, and the one that fails.
+     Built from the DIVISION list (allCurDivs), NOT from teams: a division with
+     no Team Screen has no team rows, so a teams-derived map can never see the
+     empty ones — which are exactly the ones this section exists to flag. */
   const dmap = new Map();
-  for (const t of cur) {
+  for (const d of allCurDivs) dmap.set(d.id, { d: d, n: 0, playing: 0, not_playing: 0, undecided: 0, unanswered: 0 });
+  for (const t of _nr.teams) {
     const d = t.division; if (!d) continue;
     if (!dmap.has(d.id)) dmap.set(d.id, { d: d, n: 0, playing: 0, not_playing: 0, undecided: 0, unanswered: 0 });
     const e = dmap.get(d.id); e.n++;
@@ -7185,9 +7238,6 @@ async function nrRenderMetrics(rows) {
     if (st && e[st] != null) e[st]++;
   }
   const divs = [...dmap.values()];
-  /* A division with NO teams on file is a MISSING UPLOAD, not a dying division.
-     Calling it "at risk" would repeat the escape where an absence was read as
-     its own cause. It gets its own group, named for what it actually is. */
   const gap = divs.filter(e => e.n === 0);
   const live = divs.filter(e => e.n > 0).sort((a, b) => a.playing - b.playing
     || String(a.d.division_number).localeCompare(String(b.d.division_number)));
@@ -7213,10 +7263,9 @@ async function nrRenderMetrics(rows) {
   h += '</table>';
   if (gap.length) {
     h += '<div style="margin-top:10px;border-left:3px solid #6b7280;background:#f7f7f8;padding:6px 10px">'
-      + '<div style="font-weight:700;font-size:0.8rem">' + gap.length + ' division'
-      + (gap.length === 1 ? '' : 's') + ' with no teams on file &mdash; not the same as no interest</div>'
-      + '<div class="hint" style="font-size:0.75rem">These have zero teams loaded, which means a Team Screen was never '
-      + 'imported for them. That is a data gap, not a reading on the division: '
+      + '<div style="font-weight:700;font-size:0.8rem">Not listed above: ' + gap.length + ' division'
+      + (gap.length === 1 ? '' : 's') + ' with no teams this session</div>'
+      + '<div class="hint" style="font-size:0.75rem">Dropped, or not yet loaded — left out of the ranking rather than shown as empty: '
       + gap.map(e => esc(String(e.d.division_number)) + ' ' + esc(e.d.name || '')).join(' &middot; ') + '</div></div>';
   }
 
