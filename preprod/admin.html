@@ -3520,12 +3520,22 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <details class="card">
         <summary style="cursor:pointer;display:flex;align-items:center;gap:10px;flex-wrap:wrap"><h2 style="margin:0;font-size:1.05rem;display:inline">Tracker</h2><span class="hint" id="nrCounts"></span></summary>
         <div style="height:8px"></div>
-        <div id="nrTrkFilters" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+        <div id="nrTrkFilters" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;align-items:center">
+          <span class="hint" style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em">Status</span>
           <button type="button" class="btn btn-primary btn-sm" data-trkf="all">All</button>
           <button type="button" class="btn btn-outline btn-sm" data-trkf="playing">Playing</button>
           <button type="button" class="btn btn-outline btn-sm" data-trkf="not_playing">Not playing</button>
           <button type="button" class="btn btn-outline btn-sm" data-trkf="undecided">Deciding</button>
           <button type="button" class="btn btn-outline btn-sm" data-trkf="unanswered">Unanswered</button>
+        </div>
+        <div id="nrTrkFmtFilters" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;align-items:center">
+          <span class="hint" style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em">Format</span>
+          <button type="button" class="btn btn-primary btn-sm" data-trkfmt="all">All</button>
+          <button type="button" class="btn btn-outline btn-sm" data-trkfmt="Open &mdash; 8+9">Open</button>
+          <button type="button" class="btn btn-outline btn-sm" data-trkfmt="Doubles &mdash; 8+9">Doubles</button>
+          <button type="button" class="btn btn-outline btn-sm" data-trkfmt="Masters">Masters</button>
+          <button type="button" class="btn btn-outline btn-sm" data-trkfmt="Ladies">Ladies</button>
+          <span class="hint" id="nrTrkCount" style="margin-left:6px;font-size:0.8rem"></span>
         </div>
         <div class="status-line" id="nrGridStatus"></div>
         <div id="nrGrid"></div>
@@ -3845,7 +3855,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.292';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.293';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -5566,6 +5576,18 @@ async function nrInit() {
         nrLoadTracker();
       };
     });
+    /* Format filter — combines with the status filter (both narrow the list).
+       Keyed on the family strings nrMxFamily returns; the &mdash; entities in
+       the markup decode to the same em-dash those strings use. */
+    _nr.trackerFmtFilter = 'all';
+    document.querySelectorAll('#nrTrkFmtFilters button').forEach(b => {
+      b.onclick = () => {
+        _nr.trackerFmtFilter = b.dataset.trkfmt;
+        document.querySelectorAll('#nrTrkFmtFilters button').forEach(x =>
+          x.className = 'btn btn-sm ' + (x === b ? 'btn-primary' : 'btn-outline'));
+        nrLoadTracker();
+      };
+    });
     sel.onchange = () => { _nr.targetId = Number(sel.value); nrLoadTracker(); nrLoadIntents(); nrLoadOutreach(); };
     _nr.inited = true;
   }
@@ -6960,9 +6982,30 @@ async function nrLoadTracker() {
         : st === 'undecided'
           ? '<span style="background:#ede9fe;color:#6d28d9;padding:1px 8px;border-radius:999px;font-weight:700;font-size:0.72rem">STILL DECIDING</span>'
           : '<span style="background:#f3f4f6;color:#6b7280;padding:1px 8px;border-radius:999px;font-weight:700;font-size:0.72rem">UNANSWERED</span>';
-    const shown = (rows || []).filter(r => !_nr.trackerFilter || _nr.trackerFilter === 'all' || r.status === _nr.trackerFilter);
-    document.getElementById('nrGrid').innerHTML = (rows || []).length
-      ? '<table style="width:100%;border-collapse:collapse;font-size:0.84rem">'
+    /* Format filter resolves each row's family through team → division →
+       format (r.format holds the division NAME, and is null on prior-session
+       rows, so it can't be used directly). Same nrMxFamily the metrics use, so
+       the two never disagree about which family a team is in. */
+    const _famByTeam = new Map();
+    for (const t of _nr.teams.concat(_nr.teamsN1)) if (t.division) _famByTeam.set(t.id, nrMxFamily(t.division.format));
+    const fmtFilter = _nr.trackerFmtFilter || 'all';
+    const shown = (rows || []).filter(r =>
+      (!_nr.trackerFilter || _nr.trackerFilter === 'all' || r.status === _nr.trackerFilter)
+      && (fmtFilter === 'all' || _famByTeam.get(r.team_id) === fmtFilter));
+    /* Count reflects the FILTER, so the operator can see how many a filter
+       matched — including zero, which reads as an empty table otherwise. */
+    const _cntEl = document.getElementById('nrTrkCount');
+    if (_cntEl) {
+      const filtered = (_nr.trackerFilter && _nr.trackerFilter !== 'all') || fmtFilter !== 'all';
+      _cntEl.textContent = filtered
+        ? shown.length + ' of ' + (rows || []).length + ' shown'
+        : (rows || []).length + ' teams';
+    }
+    document.getElementById('nrGrid').innerHTML = !((rows || []).length)
+      ? '<p class="hint">Nothing tracked yet — paste a Nexus report above.</p>'
+      : !shown.length
+      ? '<p class="hint">No teams match this filter.</p>'
+      : '<table style="width:100%;border-collapse:collapse;font-size:0.84rem">'
         + '<tr><th style="text-align:left;padding:6px 8px;border-bottom:2px solid var(--border)">Team</th>'
         + '<th style="text-align:left;padding:6px 8px;border-bottom:2px solid var(--border)">Division</th>'
         + '<th style="text-align:left;padding:6px 8px;border-bottom:2px solid var(--border)">Status</th>'
@@ -6988,8 +7031,7 @@ async function nrLoadTracker() {
               + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)" class="hint">' + esc(String(r.updated_at || '').slice(0, 16).replace('T', ' ')) + '</td>'
               + '</tr>';
           }).join('')
-        + '</table>'
-      : '<p class="hint">Nothing tracked yet \u2014 paste a Nexus report above.</p>';
+        + '</table>';
     document.querySelectorAll('#nrGrid button[data-trkset]').forEach(b => {
       b.onclick = () => nrTrkSetStatus(Number(b.dataset.trkset), b.dataset.trkstatus);
     });
