@@ -3509,15 +3509,33 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         <div class="status-line" id="nrOrStatus"></div>
         <div id="nrOrList"><p class="hint">Loading&hellip;</p></div>
       </details>
+      <!-- Session metrics (3.291). Deliberately ABOVE the tracker: the tracker is
+           the working list, this is the read on it. Renders from the same rows
+           the tracker already loaded — one definition, two surfaces, so the two
+           can never disagree about a count. -->
+      <details class="card" id="nrMetricsCard" style="margin-bottom:14px">
+        <summary style="cursor:pointer;display:flex;align-items:center;gap:10px;flex-wrap:wrap"><h2 style="margin:0;font-size:1.05rem;display:inline">Session metrics</h2><span class="hint" id="nrMxStamp"></span></summary>
+        <div id="nrMx"><p class="hint">Loading&hellip;</p></div>
+      </details>
       <details class="card">
         <summary style="cursor:pointer;display:flex;align-items:center;gap:10px;flex-wrap:wrap"><h2 style="margin:0;font-size:1.05rem;display:inline">Tracker</h2><span class="hint" id="nrCounts"></span></summary>
         <div style="height:8px"></div>
-        <div id="nrTrkFilters" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+        <div id="nrTrkFilters" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;align-items:center">
+          <span class="hint" style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em">Status</span>
           <button type="button" class="btn btn-primary btn-sm" data-trkf="all">All</button>
           <button type="button" class="btn btn-outline btn-sm" data-trkf="playing">Playing</button>
           <button type="button" class="btn btn-outline btn-sm" data-trkf="not_playing">Not playing</button>
           <button type="button" class="btn btn-outline btn-sm" data-trkf="undecided">Deciding</button>
           <button type="button" class="btn btn-outline btn-sm" data-trkf="unanswered">Unanswered</button>
+        </div>
+        <div id="nrTrkFmtFilters" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;align-items:center">
+          <span class="hint" style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em">Format</span>
+          <button type="button" class="btn btn-primary btn-sm" data-trkfmt="all">All</button>
+          <button type="button" class="btn btn-outline btn-sm" data-trkfmt="Open &mdash; 8+9">Open</button>
+          <button type="button" class="btn btn-outline btn-sm" data-trkfmt="Doubles &mdash; 8+9">Doubles</button>
+          <button type="button" class="btn btn-outline btn-sm" data-trkfmt="Masters">Masters</button>
+          <button type="button" class="btn btn-outline btn-sm" data-trkfmt="Ladies">Ladies</button>
+          <span class="hint" id="nrTrkCount" style="margin-left:6px;font-size:0.8rem"></span>
         </div>
         <div class="status-line" id="nrGridStatus"></div>
         <div id="nrGrid"></div>
@@ -3837,7 +3855,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.289';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.294';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -5558,6 +5576,18 @@ async function nrInit() {
         nrLoadTracker();
       };
     });
+    /* Format filter — combines with the status filter (both narrow the list).
+       Keyed on the family strings nrMxFamily returns; the &mdash; entities in
+       the markup decode to the same em-dash those strings use. */
+    _nr.trackerFmtFilter = 'all';
+    document.querySelectorAll('#nrTrkFmtFilters button').forEach(b => {
+      b.onclick = () => {
+        _nr.trackerFmtFilter = b.dataset.trkfmt;
+        document.querySelectorAll('#nrTrkFmtFilters button').forEach(x =>
+          x.className = 'btn btn-sm ' + (x === b ? 'btn-primary' : 'btn-outline'));
+        nrLoadTracker();
+      };
+    });
     sel.onchange = () => { _nr.targetId = Number(sel.value); nrLoadTracker(); nrLoadIntents(); nrLoadOutreach(); };
     _nr.inited = true;
   }
@@ -5629,7 +5659,10 @@ async function nrLoadTeams() {
   /* PostgREST caps one response at 1000 rows and the two sessions
      together exceed that — page via sbGetAll (needs a stable order). */
   const rows = await sbGetAll(
-    'teams?select=id,team_number,team_name,division:divisions!inner(id,session_id,name,format,operator_id)'
+    /* division_number + night_of_play are for the Session metrics division
+       table (3.291). Without them that table renders blank identifiers — the
+       columns an operator needs to know WHICH division is thin. */
+    'teams?select=id,team_number,team_name,division:divisions!inner(id,session_id,name,format,operator_id,division_number,night_of_play)'
     + '&division.session_id=in.(' + ids.join(',') + ')&order=id.asc');
   const all = rows || [];
   _nr.teams   = all.filter(t => t.division.session_id === currentSession.id);
@@ -6665,9 +6698,23 @@ async function nrOrSetStatus(teamIds, status) {
     return { value: m.member_number,
              label: (m.role === 'Captain' ? '★ ' : m.role === 'Co-Captain' ? '☆ ' : '') + nm };
   }));
+  /* Name EVERY team being changed, not just the first. A pair write moves two
+     tracker rows, and from the tracker the operator clicked exactly one of
+     them — so the modal has to say out loud that the twin is coming too. */
+  const allT = _nr.teams.concat(_nr.teamsN1);
+  const pairLine = teamIds.length > 1
+    ? '<div style="margin-top:6px"><strong>This is an 8+9 pair — both teams change:</strong><br>'
+      + teamIds.map(id => {
+          const t = allT.find(x => x.id === id);
+          return t ? '&nbsp;&nbsp;' + esc(nrTeamKey(t.team_number)) + '&nbsp; ' + esc(t.team_name || '')
+                     + ' <span class="hint">' + esc((t.division && t.division.format) || '') + '</span>'
+                   : '&nbsp;&nbsp;#' + id;
+        }).join('<br>') + '</div>'
+    : '';
   const choice = await nrModal({
     title: 'Mark ' + esc(first ? first.team_name || '' : '') + ' ' + word + '?',
-    body: 'For ' + esc(nrOrTargetName()) + '. Pick who gave you this answer, then email the whole roster about it or record silently.',
+    body: 'For ' + esc(nrOrTargetName()) + '. Pick who gave you this answer, then email the whole roster about it or record silently.'
+      + pairLine,
     select: { label: 'Answer from', options: whoOpts },
     buttons: [
       { label: 'Mark + email team', value: 'email', primary: true },
@@ -6712,6 +6759,69 @@ async function nrOrSetStatus(teamIds, status) {
   await nrLoadTracker();
   await nrLoadOutreach();
 }
+/* The three set-status buttons on a tracker row. The row's CURRENT status is
+   omitted rather than disabled — a disabled control still reads as an action
+   you could take, and re-marking is the one thing here that would pointlessly
+   email a roster. So a PLAYING row offers only ✗ and ?. */
+function nrTrkSetBtns(teamId, cur) {
+  return [['playing', '✓', 'playing'],
+          ['not_playing', '✗', 'not playing'],
+          ['undecided', '?', 'still deciding']]
+    .filter(([k]) => k !== cur)
+    .map(([k, glyph, word]) =>
+      ' <button type="button" class="btn btn-outline btn-sm" data-trkset="' + teamId + '"'
+      + ' data-trkstatus="' + k + '" style="padding:0 6px;font-size:0.7rem"'
+      + ' title="Mark ' + esc(word) + '">' + glyph + '</button>').join('');
+}
+
+/* ── change a decision from the TRACKER (3.290) ───────────────────────────────
+   Until now nrOrSetStatus was reachable from exactly ONE place: the ✓/✗/? rows
+   in Outreach. But a team LEAVES outreach the moment it answers definitively,
+   so the operator could set a status for a team that hadn't answered and could
+   never change one that had — which is exactly when people change their minds.
+   233 of 310 tracker rows are `playing` and were unreachable.
+
+   This calls the SAME writer. No second status path: it keeps the upsert, the
+   next_reg_log append, the who-gave-it attribution and the explicit email
+   choice, so ↶ undo and the 3.267 paste guard keep working unchanged. */
+async function nrTrkSetStatus(teamId, status) {
+  const cur = (_nr.regRowByTeam && _nr.regRowByTeam.get(teamId)) || {};
+  /* Re-marking the status a row already has would re-email the whole roster
+     for no change. Say so and stop. */
+  if (cur.status === status) {
+    setStatus('nrGridStatus', 'Already ' + nrTrkWord(status) + ' — nothing changed.', 'ok');
+    return;
+  }
+  /* Rosters power BOTH the twin-overlap match and the "answer from" dropdown.
+     The tracker can be opened without ever rendering Outreach, so the cache is
+     not guaranteed warm here the way it is on that path. */
+  await nrOrEnsureRosters();
+  await nrOrSetStatus(nrTrkPairIds(teamId), status);
+}
+const nrTrkWord = (s) => s === 'playing' ? 'PLAYING'
+  : s === 'not_playing' ? 'NOT playing' : s === 'undecided' ? 'STILL DECIDING' : 'unanswered';
+
+/* Every team id that must move together with this one. Operator decision
+   2026-07-19: changing one half of an 8+9 twin pair changes both — it matches
+   what Outreach already does (it always writes both ids) and ReRack (one tap
+   answers the pair), and it stops every tracker edit from manufacturing a
+   "half-entered pair" on the Needs-attention card.
+
+   Pairing is NOT re-derived here — nrOrMergePairs owns it, including the greedy
+   roster-overlap rule that fixed the two-teams-named-the-same bug. Re-deriving
+   it is how the two would drift apart. */
+function nrTrkPairIds(teamId) {
+  const all = _nr.teams.concat(_nr.teamsN1);
+  const me = all.find(t => t.id === teamId);
+  if (!me || !me.division) return [teamId];
+  const fmt = String(me.division.format || '');
+  if (!/8-Ball Open|9-Ball Open|8-Ball Doubles|9-Ball Doubles/.test(fmt)) return [teamId];
+  const group = nrOrMergePairs(all.filter(t => t.division
+    && /8-Ball Open|9-Ball Open|8-Ball Doubles|9-Ball Doubles/.test(String(t.division.format || ''))));
+  const pair = group.find(p => p.some(t => t.id === teamId));
+  return pair && pair.length > 1 ? pair.map(t => t.id) : [teamId];
+}
+
 async function nrOrStamp(teamIds, wave) {
   try {
     await sb('POST', 'next_reg_outreach?on_conflict=target_session_id,team_id,wave',
@@ -6872,9 +6982,30 @@ async function nrLoadTracker() {
         : st === 'undecided'
           ? '<span style="background:#ede9fe;color:#6d28d9;padding:1px 8px;border-radius:999px;font-weight:700;font-size:0.72rem">STILL DECIDING</span>'
           : '<span style="background:#f3f4f6;color:#6b7280;padding:1px 8px;border-radius:999px;font-weight:700;font-size:0.72rem">UNANSWERED</span>';
-    const shown = (rows || []).filter(r => !_nr.trackerFilter || _nr.trackerFilter === 'all' || r.status === _nr.trackerFilter);
-    document.getElementById('nrGrid').innerHTML = (rows || []).length
-      ? '<table style="width:100%;border-collapse:collapse;font-size:0.84rem">'
+    /* Format filter resolves each row's family through team → division →
+       format (r.format holds the division NAME, and is null on prior-session
+       rows, so it can't be used directly). Same nrMxFamily the metrics use, so
+       the two never disagree about which family a team is in. */
+    const _famByTeam = new Map();
+    for (const t of _nr.teams.concat(_nr.teamsN1)) if (t.division) _famByTeam.set(t.id, nrMxFamily(t.division.format));
+    const fmtFilter = _nr.trackerFmtFilter || 'all';
+    const shown = (rows || []).filter(r =>
+      (!_nr.trackerFilter || _nr.trackerFilter === 'all' || r.status === _nr.trackerFilter)
+      && (fmtFilter === 'all' || _famByTeam.get(r.team_id) === fmtFilter));
+    /* Count reflects the FILTER, so the operator can see how many a filter
+       matched — including zero, which reads as an empty table otherwise. */
+    const _cntEl = document.getElementById('nrTrkCount');
+    if (_cntEl) {
+      const filtered = (_nr.trackerFilter && _nr.trackerFilter !== 'all') || fmtFilter !== 'all';
+      _cntEl.textContent = filtered
+        ? shown.length + ' of ' + (rows || []).length + ' shown'
+        : (rows || []).length + ' teams';
+    }
+    document.getElementById('nrGrid').innerHTML = !((rows || []).length)
+      ? '<p class="hint">Nothing tracked yet — paste a Nexus report above.</p>'
+      : !shown.length
+      ? '<p class="hint">No teams match this filter.</p>'
+      : '<table style="width:100%;border-collapse:collapse;font-size:0.84rem">'
         + '<tr><th style="text-align:left;padding:6px 8px;border-bottom:2px solid var(--border)">Team</th>'
         + '<th style="text-align:left;padding:6px 8px;border-bottom:2px solid var(--border)">Division</th>'
         + '<th style="text-align:left;padding:6px 8px;border-bottom:2px solid var(--border)">Status</th>'
@@ -6891,7 +7022,8 @@ async function nrLoadTracker() {
               + (_nr.capByTeam && _nr.capByTeam.has(r.team_id)
                   ? '<div style="font-size:0.74rem">\ud83d\udc65 ' + _nr.capHtml(_nr.capByTeam.get(r.team_id)) + '</div>' : '') + '</td>'
               + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)" class="hint">' + esc(r.format || '') + '</td>'
-              + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">' + chip(r.status) + '</td>'
+              + '<td style="padding:6px 8px;border-bottom:1px solid var(--border);white-space:nowrap">' + chip(r.status)
+              + nrTrkSetBtns(r.team_id, r.status) + '</td>'
               + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)" class="hint">' + esc(r.source)
               + (r.source === 'admin'
                   ? ' <button type="button" class="btn btn-outline btn-sm" data-trkundo="' + r.team_id + '" style="padding:0 6px;font-size:0.7rem" title="Undo this admin update">&#8630; undo</button>'
@@ -6899,8 +7031,10 @@ async function nrLoadTracker() {
               + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)" class="hint">' + esc(String(r.updated_at || '').slice(0, 16).replace('T', ' ')) + '</td>'
               + '</tr>';
           }).join('')
-        + '</table>'
-      : '<p class="hint">Nothing tracked yet \u2014 paste a Nexus report above.</p>';
+        + '</table>';
+    document.querySelectorAll('#nrGrid button[data-trkset]').forEach(b => {
+      b.onclick = () => nrTrkSetStatus(Number(b.dataset.trkset), b.dataset.trkstatus);
+    });
     document.querySelectorAll('#nrGrid button[data-trkundo]').forEach(b => {
       b.onclick = () => nrTrkUndo(Number(b.dataset.trkundo));
     });
@@ -6911,10 +7045,320 @@ async function nrLoadTracker() {
     nrRenderComingBack();
     nrRenderSegments();
     nrRenderAttention();
+    /* Same `rows` the tracker just rendered — the metrics panel never issues a
+       second count, so the two surfaces cannot disagree. Awaited failure is
+       contained: a metrics error must not take the tracker down with it. */
+    nrRenderMetrics(rows || []).catch(e => {
+      const b = document.getElementById('nrMx');
+      if (b) b.innerHTML = '<p class="hint">Metrics unavailable: ' + esc(e.message) + '</p>';
+    });
     if (_nr.orSent) nrRenderOutreach();
   } catch (e) {
     gs.className = 'status-line shown err'; gs.textContent = 'Tracker load failed: ' + e.message;
   }
+}
+
+/* ── Session metrics (3.291) ──────────────────────────────────────────────────
+   Answers "how many teams did I have, and what am I looking at for next
+   session" — WITHOUT printing a single projected number.
+
+   Why no point estimate. 45-ish of the 310 tracked teams have not given a
+   definitive answer, and the ones who never reply are not a random sample of
+   the ones who did: the continuum-of-resistance result is that late and
+   never-responders resemble the DROP-OUTS, not the committed. So any single
+   projection is biased HIGH, and it is biased high exactly where being wrong
+   costs money — table time, patches, division counts committed months early.
+   Instead this shows Manski-style bounds: a FLOOR (only what is confirmed), a
+   CEILING (if every unknown returns), and the yes-rate among those who HAVE
+   answered. If the bounds are too wide to act on, that is itself the finding.
+
+   Why divisions, not just a total. A healthy league total is compatible with a
+   collapsing division — the aggregate-capacity fallacy. Divisions are what get
+   scheduled and what fail, so the per-division read is the primary artifact
+   here and the league total is context.
+
+   Encoding follows IBCS (now ISO 24896): actual = solid fill, projected =
+   hatched, prior period = lighter. And per Knaflic, style is never the only
+   signal — every projected figure is also LABELLED "projected" in words.
+
+   Colours are the tracker's own status chips (green/red/violet/grey), not a new
+   scale: two surfaces showing the same statuses must not teach two colour
+   languages. The three chromatic ones pass the dataviz CVD checks; grey is the
+   deliberate no-answer slot and is always accompanied by its label. */
+const NRMX = { playing: '#16a34a', not_playing: '#b91c1c', undecided: '#6d28d9', unanswered: '#6b7280' };
+const NRMX_LBL = { playing: 'playing', not_playing: 'not playing', undecided: 'still deciding', unanswered: 'no answer yet' };
+/* One family per operator-meaningful group. 8-Ball and 9-Ball Open are ONE
+   decision to the operator (the same players enter both), and Doubles likewise
+   — counting them apart makes "teams" a unit of inconsistent size, so a shift
+   in format mix would move the headline with no real change. */
+function nrMxFamily(fmt) {
+  const f = String(fmt || '');
+  if (/Masters/i.test(f)) return 'Masters';
+  if (/Ladies/i.test(f)) return 'Ladies';
+  if (/Doubles/i.test(f)) return 'Doubles — 8+9';
+  if (/8-Ball|9-Ball/i.test(f)) return 'Open — 8+9';
+  return f || 'Other';
+}
+const nrMxBar = (segs, total, h) => {
+  if (!total) return '<div style="height:' + (h || 10) + 'px;background:#f1f2f4;border-radius:3px"></div>';
+  return '<div style="display:flex;gap:2px;height:' + (h || 10) + 'px">'
+    + segs.filter(s => s.n > 0).map(s =>
+        '<div title="' + esc(s.n + ' ' + s.label) + '" style="flex:' + s.n
+        + ';background:' + s.color + ';border-radius:2px"></div>').join('')
+    + '</div>';
+};
+
+async function nrRenderMetrics(rows) {
+  const box = document.getElementById('nrMx');
+  if (!box) return;
+  const all = _nr.teams.concat(_nr.teamsN1);
+  const byId = new Map(all.map(t => [t.id, t]));
+
+  /* New-team intents are a SEPARATE population — they were never in the
+     returning base, so they are added on top, never mixed into the rates. */
+  let intents = [];
+  try { intents = await sb('GET', 'next_reg_new?select=id,status') || []; } catch (e) { /* additive only */ }
+
+  /* DATA-COMPLETENESS CHECK — must run before any count is shown.
+     A division with no Team Screen loaded has ZERO team rows, so it is
+     INVISIBLE in _nr.teams: "this session" and every projection silently
+     undercount by exactly those teams, and the drop reads as teams leaving
+     when it is really a missing upload. This is the 0716 escape class — an
+     absence must never name its own cause — so we fetch the division LIST
+     directly (not derived from teams) to see which exist but are empty, and
+     size the gap from the SAME divisions' prior-session rosters. */
+  const curSid = (currentSession && currentSession.id)
+    || (_nr.teams[0] && _nr.teams[0].division && _nr.teams[0].division.session_id);
+  let allCurDivs = [];
+  try {
+    allCurDivs = await sb('GET', 'divisions?select=id,division_number,name,night_of_play,format'
+      + '&operator_id=eq.1&session_id=eq.' + curSid + '&order=division_number') || [];
+  } catch (e) { /* fall back to teams-derived divisions below */ }
+  const curTeamCount = new Map();
+  for (const t of _nr.teams) if (t.division) curTeamCount.set(t.division.id, (curTeamCount.get(t.division.id) || 0) + 1);
+  const priorByDivNo = {};
+  for (const t of _nr.teamsN1) if (t.division)
+    priorByDivNo[t.division.division_number] = (priorByDivNo[t.division.division_number] || 0) + 1;
+  const gapDivs = allCurDivs.filter(d => !curTeamCount.get(d.id));
+  const gapPriorTeams = gapDivs.reduce((s, d) => s + (priorByDivNo[d.division_number] || 0), 0);
+  const newConfirmed = intents.filter(i => i.status === 'confirmed').length;
+  const newOpen = intents.filter(i => i.status === 'new' || i.status === 'contacted').length;
+
+  /* CEILING ASYMMETRY FIX (3.294) — invited-but-silent teams.
+     A current-session team that never answers is SEEDED into next_reg as
+     'unanswered' by the Nexus paste, so its silence has a row and lands in the
+     ceiling. A prior-session team that took this session off is invited via
+     ReRack OUTREACH and only gets a next_reg row when it RESPONDS — so its
+     silence had NO row and was invisible to the ceiling. A silent invitee is a
+     silent invitee regardless of which session it came from, and the ceiling is
+     the pure optimistic bound ("if every silent team returns"), so we pull the
+     outreach recipients that have no next_reg row and count them as silent.
+     GUARD against double-counting: exclude any that CONTINUED into the current
+     session (an n1 side of a link) — those are already represented by their
+     current-session row in `rows`; and exclude any already in `rows`. Purely
+     additive to the read — a fetch failure just leaves the prior behavior. */
+  let silentInvited = [];
+  try {
+    const [inv, lnk] = await Promise.all([
+      sb('GET', 'next_reg_outreach?select=team_id&target_session_id=eq.' + _nr.targetId),
+      sb('GET', 'next_reg_links?select=n1_team_id&target_session_id=eq.' + _nr.targetId),
+    ]);
+    const inRows = new Set(rows.map(r => r.team_id));
+    const continued = new Set((lnk || []).map(l => l.n1_team_id));
+    const seen = new Set();
+    for (const o of (inv || [])) {
+      if (!o || inRows.has(o.team_id) || continued.has(o.team_id) || seen.has(o.team_id)) continue;
+      seen.add(o.team_id);
+      const t = byId.get(o.team_id);
+      if (t && t.division && t.division.operator_id === 1) silentInvited.push(t);
+    }
+  } catch (e) { /* additive only */ }
+  const silentInvitedN = silentInvited.length;
+
+  const tot = { playing: 0, not_playing: 0, undecided: 0, unanswered: 0 };
+  for (const r of rows) if (tot[r.status] != null) tot[r.status]++;
+  tot.unanswered += silentInvitedN;                 // invited, no reply → silent
+  const answered = tot.playing + tot.not_playing;   // silent invitees never answered
+  const tracked = rows.length + silentInvitedN;
+  const floor = tot.playing + newConfirmed;
+  const ceiling = floor + tot.undecided + tot.unanswered + newOpen;
+  const yesRate = answered ? Math.round(tot.playing / answered * 100) : 0;
+
+  const tile = (n, label, sub, hatch) =>
+    '<div style="flex:1;min-width:150px;border:1px solid var(--border);border-radius:10px;padding:10px 12px;'
+    + (hatch ? 'background:repeating-linear-gradient(45deg,#fafafa,#fafafa 5px,#f0f0f0 5px,#f0f0f0 10px)' : 'background:#fff') + '">'
+    + '<div style="font-size:1.6rem;font-weight:800;line-height:1.1;font-variant-numeric:tabular-nums">' + n + '</div>'
+    + '<div style="font-weight:700;font-size:0.8rem">' + esc(label) + '</div>'
+    + '<div class="hint" style="font-size:0.74rem;margin-top:2px">' + sub + '</div></div>';
+
+  let h = '';
+  /* Some divisions ran last session but have zero teams this session. That has
+     TWO possible causes I cannot tell apart from here — the division was
+     dropped, or its Team Screen simply isn't loaded yet — so the note states
+     only what is observable (ran then, not now) and names both, rather than
+     asserting one. It does NOT claim the current numbers are wrong: if the
+     division was dropped, they are exactly right. It exists so the prior→this
+     drop is not mistaken for teams quietly leaving continuing divisions. */
+  if (gapDivs.length) {
+    h += '<div style="border-left:4px solid #6b7280;background:#f7f7f8;padding:8px 12px;margin-bottom:12px;border-radius:0 6px 6px 0">'
+      + '<div style="font-weight:800;font-size:0.85rem">' + gapDivs.length + ' division'
+      + (gapDivs.length === 1 ? '' : 's') + ' ran last session but ' + (gapDivs.length === 1 ? 'is' : 'are') + ' not running this session</div>'
+      + '<div class="hint" style="font-size:0.78rem;margin-top:2px">'
+      + 'Either dropped for this session, or the Team Screen isn’t loaded yet — Slate can’t tell which. '
+      + (gapPriorTeams ? 'They held <strong>' + gapPriorTeams + ' teams</strong> last session, so ' : 'So ')
+      + 'part of the prior→this drop below is these divisions leaving, not teams quitting the ones still running: '
+      + gapDivs.map(d => esc(String(d.division_number)) + ' ' + esc(d.name || '')).join(' · ')
+      + '.</div></div>';
+  }
+  h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">'
+    + tile(floor, 'confirmed for next session',
+        'teams that have said yes' + (newConfirmed ? ', incl. ' + newConfirmed + ' new' : '') + '. <strong>Plan on this number.</strong>')
+    + tile(ceiling, 'ceiling — projected',
+        'only if <strong>every</strong> undecided and silent team returns', true)
+    + tile(yesRate + '%', 'said yes, of those who answered',
+        answered + ' of ' + tracked + ' teams have given a definitive answer')
+    + '</div>';
+
+  h += '<div class="hint" style="font-size:0.78rem;margin-bottom:12px;border-left:3px solid #e8c877;background:#fffdf5;padding:6px 10px">'
+    + 'The gap between ' + floor + ' and ' + ceiling + ' is <strong>' + (ceiling - floor)
+    + ' teams still unresolved</strong>. Teams that never answer tend to behave like the ones who said no, '
+    + 'not like the ones who said yes — so treat anything above ' + floor + ' as optimistic until they reply.'
+    + '</div>';
+
+  if (silentInvitedN) {
+    h += '<div class="hint" style="font-size:0.78rem;margin-bottom:12px;border-left:3px solid #6b7280;background:#f7f7f8;padding:6px 10px">'
+      + '<strong>' + silentInvitedN + '</strong> of the silent teams above are prior-session teams that took this session '
+      + 'off, were sent a ReRack invite, and haven’t replied. They used to be invisible here — now counted in the ceiling. '
+      + 'They’ve already skipped a session, so weight them below the currently-active silent teams.'
+      + '</div>';
+  }
+
+  /* Where the tracked teams stand — one composition bar, direct-labelled. */
+  const segs = ['playing', 'not_playing', 'undecided', 'unanswered']
+    .map(k => ({ n: tot[k], label: NRMX_LBL[k], color: NRMX[k] }));
+  h += '<div style="font-weight:700;font-size:0.85rem;margin-bottom:4px">Where the ' + tracked + ' returning teams stand</div>'
+    + nrMxBar(segs, tracked, 14)
+    + '<div style="display:flex;gap:14px;flex-wrap:wrap;margin:6px 0 14px;font-size:0.78rem">'
+    + segs.map(s => '<span style="display:inline-flex;align-items:center;gap:5px">'
+        + '<span style="width:10px;height:10px;border-radius:3px;background:' + s.color + '"></span>'
+        + '<strong>' + s.n + '</strong> ' + esc(s.label) + '</span>').join('')
+    + '</div>';
+
+  /* Per family: prior session actual · current actual · next projected range. */
+  /* _nr.teams and _nr.teamsN1 are ALREADY split by session upstream, so the
+     period a team belongs to is which array it came from — no session_id
+     comparison, and no chance of the two disagreeing. */
+  const fams = {};
+  const bump = (list, key) => {
+    for (const t of list) {
+      const fam = nrMxFamily(t.division && t.division.format);
+      (fams[fam] = fams[fam] || { prior: 0, cur: 0, floor: 0, ceil: 0 })[key]++;
+    }
+  };
+  bump(_nr.teams.filter(t => t.division && t.division.operator_id === 1), 'cur');
+  bump(_nr.teamsN1.filter(t => t.division && t.division.operator_id === 1), 'prior');
+  for (const r of rows) {
+    const t = byId.get(r.team_id); if (!t) continue;
+    const f = fams[nrMxFamily(t.division && t.division.format)]; if (!f) continue;
+    if (r.status === 'playing') { f.floor++; f.ceil++; }
+    else if (r.status === 'undecided' || r.status === 'unanswered') f.ceil++;
+  }
+  /* Invited-but-silent teams count toward each family's ceiling too (3.294). */
+  for (const t of silentInvited) {
+    const f = fams[nrMxFamily(t.division && t.division.format)]; if (f) f.ceil++;
+  }
+  const famNames = Object.keys(fams).sort();
+  const maxV = Math.max(1, ...famNames.map(k => Math.max(fams[k].prior, fams[k].cur, fams[k].ceil)));
+  /* PIXELS, not percent — this is load-bearing. The three data columns are
+     table cells of DIFFERENT widths (the "Next session" header is far longer),
+     so a bar sized as a % of its own cell put the same value at different pixel
+     lengths per column: 218 in the wide next-column rendered LONGER than 254 in
+     the narrow prior-column. That defeats the whole reason the three sit side
+     by side. A fixed pixel scale shared across all three makes a value map to
+     the same length everywhere — the one-axis rule. */
+  const BARPX = 150;
+  const w = (n) => Math.round(n / maxV * BARPX);
+  h += '<div style="font-weight:700;font-size:0.85rem;margin-bottom:2px">By format</div>'
+    + '<div class="hint" style="font-size:0.75rem;margin-bottom:6px">Solid = actually happened. '
+    + '<span style="display:inline-block;width:22px;height:9px;vertical-align:middle;border:1px solid #c9c9c9;'
+    + 'background:repeating-linear-gradient(45deg,#fff,#fff 4px,#dcdcdc 4px,#dcdcdc 8px)"></span> hatched = '
+    + '<strong>projected</strong>, and only the top of the range.</div>'
+    + '<table style="width:100%;border-collapse:collapse;font-size:0.82rem">'
+    + '<tr><th style="text-align:left;padding:4px 8px;border-bottom:2px solid var(--border)">Format</th>'
+    + '<th style="text-align:left;padding:4px 8px;border-bottom:2px solid var(--border)">Prior session</th>'
+    + '<th style="text-align:left;padding:4px 8px;border-bottom:2px solid var(--border)">This session</th>'
+    + '<th style="text-align:left;padding:4px 8px;border-bottom:2px solid var(--border)">Next session — confirmed &rarr; ceiling</th></tr>';
+  for (const k of famNames) {
+    const f = fams[k];
+    const cell = (n, style) => '<td style="padding:4px 8px;border-bottom:1px solid var(--border)">'
+      + '<div style="display:flex;align-items:center;gap:6px">'
+      + '<div style="width:' + Math.max(w(n), n ? 3 : 0) + 'px;height:11px;border-radius:2px;flex:none;' + style + '"></div>'
+      + '<span style="font-variant-numeric:tabular-nums">' + n + '</span></div></td>';
+    h += '<tr><td style="padding:4px 8px;border-bottom:1px solid var(--border)"><strong>' + esc(k) + '</strong></td>'
+      + cell(f.prior, 'background:#c8ccd2')
+      + cell(f.cur, 'background:#0031a1')
+      + '<td style="padding:4px 8px;border-bottom:1px solid var(--border)">'
+      + '<div style="display:flex;align-items:center;gap:6px">'
+      + '<div style="width:' + Math.max(w(f.ceil), f.ceil ? 3 : 0) + 'px;height:11px;border-radius:2px;position:relative;flex:none;'
+      + 'background:repeating-linear-gradient(45deg,#fff,#fff 4px,#bcd0f0 4px,#bcd0f0 8px);border:1px solid #9fb8e0">'
+      + '<div style="position:absolute;left:0;top:0;bottom:0;width:' + (f.ceil ? Math.round(f.floor / f.ceil * 100) : 0)
+      + '%;background:#16a34a;border-radius:1px"></div></div>'
+      + '<span style="font-variant-numeric:tabular-nums">' + f.floor + '&ndash;' + f.ceil + '</span></div></td></tr>';
+  }
+  h += '</table>';
+  h += '<div class="hint" style="font-size:0.74rem;margin:4px 0 14px">'
+    + '8-Ball and 9-Ball are counted together per family: the same players enter both, so splitting them '
+    + 'would make a shift in format mix look like a change in size.</div>';
+
+  /* Divisions — the unit that actually gets scheduled, and the one that fails.
+     Built from the DIVISION list (allCurDivs), NOT from teams: a division with
+     no Team Screen has no team rows, so a teams-derived map can never see the
+     empty ones — which are exactly the ones this section exists to flag. */
+  const dmap = new Map();
+  for (const d of allCurDivs) dmap.set(d.id, { d: d, n: 0, playing: 0, not_playing: 0, undecided: 0, unanswered: 0 });
+  for (const t of _nr.teams) {
+    const d = t.division; if (!d) continue;
+    if (!dmap.has(d.id)) dmap.set(d.id, { d: d, n: 0, playing: 0, not_playing: 0, undecided: 0, unanswered: 0 });
+    const e = dmap.get(d.id); e.n++;
+    const st = _nr.regByTeam && _nr.regByTeam.get(t.id);
+    if (st && e[st] != null) e[st]++;
+  }
+  const divs = [...dmap.values()];
+  const gap = divs.filter(e => e.n === 0);
+  const live = divs.filter(e => e.n > 0).sort((a, b) => a.playing - b.playing
+    || String(a.d.division_number).localeCompare(String(b.d.division_number)));
+  h += '<div style="font-weight:700;font-size:0.85rem;margin-bottom:2px">Divisions, weakest first</div>'
+    + '<div class="hint" style="font-size:0.75rem;margin-bottom:6px">A healthy league total can still hide a division that '
+    + 'will not fill. This is the number that decides whether a night runs.</div>'
+    + '<table style="width:100%;border-collapse:collapse;font-size:0.82rem">'
+    + '<tr><th style="text-align:left;padding:4px 8px;border-bottom:2px solid var(--border)">Division</th>'
+    + '<th style="text-align:left;padding:4px 8px;border-bottom:2px solid var(--border)">Night</th>'
+    + '<th style="text-align:right;padding:4px 8px;border-bottom:2px solid var(--border)">Now</th>'
+    + '<th style="text-align:right;padding:4px 8px;border-bottom:2px solid var(--border)">Yes</th>'
+    + '<th style="text-align:left;padding:4px 8px;border-bottom:2px solid var(--border)">Answers</th></tr>';
+  for (const e of live) {
+    h += '<tr><td style="padding:4px 8px;border-bottom:1px solid var(--border)"><strong>'
+      + esc(String(e.d.division_number)) + '</strong> ' + esc(e.d.name || '') + '</td>'
+      + '<td style="padding:4px 8px;border-bottom:1px solid var(--border)" class="hint">' + esc(e.d.night_of_play || '') + '</td>'
+      + '<td style="padding:4px 8px;border-bottom:1px solid var(--border);text-align:right;font-variant-numeric:tabular-nums">' + e.n + '</td>'
+      + '<td style="padding:4px 8px;border-bottom:1px solid var(--border);text-align:right;font-weight:700;font-variant-numeric:tabular-nums">' + e.playing + '</td>'
+      + '<td style="padding:4px 8px;border-bottom:1px solid var(--border);min-width:120px">'
+      + nrMxBar(['playing', 'not_playing', 'undecided', 'unanswered']
+          .map(k => ({ n: e[k], label: NRMX_LBL[k], color: NRMX[k] })), e.n, 9) + '</td></tr>';
+  }
+  h += '</table>';
+  if (gap.length) {
+    h += '<div style="margin-top:10px;border-left:3px solid #6b7280;background:#f7f7f8;padding:6px 10px">'
+      + '<div style="font-weight:700;font-size:0.8rem">Not listed above: ' + gap.length + ' division'
+      + (gap.length === 1 ? '' : 's') + ' with no teams this session</div>'
+      + '<div class="hint" style="font-size:0.75rem">Dropped, or not yet loaded — left out of the ranking rather than shown as empty: '
+      + gap.map(e => esc(String(e.d.division_number)) + ' ' + esc(e.d.name || '')).join(' &middot; ') + '</div></div>';
+  }
+
+  box.innerHTML = h;
+  const st = document.getElementById('nrMxStamp');
+  if (st) st.textContent = 'as of ' + new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    + ' — ' + answered + '/' + tracked + ' answered (' + Math.round(answered / (tracked || 1) * 100) + '%)';
 }
 
 /* Operator edits a team's change-note, players-needed, and — for
