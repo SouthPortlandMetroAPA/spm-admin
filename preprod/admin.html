@@ -3855,7 +3855,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.293';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.294';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -7144,10 +7144,42 @@ async function nrRenderMetrics(rows) {
   const newConfirmed = intents.filter(i => i.status === 'confirmed').length;
   const newOpen = intents.filter(i => i.status === 'new' || i.status === 'contacted').length;
 
+  /* CEILING ASYMMETRY FIX (3.294) — invited-but-silent teams.
+     A current-session team that never answers is SEEDED into next_reg as
+     'unanswered' by the Nexus paste, so its silence has a row and lands in the
+     ceiling. A prior-session team that took this session off is invited via
+     ReRack OUTREACH and only gets a next_reg row when it RESPONDS — so its
+     silence had NO row and was invisible to the ceiling. A silent invitee is a
+     silent invitee regardless of which session it came from, and the ceiling is
+     the pure optimistic bound ("if every silent team returns"), so we pull the
+     outreach recipients that have no next_reg row and count them as silent.
+     GUARD against double-counting: exclude any that CONTINUED into the current
+     session (an n1 side of a link) — those are already represented by their
+     current-session row in `rows`; and exclude any already in `rows`. Purely
+     additive to the read — a fetch failure just leaves the prior behavior. */
+  let silentInvited = [];
+  try {
+    const [inv, lnk] = await Promise.all([
+      sb('GET', 'next_reg_outreach?select=team_id&target_session_id=eq.' + _nr.targetId),
+      sb('GET', 'next_reg_links?select=n1_team_id&target_session_id=eq.' + _nr.targetId),
+    ]);
+    const inRows = new Set(rows.map(r => r.team_id));
+    const continued = new Set((lnk || []).map(l => l.n1_team_id));
+    const seen = new Set();
+    for (const o of (inv || [])) {
+      if (!o || inRows.has(o.team_id) || continued.has(o.team_id) || seen.has(o.team_id)) continue;
+      seen.add(o.team_id);
+      const t = byId.get(o.team_id);
+      if (t && t.division && t.division.operator_id === 1) silentInvited.push(t);
+    }
+  } catch (e) { /* additive only */ }
+  const silentInvitedN = silentInvited.length;
+
   const tot = { playing: 0, not_playing: 0, undecided: 0, unanswered: 0 };
   for (const r of rows) if (tot[r.status] != null) tot[r.status]++;
-  const answered = tot.playing + tot.not_playing;
-  const tracked = rows.length;
+  tot.unanswered += silentInvitedN;                 // invited, no reply → silent
+  const answered = tot.playing + tot.not_playing;   // silent invitees never answered
+  const tracked = rows.length + silentInvitedN;
   const floor = tot.playing + newConfirmed;
   const ceiling = floor + tot.undecided + tot.unanswered + newOpen;
   const yesRate = answered ? Math.round(tot.playing / answered * 100) : 0;
@@ -7193,6 +7225,14 @@ async function nrRenderMetrics(rows) {
     + 'not like the ones who said yes — so treat anything above ' + floor + ' as optimistic until they reply.'
     + '</div>';
 
+  if (silentInvitedN) {
+    h += '<div class="hint" style="font-size:0.78rem;margin-bottom:12px;border-left:3px solid #6b7280;background:#f7f7f8;padding:6px 10px">'
+      + '<strong>' + silentInvitedN + '</strong> of the silent teams above are prior-session teams that took this session '
+      + 'off, were sent a ReRack invite, and haven’t replied. They used to be invisible here — now counted in the ceiling. '
+      + 'They’ve already skipped a session, so weight them below the currently-active silent teams.'
+      + '</div>';
+  }
+
   /* Where the tracked teams stand — one composition bar, direct-labelled. */
   const segs = ['playing', 'not_playing', 'undecided', 'unanswered']
     .map(k => ({ n: tot[k], label: NRMX_LBL[k], color: NRMX[k] }));
@@ -7222,6 +7262,10 @@ async function nrRenderMetrics(rows) {
     const f = fams[nrMxFamily(t.division && t.division.format)]; if (!f) continue;
     if (r.status === 'playing') { f.floor++; f.ceil++; }
     else if (r.status === 'undecided' || r.status === 'unanswered') f.ceil++;
+  }
+  /* Invited-but-silent teams count toward each family's ceiling too (3.294). */
+  for (const t of silentInvited) {
+    const f = fams[nrMxFamily(t.division && t.division.format)]; if (f) f.ceil++;
   }
   const famNames = Object.keys(fams).sort();
   const maxV = Math.max(1, ...famNames.map(k => Math.max(fams[k].prior, fams[k].cur, fams[k].ceil)));
