@@ -2192,6 +2192,9 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             </select>
           </div>
           <button class="btn btn-primary" id="otRunBtn">🔄 Refresh list</button>
+          <button class="btn btn-outline" id="otFollowAllBtn"
+                  title="Show everyone marked Follow up, across every source — ignores the source and filters above"
+                  style="align-self:flex-end">⏰ All follow-ups</button>
           <button class="btn btn-outline btn-sm" id="otTemplatesBtn"
                   title="Edit text + email message templates"
                   style="align-self:flex-end; padding:6px 12px;">📝 Templates</button>
@@ -3933,7 +3936,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.297';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.298';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -20857,6 +20860,7 @@ async function otInit() {
   if (otInit._wired) return;
   otInit._wired = true;
   document.getElementById('otRunBtn').addEventListener('click', otRun);
+  document.getElementById('otFollowAllBtn').addEventListener('click', otShowAllFollowUps);
   document.getElementById('otSearch').addEventListener('input', () => {
     /* Tokens preserved so multi-word search is AND across fields.
        Diacritic-strip + lowercase + whitespace-collapse handled
@@ -21221,6 +21225,57 @@ function otMatchesSearch(c, rawQuery) {
      'playing' = outreach_currently_playing RPC (already on N+ teams) — NEW 3.82
    All return the same column shape. Dedupe by member_number when
    source='both'. Each row is tagged with _source for the UI badge. */
+/* One-click: show EVERYONE marked "Follow up", across every source, with no
+   other filters in the way. Reads the whole status universe (same cached RPC
+   otRun uses) instead of a source query, keeps only follow_up rows, and clears
+   the narrowing filters so nothing hides one. */
+async function otShowAllFollowUps() {
+  const btn = document.getElementById('otFollowAllBtn');
+  const restore = () => { if (btn) { btn.disabled = false; btn.textContent = '⏰ All follow-ups'; } };
+  if (btn) { btn.disabled = true; btn.textContent = '⏰ Loading…'; }
+  try {
+    await dncEnsure();
+    let universe;
+    if (_otUniverseCache.data && (Date.now() - _otUniverseCache.at) < OT_UNIVERSE_TTL_MS) {
+      universe = _otUniverseCache.data;
+    } else {
+      universe = await sb('POST', 'rpc/outreach_status_universe', {},
+        { 'Accept-Profile': 'slate', 'Content-Profile': 'slate' }) || [];
+      _otUniverseCache = { data: universe, at: Date.now() };
+    }
+    const candidates = [];
+    for (const u of universe) {
+      if (!u.status || u.status.status !== 'follow_up' || !u.player) continue;
+      const p = u.player;
+      const t = Math.max(otParseDate(p.last_played_8) || 0, otParseDate(p.last_played_9) || 0);
+      candidates.push({ ...p, _status: u.status,
+        last_any: t ? new Date(t).toISOString().slice(0, 10) : null,
+        _source: (p.last_played_8 || p.last_played_9) ? 'lapsed' : 'new' });
+    }
+    candidates.sort((a, b) =>
+      String(a.last_name || '').localeCompare(b.last_name || '') ||
+      String(a.first_name || '').localeCompare(b.first_name || ''));
+    _otState.candidates = candidates;
+    /* Clear every narrowing filter; land on the Follow up pill. */
+    _otState.filter.status = 'follow_up';
+    _otState.filter.touch = new Set();
+    _otState.filter.touchNot = new Set();
+    _otState.filter.gender = 'all';
+    _otState.filter.search = '';
+    const se = document.getElementById('otSearch'); if (se) se.value = '';
+    document.getElementById('otResults').style.display = '';
+    document.getElementById('otEmptyState').style.display = 'none';
+    otRenderStats();
+    otRenderList();
+    if (!candidates.length) toast('No one is marked Follow up right now.');
+  } catch (e) {
+    console.error('show all follow-ups failed', e);
+    toast('Could not load follow-ups: ' + e.message);
+  } finally {
+    restore();
+  }
+}
+
 async function otRun() {
   await dncEnsure();   /* guarantee the no-contact set is loaded before the first card render */
   const source = document.getElementById('otSource').value;   /* 'lapsed' | 'new' | 'both' | 'playing' */
