@@ -1040,6 +1040,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="polls">PulseCheck</button>
       <button class="tab" data-tab="lostfound">Lost &amp; Found</button>
       <button class="tab" data-tab="banlist">No-Contact — DNC</button>
+      <button class="tab" data-tab="housecue">House Cue</button>
       <button class="tab" data-tab="eventhorizon">Event Horizon</button>
     </div>
 
@@ -3722,6 +3723,84 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       </div>
     </div>
 
+    <div id="tab-housecue" class="tab-panel">
+      <div class="card" style="margin-bottom:14px">
+        <h2 style="margin:0 0 6px;">House Cue — host locations</h2>
+        <p class="hint" style="margin:0 0 10px;">
+          The single source of truth for the public House Cue map. Edits here go live on the map
+          (<a href="https://southportlandmetroapa.github.io/housecue/" target="_blank" rel="noopener">housecue</a>).
+          Every change is logged below. <strong>Table count blank</strong> = a listed venue that is <em>not</em> an
+          APA host location. Closed venues get a note + a state (Temporarily closed / Closed?).
+        </p>
+        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:6px">
+          <input type="text" id="hcSearch" placeholder="Search name / city / address…" style="flex:1; min-width:220px">
+          <select id="hcRegion"><option value="">All regions</option></select>
+          <select id="hcClosure">
+            <option value="">All venues</option>
+            <option value="open">Open only</option>
+            <option value="closed">Closed / questionable only</option>
+            <option value="nonhost">Not an APA host (no table count)</option>
+          </select>
+          <button type="button" class="btn btn-outline" id="hcAddBtn">➕ Add location</button>
+          <button type="button" class="btn btn-outline" id="hcBulkBtn">⇪ Bulk add</button>
+          <span class="hint" id="hcCount"></span>
+        </div>
+        <div class="status-line" id="hcStatus"></div>
+      </div>
+
+      <!-- Add / edit form (hidden until Add or Edit) -->
+      <div class="card" id="hcForm" style="display:none; margin-bottom:14px">
+        <h3 id="hcFormTitle" style="margin:0 0 8px">Add location</h3>
+        <input type="hidden" id="hcFormId">
+        <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:8px">
+          <label class="hint">Name<input type="text" id="hcfName" style="width:100%"></label>
+          <label class="hint">Phone<input type="text" id="hcfPhone" style="width:100%"></label>
+          <label class="hint">Address (street)<input type="text" id="hcfAddress" style="width:100%"></label>
+          <label class="hint">City<input type="text" id="hcfCity" style="width:100%"></label>
+          <label class="hint">Region<select id="hcfRegion" style="width:100%"></select></label>
+          <label class="hint">Table count <span title="Blank = not an APA host location">(blank = non-host)</span><input type="number" id="hcfTables" min="0" style="width:100%"></label>
+          <label class="hint">Latitude<input type="text" id="hcfLat" style="width:100%"></label>
+          <label class="hint">Longitude<input type="text" id="hcfLon" style="width:100%"></label>
+          <label class="hint">Closure state<select id="hcfClosureKind" style="width:100%"><option value="">Open</option><option value="temp">Temporarily closed</option><option value="maybe">Closed?</option></select></label>
+          <label class="hint">Closure note<input type="text" id="hcfClosureNote" style="width:100%"></label>
+          <label class="hint">Host name<input type="text" id="hcfHostName" style="width:100%"></label>
+          <label class="hint">Host APA # (8-digit)<input type="text" id="hcfHostMember" maxlength="8" style="width:100%"></label>
+          <label class="hint">Host email<input type="email" id="hcfHostEmail" style="width:100%"></label>
+          <label class="hint">Host phone<input type="text" id="hcfHostPhone" style="width:100%"></label>
+          <label class="hint" style="grid-column:1/-1">Internal notes<input type="text" id="hcfNotes" style="width:100%"></label>
+        </div>
+        <div style="display:flex; gap:8px; margin-top:10px; align-items:center">
+          <button type="button" class="btn btn-primary" id="hcSaveBtn">Save</button>
+          <button type="button" class="btn btn-outline" id="hcCancelBtn">Cancel</button>
+          <button type="button" class="btn btn-outline" id="hcArchiveBtn" style="margin-left:auto; display:none">Archive (hide from map)</button>
+        </div>
+      </div>
+
+      <!-- Bulk add -->
+      <div class="card" id="hcBulk" style="display:none; margin-bottom:14px">
+        <h3 style="margin:0 0 6px">Bulk add locations</h3>
+        <p class="hint" style="margin:0 0 6px">One per line, tab- or comma-separated:
+          <code>Name, Address, City, Region, Phone, TableCount, Lat, Lon</code>. Region must be one of the keys shown.
+          Lines that don't parse are reported, not saved. Existing names are skipped.</p>
+        <textarea id="hcBulkText" rows="6" style="width:100%; font-family:monospace; font-size:0.8rem"></textarea>
+        <div style="display:flex; gap:8px; margin-top:8px">
+          <button type="button" class="btn btn-primary" id="hcBulkAddBtn">Add all</button>
+          <button type="button" class="btn btn-outline" id="hcBulkCancelBtn">Cancel</button>
+        </div>
+        <div class="status-line" id="hcBulkStatus"></div>
+      </div>
+
+      <div class="card" style="margin-bottom:14px">
+        <div id="hcList"><p class="hint">Loading…</p></div>
+      </div>
+
+      <div class="card">
+        <h2 style="margin:0 0 6px;">Change log</h2>
+        <p class="hint" style="margin:0 0 8px;">Every edit + add + archive, from Slate and (later) host self-service.</p>
+        <div id="hcLog"><p class="hint">Loading…</p></div>
+      </div>
+    </div>
+
     <div id="tab-polls" class="tab-panel">
       <div class="card">
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
@@ -3854,7 +3933,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.296';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.297';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -8909,7 +8988,8 @@ const TAB_LABEL = {
   nextreg:       'Next Session Reg',
   polls:         'PulseCheck',
   lostfound:     'Lost & Found',
-  banlist:       'No-Contact — DNC'
+  banlist:       'No-Contact — DNC',
+  housecue:      'House Cue'
 };
 
 function switchTab(name) {
@@ -8937,6 +9017,7 @@ function switchTab(name) {
   if (name === 'polls')       plInit();
   if (name === 'lostfound')   lfInit();
   if (name === 'banlist')     blInit();
+  if (name === 'housecue')    hcInit();
   if (name === 'eventhorizon') ehInit();
 }
 
@@ -11384,6 +11465,247 @@ async function blReload() {
     : '<p class="hint">Nothing prevented yet — this fills in as bans take effect.</p>';
 }
 window.blRemove = blRemove;
+
+/* ══════════════════════════════════════════════════════════════════════
+   HOUSE CUE TAB (3.297+) — admin view/edit/bulk-add of slate.host_locations,
+   the single source of truth the public House Cue map reads. Every write
+   appends slate.host_location_changes. Mirrors the Host Plan CRUD pattern.
+   ══════════════════════════════════════════════════════════════════════ */
+const HC_REGIONS = [
+  { k: 'milwaukie',  label: 'Milwaukie' },
+  { k: 'oregoncity', label: 'Oregon City' },
+  { k: 'beaverton',  label: 'Beaverton' },
+  { k: 'tigard',     label: 'Tigard' },
+  { k: 'hillsboro',  label: 'Hillsboro & West' }
+];
+const HC_REGION_LABEL = Object.fromEntries(HC_REGIONS.map(r => [r.k, r.label]));
+let _hc = { rows: [], editingId: null };
+
+async function hcInit() {
+  if (!hcInit._wired) {
+    hcInit._wired = true;
+    /* Region dropdowns (filter + form) */
+    const filt = document.getElementById('hcRegion');
+    const fform = document.getElementById('hcfRegion');
+    for (const r of HC_REGIONS) {
+      filt.insertAdjacentHTML('beforeend', '<option value="' + r.k + '">' + esc(r.label) + '</option>');
+      fform.insertAdjacentHTML('beforeend', '<option value="' + r.k + '">' + esc(r.label) + '</option>');
+    }
+    document.getElementById('hcSearch').addEventListener('input', hcRenderList);
+    document.getElementById('hcRegion').addEventListener('change', hcRenderList);
+    document.getElementById('hcClosure').addEventListener('change', hcRenderList);
+    document.getElementById('hcAddBtn').addEventListener('click', () => hcOpenForm(null));
+    document.getElementById('hcBulkBtn').addEventListener('click', () => {
+      const b = document.getElementById('hcBulk'); b.style.display = b.style.display === 'none' ? '' : 'none';
+    });
+    document.getElementById('hcSaveBtn').addEventListener('click', hcSave);
+    document.getElementById('hcCancelBtn').addEventListener('click', hcCloseForm);
+    document.getElementById('hcArchiveBtn').addEventListener('click', hcArchive);
+    document.getElementById('hcBulkAddBtn').addEventListener('click', hcBulkAdd);
+    document.getElementById('hcBulkCancelBtn').addEventListener('click', () => {
+      document.getElementById('hcBulk').style.display = 'none';
+    });
+    document.getElementById('hcList').addEventListener('click', e => {
+      const ed = e.target.closest('[data-hc-edit]'); if (ed) hcOpenForm(_hc.rows.find(r => String(r.id) === ed.dataset.hcEdit));
+    });
+  }
+  await Promise.all([hcLoad(), hcLoadLog()]);
+}
+
+async function hcLoad() {
+  try {
+    _hc.rows = await sb('GET', 'host_locations?select=*&order=is_active.desc,name.asc') || [];
+    hcRenderList();
+  } catch (e) {
+    document.getElementById('hcList').innerHTML = '<p class="hint">Load failed: ' + esc(e.message) + '</p>';
+  }
+}
+
+function hcClosureLabel(r) {
+  if (!r.closure_kind) return '';
+  return r.closure_kind === 'temp' ? 'Temporarily closed' : 'Closed?';
+}
+
+function hcRenderList() {
+  const q = (document.getElementById('hcSearch').value || '').toLowerCase().trim();
+  const region = document.getElementById('hcRegion').value;
+  const closure = document.getElementById('hcClosure').value;
+  const rows = _hc.rows.filter(r => {
+    if (region && r.region !== region) return false;
+    if (closure === 'open' && r.closure_kind) return false;
+    if (closure === 'closed' && !r.closure_kind) return false;
+    if (closure === 'nonhost' && r.table_count != null) return false;
+    if (q) {
+      const hay = ((r.name || '') + ' ' + (r.city || '') + ' ' + (r.address || '') + ' ' + (r.phone || '')).toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+  const active = _hc.rows.filter(r => r.is_active).length;
+  document.getElementById('hcCount').textContent = rows.length + ' shown · ' + active + ' active · ' + _hc.rows.length + ' total';
+  const el = document.getElementById('hcList');
+  if (!rows.length) { el.innerHTML = '<p class="hint">No locations match.</p>'; return; }
+  el.innerHTML = rows.map(r => {
+    const closed = r.closure_kind
+      ? '<span style="background:#fee2e2;color:#991b1b;border-radius:999px;padding:1px 8px;font-size:0.7rem;font-weight:700;margin-left:6px">' + esc(hcClosureLabel(r)) + '</span>' : '';
+    const nonhost = r.table_count == null
+      ? '<span style="background:#f3f4f6;color:#6b7280;border-radius:999px;padding:1px 8px;font-size:0.7rem;font-weight:700;margin-left:6px">not an APA host</span>' : '';
+    const archived = !r.is_active
+      ? '<span style="background:#e5e7eb;color:#374151;border-radius:999px;padding:1px 8px;font-size:0.7rem;font-weight:700;margin-left:6px">ARCHIVED</span>' : '';
+    const tables = r.table_count == null ? '' : r.table_count + (r.table_count === 1 ? ' table' : ' tables');
+    return '<div style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--border)"'
+      + (r.is_active ? '' : ' style="opacity:0.6"') + '>'
+      + '<div style="flex:1;min-width:0">'
+      +   '<div style="font-weight:700">' + esc(r.name) + closed + nonhost + archived + '</div>'
+      +   '<div class="hint" style="font-size:0.8rem">' + esc(r.address || '') + (r.city ? ', ' + esc(r.city) : '')
+      +     ' · ' + esc(HC_REGION_LABEL[r.region] || r.region || '?') + (tables ? ' · ' + tables : '')
+      +     (r.phone ? ' · ' + esc(r.phone) : '') + '</div>'
+      +   (r.closure_note ? '<div class="hint" style="font-size:0.78rem;color:#991b1b">' + esc(r.closure_note) + '</div>' : '')
+      +   (r.host_name || r.host_member_number ? '<div class="hint" style="font-size:0.76rem">Host: ' + esc(r.host_name || '—') + (r.host_member_number ? ' (#' + esc(r.host_member_number) + ')' : '') + '</div>' : '')
+      + '</div>'
+      + '<button type="button" class="btn btn-outline btn-sm" data-hc-edit="' + esc(r.id) + '">Edit</button>'
+      + '</div>';
+  }).join('');
+}
+
+function hcOpenForm(row) {
+  _hc.editingId = row ? row.id : null;
+  document.getElementById('hcFormTitle').textContent = row ? 'Edit location' : 'Add location';
+  const g = (id, v) => { document.getElementById(id).value = v == null ? '' : v; };
+  g('hcFormId', row ? row.id : '');
+  g('hcfName', row && row.name); g('hcfPhone', row && row.phone);
+  g('hcfAddress', row && row.address); g('hcfCity', row && row.city);
+  document.getElementById('hcfRegion').value = (row && row.region) || '';
+  g('hcfTables', row && row.table_count); g('hcfLat', row && row.lat); g('hcfLon', row && row.lon);
+  document.getElementById('hcfClosureKind').value = (row && row.closure_kind) || '';
+  g('hcfClosureNote', row && row.closure_note);
+  g('hcfHostName', row && row.host_name); g('hcfHostMember', row && row.host_member_number);
+  g('hcfHostEmail', row && row.host_email); g('hcfHostPhone', row && row.host_phone);
+  g('hcfNotes', row && row.notes);
+  document.getElementById('hcArchiveBtn').style.display = (row && row.is_active) ? '' : 'none';
+  document.getElementById('hcForm').style.display = '';
+  document.getElementById('hcForm').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+function hcCloseForm() { document.getElementById('hcForm').style.display = 'none'; _hc.editingId = null; }
+
+/* lowercase → hyphen slug, deduped against loaded rows */
+function hcSlugify(name) {
+  let s = String(name || '').normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').replace(/-+/g, '-') || 'location';
+  const taken = new Set(_hc.rows.map(r => r.slug));
+  if (!taken.has(s)) return s;
+  let n = 1, c; do { n++; c = s + '-' + n; } while (taken.has(c)); return c;
+}
+
+/* Append the audit row. Best-effort — a logging failure never blocks the edit. */
+async function hcLogChange(id, slug, kind, before, after) {
+  try {
+    await sb('POST', 'host_location_changes',
+      { host_location_id: id || null, slug: slug || null, changed_by: 'slate-admin', source: 'slate', change: { kind: kind, before: before, after: after } });
+  } catch (e) { console.warn('[housecue] change-log write failed', e); }
+}
+
+function hcReadForm() {
+  const v = id => { const s = document.getElementById(id).value; return s == null ? '' : s.trim(); };
+  const num = id => { const s = v(id); return s === '' ? null : Number(s); };
+  const member = v('hcfHostMember');
+  if (member && !/^[0-9]{8}$/.test(member)) { setStatus('hcStatus', 'Host APA # must be 8 digits, or blank.', 'err'); return null; }
+  const name = v('hcfName');
+  if (!name) { setStatus('hcStatus', 'Name is required.', 'err'); return null; }
+  return {
+    name: name, phone: v('hcfPhone') || null, address: v('hcfAddress') || null, city: v('hcfCity') || null,
+    region: v('hcfRegion') || null, table_count: num('hcfTables'), lat: num('hcfLat'), lon: num('hcfLon'),
+    closure_kind: v('hcfClosureKind') || null, closure_note: v('hcfClosureNote') || null,
+    host_name: v('hcfHostName') || null, host_member_number: member || null,
+    host_email: v('hcfHostEmail') || null, host_phone: v('hcfHostPhone') || null,
+    notes: v('hcfNotes') || null, updated_by: 'slate-admin'
+  };
+}
+
+async function hcSave() {
+  const patch = hcReadForm(); if (!patch) return;
+  const id = _hc.editingId;
+  try {
+    if (id) {
+      const before = _hc.rows.find(r => String(r.id) === String(id)) || {};
+      const rows = await sb('PATCH', 'host_locations?id=eq.' + encodeURIComponent(id), patch);
+      const after = (rows && rows[0]) || patch;
+      await hcLogChange(id, before.slug, 'edit', before, after);
+      setStatus('hcStatus', '✓ Saved.', 'ok');
+    } else {
+      const body = { ...patch, slug: hcSlugify(patch.name), created_by: 'slate-admin' };
+      const rows = await sb('POST', 'host_locations', body);
+      const created = (rows && rows[0]) || body;
+      await hcLogChange(created.id, created.slug, 'add', null, created);
+      setStatus('hcStatus', '✓ Added.', 'ok');
+    }
+    hcCloseForm();
+    await Promise.all([hcLoad(), hcLoadLog()]);
+  } catch (e) {
+    setStatus('hcStatus', 'Save failed: ' + esc(e.message), 'err');
+  }
+}
+
+async function hcArchive() {
+  const id = _hc.editingId; if (!id) return;
+  const before = _hc.rows.find(r => String(r.id) === String(id)) || {};
+  if (!confirm('Archive ' + (before.name || 'this location') + '? It will disappear from the public map. You can restore it by editing and un-archiving later.')) return;
+  try {
+    await sb('PATCH', 'host_locations?id=eq.' + encodeURIComponent(id), { is_active: false, updated_by: 'slate-admin' });
+    await hcLogChange(id, before.slug, 'archive', { is_active: true }, { is_active: false });
+    setStatus('hcStatus', '✓ Archived.', 'ok');
+    hcCloseForm();
+    await Promise.all([hcLoad(), hcLoadLog()]);
+  } catch (e) { setStatus('hcStatus', 'Archive failed: ' + esc(e.message), 'err'); }
+}
+
+async function hcBulkAdd() {
+  const text = document.getElementById('hcBulkText').value || '';
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  if (!lines.length) { setStatus('hcBulkStatus', 'Nothing to add.', 'err'); return; }
+  const regionKeys = new Set(HC_REGIONS.map(r => r.k));
+  const existing = new Set(_hc.rows.map(r => (r.name || '').toLowerCase().trim()));
+  const good = [], bad = [];
+  for (const line of lines) {
+    const parts = line.split(/\t|,/).map(s => s.trim());
+    const [name, address, city, region, phone, tc, lat, lon] = parts;
+    if (!name) { bad.push(line + '  → no name'); continue; }
+    if (region && !regionKeys.has(region)) { bad.push(line + '  → bad region "' + region + '"'); continue; }
+    if (existing.has(name.toLowerCase())) { bad.push(line + '  → already exists'); continue; }
+    existing.add(name.toLowerCase());
+    good.push({
+      slug: hcSlugify(name), name: name, address: address || null, city: city || null,
+      region: region || null, phone: phone || null,
+      table_count: (tc === '' || tc == null) ? null : Number(tc),
+      lat: lat ? Number(lat) : null, lon: lon ? Number(lon) : null, created_by: 'slate-admin'
+    });
+  }
+  if (!good.length) { setStatus('hcBulkStatus', 'No valid rows. ' + bad.length + ' skipped: ' + esc(bad.join(' | ')), 'err'); return; }
+  try {
+    const rows = await sb('POST', 'host_locations', good);
+    for (const c of (rows || good)) await hcLogChange(c.id, c.slug, 'bulk-add', null, c);
+    setStatus('hcBulkStatus', '✓ Added ' + good.length + (bad.length ? ' · ' + bad.length + ' skipped: ' + esc(bad.join(' | ')) : ''), 'ok');
+    document.getElementById('hcBulkText').value = '';
+    await Promise.all([hcLoad(), hcLoadLog()]);
+  } catch (e) { setStatus('hcBulkStatus', 'Bulk add failed: ' + esc(e.message), 'err'); }
+}
+
+async function hcLoadLog() {
+  const el = document.getElementById('hcLog');
+  try {
+    const log = await sb('GET', 'host_location_changes?select=slug,changed_by,source,change,at&order=at.desc&limit=100');
+    if (!log || !log.length) { el.innerHTML = '<p class="hint">No changes yet.</p>'; return; }
+    el.innerHTML = '<div class="table-wrap"><table class="table"><thead><tr><th>When</th><th>What</th><th>Location</th><th>By</th><th>Source</th></tr></thead><tbody>'
+      + log.map(l => {
+          const kind = (l.change && l.change.kind) || 'edit';
+          return '<tr><td>' + esc(String(l.at).replace('T', ' ').slice(0, 16)) + '</td>'
+            + '<td>' + esc(kind) + '</td><td>' + esc(l.slug || '') + '</td>'
+            + '<td>' + esc(l.changed_by || '') + '</td><td>' + esc(l.source || '') + '</td></tr>';
+        }).join('')
+      + '</tbody></table></div>';
+  } catch (e) { el.innerHTML = '<p class="hint">Change log load failed: ' + esc(e.message) + '</p>'; }
+}
+window.hcInit = hcInit;
 
 async function ehqCopyEmails() {
   const emails = _ehqCollectEmails();
