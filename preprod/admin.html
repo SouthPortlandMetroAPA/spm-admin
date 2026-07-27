@@ -1039,7 +1039,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="nextreg">Next Session</button>
       <button class="tab" data-tab="polls">PulseCheck</button>
       <button class="tab" data-tab="lostfound">Lost &amp; Found</button>
-      <button class="tab" data-tab="banlist">Email Ban List</button>
+      <button class="tab" data-tab="banlist">No-Contact — DNC</button>
       <button class="tab" data-tab="eventhorizon">Event Horizon</button>
     </div>
 
@@ -3688,31 +3688,30 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 
     <div id="tab-banlist" class="tab-panel">
       <div class="card" style="margin-bottom:14px">
-        <h2 style="margin:0 0 6px;">Email ban list</h2>
+        <h2 style="margin:0 0 6px;">No-Contact (DNC) list</h2>
         <p class="hint" style="margin:0 0 10px;">
-          Anyone here will <strong>never</strong> be emailed or copied to the clipboard from any Slate
-          tool — automated sends and click-to-copy both check this list first, and every prevention is
-          logged below. Ban a <strong>person</strong> (covers every email address they have now or
-          later) or a single <strong>email address</strong>.
+          Anyone here will <strong>never</strong> be texted, called, emailed, or copied to the clipboard
+          from any Slate tool — Outreach, Switchboard, Next-Reg, PulseCheck and TCQ gray out their
+          text/call buttons, and every automated send + click-to-copy checks this list first (every
+          prevention is logged below). A DNC entry <strong>requires a player record</strong> — search by
+          name, nickname, or APA #. It covers every phone and email address they have now or later.
         </p>
         <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-start;">
-          <div style="position:relative; width:280px;">
+          <div style="position:relative; width:320px;">
             <input type="text" id="blPerson" autocomplete="off"
-                   placeholder="Ban a person — name, nickname, or APA #" style="width:100%">
+                   placeholder="Player — name, nickname, or APA #" style="width:100%">
             <div id="blPickBox" class="card" style="display:none; position:absolute; z-index:40; left:0; right:0;
                  top:100%; margin-top:2px; padding:4px; max-height:240px; overflow:auto;
                  box-shadow:0 8px 24px rgba(0,0,0,.14);"></div>
           </div>
-          <span style="align-self:center; color:var(--muted)">or</span>
-          <input type="email" id="blEmail" placeholder="Ban an email address" style="width:230px">
           <input type="text" id="blReason" placeholder="Reason (optional)" style="flex:1; min-width:150px">
-          <button type="button" class="btn btn-primary" id="blAddBtn">Add to ban list</button>
+          <button type="button" class="btn btn-primary" id="blAddBtn">Add to no-contact list</button>
         </div>
         <div class="status-line" id="blAddStatus"></div>
       </div>
 
       <div class="card" style="margin-bottom:14px">
-        <h2 style="margin:0 0 6px;">Currently banned</h2>
+        <h2 style="margin:0 0 6px;">On the no-contact list</h2>
         <div id="blList"><p class="hint">Loading…</p></div>
       </div>
 
@@ -3855,7 +3854,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.295';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.296';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -6260,6 +6259,7 @@ function nrOrTargetName() {
   return t ? t.name : 'next session';
 }
 async function nrLoadOutreach() {
+  await dncEnsure();   /* no-contact set loaded before wave rows render */
   if (!_nr.targetId) return;
   try {
     const rows = await sbGetAll('next_reg_outreach?target_session_id=eq.' + _nr.targetId
@@ -6458,6 +6458,7 @@ function nrRenderOutreach() {
       const roster = pair.map(x => _nr.orRoster.get(x.id) || []).flat();
       const seenNum = new Set();
       const uniq = roster.filter(m => {
+        if (dncIsBlocked((m.player || {}).member_number)) return false;   /* DNC excluded from wave texts */
         const ph = nrBestPhone(m.player || {});
         if (!ph) return false;
         const d = otPhoneDigits(ph);
@@ -7563,6 +7564,7 @@ async function plInit() {
   else document.getElementById('plVoters').innerHTML = '<p class="hint">No polls yet.</p>';
 }
 async function plLoad() {
+  await dncEnsure();   /* no-contact set loaded before the outreach roster renders */
   const poll = _pl.polls.find(p => String(p.id) === document.getElementById('plSel').value) || _pl.polls[0];
   if (!poll) return;
   const st = document.getElementById('plStatus');
@@ -7946,20 +7948,23 @@ function plOrDraw(poll) {
     const smsBody = plOrFill(x.text_body || 'Quick SPM poll: {link}',
       { first_name: first, link: tok ? PL_APP_URL + '?t=' + tok : link, poll_title: poll.title });
     const checked = _plOr.sel.has(m.apa) ? _plOr.sel.get(m.apa) : (!!em && !_plOr.stamps.get(m.apa + '|' + plOrKind('email')));
+    const dnc = dncIsBlocked(m.apa);   /* DNC: no email/text controls (checkbox disabled); the "record" logging link stays */
     return '<div style="display:flex;gap:8px;align-items:center;padding:3px 0;font-size:0.84rem;flex-wrap:wrap">'
-      + '<input type="checkbox" data-plorsel="' + m.apa + '"' + (checked && em ? ' checked' : '') + (em ? '' : ' disabled') + '>'
+      + '<input type="checkbox" data-plorsel="' + m.apa + '"' + (checked && em && !dnc ? ' checked' : '') + ((em && !dnc) ? '' : ' disabled') + '>'
       + '<strong>' + esc(m.name) + '</strong>'
       + '<span class="hint">' + esc(m.team) + '</span>'
       + (m.voted ? '<span style="color:#15803d;font-size:0.72rem;font-weight:700">VOTED</span>' : '')
       + (em ? '' : '<span style="color:#b91c1c;font-size:0.72rem;font-weight:700">NO EMAIL</span>')
       + (_plOr.stamps.get(m.apa + '|' + plOrKind('email')) ? '<span style="background:#e8f0fe;color:#0031a1;border-radius:999px;padding:1px 8px;font-size:0.7rem;font-weight:700">EMAILED</span>' : '')
       + (_plOr.stamps.get(m.apa + '|' + plOrKind('text')) ? '<span style="background:#ede9fe;color:#6d28d9;border-radius:999px;padding:1px 8px;font-size:0.7rem;font-weight:700">TEXTED</span>' : '')
-      + (em
-          ? '<a href="#" data-ploremail1="' + m.apa + '" style="margin-left:auto;font-size:0.78rem">&#128231; email</a>'
-          : '<span style="margin-left:auto"></span>')
-      + (digits
-          ? '<a href="' + otBuildSmsUrl(digits, smsBody) + '" data-plortext="' + m.apa + '" style="font-size:0.78rem">&#128172; text</a>'
-          : '<span class="hint" style="font-size:0.72rem">no phone</span>')
+      + (dnc
+          ? '<span style="margin-left:auto">' + dncChipHtml('all') + '</span>'
+          : (em
+              ? '<a href="#" data-ploremail1="' + m.apa + '" style="margin-left:auto;font-size:0.78rem">&#128231; email</a>'
+              : '<span style="margin-left:auto"></span>')
+            + (digits
+                ? '<a href="' + otBuildSmsUrl(digits, smsBody) + '" data-plortext="' + m.apa + '" style="font-size:0.78rem">&#128172; text</a>'
+                : '<span class="hint" style="font-size:0.72rem">no phone</span>'))
       + '<a href="#" data-plorrec="' + m.apa + '" style="font-size:0.78rem">&#9998; record</a>'
       + '</div>';
   }).join('');
@@ -8904,7 +8909,7 @@ const TAB_LABEL = {
   nextreg:       'Next Session Reg',
   polls:         'PulseCheck',
   lostfound:     'Lost & Found',
-  banlist:       'Email Ban List'
+  banlist:       'No-Contact — DNC'
 };
 
 function switchTab(name) {
@@ -11225,6 +11230,34 @@ function dncGate(memberNumber, activeHtml, kind) {
   return dncIsBlocked(memberNumber) ? dncChipHtml(kind) : activeHtml;
 }
 
+/* Central DNC-list mutation. email_blocklist is the SINGLE source of truth, so
+   "Mark DO NOT CONTACT" ANYWHERE (Outreach toggle, No-Contact tab) routes here —
+   one write, every surface's gate updates via dncRefresh(). Requires a member
+   number (the list is player-keyed; the DB CHECK enforces member_number NOT NULL).
+   Re-adding a previously-removed person REACTIVATES their row rather than
+   inserting a duplicate (member has a unique constraint). */
+async function dncAddMember(memberNumber, reason) {
+  const mn = dncKey(memberNumber);
+  if (!/^[0-9]{8}$/.test(mn)) throw new Error('The no-contact list needs an 8-digit player record; got "' + mn + '".');
+  /* No unique constraint on member_number, so reactivate any existing row(s)
+     rather than inserting duplicates; insert fresh only if none exist. */
+  const existing = await sb('GET', 'email_blocklist?member_number=eq.' + encodeURIComponent(mn) + '&select=id&limit=1');
+  if (existing && existing.length) {
+    await sb('PATCH', 'email_blocklist?member_number=eq.' + encodeURIComponent(mn),
+      { active: true, removed_at: null, removed_by: null, reason: reason || null });
+  } else {
+    await sb('POST', 'email_blocklist', { member_number: mn, reason: reason || null, added_by: 'slate-admin' });
+  }
+  await dncRefresh();
+}
+async function dncRemoveMember(memberNumber) {
+  const mn = dncKey(memberNumber);
+  if (!mn) return;
+  await sb('PATCH', 'email_blocklist?active=eq.true&member_number=eq.' + encodeURIComponent(mn),
+    { active: false, removed_at: new Date().toISOString(), removed_by: 'slate-admin' });
+  await dncRefresh();
+}
+
 /* Shared toast helper so every routed caller reports removals consistently. */
 function _sbCopyMsg(r, unit) {
   if (!r.ok) return '⚠ ' + r.error;
@@ -11254,11 +11287,6 @@ async function blInit() {
     document.getElementById('blPickBox').addEventListener('click', e => {
       const row = e.target.closest('.bl-pick'); if (row) blPick(+row.dataset.i);
     });
-    document.getElementById('blEmail').addEventListener('input', () => {
-      /* typing an email clears a person pick — one target per add */
-      if (document.getElementById('blEmail').value.trim()) { _bl.picked = null;
-        document.getElementById('blPerson').value = ''; }
-    });
     add.dataset.wired = '1';
   }
   await blReload();
@@ -11285,41 +11313,35 @@ function blPick(i) {
   const r = _bl.hits[i]; if (!r) return;
   _bl.picked = r;
   document.getElementById('blPerson').value = r.display;
-  document.getElementById('blEmail').value = '';
   document.getElementById('blPickBox').style.display = 'none';
 }
 
 async function blAdd() {
-  const email = (document.getElementById('blEmail').value || '').trim();
   const reason = (document.getElementById('blReason').value || '').trim() || null;
-  let row;
-  if (_bl.picked) {
-    row = { member_number: _bl.picked.member_number, reason: reason, added_by: 'slate-admin' };
-  } else if (email) {
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setStatus('blAddStatus', 'That does not look like an email address.', 'err'); return; }
-    row = { email: email.toLowerCase(), reason: reason, added_by: 'slate-admin' };
-  } else {
-    setStatus('blAddStatus', 'Pick a person or type an email address to ban.', 'err'); return;
+  /* Player-required (user directive 2026-07-24 + DB CHECK member_number NOT NULL).
+     Routes through the central helper so the reactivation + gate-refresh logic is
+     shared with the Outreach toggle. */
+  if (!_bl.picked || !_bl.picked.member_number) {
+    setStatus('blAddStatus', 'Search for and pick a player — the no-contact list requires a player record.', 'err'); return;
   }
   try {
-    await sb('POST', 'email_blocklist', row);
+    await dncAddMember(_bl.picked.member_number, reason);
     document.getElementById('blPerson').value = '';
-    document.getElementById('blEmail').value = '';
     document.getElementById('blReason').value = '';
     _bl.picked = null;
-    setStatus('blAddStatus', '✓ Added to the ban list — they will no longer be emailed or copied.', 'ok');
+    setStatus('blAddStatus', '✓ Added to the no-contact (DNC) list — Slate will no longer text, call, email, or copy them from any tab.', 'ok');
     await blReload();
   } catch (e) {
-    const dup = /23505|duplicate/.test(e.message);
-    setStatus('blAddStatus', dup ? 'That person/address is already on the ban list.' : ('Failed: ' + esc(e.message)), 'err');
+    setStatus('blAddStatus', 'Failed: ' + esc(e.message), 'err');
   }
 }
 
 async function blRemove(id, label) {
-  if (!confirm('Remove the ban on ' + label + '?\n\nThey will be emailable and copyable again.')) return;
+  if (!confirm('Remove ' + label + ' from the no-contact list?\n\nSlate will let you text, call, email, and copy them again.')) return;
   try {
     await sb('PATCH', 'email_blocklist?id=eq.' + id,
       { active: false, removed_at: new Date().toISOString(), removed_by: 'slate-admin' });
+    await dncRefresh();   /* update every surface's gate immediately */
     await blReload();
   } catch (e) { setStatus('blAddStatus', 'Remove failed: ' + esc(e.message), 'err'); }
 }
@@ -11342,12 +11364,12 @@ async function blReload() {
   const listEl = document.getElementById('blList');
   listEl.innerHTML = bans.length ? bans.map(b => {
     const label = b.member_number ? (nameByMn.get(b.member_number) || ('APA ' + b.member_number)) : b.email;
-    const kind = b.member_number ? 'person' : 'address';
+    const kind = b.member_number ? 'no text · no call · no email' : 'legacy address-only';
     return '<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">'
-      + '<div style="flex:1"><strong>' + esc(label) + '</strong> '
+      + '<div style="flex:1"><strong>🚫 ' + esc(label) + '</strong> '
       + '<span class="hint">· ' + kind + (b.reason ? ' · ' + esc(b.reason) : '') + '</span></div>'
       + '<button class="btn btn-outline btn-sm" onclick="blRemove(' + b.id + ',' + JSON.stringify(String(label)).replace(/"/g, '&quot;') + ')">Remove</button></div>';
-  }).join('') : '<p class="hint">No one is banned. Add a person or address above.</p>';
+  }).join('') : '<p class="hint">No one is on the no-contact list. Add a player above.</p>';
 
   try {
     log = await sb('GET', 'email_block_log?select=email,medium,context,reason,at&order=at.desc&limit=100');
@@ -20520,6 +20542,8 @@ async function otInit() {
     _otState.filter.search = document.getElementById('otSearch').value;
     otRenderList();
   });
+  /* DNC set — loaded before the first card render so contact controls gate. */
+  dncEnsure().catch(e => console.error('dnc load failed', e));
   /* One-shot fetches: county list + city list + current session. */
   otLoadCounties().catch(e => console.error('counties load failed', e));
   otLoadCities(null).catch(e => console.error('cities load failed', e));
@@ -20876,6 +20900,7 @@ function otMatchesSearch(c, rawQuery) {
    All return the same column shape. Dedupe by member_number when
    source='both'. Each row is tagged with _source for the UI badge. */
 async function otRun() {
+  await dncEnsure();   /* guarantee the no-contact set is loaded before the first card render */
   const source = document.getElementById('otSource').value;   /* 'lapsed' | 'new' | 'both' | 'playing' */
   /* Last-played range (3.78+): two inputs. Min = lower bound (how recent
      they can be); Max = upper bound (how far back to look). Defaults
@@ -21352,6 +21377,7 @@ function otRenderList() {
    • Clicking opens a small popover menu: Call / Text / Copy.
      (Phone label e.g. "Cell" shown inline.) */
 function otRenderPhones(c) {
+  if (dncIsBlocked(c.member_number)) return dncChipHtml('call');   // DNC: no call/text controls
   const phones = [
     { label: 'Cell', raw: c.cell_phone },
     { label: 'Home', raw: c.home_phone },
@@ -21447,7 +21473,7 @@ function otCardHtml(c) {
   }
 
   return `
-    <div class="ot-card ${s.do_not_contact ? 'dnc' : ''} ${expanded ? 'expanded' : ''}" data-mn="${esc(c.member_number)}">
+    <div class="ot-card ${(s.do_not_contact || dncIsBlocked(c.member_number)) ? 'dnc' : ''} ${expanded ? 'expanded' : ''}" data-mn="${esc(c.member_number)}">
       <div class="ot-card-head">
         <div style="flex:1; min-width:0">
           <div class="ot-name">${esc(fullName)} <span class="hint" style="font-weight:500; font-family:ui-monospace,monospace">#${esc(c.member_number)}</span>${sourceBadge}</div>
@@ -21462,16 +21488,22 @@ function otCardHtml(c) {
         </div>
       </div>
       <div class="ot-contact">
-        ${c.email ? `<a href="${esc(otBuildMailtoUrl(c.email, otSubstitute(_otTemplates.email.subject, c), otSubstitute(_otTemplates.email.body, c)))}" data-templated-mail>✉️ ${esc(c.email)}</a>` : ''}
+        ${dncIsBlocked(c.member_number)
+            ? (c.email ? dncChipHtml('email') : '')
+            : (c.email ? `<a href="${esc(otBuildMailtoUrl(c.email, otSubstitute(_otTemplates.email.subject, c), otSubstitute(_otTemplates.email.body, c)))}" data-templated-mail>✉️ ${esc(c.email)}</a>` : '')}
         ${otRenderPhones(c)}
       </div>
       <!-- Quick-touch buttons. Persistent highlight when the corresponding
            timestamp column is set (last_emailed_at / _texted_at / _called_at).
-           Date shown inline so the operator sees recency at a glance. -->
+           Date shown inline so the operator sees recency at a glance.
+           DNC: the email/text/call channels are replaced by a disabled chip;
+           the CRM-only "Add contact" + the recency label stay (not outbound). -->
       <div class="ot-quicktouch" style="display:flex; gap:6px; margin-top:8px; flex-wrap:wrap;">
-        ${otQuickTouchBtn(s, 'email', 'Emailed', '📧')}
+        ${dncIsBlocked(c.member_number)
+            ? dncChipHtml('all')
+            : `${otQuickTouchBtn(s, 'email', 'Emailed', '📧')}
         ${otQuickTouchBtn(s, 'text',  'Texted',  '💬')}
-        ${otQuickTouchBtn(s, 'call',  'Called',  '📞')}
+        ${otQuickTouchBtn(s, 'call',  'Called',  '📞')}`}
         <button type="button" class="ot-qt-btn" data-add-contact title="Add to Google Contacts (SPM APA group, soldans@)">👤 Add contact</button>
         ${otFmtLastAction(s) ? '<span class="hint" style="align-self:center; font-size:0.74rem">' + esc(otFmtLastAction(s)) + '</span>' : ''}
       </div>
@@ -21931,6 +21963,12 @@ async function otSaveNotes(memberNumber, textarea) {
 async function otQuickTouch(memberNumber, kind, btn) {
   const c = _otState.candidates.find(x => x.member_number === memberNumber);
   if (!c) return;
+  /* DNC gate — reliable enforcement even if a stale render left a live button.
+     Blocks the outbound channel (email/text/call); a no-op returns silently. */
+  if ((kind === 'email' || kind === 'text' || kind === 'call') && dncIsBlocked(memberNumber)) {
+    toast('🚫 On the no-contact (DNC) list — not contacting.');
+    return;
+  }
   const niceLabel = kind === 'email' ? 'Emailed' : kind === 'text' ? 'Texted' : 'Called';
   otPushUndo(memberNumber, 'Logged: ' + niceLabel);
   await otAppendLog(memberNumber, kind, niceLabel + ' (quick-log)');
@@ -22066,6 +22104,7 @@ function otOpenPhoneMenu(btn) {
   const digits = btn.dataset.phoneDigits;
   const label = btn.dataset.phoneLabel;
   const mn = btn.dataset.mn;
+  if (dncIsBlocked(mn)) { toast('🚫 On the no-contact (DNC) list — not contacting.'); return; }
 
   const menu = document.createElement('div');
   menu.style.cssText = 'position:absolute; background:#fff; border:1px solid var(--border); border-radius:10px; box-shadow:0 4px 16px rgba(0,0,0,0.16); z-index:1000; padding:6px; min-width:200px; font-size:0.88rem;';
@@ -22257,13 +22296,23 @@ async function otToggleDnc(memberNumber) {
   const c = _otState.candidates.find(x => x.member_number === memberNumber);
   if (!c) return;
   const next = !c._status.do_not_contact;
-  if (next && !confirm('Mark as DO NOT CONTACT? This hides them from outreach unless you specifically filter for DNC.')) return;
+  if (next && !confirm('Mark as DO NOT CONTACT?\n\nThis adds them to the central No-Contact list — Slate will no longer let you text, call, or email them from any tab: Outreach, Switchboard, Next-Reg, PulseCheck, TCQ. Their emails are blocked from every send too.')) return;
   otPushUndo(memberNumber, next ? 'Marked DO NOT CONTACT' : 'Cleared DO NOT CONTACT');
   await otUpsertStatus(memberNumber, {
     do_not_contact: next,
     last_touched_at: new Date().toISOString()
   });
   await otAppendLog(memberNumber, 'status', next ? 'Marked DO NOT CONTACT' : 'Cleared DO NOT CONTACT');
+  /* "dnc in outreach should add to dnc in slate tab" — the toggle is the SAME
+     no-contact list as the No-Contact (DNC) tab. Write the central source of
+     truth (email_blocklist) so every surface's gate + the email chokepoint pick
+     it up. A central-write failure is surfaced but does NOT silently pass. */
+  try {
+    if (next) await dncAddMember(memberNumber, 'Marked no-contact in Outreach');
+    else await dncRemoveMember(memberNumber);
+  } catch (e) {
+    toast('⚠ Saved the Outreach flag but the central No-Contact list update FAILED: ' + e.message);
+  }
   c._status = { ...c._status, do_not_contact: next };
   otRenderStats();
   otRenderList();
@@ -22486,6 +22535,7 @@ async function sbInit() {
 async function sbLoad() {
   const status = document.getElementById('sbStatusLine');
   status.textContent = 'Loading…';
+  await dncEnsure();   /* no-contact set loaded before team cards render */
   if (!currentSession) {
     status.textContent = 'No current session.';
     return;
@@ -22685,7 +22735,9 @@ function sbTeamCardHtml(t) {
   const rowsHtml = rows.map(r => {
     const tag = r.role === 'Captain'    ? 'captain'
               : r.role === 'Co-Captain' ? 'cocap' : 'player';
-    const phoneHtml = r.has_cell
+    const phoneHtml = dncIsBlocked((r.player || {}).member_number)
+      ? dncChipHtml('text')
+      : r.has_cell
       ? `<a class="sb-phone real" href="${esc(sbBuildSmsUrl([r], r.player))}">${esc(r.phone_raw)}</a>`
       : '<span class="sb-no-phone">(no cell)</span>';
     return `<div class="sb-roster-row">
@@ -22694,10 +22746,13 @@ function sbTeamCardHtml(t) {
       ${phoneHtml}
     </div>`;
   }).join('');
-  /* Per-team aggregate buttons */
-  const caps  = t.rows.filter(r => r.role === 'Captain'    && r.has_cell);
-  const cocs  = t.rows.filter(r => r.role === 'Co-Captain' && r.has_cell);
-  const all   = t.rows.filter(r => r.has_cell);
+  /* Per-team aggregate buttons. DNC members are excluded from every count +
+     recipient set, so a fully-DNC team disables the button (sbBuildSmsUrl
+     also drops them centrally as a backstop). */
+  const _reach = r => r.has_cell && !dncIsBlocked((r.player || {}).member_number);
+  const caps  = t.rows.filter(r => r.role === 'Captain'    && _reach(r));
+  const cocs  = t.rows.filter(r => r.role === 'Co-Captain' && _reach(r));
+  const all   = t.rows.filter(r => _reach(r));
   const noBody = '';
   const dis = arr => arr.length === 0 ? ' disabled' : '';
   const capUrl  = caps.length        ? sbBuildSmsUrl(caps, caps[0]?.player)        : '#';
@@ -22739,6 +22794,9 @@ function sbWireTeamCards() {
    personalize within one message). Multi-recipient links typically
    open a group thread on iOS / Android. */
 function sbBuildSmsUrl(recipients, candidateForBody) {
+  /* DNC: central enforcement — a no-contact member's number never enters a
+     text URL, even in a group/bulk send, regardless of the caller. */
+  recipients = (recipients || []).filter(r => !dncIsBlocked((r.player || {}).member_number));
   if (!recipients.length) return '#';
   /* Dedupe by digits (3.190) — with the prior session unioned in, the
      same person can captain teams in both sessions; one text, not two. */
@@ -22772,6 +22830,7 @@ function sbTextSelection(scope) {
         const p = m.player || {};
         if (!otIsRealPhone(p.cell_phone)) continue;
         if (!includeRole(m.role)) continue;
+        if (dncIsBlocked(p.member_number)) continue;   /* DNC excluded from bulk send */
         recipients.push({ phone_digits: otPhoneDigits(p.cell_phone), player: p });
         if (!firstPlayer) firstPlayer = p;
       }
@@ -25283,7 +25342,7 @@ let _tcqTeams = [];
 let _tcqPlayersByTeam = new Map();
 
 async function tcqInit() {
-  await Promise.all([tcqLoadEligibility(), tcqLoadSu26Roster()]);
+  await Promise.all([tcqLoadEligibility(), tcqLoadSu26Roster(), dncEnsure()]);
   await tcqRender();
   /* Outreach section — runs in parallel, doesn't block team render. */
   tcqOrInit().catch(e => console.warn('[tcq] outreach init', e));
@@ -26294,6 +26353,7 @@ async function tcqTextCaptain(teamId) {
   const players = (_tcqPlayersByTeam.get(teamId) || []).slice().sort((a, b) => a.position - b.position);
   const captain = players.find(p => p.is_captain);
   if (!captain) { alert('No captain on this team yet.'); return; }
+  if (dncIsBlocked(captain.member_number)) { alert('🚫 ' + (captain.name || 'This captain') + ' is on the no-contact (DNC) list — not texting.'); return; }
   const phone = tcqNormalizePhone(captain.cell_phone);
   if (!phone) { alert('No usable cell phone on file for ' + captain.name + '.'); return; }
   const lineup = tcqLineupCheck(players);
@@ -26316,11 +26376,12 @@ async function tcqTextTeam(teamId) {
   const phones = [];
   const noPhone = [];
   for (const p of players) {
+    if (dncIsBlocked(p.member_number)) continue;   /* DNC excluded from the group text */
     const ph = tcqNormalizePhone(p.cell_phone);
     if (ph) phones.push(ph);
     else noPhone.push(p.name);
   }
-  if (!phones.length) { alert('No usable cell phones on file for this team.'); return; }
+  if (!phones.length) { alert('No usable cell phones on file for this team (no-contact players are excluded).'); return; }
   if (noPhone.length) {
     if (!confirm('No phone on file for: ' + noPhone.join(', ') + '\n\nText the rest of the team?')) return;
   }
@@ -27484,6 +27545,7 @@ function tcqOrRefreshChipStyles() {
 async function tcqOrRender() {
   const stat = document.getElementById('tcqOrStatus');
   stat.textContent = 'Loading…';
+  await dncEnsure();   /* no-contact set loaded before candidate rows render */
   try {
     _tcqOrAll = await tcqGet('outreach_candidates?select=*&limit=2000');
   } catch (e) {
@@ -27641,7 +27703,9 @@ function tcqOrRowHtml(r) {
     ['W', r.work_phone],
     ['A', r.alt_phone]
   ].filter(([, v]) => v && String(v).replace(/[^0-9]/g, '').length >= 7);
-  const phoneSpan = phoneFields.length
+  const phoneSpan = dncIsBlocked(r.member_number)
+    ? ' &middot; ' + dncChipHtml('call')                    /* DNC: no tap-to-call/text links */
+    : phoneFields.length
     ? ' &middot; ' + phoneFields.map(([tag, v]) =>
         '<a href="tel:' + esc(v) + '" style="color:inherit;text-decoration:none">'
         + '<span style="display:inline-block;background:#eef4ff;border:1px solid #b9cdf2;border-radius:4px;padding:0 4px;font-size:0.7rem;font-weight:700;margin-right:2px">' + tag + '</span>'
@@ -27692,9 +27756,12 @@ function tcqOrRowHtml(r) {
     /* tcqOrTextOne texts via SMS to r.cell_phone specifically (not any
        of the other phones), so disable the button only when cell_phone
        is unusable. The phone-pill row above shows H/W/A links so the
-       admin can still call those numbers manually. */
-    +       (r.cell_phone && String(r.cell_phone).replace(/[^0-9]/g, '').length >= 10
-              ? '' : ' disabled title="No cell phone on file"') + '>Text</button>'
+       admin can still call those numbers manually. DNC disables it outright. */
+    +       (dncIsBlocked(r.member_number)
+              ? ' disabled title="On the no-contact (DNC) list"'
+              : (r.cell_phone && String(r.cell_phone).replace(/[^0-9]/g, '').length >= 10
+              ? '' : ' disabled title="No cell phone on file"')) + '>'
+    +       (dncIsBlocked(r.member_number) ? '🚫 DNC' : 'Text') + '</button>'
     +   '</div>'
     + '</div>';
 }
@@ -27844,6 +27911,7 @@ function tcqOrBuildVars(r) {
   };
 }
 async function tcqOrTextOne(memberNumber) {
+  if (dncIsBlocked(memberNumber)) { alert('🚫 On the no-contact (DNC) list — not texting.'); return; }
   const r = _tcqOrAll.find(x => x.member_number === memberNumber);
   if (!r) { alert('Candidate not loaded.'); return; }
   const phone = tcqNormalizePhone(r.cell_phone);
