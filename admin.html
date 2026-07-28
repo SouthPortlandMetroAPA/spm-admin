@@ -464,6 +464,33 @@ input:focus, select:focus, textarea:focus {
   border: 2px solid var(--amber);
 }
 
+/* Indeterminate progress bar (Contacts sync + any long single-call op). The
+   server work is one blocking request with no per-item stream, so the bar is
+   deliberately indeterminate — an honest "working" animation paired with a
+   live elapsed timer, not a fake fill. */
+.gc-prog { margin: 4px 0 12px; }
+.gc-prog-bar {
+  position: relative; height: 8px; border-radius: 999px; overflow: hidden;
+  background: rgba(0,49,161,0.12);
+}
+.gc-prog-bar span {
+  position: absolute; top: 0; left: 0; height: 100%; width: 35%;
+  border-radius: 999px; background: var(--accent, #0031a1);
+  animation: gc-prog-slide 1.25s ease-in-out infinite;
+}
+@keyframes gc-prog-slide {
+  0%   { left: -35%; }
+  100% { left: 100%; }
+}
+.gc-prog-meta {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-top: 6px; font-size: 0.8rem; font-weight: 600; color: var(--muted, #6b7280);
+}
+.gc-prog-time { font-variant-numeric: tabular-nums; }
+@media (prefers-reduced-motion: reduce) {
+  .gc-prog-bar span { animation: none; width: 100%; opacity: 0.5; }
+}
+
 /* ── Table ── */
 .table-wrap { overflow-x: auto; }
 .table {
@@ -3711,6 +3738,11 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <input type="text" id="blReason" placeholder="Reason (optional)" style="flex:1; min-width:150px">
           <button type="button" class="btn btn-primary" id="blAddBtn">Add to no-contact list</button>
         </div>
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:8px">
+          <button type="button" class="btn btn-outline btn-sm" id="blPullOutreachBtn"
+                  title="Add everyone marked DO NOT CONTACT in the Outreach tab to this central list">⇪ Pull DO-NOT-CONTACT marks from Outreach</button>
+          <span class="hint" style="font-size:0.78rem">Brings Outreach "DO NOT CONTACT" toggles that predate this list onto it.</span>
+        </div>
         <div class="status-line" id="blAddStatus"></div>
       </div>
 
@@ -3882,9 +3914,13 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           household contact (e.g. <em>Kevin/Karen Blodgett</em>).
         </p>
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
-          <button class="btn btn-outline" onclick="gcSync(true)" title="Compute what WOULD change without writing anything">🔍 Dry run</button>
-          <button class="btn btn-primary" onclick="gcSync(false)">🔄 Sync to Google Contacts</button>
+          <button class="btn btn-outline" id="gcDryBtn" onclick="gcSync(true)" title="Compute what WOULD change without writing anything">🔍 Dry run</button>
+          <button class="btn btn-primary" id="gcSyncBtn" onclick="gcSync(false)">🔄 Sync to Google Contacts</button>
           <span id="gcStatus" class="status-line" style="flex:1" role="status" aria-live="polite"></span>
+        </div>
+        <div id="gcProgress" class="gc-prog" style="display:none" role="progressbar" aria-label="Contacts sync in progress">
+          <div class="gc-prog-bar"><span></span></div>
+          <div class="gc-prog-meta"><span id="gcProgLabel">Working…</span><span id="gcProgTime" class="gc-prog-time">0:00</span></div>
         </div>
         <div id="gcResults" style="display:none;padding:12px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:0.9rem"></div>
         <p class="hint" style="margin:12px 0 0;font-size:0.78rem;color:#888">
@@ -3936,7 +3972,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.298';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.299';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11359,6 +11395,7 @@ async function blInit() {
   const add = document.getElementById('blAddBtn');
   if (!add.dataset.wired) {
     add.addEventListener('click', blAdd);
+    document.getElementById('blPullOutreachBtn').addEventListener('click', blPullFromOutreach);
     const p = document.getElementById('blPerson');
     p.addEventListener('input', () => {
       _bl.picked = null;
@@ -11428,6 +11465,40 @@ async function blRemove(id, label) {
     await dncRefresh();   /* update every surface's gate immediately */
     await blReload();
   } catch (e) { setStatus('blAddStatus', 'Remove failed: ' + esc(e.message), 'err'); }
+}
+
+/* Pull everyone marked DO NOT CONTACT in the Outreach tab (outreach_status.
+   do_not_contact) onto the central no-contact list. Covers marks made before
+   the Outreach toggle started writing here. Idempotent: members already on
+   the list are skipped. Player-keyed (dncAddMember enforces 8-digit). */
+async function blPullFromOutreach() {
+  const btn = document.getElementById('blPullOutreachBtn');
+  if (btn) btn.disabled = true;
+  setStatus('blAddStatus', 'Scanning Outreach for DO NOT CONTACT marks…', '');
+  try {
+    const marked = await sb('GET', 'outreach_status?do_not_contact=eq.true&select=member_number');
+    const members = [...new Set((marked || []).map(r => dncKey(r.member_number)).filter(m => /^[0-9]{8}$/.test(m)))];
+    if (!members.length) { setStatus('blAddStatus', 'No DO NOT CONTACT marks found in Outreach.', 'ok'); return; }
+    const existing = await sb('GET', 'email_blocklist?active=eq.true&member_number=in.(' + members.join(',') + ')&select=member_number');
+    const have = new Set((existing || []).map(r => dncKey(r.member_number)));
+    const todo = members.filter(m => !have.has(m));
+    let added = 0, failed = 0;
+    for (const m of todo) {
+      try { await dncAddMember(m, 'Marked DO NOT CONTACT in Outreach'); added++; }
+      catch (e) { failed++; console.warn('[dnc-pull] failed for', m, e); }
+    }
+    await dncRefresh();
+    await blReload();
+    setStatus('blAddStatus',
+      '✓ Pulled ' + added + ' from Outreach'
+      + (have.size ? ' · ' + have.size + ' already on the list' : '')
+      + (failed ? ' · ' + failed + ' failed' : '') + '.',
+      failed ? 'err' : 'ok');
+  } catch (e) {
+    setStatus('blAddStatus', 'Pull failed: ' + esc(e.message), 'err');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 async function blReload() {
@@ -13773,9 +13844,26 @@ window.mailerQuotaCheck = mailerQuotaCheck;
 async function gcSync(dryRun) {
   const stat = document.getElementById('gcStatus');
   const box  = document.getElementById('gcResults');
-  stat.textContent = dryRun ? 'Computing diff (no writes)…' : 'Syncing… this can take a minute on first run.';
+  const dryBtn  = document.getElementById('gcDryBtn');
+  const syncBtn = document.getElementById('gcSyncBtn');
+  const prog = document.getElementById('gcProgress');
+  const label = dryRun ? 'Computing what would change (no writes)…' : 'Syncing to Google Contacts…';
+  stat.textContent = label;
   stat.className = 'status-line';
   box.style.display = 'none';
+  /* Indeterminate progress + live elapsed timer; both buttons lock while it
+     runs. The GAS call is one blocking request with no per-item stream, so the
+     bar animates rather than filling to a real percentage — an honest "still
+     working" signal so a minute-long sync never looks frozen. */
+  document.getElementById('gcProgLabel').textContent = label;
+  document.getElementById('gcProgTime').textContent = '0:00';
+  prog.style.display = '';
+  if (dryBtn) dryBtn.disabled = true;
+  if (syncBtn) syncBtn.disabled = true;
+  const _started = Date.now();
+  const _fmt = ms => { const s = Math.floor(ms / 1000); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+  const _timer = setInterval(() => { document.getElementById('gcProgTime').textContent = _fmt(Date.now() - _started); }, 1000);
+  const _finish = () => { clearInterval(_timer); prog.style.display = 'none'; if (dryBtn) dryBtn.disabled = false; if (syncBtn) syncBtn.disabled = false; };
   try {
     const r = await fetch(OPTOUT_CONFIRM_MAILER_URL, {
       method: 'POST',
@@ -13817,6 +13905,8 @@ async function gcSync(dryRun) {
   } catch (e) {
     stat.textContent = '✗ ' + e.message;
     stat.className = 'status-line err';
+  } finally {
+    _finish();
   }
 }
 window.gcSync = gcSync;
@@ -21243,19 +21333,33 @@ async function otShowAllFollowUps() {
         { 'Accept-Profile': 'slate', 'Content-Profile': 'slate' }) || [];
       _otUniverseCache = { data: universe, at: Date.now() };
     }
-    const candidates = [];
+    const all = [];
     for (const u of universe) {
       if (!u.status || u.status.status !== 'follow_up' || !u.player) continue;
       const p = u.player;
       const t = Math.max(otParseDate(p.last_played_8) || 0, otParseDate(p.last_played_9) || 0);
-      candidates.push({ ...p, _status: u.status,
+      all.push({ ...p, _status: u.status,
         last_any: t ? new Date(t).toISOString().slice(0, 10) : null,
         _source: (p.last_played_8 || p.last_played_9) ? 'lapsed' : 'new' });
     }
-    candidates.sort((a, b) =>
-      String(a.last_name || '').localeCompare(b.last_name || '') ||
-      String(a.first_name || '').localeCompare(b.first_name || ''));
-    _otState.candidates = candidates;
+    restore();   /* the picker modal is the interaction now — free the button */
+    if (!all.length) { toast('No one is marked Follow up right now.'); return; }
+    /* Ask which session's follow-ups to show. Group by follow_up_session
+       (blank = no session set) so the operator can scope, or pick All. */
+    const byKey = new Map();
+    for (const c of all) {
+      const key = c._status.follow_up_session || '';
+      if (!byKey.has(key)) byKey.set(key, { key, label: key || '(no session set)', count: 0 });
+      byKey.get(key).count++;
+    }
+    const groups = [...byKey.values()].sort((a, b) => (b.count - a.count) || a.label.localeCompare(b.label));
+    const pick = await otPickFollowUpFilterSession(groups);
+    if (pick === null) return;   /* cancelled */
+    const chosen = (pick === '__ALL__' ? all : all.filter(c => (c._status.follow_up_session || '') === pick))
+      .sort((a, b) =>
+        String(a.last_name || '').localeCompare(b.last_name || '') ||
+        String(a.first_name || '').localeCompare(b.first_name || ''));
+    _otState.candidates = chosen;
     /* Clear every narrowing filter; land on the Follow up pill. */
     _otState.filter.status = 'follow_up';
     _otState.filter.touch = new Set();
@@ -21267,7 +21371,6 @@ async function otShowAllFollowUps() {
     document.getElementById('otEmptyState').style.display = 'none';
     otRenderStats();
     otRenderList();
-    if (!candidates.length) toast('No one is marked Follow up right now.');
   } catch (e) {
     console.error('show all follow-ups failed', e);
     toast('Could not load follow-ups: ' + e.message);
@@ -22629,6 +22732,36 @@ function otPickFollowUpSession(current) {
     }));
     document.getElementById('otFuClear').addEventListener('click', () => { cleanup(); resolve(null); /* clear = cancel (status stays unchanged) */ });
     document.getElementById('otFuCancel').addEventListener('click', () => { cleanup(); resolve(null); });
+  });
+}
+
+/* Filter picker for "All follow-ups": choose which session's follow-ups to
+   show. groups = [{key, label, count}] (key = follow_up_session, '' = none).
+   Resolves '__ALL__' for every session, the group's key for one, or null on
+   cancel. */
+function otPickFollowUpFilterSession(groups) {
+  return new Promise((resolve) => {
+    const total = groups.reduce((n, g) => n + g.count, 0);
+    const back = document.createElement('div');
+    back.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.45); z-index:2000; display:flex; align-items:center; justify-content:center; padding:20px;';
+    const box = document.createElement('div');
+    box.style.cssText = 'background:#fff; border-radius:14px; padding:20px; max-width:360px; width:100%; box-shadow:0 10px 30px rgba(0,0,0,0.25); max-height:80vh; overflow:auto;';
+    const btn = (key, label, count, primary) =>
+      `<button type="button" data-fk="${esc(key)}" style="display:flex; justify-content:space-between; align-items:center; gap:12px; width:100%; text-align:left; padding:13px 16px; margin-bottom:8px; background:${primary?'#eef3ff':'#f5f5f5'}; border:1.5px solid ${primary?'var(--spm-accent)':'var(--border)'}; border-radius:10px; cursor:pointer; font-weight:600; font-size:0.92rem; color:var(--text);">`
+      + `<span>${esc(label)}</span><strong style="color:var(--spm-accent)">${count}</strong></button>`;
+    box.innerHTML =
+      '<div style="font-weight:800; font-size:1rem; margin-bottom:12px; color:var(--text);">Show follow-ups for which session?</div>' +
+      btn('__ALL__', 'All sessions', total, true) +
+      groups.map(g => btn(g.key, g.label, g.count, false)).join('') +
+      '<button type="button" id="otFuFilterCancel" style="width:100%; padding:10px; margin-top:4px; background:#fff; border:1px solid var(--border); border-radius:8px; cursor:pointer; font-size:0.86rem; color:var(--muted);">Cancel</button>';
+    back.appendChild(box);
+    document.body.appendChild(back);
+    const cleanup = () => { back.remove(); document.removeEventListener('keydown', onKey, true); };
+    const onKey = (e) => { if (e.key === 'Escape') { cleanup(); resolve(null); } };
+    document.addEventListener('keydown', onKey, true);
+    back.addEventListener('click', (e) => { if (e.target === back) { cleanup(); resolve(null); } });
+    box.querySelectorAll('[data-fk]').forEach(b => b.addEventListener('click', () => { const k = b.dataset.fk; cleanup(); resolve(k); }));
+    document.getElementById('otFuFilterCancel').addEventListener('click', () => { cleanup(); resolve(null); });
   });
 }
 
