@@ -3874,6 +3874,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
                 <select id="plfRule">
                   <option value="division_roster">One division &mdash; format + night</option>
                   <option value="formats">Any player in format(s)</option>
+                  <option value="member_list">Specific players (paste APA #s)</option>
                   <option value="all_spm">Any current SPM player</option>
                 </select>
               </label>
@@ -3881,6 +3882,8 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
               <input id="plfNight" placeholder="Night" style="max-width:120px">
               <input id="plfAudience" placeholder="Audience label for refusals" style="max-width:260px">
             </div>
+            <textarea id="plfMembers" placeholder="Eligible APA numbers &mdash; paste the rosters here, one per line or comma/space separated (member-list rule only)"
+                      style="display:none;width:100%;min-height:72px;font-family:monospace;font-size:0.8rem"></textarea>
             <input id="plfCheckbox" placeholder="Optional extra checkbox copy &mdash; blank for none">
             <input id="plfComment" placeholder="Comment-box placeholder &mdash; blank for generic">
             <div style="font-weight:700;font-size:0.82rem;margin-top:2px">Invite templates
@@ -3974,7 +3977,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.300';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.301';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -7825,6 +7828,15 @@ function plTeamBadge(counts, votes, poles) {
 }
 async function plRosterByTeam(poll) {
   const el = poll.eligibility || {};
+  if (el.rule === 'member_list') {
+    const members = [...new Set((el.members || []).map(String))];
+    if (!members.length) return { teams: [] };
+    let players = [];
+    try { players = await sbGetAll('players?member_number=in.(' + members.join(',') + ')&select=member_number,first_name,last_name'); } catch (e) {}
+    const nameBy = new Map((players || []).map(p => [p.member_number, ((p.first_name || '') + ' ' + (p.last_name || '')).trim() || p.member_number]));
+    return { teams: [{ id: 0, number: '', name: el.audience_label || 'Eligible players',
+      members: members.map(m => ({ apa: m, name: nameBy.get(m) || m })) }] };
+  }
   if (el.rule !== 'division_roster') return null;
   const divs = await sb('GET', 'divisions?session_id=eq.' + currentSession.id
     + '&operator_id=eq.' + el.operator_id + '&format=eq.' + encodeURIComponent(el.format)
@@ -8345,8 +8357,9 @@ function plfDrawOpts() {
 }
 function plfRuleSync() {
   const rule = document.getElementById('plfRule').value;
-  document.getElementById('plfFormat').style.display = rule === 'all_spm' ? 'none' : '';
+  document.getElementById('plfFormat').style.display = (rule === 'all_spm' || rule === 'member_list') ? 'none' : '';
   document.getElementById('plfNight').style.display = rule === 'division_roster' ? '' : 'none';
+  document.getElementById('plfMembers').style.display = rule === 'member_list' ? '' : 'none';
 }
 function plfFill(poll, responseCount) {
   _plf.locked = responseCount > 0;
@@ -8358,6 +8371,7 @@ function plfFill(poll, responseCount) {
   document.getElementById('plfRule').value = el.rule || 'all_spm';
   document.getElementById('plfFormat').value = el.format || (el.formats || []).join(', ') || '';
   document.getElementById('plfNight').value = el.night || '';
+  document.getElementById('plfMembers').value = (el.members || []).join('\n');
   document.getElementById('plfAudience').value = el.audience_label || '';
   const x = poll ? (poll.extras || {}) : {};
   document.getElementById('plfCheckbox').value = x.checkbox || '';
@@ -8385,6 +8399,11 @@ function plfCollect() {
   } else if (rule === 'formats') {
     if (!fmts.length) throw new Error('formats rule needs at least one format');
     el.formats = fmts;
+  } else if (rule === 'member_list') {
+    const raw = (document.getElementById('plfMembers').value.match(/\d+/g) || []);
+    const members = [...new Set(raw.map(d => d.length === 5 ? '972' + d : d).filter(d => /^\d{8}$/.test(d)))];
+    if (!members.length) throw new Error('member-list rule needs at least one APA number (8-digit, or 5-digit local)');
+    el.members = members;
   }
   const extras = {};
   const cb = document.getElementById('plfCheckbox').value.trim();
