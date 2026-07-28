@@ -3306,13 +3306,15 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <span class="hint" id="dpStatus"></span>
           <div style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">
             <button class="btn btn-primary btn-sm" onclick="dpOpenModal()">+ Add / Update Team</button>
+            <button class="btn btn-outline btn-sm" onclick="dpCopyFormLink(this)" title="Copy the public captain self-service form link to share with teams">🔗 Copy captain form link</button>
             <button class="btn btn-outline btn-sm" onclick="dpExportDeclinesCsv()">📥 Declines CSV</button>
             <button class="btn btn-outline btn-sm" onclick="dpRender()">↻ Refresh</button>
           </div>
         </div>
         <p class="hint" style="margin-top:0;margin-bottom:12px">
-          Team preferences are recorded manually by league operators. A team may
-          choose not to play away matches at The Dolphin without providing a reason.
+          Teams can self-submit via the <b>captain form</b> (🔗 above — share the link) or you can
+          record preferences manually. Self-submissions land here instantly, shown with
+          <b>Contacted&nbsp;by: Captain</b>. A team may decline away matches at The Dolphin without a reason.
         </p>
 
         <!-- Summary tiles -->
@@ -3972,7 +3974,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.299';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.300';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -19190,11 +19192,24 @@ function dpExportDeclinesCsv() {
 
 window.dpInit             = dpInit;
 window.dpRender           = dpRender;
+/* Public captain self-service form (repo `dolphin`). Copy the link to share
+   with teams; their submissions land in this tab (Contacted by: Captain). */
+const DP_FORM_URL = 'https://southportlandmetroapa.github.io/dolphin/';
+async function dpCopyFormLink(btn) {
+  const old = btn ? btn.textContent : '';
+  try {
+    await navigator.clipboard.writeText(DP_FORM_URL);
+    if (btn) { btn.textContent = '✓ Link copied'; setTimeout(() => { btn.textContent = old; }, 1800); }
+  } catch (e) {
+    window.prompt('Copy the captain form link:', DP_FORM_URL);
+  }
+}
 window.dpOpenModal        = dpOpenModal;
 window.dpCloseModal       = dpCloseModal;
 window.dpSave             = dpSave;
 window.dpDelete           = dpDelete;
 window.dpExportDeclinesCsv = dpExportDeclinesCsv;
+window.dpCopyFormLink     = dpCopyFormLink;
 
 /* ════════════════════════════════════════════════════════════════════════
    COMMON PLAYERS — Roster & Handicap Report parser + transitive grouping
@@ -21237,6 +21252,7 @@ async function otReminderContacted(mn) {
 async function otReminderSnooze(mn) {
   const newSession = await otPickFollowUpSession(null);
   if (newSession === null) return;
+  if (newSession === '__CLEAR__') { await otClearFollowUp(mn); return; }
   otPushUndo(mn, 'Reminder: snoozed to ' + newSession);
   await otUpsertStatus(mn, { follow_up_session: newSession, last_touched_at: new Date().toISOString() });
   await otAppendLog(mn, 'snooze', 'Reminder → re-deferred to: ' + newSession);
@@ -22671,6 +22687,8 @@ async function otSetStatus(memberNumber, status) {
     );
     if (followUpSession === null) return;
   }
+  /* Picker "Clear" while setting a status = no specific session. */
+  if (followUpSession === '__CLEAR__') followUpSession = null;
   otPushUndo(memberNumber, 'Set status to ' + STATUS_LABEL[status]);
   await otUpsertStatus(memberNumber, {
     status,
@@ -22730,7 +22748,7 @@ function otPickFollowUpSession(current) {
       const label = btn.dataset.pick;
       cleanup(); resolve(label);
     }));
-    document.getElementById('otFuClear').addEventListener('click', () => { cleanup(); resolve(null); /* clear = cancel (status stays unchanged) */ });
+    document.getElementById('otFuClear').addEventListener('click', () => { cleanup(); resolve('__CLEAR__'); /* remove the follow-up (callers interpret) */ });
     document.getElementById('otFuCancel').addEventListener('click', () => { cleanup(); resolve(null); });
   });
 }
@@ -22765,17 +22783,35 @@ function otPickFollowUpFilterSession(groups) {
   });
 }
 
+/* Remove a follow-up entirely: status → Working, session cleared. Shared by
+   the follow-up Edit line, the reminder snooze, and the picker's Clear button. */
+async function otClearFollowUp(memberNumber) {
+  otPushUndo(memberNumber, 'Cleared follow-up');
+  await otUpsertStatus(memberNumber, {
+    status: 'working', follow_up_session: null,
+    last_touched_at: new Date().toISOString(), updated_by: 'admin'
+  });
+  await otAppendLog(memberNumber, 'status', 'Cleared follow-up (→ Working)');
+  const c = _otState.candidates.find(x => x.member_number === memberNumber);
+  if (c) c._status = { ...c._status, status: 'working', follow_up_session: null };
+  otRenderStats();
+  otRenderList();
+  otRefreshReminders();
+}
+
 async function otEditFollowUp(memberNumber) {
   const c = _otState.candidates.find(x => x.member_number === memberNumber);
   if (!c) return;
-  const followUpSession = await otPickFollowUpSession(c._status.follow_up_session);
-  if (followUpSession === null) return;
-  otPushUndo(memberNumber, 'Changed follow-up to ' + (followUpSession || 'cleared'));
+  const res = await otPickFollowUpSession(c._status.follow_up_session);
+  if (res === null) return;                       /* cancelled */
+  if (res === '__CLEAR__') { await otClearFollowUp(memberNumber); return; }
+  const followUpSession = res;
+  otPushUndo(memberNumber, 'Changed follow-up to ' + followUpSession);
   await otUpsertStatus(memberNumber, {
     follow_up_session: followUpSession,
     last_touched_at: new Date().toISOString()
   });
-  await otAppendLog(memberNumber, 'snooze', 'Follow-up session: ' + (followUpSession || '(cleared)'));
+  await otAppendLog(memberNumber, 'snooze', 'Follow-up session: ' + followUpSession);
   c._status = { ...c._status, follow_up_session: followUpSession };
   otRenderList();
   otRefreshReminders();   /* session label may have changed → re-check bucket */
