@@ -3977,7 +3977,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.301';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.302';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -16051,6 +16051,18 @@ function spNotifyTeamKey(tn) {
   return Number.isFinite(n) ? String(n) : String(tn || '').trim();
 }
 
+/* Mailing-address key — same name is NOT the same household. Normalizes the
+   street line (lowercase, non-alphanumeric collapsed to one space, trimmed)
+   plus the first-5 ZIP, so two people who merely share a name but live at
+   DIFFERENT addresses never collapse together (Jerry Harris father @ Nehalem
+   vs son @ Portland, both on team 8001). sp_patches_v.zip is bare '97266';
+   players.zip is '97266-____' — the \D strip + slice(0,5) reconciles them. */
+function spAddrKey(addr1, zip) {
+  const a = String(addr1 || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const z = String(zip || '').replace(/\D+/g, '').slice(0, 5);
+  return a + '|' + z;
+}
+
 /* Build the full recipient model for the active batch. */
 async function spNotifyBuild() {
   if (!_spLastBatch) throw new Error('No active mailing batch.');
@@ -16066,7 +16078,7 @@ async function spNotifyBuild() {
   for (let i = 0; i < teamNums.length; i += TCH) {
     const rows = await sb('GET',
       'teams?select=team_number,division:divisions!inner(session_id),'
-      + 'memberships:team_memberships(role,player:players(member_number,first_name,last_name,email))'
+      + 'memberships:team_memberships(role,player:players(member_number,first_name,last_name,email,address1,zip))'
       + '&division.session_id=eq.' + currentSession.id
       + '&team_number=in.(' + teamNums.slice(i, i + TCH).map(encodeURIComponent).join(',') + ')',
       null, { 'Accept-Profile': 'slate' });
@@ -16136,6 +16148,24 @@ async function spNotifyBuild() {
     if (contactName && !matched.length) {
       const wide = [...new Map(allRoster.filter(nameEq).map(r => [r.member_number, r])).values()];
       if (wide.length === 1) matched = wide;
+    }
+    /* Same name is NOT the same household. When the contact name matches >1
+       rostered player — a father + son BOTH on the team, both "Jerry Harris" —
+       only the one(s) actually at THIS envelope's mailing address are the
+       household; email them, not every namesake (the 07-19 escape sent a son's
+       patch notice to his dad in Nehalem). A single match is unambiguous, so
+       the filter only runs on >1 (no regression, override addresses included).
+       >1 match but none at the envelope address = can't tell who the envelope
+       is for → report it, never guess. */
+    if (matched.length > 1) {
+      const envKey = spAddrKey(list[0].address_line1, list[0].zip);
+      const atEnvelope = matched.filter(r => spAddrKey(r.address1, r.zip) === envKey);
+      if (atEnvelope.length) matched = atEnvelope;
+      else {
+        contactUnresolved.push(contactName + ' (teams ' + teams.join(', ')
+          + ' — ' + matched.length + ' players share this name, none at the mailing address)');
+        continue;
+      }
     }
     if (!contactName || !matched.length) {
       contactUnresolved.push(contactName ? (contactName + ' (teams ' + teams.join(', ') + ')') : ('(no contact) teams ' + teams.join(', ')));
