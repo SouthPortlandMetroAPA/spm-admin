@@ -3977,7 +3977,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.302';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.303';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -17956,6 +17956,17 @@ async function ssgRenderGridForDivision(divisionId) {
     }
     _ssgState.photosByMatchTeam = photosByMatchTeam;
 
+    // "Use opponent's upload" markers (papertrail.sheet_borrows) — a team whose
+    // own sheet is missing borrows the opponent's for the same match (cell → M).
+    // Anon read alongside photos; keyed match_id:team_id like the photo map.
+    const borrowed = new Set();
+    if (matchIds.length) {
+      const br = await fetch(SB_URL + '/rest/v1/sheet_borrows?select=match_id,team_id&match_id=in.(' + matchIds.join(',') + ')',
+        { headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON, 'Accept-Profile': 'papertrail' } });
+      if (br.ok) for (const b of await br.json()) borrowed.add(b.match_id + ':' + b.team_id);
+    }
+    _ssgState.borrowed = borrowed;
+
     _ssgState.teams = teams;
     _ssgState.matches = matches;
     _ssgState.photosByMatch = photosByMatch;
@@ -18025,7 +18036,17 @@ function ssgCellState(team, col, fmt) {
     const haveCount = required.filter(s => have.has(s)).length;
     if (haveCount === required.length) return { state: 'ok',  tip: 'Uploaded', match, photos, team };
     if (haveCount > 0)                  return { state: 'partial', tip: haveCount + '/' + required.length + ' uploaded', match, photos, team };
-    // No photos. If admin marked the match rescheduled, show R instead of ✗.
+    // No own photos. "Use opponent's upload" (M) wins first — the same physical
+    // sheet exists on the opponent's upload for this match.
+    if (ssgIsBorrowed(match.id, team.id)) {
+      const opp = ssgOpponentInfo(match, team.id, required);
+      const oppLabel = opp.oppTeam ? (opp.oppTeam.team_number + ' ' + opp.oppTeam.team_name) : 'opponent';
+      const tip = opp.complete
+        ? 'Missing — using ' + oppLabel + "'s upload"
+        : 'Marked M — but ' + oppLabel + ' has no complete upload yet';
+      return { state: 'borrowed', tip, match, photos: opp.oppPhotos, team, borrowedFrom: opp };
+    }
+    // If admin marked the match rescheduled, show R instead of ✗.
     // Photos always win (see ok / partial above) — R only shows on empty cells.
     if (match.rescheduled) {
       const tip = match.rescheduled_to
@@ -18036,6 +18057,25 @@ function ssgCellState(team, col, fmt) {
     return { state: 'bad', tip: 'Missing scoresheet (this team)', match, photos: [], team };
   }
   return { state: 'dash', tip: col.label };  // playoff / no_play
+}
+
+/* "Use opponent's upload" helpers (single source of truth for cell state,
+   popover, and the download queue). ssgIsBorrowed = is this (match,team) cell
+   marked to borrow. ssgOpponentInfo = the other team in the match + their
+   photos + whether that set is COMPLETE for the format (only a complete set is
+   worth borrowing/downloading). */
+function ssgIsBorrowed(matchId, teamId) {
+  return !!(_ssgState.borrowed && _ssgState.borrowed.has(matchId + ':' + teamId));
+}
+function ssgOpponentInfo(match, teamId, requiredSides) {
+  const oppId = match.home_team_id === teamId ? match.away_team_id
+              : match.away_team_id === teamId ? match.home_team_id : null;
+  if (!oppId) return { oppId: null, oppPhotos: [], complete: false, oppTeam: null };
+  const oppPhotos = _ssgState.photosByMatchTeam.get(match.id + ':' + oppId) || [];
+  const have = new Set(oppPhotos.map(p => p.side));
+  const complete = (requiredSides || ['single']).every(s => have.has(s));
+  const oppTeam = _ssgState.teams.find(t => t.id === oppId) || null;
+  return { oppId, oppPhotos, complete, oppTeam };
 }
 
 /* 3.225: hover a team name -> who receives the upload-copy email.
@@ -18141,9 +18181,10 @@ function ssgRenderGridDom(div) {
         bad:         'background:#fef2f2;color:#dc2626;cursor:pointer',
         partial:     'background:#fefce8;color:#ca8a04;cursor:pointer',
         rescheduled: 'background:#dbeafe;color:#2563eb;cursor:pointer;font-weight:800',
+        borrowed:    'background:#f5f3ff;color:#7c3aed;cursor:pointer;font-weight:800',
         dash:        'background:#fafafa;color:#9ca3af'
       })[s.state];
-      const sym = ({ ok: '✓', bad: '✗', partial: '⚠', rescheduled: 'R', dash: '—' })[s.state];
+      const sym = ({ ok: '✓', bad: '✗', partial: '⚠', rescheduled: 'R', borrowed: 'M', dash: '—' })[s.state];
       const click = s.match
         ? `onclick="ssgCellClick(event, ${s.match.id}, ${t.id})"`
         : '';
@@ -18207,6 +18248,45 @@ function ssgCellClick(ev, matchId, teamId) {
       </div>`;
     }
     body += '</div>';
+  }
+
+  // "Use opponent's upload" (M). Only when THIS team has no own photos and the
+  // match has a real opponent. Offer the mark when the opponent has a complete
+  // set; show the borrowed photos + a stop button when already marked.
+  const isRegMatch = match.row_type === 'regular' && match.home_team_id && match.away_team_id;
+  if (isRegMatch && missingSides.length === requiredSides.length) {
+    const opp = ssgOpponentInfo(match, teamId, requiredSides);
+    const oppLabel = opp.oppTeam ? (opp.oppTeam.team_number + ' ' + opp.oppTeam.team_name) : 'the opponent';
+    const statusSpan = `<span id="ssgBorrow_${matchId}_${teamId}_status" style="font-size:0.72rem;color:var(--muted);margin-left:6px"></span>`;
+    if (ssgIsBorrowed(matchId, teamId)) {
+      let opphtml;
+      if (opp.oppPhotos.length) {
+        opphtml = '<div style="display:grid;gap:8px;margin-top:6px">' + opp.oppPhotos.map(p => {
+          const url = ssR2Url(p.r2_path, p);
+          const sideLabel = p.side === 'single' ? 'Scoresheet' : (p.side.charAt(0).toUpperCase() + p.side.slice(1));
+          return `<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden">
+            <a href="${esc(url)}" target="_blank" rel="noopener"><img src="${esc(url)}" style="display:block;width:100%;max-height:160px;object-fit:cover;background:#000"></a>
+            <div style="padding:6px 8px;font-size:0.74rem"><strong>${esc(sideLabel)}</strong> <span style="color:var(--muted)">&middot; from ${esc(oppLabel)}${p.uploader_name ? ' &middot; ' + esc(p.uploader_name) : ''}</span></div>
+          </div>`;
+        }).join('') + '</div>';
+      } else {
+        opphtml = `<div style="font-size:0.74rem;color:#b45309;margin-top:4px">&#9888; ${esc(oppLabel)} has no upload on file right now &mdash; nothing to show/download until they upload.</div>`;
+      }
+      body += `<div style="margin-top:10px;padding:10px;background:#f5f3ff;border:1px solid #7c3aed;border-radius:8px">
+        <div style="font-size:0.78rem;font-weight:700;color:#6d28d9;margin-bottom:4px">M &middot; Using ${esc(oppLabel)}'s upload</div>
+        <div style="font-size:0.72rem;color:var(--muted);margin-bottom:6px">Cell shows "M". View/download for this team uses these photos.</div>
+        ${opphtml}
+        <button class="btn btn-outline btn-sm" style="margin-top:8px;padding:4px 12px;font-size:0.74rem"
+          onclick="event.stopPropagation();ssgClearBorrow(${matchId}, ${teamId})">Stop using opponent's upload</button>${statusSpan}
+      </div>`;
+    } else if (opp.complete) {
+      body += `<div style="margin-top:10px;padding:10px;background:#f5f3ff;border:1px dashed #7c3aed;border-radius:8px">
+        <div style="font-size:0.78rem;font-weight:700;color:#6d28d9;margin-bottom:4px">M &middot; Use opponent's upload</div>
+        <div style="font-size:0.72rem;color:var(--muted);margin-bottom:8px">${esc(oppLabel)} uploaded this match's sheet. Mark this team's cell "M" and use their photos for view + download.</div>
+        <button class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:0.74rem"
+          onclick="event.stopPropagation();ssgMarkBorrow(${matchId}, ${teamId})">Use opponent's upload (mark M)</button>${statusSpan}
+      </div>`;
+    }
   }
 
   // Admin upload section — visible when this team has missing sides for the
@@ -18342,6 +18422,43 @@ async function ssgPopoverDelete(photoId, r2Path, matchId, teamId) {
 window.ssgCellClick      = ssgCellClick;
 window.ssgPopoverDelete  = ssgPopoverDelete;
 window.ssCellPopoverClose = ssCellPopoverClose;
+
+/* Mark / clear "use opponent's upload" (papertrail.sheet_borrows). Admin-only —
+   writes go through the service key + Content-Profile:papertrail, like the photo
+   delete (3.45: PostgREST routes writes by Content-Profile). on_conflict makes a
+   double-click a no-op merge instead of a 23505. */
+async function ssgMarkBorrow(matchId, teamId) {
+  const st = document.getElementById('ssgBorrow_' + matchId + '_' + teamId + '_status');
+  if (st) st.textContent = 'Saving…';
+  try {
+    const r = await fetch(SB_URL + '/rest/v1/sheet_borrows?on_conflict=match_id,team_id', {
+      method: 'POST',
+      headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY,
+                 'Accept-Profile': 'papertrail', 'Content-Profile': 'papertrail',
+                 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates' },
+      body: JSON.stringify({ match_id: matchId, team_id: teamId, marked_by: 'Admin (Slate)' })
+    });
+    if (!r.ok) throw new Error('DB write: ' + r.status);
+    ssCellPopoverClose();
+    ssgRenderGridForDivision(_ssgState.divisionId);
+  } catch (e) { if (st) st.textContent = 'Failed: ' + e.message; }
+}
+async function ssgClearBorrow(matchId, teamId) {
+  const st = document.getElementById('ssgBorrow_' + matchId + '_' + teamId + '_status');
+  if (st) st.textContent = 'Clearing…';
+  try {
+    const r = await fetch(SB_URL + '/rest/v1/sheet_borrows?match_id=eq.' + matchId + '&team_id=eq.' + teamId, {
+      method: 'DELETE',
+      headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY,
+                 'Accept-Profile': 'papertrail', 'Content-Profile': 'papertrail' }
+    });
+    if (!r.ok) throw new Error('DB delete: ' + r.status);
+    ssCellPopoverClose();
+    ssgRenderGridForDivision(_ssgState.divisionId);
+  } catch (e) { if (st) st.textContent = 'Failed: ' + e.message; }
+}
+window.ssgMarkBorrow  = ssgMarkBorrow;
+window.ssgClearBorrow = ssgClearBorrow;
 
 /* ── Admin upload-on-behalf (red-X / partial cells) ─────────────────
    When admin clicks a cell with missing photos, the popover shows an
@@ -18680,22 +18797,31 @@ function ssgBuildPhotoQueue(weekSel) {
   const allMatches = weekSel === 'all'
     ? _ssgState.matches.filter(m => m.row_type === 'regular')
     : _ssgState.matches.filter(m => m.row_type === 'regular' && m.week_number === weekSel);
+  const div = _ssgState.divisions.find(d => d.id === _ssgState.divisionId);
+  const requiredSides = (div && SSG_FORMATS[div.format] && SSG_FORMATS[div.format].sides) || ['single'];
   const queued = [];
+  // borrowedFromNum non-null => this team's own sheet is missing (marked "M")
+  // and we're packing the opponent's copy under this team's name.
+  const push = (m, p, uploaderNum, borrowedFromNum) => {
+    const home = m.home_team ? ssgSafe(m.home_team.team_number + '-' + m.home_team.team_name) : 'unfilled';
+    const away = m.away_team ? ssgSafe(m.away_team.team_number + '-' + m.away_team.team_name) : 'unfilled';
+    const side = p.side === 'single' ? 'scoresheet' : p.side;
+    const borrow = borrowedFromNum ? '_MISSING-used-' + ssgSafe(borrowedFromNum) : '';
+    const baseName = home + '_vs_' + away + '__by-' + ssgSafe(uploaderNum) + borrow + '_' + side + '.jpg';
+    // All weeks -> per-week subfolder; single week -> flat into the picked folder.
+    const filename = weekSel === 'all'
+      ? 'week-' + String(m.week_number).padStart(2, '0') + '/' + baseName
+      : baseName;
+    queued.push({ p, filename });
+  };
   for (const m of allMatches) {
     for (const t of _ssgState.teams) {
       const photos = _ssgState.photosByMatchTeam.get(m.id + ':' + t.id) || [];
-      for (const p of photos) {
-        const home = m.home_team ? ssgSafe(m.home_team.team_number + '-' + m.home_team.team_name) : 'unfilled';
-        const away = m.away_team ? ssgSafe(m.away_team.team_number + '-' + m.away_team.team_name) : 'unfilled';
-        const side = p.side === 'single' ? 'scoresheet' : p.side;
-        const uploader = ssgSafe(t.team_number);
-        const baseName = home + '_vs_' + away + '__by-' + uploader + '_' + side + '.jpg';
-        // When dumping all weeks, prepend the week folder; when dumping
-        // a single week, the file goes flat into the picked folder.
-        const filename = weekSel === 'all'
-          ? 'week-' + String(m.week_number).padStart(2, '0') + '/' + baseName
-          : baseName;
-        queued.push({ p, filename });
+      if (photos.length) {
+        for (const p of photos) push(m, p, t.team_number, null);
+      } else if (ssgIsBorrowed(m.id, t.id)) {
+        const opp = ssgOpponentInfo(m, t.id, requiredSides);
+        if (opp.complete) for (const p of opp.oppPhotos) push(m, p, t.team_number, opp.oppTeam ? opp.oppTeam.team_number : 'opp');
       }
     }
   }
