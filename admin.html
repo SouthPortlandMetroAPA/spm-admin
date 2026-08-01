@@ -3977,7 +3977,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.303';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.304';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -17927,7 +17927,7 @@ async function ssgRenderGridForDivision(divisionId) {
       '&order=team_number');
     const matches = await sb('GET',
       'matches?select=id,week_number,match_index,scheduled_date,row_type,label,home_team_id,away_team_id,' +
-      'rescheduled,rescheduled_to,rescheduled_at,' +
+      'rescheduled,rescheduled_to,rescheduled_at,forfeit,forfeit_at,' +
       'home_team:teams!matches_home_team_id_fkey(team_number,team_name),' +
       'away_team:teams!matches_away_team_id_fkey(team_number,team_name)' +
       '&division_id=eq.' + divisionId +
@@ -18036,6 +18036,9 @@ function ssgCellState(team, col, fmt) {
     const haveCount = required.filter(s => have.has(s)).length;
     if (haveCount === required.length) return { state: 'ok',  tip: 'Uploaded', match, photos, team };
     if (haveCount > 0)                  return { state: 'partial', tip: haveCount + '/' + required.length + ' uploaded', match, photos, team };
+    // A forfeited match needs no scoresheet for either team → F. Photos still win
+    // (checked above); F beats M/R (no sheet to borrow or wait for).
+    if (match.forfeit) return { state: 'forfeit', tip: 'Forfeit — no scoresheet expected', match, photos: [], team };
     // No own photos. "Use opponent's upload" (M) wins first — the same physical
     // sheet exists on the opponent's upload for this match.
     if (ssgIsBorrowed(match.id, team.id)) {
@@ -18182,9 +18185,10 @@ function ssgRenderGridDom(div) {
         partial:     'background:#fefce8;color:#ca8a04;cursor:pointer',
         rescheduled: 'background:#dbeafe;color:#2563eb;cursor:pointer;font-weight:800',
         borrowed:    'background:#f5f3ff;color:#7c3aed;cursor:pointer;font-weight:800',
+        forfeit:     'background:#f1f5f9;color:#475569;cursor:pointer;font-weight:800',
         dash:        'background:#fafafa;color:#9ca3af'
       })[s.state];
-      const sym = ({ ok: '✓', bad: '✗', partial: '⚠', rescheduled: 'R', borrowed: 'M', dash: '—' })[s.state];
+      const sym = ({ ok: '✓', bad: '✗', partial: '⚠', rescheduled: 'R', borrowed: 'M', forfeit: 'F', dash: '—' })[s.state];
       const click = s.match
         ? `onclick="ssgCellClick(event, ${s.match.id}, ${t.id})"`
         : '';
@@ -18354,8 +18358,8 @@ function ssgCellClick(ev, matchId, teamId) {
             onclick="event.stopPropagation();ssgClearReschedule(${matchId})">Clear</button>
         </div>`;
       }
-    } else if (photos.length === 0) {
-      // Mode 1: bad state, offer to mark rescheduled.
+    } else if (photos.length === 0 && !match.forfeit) {
+      // Mode 1: bad state, offer to mark rescheduled (not when it's a forfeit).
       body += `<div style="margin-top:10px;padding:10px;background:#eff6ff;border:1px dashed #2563eb;border-radius:8px">
         <div style="font-size:0.78rem;font-weight:700;color:#1e40af;margin-bottom:6px">
           📅 Mark as rescheduled
@@ -18371,6 +18375,40 @@ function ssgCellClick(ev, matchId, teamId) {
             onclick="event.stopPropagation();ssgMarkRescheduled(${matchId}, null)">No date yet</button>
           <span id="ssgRsStatus_${matchId}" style="font-size:0.72rem;color:var(--muted)"></span>
         </div>
+      </div>`;
+    }
+  }
+
+  // Forfeit section (match-level, mirrors reschedule). A forfeited match needs no
+  // scoresheet → cell shows F for both teams. Photos still win (audit note only).
+  // "Mark forfeit" shows only on an empty, non-rescheduled cell so it and the
+  // reschedule mark are mutually exclusive.
+  if (isReg) {
+    if (match.forfeit) {
+      if (photos.length === 0) {
+        body += `<div style="margin-top:10px;padding:10px;background:#f1f5f9;border:1px solid #475569;border-radius:8px">
+          <div style="font-size:0.78rem;font-weight:700;color:#334155;margin-bottom:6px">🏳️ Forfeit — no scoresheet expected</div>
+          <div style="font-size:0.72rem;color:var(--muted);margin-bottom:8px">Cell shows "F" instead of "✗" for both teams. Clear it if the match is actually being played.</div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button class="btn btn-danger btn-sm" style="padding:4px 12px;font-size:0.74rem"
+              onclick="event.stopPropagation();ssgClearForfeit(${matchId})">Clear forfeit</button>
+            <span id="ssgFfStatus_${matchId}" style="font-size:0.72rem;color:var(--muted)"></span>
+          </div>
+        </div>`;
+      } else {
+        body += `<div style="margin-top:8px;padding:6px 10px;background:#f8fafc;border-left:3px solid #475569;font-size:0.74rem;color:#334155">
+          🏳️ Match was marked a forfeit — photos were uploaded anyway.
+          <button class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:0.68rem;margin-left:6px"
+            onclick="event.stopPropagation();ssgClearForfeit(${matchId})">Clear</button>
+        </div>`;
+      }
+    } else if (photos.length === 0 && !match.rescheduled) {
+      body += `<div style="margin-top:10px;padding:10px;background:#f8fafc;border:1px dashed #475569;border-radius:8px">
+        <div style="font-size:0.78rem;font-weight:700;color:#334155;margin-bottom:6px">🏳️ Mark as forfeit</div>
+        <div style="font-size:0.72rem;color:var(--muted);margin-bottom:8px">Use when the match was forfeited and no scoresheet will exist. Both teams' cells show "F" instead of "✗".</div>
+        <button class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:0.74rem"
+          onclick="event.stopPropagation();ssgMarkForfeit(${matchId})">Mark forfeit</button>
+        <span id="ssgFfStatus_${matchId}" style="font-size:0.72rem;color:var(--muted)"></span>
       </div>`;
     }
   }
@@ -18731,6 +18769,49 @@ async function ssgClearReschedule(matchId) {
 }
 window.ssgMarkRescheduled = ssgMarkRescheduled;
 window.ssgClearReschedule = ssgClearReschedule;
+
+/* ── Mark / clear forfeit ───────────────────────────────────────────
+   Backed by slate.matches.{forfeit, forfeit_at}. Match-level: a forfeited
+   match needs no scoresheet, so ssgCellState renders 'F' for BOTH teams when
+   there are no photos (photos still win). Mirrors the reschedule writer —
+   PATCH via the service key; both profile headers on every write. */
+async function ssgMarkForfeit(matchId) {
+  const statusEl = document.getElementById('ssgFfStatus_' + matchId);
+  const setStatus = (txt, danger) => { if (!statusEl) return; statusEl.textContent = txt; statusEl.style.color = danger ? 'var(--danger)' : 'var(--muted)'; };
+  setStatus('Saving…', false);
+  try {
+    const r = await fetch(SB_URL + '/rest/v1/matches?id=eq.' + matchId, {
+      method: 'PATCH',
+      headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Accept-Profile': SB_SCHEMA, 'Content-Profile': SB_SCHEMA, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+      body: JSON.stringify({ forfeit: true, forfeit_at: new Date().toISOString() })
+    });
+    if (!r.ok) throw new Error('PATCH ' + r.status + ': ' + (await r.text()).slice(0, 160));
+    const m = _ssgState.matches.find(x => x.id === matchId);
+    if (m) { m.forfeit = true; m.forfeit_at = new Date().toISOString(); }
+    ssCellPopoverClose();
+    ssgRenderGridForDivision(_ssgState.divisionId);
+  } catch (e) { setStatus('Failed: ' + e.message, true); }
+}
+async function ssgClearForfeit(matchId) {
+  if (!confirm('Clear forfeit for this match? Cell will go back to ✗ if no photos.')) return;
+  const statusEl = document.getElementById('ssgFfStatus_' + matchId);
+  const setStatus = (txt, danger) => { if (!statusEl) return; statusEl.textContent = txt; statusEl.style.color = danger ? 'var(--danger)' : 'var(--muted)'; };
+  setStatus('Clearing…', false);
+  try {
+    const r = await fetch(SB_URL + '/rest/v1/matches?id=eq.' + matchId, {
+      method: 'PATCH',
+      headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Accept-Profile': SB_SCHEMA, 'Content-Profile': SB_SCHEMA, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+      body: JSON.stringify({ forfeit: false, forfeit_at: null })
+    });
+    if (!r.ok) throw new Error('PATCH ' + r.status + ': ' + (await r.text()).slice(0, 160));
+    const m = _ssgState.matches.find(x => x.id === matchId);
+    if (m) { m.forfeit = false; m.forfeit_at = null; }
+    ssCellPopoverClose();
+    ssgRenderGridForDivision(_ssgState.divisionId);
+  } catch (e) { setStatus('Failed: ' + e.message, true); }
+}
+window.ssgMarkForfeit  = ssgMarkForfeit;
+window.ssgClearForfeit = ssgClearForfeit;
 
 /* ── Per-week ZIP download ────────────────────────────────────────── */
 let _jszipPromise = null;
