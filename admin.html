@@ -1069,6 +1069,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="banlist">No-Contact — DNC</button>
       <button class="tab" data-tab="housecue">House Cue</button>
       <button class="tab" data-tab="eventhorizon">Event Horizon</button>
+      <button class="tab" data-tab="onthefelt">OnTheFelt</button>
     </div>
 
     <div id="globalStatus" class="status-line"></div>
@@ -3719,6 +3720,182 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 
     </div>
 
+    <!-- ══════════════════════════════════════════════════════════════
+         TAB: ONTHEFELT — ported from standalone OnTheFelt admin (3.305),
+         now tournament-scoped. Schema onthefelt.{tournaments,participants,
+         matches}. All ids/functions namespaced otf* / _otf*.
+         ══════════════════════════════════════════════════════════════ -->
+    <style>
+      #tab-onthefelt input[type="time"],
+      #tab-onthefelt input[type="url"],
+      #tab-onthefelt input[type="search"] {
+        width: 100%; min-height: 40px; padding: 8px 12px; font: inherit;
+        border: 1.5px solid var(--border); border-radius: 10px; background: #fff; color: var(--text);
+      }
+      #tab-onthefelt input[type="time"]:focus,
+      #tab-onthefelt input[type="url"]:focus,
+      #tab-onthefelt input[type="search"]:focus {
+        outline: none; border-color: var(--spm-accent); box-shadow: 0 0 0 3px rgba(0,49,161,0.12);
+      }
+      #tab-onthefelt textarea { min-height: 70px; font-family: inherit; font-size: 0.9rem; white-space: pre-wrap; }
+      #tab-onthefelt .otf-win.active  { background: var(--success);     color: #fff; border-color: var(--success); }
+      #tab-onthefelt .otf-loss.active { background: var(--spm-primary); color: #fff; border-color: var(--spm-primary); }
+      #tab-onthefelt .table td, #tab-onthefelt .table th { vertical-align: middle; }
+      #tab-onthefelt .table input[type="text"],
+      #tab-onthefelt .table input[type="url"],
+      #tab-onthefelt .table select { min-height: 32px; padding: 5px 8px; font-size: 0.82rem; border-radius: 8px; }
+      #tab-onthefelt .table input[type="date"],
+      #tab-onthefelt .table input[type="time"] {
+        min-height: 32px; padding: 4px 6px; font-size: 0.8rem;
+        border: 1.5px solid var(--border); border-radius: 8px; background: #fff;
+      }
+      #tab-onthefelt .table textarea { min-height: 44px; }
+      #tab-onthefelt .chip span { background: rgba(0,0,0,0.08); border-radius: 999px; padding: 0 7px; margin-left: 5px; font-size: 0.7rem; font-weight: 700; }
+      #tab-onthefelt .chip.active span { background: rgba(255,255,255,0.28); }
+    </style>
+    <div id="tab-onthefelt" class="tab-panel">
+
+      <!-- ─── Tournament selector + management ─── -->
+      <div class="card">
+        <h2>Tournament</h2>
+        <div class="form-row" style="align-items:flex-end">
+          <div style="flex:2">
+            <label for="otfTournamentSelect">Active tournament</label>
+            <select id="otfTournamentSelect" class="form-input"></select>
+          </div>
+          <div style="flex:0 0 auto">
+            <button class="btn btn-outline btn-sm" id="otfManageToggle" type="button">Manage</button>
+          </div>
+        </div>
+        <p class="hint" style="margin-top:6px">Everything below is scoped to the selected tournament. Switching tournaments reloads its players, matches, and category lists.</p>
+
+        <div id="otfManagePanel" style="display:none; margin-top:14px; border-top:1px solid var(--border); padding-top:14px">
+          <h3>Edit selected tournament</h3>
+          <div class="form-row">
+            <div style="flex:2"><label for="otfEditName">Name</label><input type="text" id="otfEditName" class="form-input"></div>
+            <div style="flex:1"><label for="otfEditStart">Start date</label><input type="date" id="otfEditStart" class="form-input"></div>
+            <div style="flex:1"><label for="otfEditEnd">End date</label><input type="date" id="otfEditEnd" class="form-input"></div>
+          </div>
+          <div class="form-row">
+            <div><label for="otfEditCats">Categories — one per line or comma-separated</label><textarea id="otfEditCats" class="form-input" style="min-height:90px"></textarea></div>
+          </div>
+          <div class="actions" style="align-items:center">
+            <button class="btn btn-primary btn-sm" id="otfEditSave" type="button">Save changes</button>
+            <span class="hint" id="otfEditSlug" style="font-family:ui-monospace,monospace"></span>
+          </div>
+
+          <hr style="border:0; border-top:1px solid var(--border); margin:18px 0">
+
+          <h3>Create a new tournament</h3>
+          <div class="form-row">
+            <div style="flex:2"><label for="otfNewName">Name</label><input type="text" id="otfNewName" class="form-input" placeholder="e.g. World Pool Championships 2026"></div>
+            <div style="flex:1"><label for="otfNewStart">Start date</label><input type="date" id="otfNewStart" class="form-input"></div>
+            <div style="flex:1"><label for="otfNewEnd">End date</label><input type="date" id="otfNewEnd" class="form-input"></div>
+          </div>
+          <div class="form-row">
+            <div><label for="otfNewCats">Categories — one per line or comma-separated</label><textarea id="otfNewCats" class="form-input" style="min-height:90px" placeholder="8-Ball, 9-Ball"></textarea></div>
+          </div>
+          <div class="actions">
+            <button class="btn btn-primary btn-sm" id="otfCreateBtn" type="button">Create tournament</button>
+          </div>
+          <p class="hint" style="margin-top:4px">Slug is auto-generated from the name and locked once created. To rename the tournament, edit the Name above — the slug stays fixed.</p>
+          <div id="otfManageStatus" class="status-line" style="margin-top:10px"></div>
+        </div>
+      </div>
+
+      <!-- ─── Add participant ─── -->
+      <div class="card">
+        <h2>Add a player or team</h2>
+        <div class="form-row">
+          <div style="flex:0 0 220px"><label for="otfNewPCat">Category</label><select id="otfNewPCat" class="form-input"></select></div>
+          <div style="flex:2"><label for="otfNewPName">Name</label><input type="text" id="otfNewPName" class="form-input" placeholder="e.g. Brandon Holowati or That's Gonna Sting"></div>
+        </div>
+        <div class="form-row">
+          <div><label for="otfNewPMembers">Team members — doubles / Jack &amp; Jill only, one per line</label><textarea id="otfNewPMembers" class="form-input" placeholder="Alice Smith&#10;Bob Jones" style="min-height:70px"></textarea></div>
+        </div>
+        <div class="actions">
+          <button class="btn btn-primary" id="otfAddPBtn" type="button">Add</button>
+        </div>
+        <p class="hint" style="margin-top:6px">Members show publicly under the team name. Singles categories ignore the members field.</p>
+        <div id="otfAddPStatus" class="status-line" style="margin-top:10px"></div>
+      </div>
+
+      <!-- ─── Participant list ─── -->
+      <div class="card">
+        <h2>All players &amp; teams <span id="otfPCount" class="hint" style="margin-left:6px"></span></h2>
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th style="width:170px">Category</th>
+                <th>Name</th>
+                <th>Members</th>
+                <th style="width:80px"></th>
+              </tr>
+            </thead>
+            <tbody id="otfPBody"><tr><td colspan="4" class="hint">Loading&hellip;</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ─── Add match ─── -->
+      <div class="card">
+        <h2>Add a match time</h2>
+        <div class="form-row">
+          <div><label for="otfNewMPart">Player or team</label><select id="otfNewMPart" class="form-input"></select></div>
+        </div>
+        <div class="form-row">
+          <div style="flex:0 0 180px"><label for="otfNewMDate">Date</label><input type="date" id="otfNewMDate" class="form-input"></div>
+          <div style="flex:0 0 150px"><label for="otfNewMTime">Time — venue local</label><input type="time" id="otfNewMTime" class="form-input"></div>
+          <div style="flex:0 0 110px"><label for="otfNewMTable">Table #</label><input type="text" id="otfNewMTable" class="form-input" placeholder="optional"></div>
+          <div style="flex:2"><label for="otfNewMStream">Stream URL — optional</label><input type="url" id="otfNewMStream" class="form-input" placeholder="https://youtube.com/&hellip;"></div>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px; margin-top:4px">
+          <input type="checkbox" id="otfNewMNotStreamed" style="width:auto; min-height:0; margin:0">
+          <label for="otfNewMNotStreamed" style="margin:0; text-transform:none; letter-spacing:0; font-weight:500; font-size:0.85rem; color:var(--text)">This match is <strong>not being streamed</strong> — shows a &ldquo;Not streamed&rdquo; badge and clears any URL.</label>
+        </div>
+        <div class="actions">
+          <button class="btn btn-primary" id="otfAddMBtn" type="button">Add match</button>
+        </div>
+        <p class="hint" style="margin-top:6px">Category is inferred from the selected player/team. A blank Stream URL without &ldquo;not being streamed&rdquo; means &ldquo;to be determined.&rdquo;</p>
+        <div id="otfAddMStatus" class="status-line" style="margin-top:10px"></div>
+      </div>
+
+      <!-- ─── Match list ─── -->
+      <div class="card">
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:10px">
+          <h2 style="margin:0">All matches</h2>
+          <span id="otfMCount" class="hint" style="margin-left:auto"></span>
+          <button class="btn btn-outline btn-sm" id="otfMRefresh" type="button">Refresh</button>
+        </div>
+        <div id="otfMFilterTabs" class="filter-chips" style="margin-bottom:8px"></div>
+        <div class="filter-chips" style="margin-bottom:8px">
+          <button class="chip" id="otfFilterNoStream" type="button">Missing stream <span id="otfNoStreamCount">0</span></button>
+          <button class="chip" id="otfFilterNoTable" type="button">Missing table <span id="otfNoTableCount">0</span></button>
+        </div>
+        <div style="margin-bottom:12px">
+          <input type="search" id="otfMSearch" placeholder="Search players, teams, members, or category&hellip;" autocomplete="off">
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th style="width:180px">When — viewer local</th>
+                <th style="width:150px">Category</th>
+                <th>Player or team</th>
+                <th style="width:80px">Table</th>
+                <th>Stream URL</th>
+                <th style="width:150px">Result</th>
+                <th style="width:80px"></th>
+              </tr>
+            </thead>
+            <tbody id="otfMBody"><tr><td colspan="7" class="hint">Loading&hellip;</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+
     <div id="tab-banlist" class="tab-panel">
       <div class="card" style="margin-bottom:14px">
         <h2 style="margin:0 0 6px;">No-Contact (DNC) list</h2>
@@ -3977,7 +4154,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.304';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.305';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -9049,7 +9226,8 @@ const TAB_LABEL = {
   polls:         'PulseCheck',
   lostfound:     'Lost & Found',
   banlist:       'No-Contact — DNC',
-  housecue:      'House Cue'
+  housecue:      'House Cue',
+  onthefelt:     'OnTheFelt'
 };
 
 function switchTab(name) {
@@ -9079,7 +9257,561 @@ function switchTab(name) {
   if (name === 'banlist')     blInit();
   if (name === 'housecue')    hcInit();
   if (name === 'eventhorizon') ehInit();
+  if (name === 'onthefelt') otfInit();
 }
+
+/* OTF_TAB_BEGIN — OnTheFelt tab logic (3.305). Ported + tournament-scoped.
+   Namespaced otf* / _otf*. Reads/writes onthefelt schema with SB_KEY. */
+const _otfState = { tournaments: [], activeId: null, participants: [], matches: [],
+                    matchTab: 'All', matchSearch: '', missingStream: false, missingTable: false };
+let _otfInited = false;
+
+function _otfHeaders(write) {
+  const h = { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Accept-Profile': 'onthefelt' };
+  if (write) { h['Content-Type'] = 'application/json'; h['Content-Profile'] = 'onthefelt'; h['Prefer'] = 'return=representation'; }
+  return h;
+}
+async function _otfSb(method, path, body) {
+  const write = method !== 'GET';
+  const opts = { method, headers: _otfHeaders(write) };
+  if (body !== undefined && body !== null && method !== 'GET' && method !== 'DELETE') opts.body = JSON.stringify(body);
+  const res = await fetch(SB_URL + '/rest/v1/' + path, opts);
+  if (!res.ok) { const t = await res.text(); throw new Error('Supabase ' + res.status + ': ' + t.substring(0, 300)); }
+  if (res.status === 204) return null;
+  const ct = res.headers.get('content-type') || '';
+  return ct.includes('json') ? res.json() : null;
+}
+
+function otfSetStatus(id, msg, kind) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.className = 'status-line shown ' + (kind || 'ok');
+  el.textContent = msg;
+  clearTimeout(el._otfTimer);
+  el._otfTimer = setTimeout(() => { el.className = 'status-line'; el.textContent = ''; }, 4000);
+}
+
+function otfSlugify(name) {
+  return String(name || '').toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+function otfParseCats(raw) {
+  return String(raw || '').split(/[\n,]/).map(s => s.trim()).filter(Boolean);
+}
+function otfIsTeamCat(cat) { return /doubles|jack\s*&?\s*jill/i.test(cat || ''); }
+function otfActiveTournament() { return _otfState.tournaments.find(x => x.id === _otfState.activeId) || null; }
+function otfCategories() { const t = otfActiveTournament(); return (t && Array.isArray(t.categories)) ? t.categories : []; }
+function otfPartOf(m) { return _otfState.participants.find(p => p.id === m.participant_id) || null; }
+
+/* ── init / wiring ── */
+async function otfInit() {
+  if (!_otfInited) { _otfInited = true; otfWire(); }
+  try { await otfLoadTournaments(); }
+  catch (e) { otfSetStatus('otfManageStatus', 'Load failed: ' + e.message, 'err'); }
+}
+function otfWire() {
+  document.getElementById('otfManageToggle').addEventListener('click', otfToggleManage);
+  document.getElementById('otfTournamentSelect').addEventListener('change', otfOnTournamentChange);
+  document.getElementById('otfCreateBtn').addEventListener('click', otfCreateTournament);
+  document.getElementById('otfEditSave').addEventListener('click', otfSaveTournament);
+  document.getElementById('otfAddPBtn').addEventListener('click', otfAddParticipant);
+  document.getElementById('otfAddMBtn').addEventListener('click', otfAddMatch);
+  document.getElementById('otfMRefresh').addEventListener('click', otfReloadData);
+  document.getElementById('otfFilterNoStream').addEventListener('click', () => {
+    _otfState.missingStream = !_otfState.missingStream; otfRefreshIssueFilters(); otfRenderMatchTable();
+  });
+  document.getElementById('otfFilterNoTable').addEventListener('click', () => {
+    _otfState.missingTable = !_otfState.missingTable; otfRefreshIssueFilters(); otfRenderMatchTable();
+  });
+  document.getElementById('otfMSearch').addEventListener('input', (ev) => {
+    _otfState.matchSearch = (ev.target.value || '').trim();
+    otfRenderMatchFilterTabs(); otfRenderMatchTable();
+  });
+}
+function otfToggleManage() {
+  const p = document.getElementById('otfManagePanel');
+  if (!p) return;
+  p.style.display = (p.style.display === 'none') ? '' : 'none';
+}
+
+/* ── tournaments ── */
+async function otfLoadTournaments() {
+  const rows = await _otfSb('GET', 'tournaments?select=*&order=start_date.desc,created_at.desc');
+  _otfState.tournaments = rows || [];
+  const sel = document.getElementById('otfTournamentSelect');
+  if (!_otfState.tournaments.length) {
+    sel.innerHTML = '<option value="">No tournaments yet — create one below</option>';
+    _otfState.activeId = null;
+    document.getElementById('otfManagePanel').style.display = '';
+    otfRenderTournamentEditor();
+    _otfState.participants = []; _otfState.matches = [];
+    otfPopulateCategoryDropdowns(); otfPopulateParticipantDropdown();
+    otfRenderParticipants(); otfRenderMatchFilterTabs(); otfRenderMatchTable();
+    return;
+  }
+  if (!_otfState.tournaments.some(t => t.id === _otfState.activeId)) {
+    _otfState.activeId = _otfState.tournaments[0].id;
+  }
+  sel.innerHTML = _otfState.tournaments.map(t =>
+    '<option value="' + t.id + '"' + (t.id === _otfState.activeId ? ' selected' : '') + '>' + esc(t.name) + '</option>'
+  ).join('');
+  otfRenderTournamentEditor();
+  await otfReloadData();
+}
+async function otfOnTournamentChange() {
+  const sel = document.getElementById('otfTournamentSelect');
+  const id = parseInt(sel.value, 10);
+  _otfState.activeId = isNaN(id) ? null : id;
+  _otfState.matchTab = 'All'; _otfState.matchSearch = '';
+  const s = document.getElementById('otfMSearch'); if (s) s.value = '';
+  otfRenderTournamentEditor();
+  await otfReloadData();
+}
+async function otfReloadData() {
+  otfPopulateCategoryDropdowns();
+  if (_otfState.activeId == null) {
+    _otfState.participants = []; _otfState.matches = [];
+    otfPopulateParticipantDropdown();
+    otfRenderParticipants(); otfRenderMatchFilterTabs(); otfRenderMatchTable();
+    return;
+  }
+  await otfLoadParticipants();
+  await otfLoadMatches();
+}
+function otfRenderTournamentEditor() {
+  const t = otfActiveTournament();
+  const nameEl = document.getElementById('otfEditName');
+  const startEl = document.getElementById('otfEditStart');
+  const endEl = document.getElementById('otfEditEnd');
+  const catsEl = document.getElementById('otfEditCats');
+  const slugEl = document.getElementById('otfEditSlug');
+  const saveBtn = document.getElementById('otfEditSave');
+  if (!t) {
+    if (nameEl) nameEl.value = '';
+    if (startEl) startEl.value = '';
+    if (endEl) endEl.value = '';
+    if (catsEl) catsEl.value = '';
+    if (slugEl) slugEl.textContent = '';
+    if (saveBtn) saveBtn.disabled = true;
+    return;
+  }
+  if (nameEl) nameEl.value = t.name || '';
+  if (startEl) startEl.value = t.start_date || '';
+  if (endEl) endEl.value = t.end_date || '';
+  if (catsEl) catsEl.value = (Array.isArray(t.categories) ? t.categories : []).join('\n');
+  if (slugEl) slugEl.textContent = 'slug: ' + (t.slug || '');
+  if (saveBtn) saveBtn.disabled = false;
+}
+async function otfCreateTournament() {
+  const name = document.getElementById('otfNewName').value.trim();
+  const start = document.getElementById('otfNewStart').value || null;
+  const end = document.getElementById('otfNewEnd').value || null;
+  const cats = otfParseCats(document.getElementById('otfNewCats').value);
+  if (!name) { otfSetStatus('otfManageStatus', 'Tournament name is required', 'err'); return; }
+  const slug = otfSlugify(name);
+  if (!slug) { otfSetStatus('otfManageStatus', 'Name must contain letters or numbers', 'err'); return; }
+  try {
+    const rows = await _otfSb('POST', 'tournaments', { slug: slug, name: name, start_date: start, end_date: end, categories: cats });
+    const created = Array.isArray(rows) ? rows[0] : rows;
+    otfSetStatus('otfManageStatus', 'Created.', 'ok');
+    document.getElementById('otfNewName').value = '';
+    document.getElementById('otfNewStart').value = '';
+    document.getElementById('otfNewEnd').value = '';
+    document.getElementById('otfNewCats').value = '';
+    if (created && created.id) _otfState.activeId = created.id;
+    await otfLoadTournaments();
+  } catch (e) {
+    otfSetStatus('otfManageStatus', 'Create failed: ' + e.message, 'err');
+  }
+}
+async function otfSaveTournament() {
+  const t = otfActiveTournament();
+  if (!t) return;
+  const name = document.getElementById('otfEditName').value.trim();
+  const start = document.getElementById('otfEditStart').value || null;
+  const end = document.getElementById('otfEditEnd').value || null;
+  const cats = otfParseCats(document.getElementById('otfEditCats').value);
+  if (!name) { otfSetStatus('otfManageStatus', 'Tournament name is required', 'err'); return; }
+  try {
+    await _otfSb('PATCH', 'tournaments?id=eq.' + t.id, { name: name, start_date: start, end_date: end, categories: cats });
+    otfSetStatus('otfManageStatus', 'Saved.', 'ok');
+    await otfLoadTournaments();
+  } catch (e) {
+    otfSetStatus('otfManageStatus', 'Save failed: ' + e.message, 'err');
+  }
+}
+
+/* ── participants ── */
+async function otfLoadParticipants() {
+  _otfState.participants = await _otfSb('GET', 'participants?select=*&tournament_id=eq.' + _otfState.activeId + '&order=category.asc,name.asc') || [];
+  otfRenderParticipants();
+  otfPopulateParticipantDropdown();
+}
+function otfRenderParticipants() {
+  const body = document.getElementById('otfPBody');
+  const cnt = document.getElementById('otfPCount');
+  if (cnt) cnt.textContent = '(' + _otfState.participants.length + ')';
+  if (!body) return;
+  if (!_otfState.activeId) { body.innerHTML = '<tr><td colspan="4" class="hint">Select or create a tournament first.</td></tr>'; return; }
+  if (!_otfState.participants.length) { body.innerHTML = '<tr><td colspan="4" class="hint">No players or teams yet.</td></tr>'; return; }
+  const cats = otfCategories();
+  body.innerHTML = _otfState.participants.map(p => {
+    const isTeam = otfIsTeamCat(p.category);
+    const members = Array.isArray(p.members) ? p.members : [];
+    const memberCell = isTeam
+      ? '<textarea data-pfield="members" data-pid="' + p.id + '" rows="' + Math.max(2, members.length) + '" placeholder="One member per line">' + esc(members.join('\n')) + '</textarea>'
+      : '<span class="hint">\u2014 singles</span>';
+    const catList = cats.includes(p.category) ? cats : [p.category].concat(cats);
+    const catOpts = catList.map(c =>
+      '<option value="' + esc(c) + '"' + (c === p.category ? ' selected' : '') + '>' + esc(c) + '</option>'
+    ).join('');
+    return '<tr>'
+      + '<td><select data-pfield="category" data-pid="' + p.id + '">' + catOpts + '</select></td>'
+      + '<td><input type="text" data-pfield="name" data-pid="' + p.id + '" value="' + esc(p.name) + '"></td>'
+      + '<td>' + memberCell + '</td>'
+      + '<td><button class="btn btn-danger btn-sm" onclick="otfDeleteParticipant(' + p.id + ')">Delete</button></td>'
+      + '</tr>';
+  }).join('');
+  body.querySelectorAll('[data-pfield]').forEach(el => {
+    el.addEventListener('change', () => {
+      const id = parseInt(el.dataset.pid, 10);
+      const field = el.dataset.pfield;
+      let value;
+      if (field === 'members') {
+        value = el.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+      } else {
+        value = el.value.trim();
+        if (!value) {
+          alert(field === 'name' ? 'Name cannot be empty.' : 'Required.');
+          const orig = _otfState.participants.find(p => p.id === id) || {};
+          el.value = orig[field] || '';
+          return;
+        }
+      }
+      otfPatchParticipant(id, { [field]: value });
+    });
+  });
+}
+async function otfPatchParticipant(id, patch) {
+  try {
+    await _otfSb('PATCH', 'participants?id=eq.' + id, patch);
+    const cascade = {};
+    if ('category' in patch) cascade.category = patch.category;
+    if ('name' in patch) cascade.display_name = patch.name;
+    if (Object.keys(cascade).length) {
+      await _otfSb('PATCH', 'matches?participant_id=eq.' + id, cascade);
+    }
+    const p = _otfState.participants.find(x => x.id === id);
+    if (p) Object.assign(p, patch);
+    await otfLoadMatches();
+    otfPopulateParticipantDropdown();
+  } catch (e) {
+    alert('Save failed: ' + e.message);
+    await otfLoadParticipants();
+  }
+}
+async function otfAddParticipant() {
+  if (!_otfState.activeId) { otfSetStatus('otfAddPStatus', 'Select or create a tournament first', 'err'); return; }
+  const cat = document.getElementById('otfNewPCat').value;
+  const name = document.getElementById('otfNewPName').value.trim();
+  const membersRaw = document.getElementById('otfNewPMembers').value.trim();
+  if (!cat || !name) { otfSetStatus('otfAddPStatus', 'Category + name required', 'err'); return; }
+  const members = otfIsTeamCat(cat) ? membersRaw.split(/\r?\n/).map(s => s.trim()).filter(Boolean) : [];
+  try {
+    await _otfSb('POST', 'participants', { category: cat, name: name, members: members, tournament_id: _otfState.activeId });
+    otfSetStatus('otfAddPStatus', 'Added.', 'ok');
+    document.getElementById('otfNewPName').value = '';
+    document.getElementById('otfNewPMembers').value = '';
+    await otfLoadParticipants();
+  } catch (e) {
+    otfSetStatus('otfAddPStatus', 'Add failed: ' + e.message, 'err');
+  }
+}
+async function otfDeleteParticipant(id) {
+  const using = _otfState.matches.filter(m => m.participant_id === id);
+  if (using.length) {
+    alert('Cannot delete: ' + using.length + ' scheduled match' + (using.length === 1 ? '' : 'es') + ' reference this player/team. Delete those matches first.');
+    return;
+  }
+  if (!confirm('Delete this player/team?')) return;
+  try { await _otfSb('DELETE', 'participants?id=eq.' + id); await otfLoadParticipants(); }
+  catch (e) { alert('Delete failed: ' + e.message); }
+}
+function otfPopulateParticipantDropdown() {
+  const sel = document.getElementById('otfNewMPart');
+  if (!sel) return;
+  if (!_otfState.participants.length) { sel.innerHTML = '<option value="">Add a player or team first</option>'; return; }
+  sel.innerHTML = otfParticipantOptionsHtml(null);
+}
+function otfParticipantOptionsHtml(selectedId) {
+  if (!_otfState.participants.length) return '<option value="">\u2014 no players or teams \u2014</option>';
+  const byCat = new Map();
+  for (const p of _otfState.participants) {
+    if (!byCat.has(p.category)) byCat.set(p.category, []);
+    byCat.get(p.category).push(p);
+  }
+  const order = otfCategories().slice();
+  for (const c of byCat.keys()) if (!order.includes(c)) order.push(c);
+  let html = '';
+  for (const cat of order) {
+    const list = byCat.get(cat);
+    if (!list || !list.length) continue;
+    html += '<optgroup label="' + esc(cat) + '">';
+    for (const p of list) html += '<option value="' + p.id + '"' + (p.id === selectedId ? ' selected' : '') + '>' + esc(p.name) + '</option>';
+    html += '</optgroup>';
+  }
+  return html;
+}
+
+/* ── matches ── */
+async function otfLoadMatches() {
+  _otfState.matches = await _otfSb('GET', 'matches?select=*&tournament_id=eq.' + _otfState.activeId + '&order=scheduled_at.asc') || [];
+  otfRenderMatchFilterTabs();
+  otfRenderMatchTable();
+}
+function otfMatchHaystack(m) {
+  const parts = [];
+  const p = otfPartOf(m);
+  if (p && p.name) parts.push(p.name);
+  if (p && Array.isArray(p.members)) parts.push(p.members.join(' '));
+  if (m.display_name) parts.push(m.display_name);
+  if (m.category) parts.push(m.category);
+  return parts.join(' ').toLowerCase();
+}
+function otfFilteredMatches() {
+  let list;
+  if (_otfState.matchSearch) {
+    const q = _otfState.matchSearch.toLowerCase();
+    list = _otfState.matches.filter(m => otfMatchHaystack(m).includes(q));
+  } else if (_otfState.matchTab === 'All') {
+    list = _otfState.matches.slice();
+  } else {
+    list = _otfState.matches.filter(m => m.category === _otfState.matchTab);
+  }
+  if (_otfState.missingStream) list = list.filter(m => !m.stream_url && !m.not_streamed);
+  if (_otfState.missingTable) list = list.filter(m => !m.table_number);
+  return list;
+}
+function otfRefreshIssueFilters() {
+  const noStr = _otfState.matches.filter(m => !m.stream_url && !m.not_streamed).length;
+  const noTbl = _otfState.matches.filter(m => !m.table_number).length;
+  const sBtn = document.getElementById('otfFilterNoStream');
+  const tBtn = document.getElementById('otfFilterNoTable');
+  const sCnt = document.getElementById('otfNoStreamCount');
+  const tCnt = document.getElementById('otfNoTableCount');
+  if (sBtn) sBtn.classList.toggle('active', _otfState.missingStream);
+  if (tBtn) tBtn.classList.toggle('active', _otfState.missingTable);
+  if (sCnt) sCnt.textContent = noStr;
+  if (tCnt) tCnt.textContent = noTbl;
+}
+function otfRenderMatchFilterTabs() {
+  const wrap = document.getElementById('otfMFilterTabs');
+  if (!wrap) return;
+  const cats = otfCategories();
+  const counts = { All: _otfState.matches.length };
+  for (const c of cats) counts[c] = 0;
+  for (const m of _otfState.matches) counts[m.category] = (counts[m.category] || 0) + 1;
+  const tabs = ['All'].concat(cats);
+  for (const m of _otfState.matches) if (m.category && !tabs.includes(m.category)) tabs.push(m.category);
+  wrap.innerHTML = tabs.map(t =>
+    '<button class="chip' + (_otfState.matchTab === t && !_otfState.matchSearch ? ' active' : '') + '" data-ftab="' + esc(t) + '">'
+    + esc(t) + '<span>' + (counts[t] || 0) + '</span></button>'
+  ).join('');
+  wrap.querySelectorAll('.chip').forEach(b => {
+    b.addEventListener('click', () => {
+      _otfState.matchTab = b.dataset.ftab;
+      _otfState.matchSearch = '';
+      const s = document.getElementById('otfMSearch'); if (s) s.value = '';
+      otfRenderMatchFilterTabs();
+      otfRenderMatchTable();
+    });
+  });
+  otfRefreshIssueFilters();
+}
+function otfSplitDateTime(ts) {
+  if (!ts) return { date: '', time: '' };
+  const d = new Date(ts);
+  const pad = x => String(x).padStart(2, '0');
+  return { date: d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()), time: pad(d.getHours()) + ':' + pad(d.getMinutes()) };
+}
+function otfRenderMatchTable() {
+  const body = document.getElementById('otfMBody');
+  if (!body) return;
+  const view = otfFilteredMatches();
+  const total = _otfState.matches.length;
+  const countEl = document.getElementById('otfMCount');
+  if (countEl) {
+    if (view.length === total) countEl.textContent = total + ' match' + (total === 1 ? '' : 'es');
+    else countEl.textContent = view.length + ' of ' + total + ' shown';
+  }
+  if (!_otfState.activeId) { body.innerHTML = '<tr><td colspan="7" class="hint">Select or create a tournament first.</td></tr>'; return; }
+  if (!total) { body.innerHTML = '<tr><td colspan="7" class="hint">No matches yet. Add some on the form above.</td></tr>'; return; }
+  if (!view.length) {
+    const why = _otfState.matchSearch
+      ? 'No matches found for "' + esc(_otfState.matchSearch) + '".'
+      : 'No matches in ' + esc(_otfState.matchTab) + '.';
+    body.innerHTML = '<tr><td colspan="7" class="hint">' + why + '</td></tr>';
+    return;
+  }
+  body.innerHTML = view.map(m => {
+    const dt = otfSplitDateTime(m.scheduled_at);
+    const whenCell =
+        '<input type="date" data-mfield="date" data-id="' + m.id + '" value="' + esc(dt.date) + '" style="margin-bottom:4px">'
+      + '<input type="time" data-mfield="time" data-id="' + m.id + '" value="' + esc(dt.time) + '">';
+    const catCell = '<span class="badge gold" data-catbadge="' + m.id + '">' + esc(m.category) + '</span>';
+    return '<tr data-row-id="' + m.id + '">'
+      + '<td>' + whenCell + '</td>'
+      + '<td>' + catCell + '</td>'
+      + '<td><select data-mfield="participant_id" data-id="' + m.id + '">' + otfParticipantOptionsHtml(m.participant_id) + '</select></td>'
+      + '<td><input type="text" value="' + esc(m.table_number || '') + '" placeholder="\u2014" data-mfield="table_number" data-id="' + m.id + '" style="width:60px"></td>'
+      + '<td>'
+      +   '<input type="url" value="' + esc(m.stream_url || '') + '" placeholder="https://&hellip;" data-mfield="stream_url" data-id="' + m.id + '"' + (m.not_streamed ? ' disabled style="opacity:0.45"' : '') + '>'
+      +   '<label style="display:flex;align-items:center;gap:6px;font-size:0.72rem;font-weight:600;color:var(--muted);text-transform:none;letter-spacing:0;margin-top:4px;cursor:pointer">'
+      +     '<input type="checkbox" data-mfield="not_streamed" data-id="' + m.id + '"' + (m.not_streamed ? ' checked' : '') + ' style="width:auto;min-height:0;margin:0">Not streamed'
+      +   '</label>'
+      + '</td>'
+      + '<td data-result-cell="' + m.id + '">' + otfResultCellHtml(m) + '</td>'
+      + '<td><button class="btn btn-danger btn-sm" onclick="otfDeleteMatch(' + m.id + ')">Delete</button></td>'
+      + '</tr>';
+  }).join('');
+
+  body.querySelectorAll('input[data-mfield="date"]').forEach(inp => {
+    inp.addEventListener('change', () => otfPatchMatchDateTime(parseInt(inp.dataset.id, 10), { date: inp.value }));
+  });
+  body.querySelectorAll('input[data-mfield="time"]').forEach(inp => {
+    inp.addEventListener('change', () => otfPatchMatchDateTime(parseInt(inp.dataset.id, 10), { time: inp.value }));
+  });
+  body.querySelectorAll('select[data-mfield="participant_id"]').forEach(sel => {
+    sel.addEventListener('change', () => {
+      const id = parseInt(sel.dataset.id, 10);
+      const newPartId = parseInt(sel.value, 10);
+      const newPart = _otfState.participants.find(p => p.id === newPartId);
+      if (!newPart) return;
+      otfPatchMatch(id, { participant_id: newPartId, category: newPart.category, display_name: newPart.name });
+      const badge = body.querySelector('[data-catbadge="' + id + '"]');
+      if (badge) badge.textContent = newPart.category;
+    });
+  });
+  body.querySelectorAll('input[data-mfield="table_number"], input[data-mfield="stream_url"]').forEach(inp => {
+    inp.addEventListener('change', () => {
+      const id = parseInt(inp.dataset.id, 10);
+      const field = inp.dataset.mfield;
+      const value = inp.value.trim() || null;
+      const m = _otfState.matches.find(x => x.id === id);
+      const orig = m && m[field] ? m[field] : '';
+      if (orig && value !== orig) {
+        const label = field === 'stream_url' ? 'stream URL' : 'table number';
+        const newDisp = value == null ? '\u2014 blank' : value;
+        if (!confirm('Replace existing ' + label + '?\n\nFrom: ' + orig + '\nTo:   ' + newDisp)) { inp.value = orig; return; }
+      }
+      if (field === 'stream_url' && value && m && m.not_streamed) {
+        const cb = body.querySelector('input[data-mfield="not_streamed"][data-id="' + id + '"]');
+        if (cb) cb.checked = false;
+        otfPatchMatch(id, { stream_url: value, not_streamed: false });
+        return;
+      }
+      otfPatchMatch(id, { [field]: value });
+    });
+  });
+  body.querySelectorAll('input[data-mfield="not_streamed"]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const id = parseInt(cb.dataset.id, 10);
+      const isOff = cb.checked;
+      const urlInp = body.querySelector('input[data-mfield="stream_url"][data-id="' + id + '"]');
+      if (isOff) {
+        if (urlInp) { urlInp.value = ''; urlInp.disabled = true; urlInp.style.opacity = '0.45'; }
+        otfPatchMatch(id, { not_streamed: true, stream_url: null });
+      } else {
+        if (urlInp) { urlInp.disabled = false; urlInp.style.opacity = ''; }
+        otfPatchMatch(id, { not_streamed: false });
+      }
+    });
+  });
+}
+function otfResultCellHtml(m) {
+  const r = m.result;
+  const winCls = 'btn btn-sm otf-win ' + (r === 'W' ? 'active' : 'btn-outline');
+  const lossCls = 'btn btn-sm otf-loss ' + (r === 'L' ? 'active' : 'btn-outline');
+  return '<div style="display:flex;gap:4px">'
+    + '<button class="' + winCls + '" onclick="otfSetResult(' + m.id + ',\'W\')">Won</button>'
+    + '<button class="' + lossCls + '" onclick="otfSetResult(' + m.id + ',\'L\')">Lost</button>'
+    + (r ? '<button class="btn btn-outline btn-sm" onclick="otfSetResult(' + m.id + ',null)" title="Clear result">\u2715</button>' : '')
+    + '</div>';
+}
+function otfPatchMatchDateTime(id, partial) {
+  const m = _otfState.matches.find(x => x.id === id);
+  if (!m) return;
+  const cur = otfSplitDateTime(m.scheduled_at);
+  const date = partial.date != null ? partial.date : cur.date;
+  const time = partial.time != null ? partial.time : cur.time;
+  if (!date || !time) return;
+  const dt = new Date(date + 'T' + time);
+  if (isNaN(dt.getTime())) { alert('Invalid date/time'); return; }
+  otfPatchMatch(id, { scheduled_at: dt.toISOString() });
+}
+async function otfSetResult(id, result) {
+  await otfPatchMatch(id, { result: result });
+  const m = _otfState.matches.find(x => x.id === id);
+  const cell = document.querySelector('[data-result-cell="' + id + '"]');
+  if (m && cell) cell.innerHTML = otfResultCellHtml(m);
+}
+async function otfPatchMatch(id, patch) {
+  try {
+    await _otfSb('PATCH', 'matches?id=eq.' + id, patch);
+    const m = _otfState.matches.find(x => x.id === id);
+    if (m) Object.assign(m, patch);
+  } catch (e) {
+    alert('Save failed: ' + e.message);
+    await otfLoadMatches();
+  }
+}
+async function otfAddMatch() {
+  if (!_otfState.activeId) { otfSetStatus('otfAddMStatus', 'Select or create a tournament first', 'err'); return; }
+  const partId = parseInt(document.getElementById('otfNewMPart').value, 10);
+  const date = document.getElementById('otfNewMDate').value;
+  const time = document.getElementById('otfNewMTime').value;
+  const table = document.getElementById('otfNewMTable').value.trim();
+  const stream = document.getElementById('otfNewMStream').value.trim();
+  const noStr = document.getElementById('otfNewMNotStreamed').checked;
+  if (!partId) { otfSetStatus('otfAddMStatus', 'Pick a player or team', 'err'); return; }
+  if (!date || !time) { otfSetStatus('otfAddMStatus', 'Date + time required', 'err'); return; }
+  const finalUrl = noStr ? null : (stream || null);
+  const part = _otfState.participants.find(p => p.id === partId);
+  if (!part) { otfSetStatus('otfAddMStatus', 'Participant not found, refresh', 'err'); return; }
+  const dt = new Date(date + 'T' + time);
+  if (isNaN(dt.getTime())) { otfSetStatus('otfAddMStatus', 'Invalid date/time', 'err'); return; }
+  try {
+    await _otfSb('POST', 'matches', {
+      category: part.category, participant_id: partId, display_name: part.name,
+      scheduled_at: dt.toISOString(), table_number: table || null,
+      stream_url: finalUrl, not_streamed: noStr, tournament_id: _otfState.activeId
+    });
+    otfSetStatus('otfAddMStatus', 'Added.', 'ok');
+    document.getElementById('otfNewMTable').value = '';
+    document.getElementById('otfNewMStream').value = '';
+    document.getElementById('otfNewMNotStreamed').checked = false;
+    await otfReloadData();
+  } catch (e) {
+    otfSetStatus('otfAddMStatus', 'Add failed: ' + e.message, 'err');
+  }
+}
+async function otfDeleteMatch(id) {
+  if (!confirm('Delete this match?')) return;
+  try { await _otfSb('DELETE', 'matches?id=eq.' + id); await otfReloadData(); }
+  catch (e) { alert('Delete failed: ' + e.message); }
+}
+function otfPopulateCategoryDropdowns() {
+  const cats = otfCategories();
+  const pcat = document.getElementById('otfNewPCat');
+  if (pcat) {
+    pcat.innerHTML = cats.length
+      ? cats.map(c => '<option value="' + esc(c) + '">' + esc(c) + '</option>').join('')
+      : '<option value="">No categories — edit the tournament</option>';
+  }
+}
+/* OTF_TAB_END */
+
 
 /* ══════════════════════════════════════════════════════════════════════
    OPERATORS (read-only, seeded by schema). Only Email HQ uses this now —
