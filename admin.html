@@ -1070,6 +1070,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="housecue">House Cue</button>
       <button class="tab" data-tab="eventhorizon">Event Horizon</button>
       <button class="tab" data-tab="onthefelt">OnTheFelt</button>
+      <button class="tab" data-tab="poolpics">PoolPics</button>
     </div>
 
     <div id="globalStatus" class="status-line"></div>
@@ -3896,6 +3897,217 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 
     </div>
 
+    <style id="ppStyles">
+      #tab-poolpics .pp-subtabs { display:flex; flex-wrap:wrap; gap:2px; border-bottom:1px solid var(--border); margin-bottom:16px; }
+      #tab-poolpics .pp-subtab { padding:9px 16px; border:0; background:transparent; cursor:pointer; font-size:0.85rem; font-weight:700; color:var(--muted); border-bottom:3px solid transparent; }
+      #tab-poolpics .pp-subtab:hover { color:var(--text); }
+      #tab-poolpics .pp-subtab.pp-active { color:var(--spm-accent); border-bottom-color:var(--spm-accent); }
+      #tab-poolpics .pp-subpanel { display:none; }
+      #tab-poolpics .pp-subpanel.pp-active { display:block; }
+      #tab-poolpics .pp-btn-warn { background:var(--amber); color:#fff; }
+      #tab-poolpics .pp-btn-warn:hover:not(:disabled) { opacity:0.9; }
+      #tab-poolpics .pp-btn-success { background:var(--success); color:#fff; }
+      #tab-poolpics .pp-btn-success:hover:not(:disabled) { opacity:0.9; }
+      #tab-poolpics .pp-badge-danger { display:inline-block; padding:2px 8px; border-radius:999px; font-size:0.7rem; font-weight:700; letter-spacing:0.04em; text-transform:uppercase; background:rgba(220,38,38,0.12); color:#dc2626; }
+      #tab-poolpics .pp-feed { display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:12px; margin-top:12px; }
+      #tab-poolpics .pp-post { position:relative; background:var(--card); border-radius:12px; overflow:hidden; box-shadow:0 2px 6px rgba(0,0,0,0.06); border:2px solid transparent; }
+      #tab-poolpics .pp-post.pp-hidden-post { border-color:var(--amber); opacity:0.85; }
+      #tab-poolpics .pp-post.pp-banned { border-color:#dc2626; }
+      #tab-poolpics .pp-post img { width:100%; height:200px; object-fit:cover; display:block; background:#ddd; cursor:pointer; }
+      #tab-poolpics .pp-post .pp-meta { padding:8px 12px; font-size:0.76rem; color:var(--muted); }
+      #tab-poolpics .pp-post .pp-caption { padding:2px 12px 6px; font-size:0.84rem; color:var(--text); }
+      #tab-poolpics .pp-post .pp-row { padding:8px 12px; border-top:1px solid var(--border); display:flex; gap:6px; flex-wrap:wrap; }
+      #tab-poolpics .pp-post.is-sel { border-color:#2563eb; }
+      #tab-poolpics .pp-check { position:absolute; top:8px; left:8px; z-index:2; width:28px; height:28px; border-radius:50%; background:rgba(255,255,255,0.92); border:2px solid #d1d5db; display:flex; align-items:center; justify-content:center; cursor:pointer; font-weight:800; font-size:0.8rem; color:#6b7280; box-shadow:0 2px 6px rgba(0,0,0,0.16); }
+      #tab-poolpics .pp-post.is-sel .pp-check { background:#2563eb; border-color:#1d4ed8; color:#fff; }
+      #tab-poolpics .pp-dripbar { display:none; align-items:center; gap:14px; background:#1f2937; color:#fff; padding:10px 16px; border-radius:10px; margin:12px 0; font-weight:600; }
+      #tab-poolpics .pp-stats { display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:12px; margin-bottom:16px; }
+      #tab-poolpics .pp-stat { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px; text-align:center; }
+      #tab-poolpics .pp-stat-num { font-size:1.8rem; font-weight:900; color:var(--spm-accent); }
+      #tab-poolpics .pp-stat-label { font-size:0.7rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.05em; margin-top:4px; }
+      #tab-poolpics .pp-drip-section { display:flex; flex-direction:column; gap:12px; }
+      #tab-poolpics .pp-drip-row { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:12px 14px; }
+      #tab-poolpics .pp-drip-thumbs { display:flex; gap:6px; flex-wrap:wrap; margin:6px 0; }
+      #tab-poolpics .pp-drip-thumb { position:relative; width:64px; height:64px; border-radius:6px; overflow:hidden; background:#f3f4f6; border:2px solid transparent; }
+      #tab-poolpics .pp-drip-thumb.is-hook { border-color:#2563eb; }
+      #tab-poolpics .pp-drip-thumb img { width:100%; height:100%; object-fit:cover; }
+      #tab-poolpics .pp-drip-thumb-idx { position:absolute; top:2px; left:2px; background:rgba(0,0,0,0.7); color:#fff; font-size:0.64rem; font-weight:700; padding:1px 5px; border-radius:4px; }
+      #tab-poolpics .pp-drip-caption { margin-top:6px; padding:8px 10px; background:#f9fafb; border-left:3px solid #2563eb; font-size:0.84rem; line-height:1.4; white-space:pre-wrap; }
+      #tab-poolpics .pp-countdown-chip { display:inline-block; padding:6px 14px; border-radius:999px; background:#dbeafe; color:#1e40af; font-weight:800; font-size:0.84rem; margin-bottom:14px; }
+    </style>
+
+    <!-- ══════════════════════════════════════════════════════════════
+         TAB: POOLPICS — ported from Apps/Snapshot/site/admin.html (3.306)
+         ══════════════════════════════════════════════════════════════ -->
+    <div id="tab-poolpics" class="tab-panel">
+
+      <div class="pp-subtabs">
+        <button class="pp-subtab pp-active" data-ppsub="events" onclick="ppSwitchSub('events')">Events</button>
+        <button class="pp-subtab" data-ppsub="feed" onclick="ppSwitchSub('feed')">Feed</button>
+        <button class="pp-subtab" data-ppsub="dripqueue" onclick="ppSwitchSub('dripqueue')">IG Drip</button>
+        <button class="pp-subtab" data-ppsub="bans" onclick="ppSwitchSub('bans')">Bans</button>
+        <button class="pp-subtab" data-ppsub="stats" onclick="ppSwitchSub('stats')">Stats</button>
+        <button class="pp-subtab" data-ppsub="download" onclick="ppSwitchSub('download')">Download</button>
+      </div>
+
+      <!-- ─── Events sub-panel ─── -->
+      <div class="pp-subpanel pp-active" id="ppsub-events">
+        <div class="card">
+          <h2>Create event</h2>
+          <div class="form-row">
+            <div><label for="ppEvName">Name</label><input type="text" id="ppEvName" class="form-input" placeholder="Vegas Championships 2026"></div>
+            <div><label for="ppEvStart">Start date</label><input type="date" id="ppEvStart" class="form-input"></div>
+            <div><label for="ppEvEnd">End date</label><input type="date" id="ppEvEnd" class="form-input"></div>
+          </div>
+          <div class="form-row">
+            <div style="flex:2"><label for="ppEvLoc">Location</label><input type="text" id="ppEvLoc" class="form-input" placeholder="Las Vegas, NV"></div>
+            <div style="flex:3"><label for="ppEvCover">Cover photo URL &mdash; optional</label><input type="url" id="ppEvCover" class="form-input" placeholder="https://&hellip;"></div>
+          </div>
+          <div class="form-row">
+            <div><label for="ppEvDesc">Description &mdash; optional</label><textarea id="ppEvDesc" class="form-input" placeholder="One or two sentences&hellip;"></textarea></div>
+          </div>
+          <label style="display:inline-flex; align-items:center; gap:8px; font-size:0.86rem; color:var(--text); font-weight:600; cursor:pointer; margin-top:8px; text-transform:none; letter-spacing:0">
+            <input type="checkbox" id="ppEvPrivate" style="width:18px; height:18px; cursor:pointer">
+            &#128274; Private &mdash; hide from the public picker
+          </label>
+          <div class="actions" style="margin-top:10px"><button class="btn btn-primary" onclick="ppCreateEvent()">Create</button></div>
+          <div id="ppEvCreateStatus" class="status-line" style="margin-top:10px"></div>
+          <p class="hint" style="margin-top:6px">Slug is auto-generated from the name. Private events stay reachable by anyone with the deep-link URL <code>?event=&lt;slug&gt;</code>.</p>
+        </div>
+
+        <!-- Edit event — inline card, mirrors OnTheFelt's inline Manage panel -->
+        <div class="card" id="ppEditCard" style="display:none">
+          <h2>Edit event</h2>
+          <div class="form-row">
+            <div style="flex:2"><label for="ppEeName">Name</label><input type="text" id="ppEeName" class="form-input"></div>
+            <div style="flex:1"><label for="ppEeSlug">Slug</label><input type="text" id="ppEeSlug" class="form-input" placeholder="vegas-2026"></div>
+          </div>
+          <div class="form-row">
+            <div><label for="ppEeStart">Start date</label><input type="date" id="ppEeStart" class="form-input"></div>
+            <div><label for="ppEeEnd">End date</label><input type="date" id="ppEeEnd" class="form-input"></div>
+          </div>
+          <div class="form-row">
+            <div style="flex:2"><label for="ppEeLoc">Location</label><input type="text" id="ppEeLoc" class="form-input"></div>
+            <div style="flex:3"><label for="ppEeCover">Cover photo URL</label><input type="url" id="ppEeCover" class="form-input"></div>
+          </div>
+          <div class="form-row">
+            <div><label for="ppEeDesc">Description</label><textarea id="ppEeDesc" class="form-input"></textarea></div>
+          </div>
+          <div style="display:flex; gap:18px; flex-wrap:wrap; margin-top:4px">
+            <label style="display:inline-flex; align-items:center; gap:8px; font-size:0.82rem; color:var(--text); font-weight:600; cursor:pointer; text-transform:none; letter-spacing:0"><input type="checkbox" id="ppEeOpen" style="width:18px; height:18px; cursor:pointer"> Posting open</label>
+            <label style="display:inline-flex; align-items:center; gap:8px; font-size:0.82rem; color:var(--text); font-weight:600; cursor:pointer; text-transform:none; letter-spacing:0"><input type="checkbox" id="ppEePrivate" style="width:18px; height:18px; cursor:pointer"> &#128274; Private</label>
+          </div>
+          <div id="ppEeStatus" class="status-line" style="margin-top:10px"></div>
+          <p class="hint" style="margin-top:8px">Changing the slug only updates the deep-link URL. Existing photo URLs keep working &mdash; they are stored at upload time and do not depend on the current slug.</p>
+          <div class="actions" style="margin-top:10px">
+            <button class="btn btn-outline" onclick="ppCloseEdit()">Cancel</button>
+            <button class="btn btn-primary" onclick="ppSaveEdit()">Save</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Events</h2>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Name</th><th>Slug</th><th>Dates</th><th>Location</th><th>Posts</th><th>Status</th><th></th></tr></thead>
+              <tbody id="ppEvBody"><tr><td colspan="7" class="hint">Loading&hellip;</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─── Feed sub-panel ─── -->
+      <div class="pp-subpanel" id="ppsub-feed">
+        <div class="card">
+          <h2>Feed moderation</h2>
+          <div class="form-row" style="align-items:flex-end">
+            <div style="flex:0 0 240px"><label for="ppFeedEvent">Event</label><select id="ppFeedEvent" class="form-input" onchange="ppLoadAdminFeed()"></select></div>
+            <div style="flex:0 0 200px"><label for="ppFeedFilter">Show</label><select id="ppFeedFilter" class="form-input" onchange="ppLoadAdminFeed()"><option value="all">All posts</option><option value="visible">Visible only</option><option value="hidden">Hidden or banned only</option></select></div>
+            <div style="flex:0 0 auto"><button class="btn btn-outline btn-sm" onclick="ppLoadAdminFeed()">Refresh</button></div>
+          </div>
+          <div id="ppAdminFeedStatus" class="status-line" style="margin-top:12px"></div>
+          <div id="ppDripBar" class="pp-dripbar">
+            <span id="ppDripCount">0 selected</span>
+            <span id="ppDripHint" style="font-size:0.82rem; font-weight:400; color:#9ca3af"></span>
+            <span style="flex:1"></span>
+            <button class="btn btn-outline btn-sm" onclick="ppDripClearSelection()" style="background:transparent; color:#fff; border-color:#4b5563">Clear</button>
+            <button id="ppDripAddBtn" class="btn btn-primary btn-sm" onclick="ppDripAddSelectionToQueue()">Add to IG drip queue</button>
+          </div>
+          <div id="ppAdminFeed" class="pp-feed"></div>
+        </div>
+      </div>
+
+      <!-- ─── IG Drip queue sub-panel ─── -->
+      <div class="pp-subpanel" id="ppsub-dripqueue">
+        <div class="card">
+          <h2>IG Drip queue</h2>
+          <p class="hint" style="margin-bottom:14px">Curated carousels heading to Instagram. Items move Needs review &rarr; Scheduled &rarr; Published. This tab manages the queue; the auto-publisher worker is a later phase and is not built yet.</p>
+          <div class="pp-countdown-chip">Next post: <span id="ppDripCountdownText">no posts scheduled</span></div>
+          <h3 style="margin:18px 0 10px; font-size:1rem">Needs review</h3>
+          <div id="ppDripNeedsReview" class="pp-drip-section"></div>
+          <h3 style="margin:18px 0 10px; font-size:1rem">Scheduled</h3>
+          <div id="ppDripScheduled" class="pp-drip-section"></div>
+          <h3 style="margin:18px 0 10px; font-size:1rem">Published</h3>
+          <div id="ppDripPublished" class="pp-drip-section"></div>
+        </div>
+      </div>
+
+      <!-- ─── Bans sub-panel ─── -->
+      <div class="pp-subpanel" id="ppsub-bans">
+        <div class="card">
+          <h2>Active bans</h2>
+          <p class="hint" style="margin-bottom:10px">A ban inserts up to 3 rows &mdash; one per identifier: client_id, ip, canvas_fp. Unban removes all rows for that device. Bans are global across all events.</p>
+          <div id="ppBanListStatus" class="status-line"></div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Identifier type</th><th>Value</th><th>Display label</th><th>Reason</th><th>Banned</th><th></th></tr></thead>
+              <tbody id="ppBanBody"><tr><td colspan="6" class="hint">Loading&hellip;</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─── Stats sub-panel ─── -->
+      <div class="pp-subpanel" id="ppsub-stats">
+        <div class="card">
+          <h2>Stats</h2>
+          <div class="form-row" style="align-items:flex-end; margin-bottom:12px">
+            <div style="flex:0 0 240px"><label for="ppStatsEvent">Scope</label><select id="ppStatsEvent" class="form-input" onchange="ppLoadStats()"></select></div>
+            <div style="flex:0 0 auto"><button class="btn btn-outline btn-sm" onclick="ppLoadStats()">Refresh</button></div>
+          </div>
+          <div class="pp-stats" id="ppStatsHeader"></div>
+          <h2 style="margin-top:18px">Top devices by load count</h2>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Device &mdash; client_id</th><th>IP</th><th>Loads</th><th>Posts</th><th>First seen</th><th>Last seen</th><th>Banned?</th><th></th></tr></thead>
+              <tbody id="ppTopDevicesBody"><tr><td colspan="8" class="hint">Loading&hellip;</td></tr></tbody>
+            </table>
+          </div>
+          <h2 style="margin-top:18px">Recent loads</h2>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Time</th><th>Event</th><th>Device</th><th>IP</th><th>UA</th></tr></thead>
+              <tbody id="ppRecentLoadsBody"><tr><td colspan="5" class="hint">Loading&hellip;</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─── Download sub-panel ─── -->
+      <div class="pp-subpanel" id="ppsub-download">
+        <div class="card">
+          <h2>Download all photos</h2>
+          <p class="hint" style="margin-bottom:10px">Bundles every photo for the chosen event into a single ZIP alongside a <code>manifest.csv</code> with caption, posted_at, device fingerprint, and banned flag. Built with JSZip in your browser &mdash; no server roundtrip.</p>
+          <div class="form-row" style="align-items:flex-end">
+            <div style="flex:0 0 320px"><label for="ppDlEvent">Event</label><select id="ppDlEvent" class="form-input"></select></div>
+            <div style="flex:0 0 auto"><button class="btn btn-primary" id="ppDlBtn" onclick="ppDownloadEventPhotos()">Build ZIP</button></div>
+          </div>
+          <div id="ppDlStatus" class="status-line" style="margin-top:12px"></div>
+        </div>
+      </div>
+
+    </div>
+
     <div id="tab-banlist" class="tab-panel">
       <div class="card" style="margin-bottom:14px">
         <h2 style="margin:0 0 6px;">No-Contact (DNC) list</h2>
@@ -4154,7 +4366,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.305';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.306';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -9227,7 +9439,8 @@ const TAB_LABEL = {
   lostfound:     'Lost & Found',
   banlist:       'No-Contact — DNC',
   housecue:      'House Cue',
-  onthefelt:     'OnTheFelt'
+  onthefelt:     'OnTheFelt',
+  poolpics:      'PoolPics'
 };
 
 function switchTab(name) {
@@ -9258,6 +9471,7 @@ function switchTab(name) {
   if (name === 'housecue')    hcInit();
   if (name === 'eventhorizon') ehInit();
   if (name === 'onthefelt') otfInit();
+  if (name === 'poolpics') ppInit();
 }
 
 /* OTF_TAB_BEGIN — OnTheFelt tab logic (3.305). Ported + tournament-scoped.
@@ -9811,6 +10025,565 @@ function otfPopulateCategoryDropdowns() {
   }
 }
 /* OTF_TAB_END */
+
+
+/* ══════════════════════════════════════════════════════════════════════
+   PP_TAB_BEGIN — PoolPics tab logic (3.306). Ported from the standalone
+   Apps/Snapshot/site/admin.html into Slate as Slice 3. Namespaced pp* / _pp*.
+   Reads/writes the snapshot schema with Slate's service-role SB_KEY:
+   Accept-Profile on GET, Content-Profile on writes. Storage bucket
+   snapshot — public read via /object/public/, authed delete via
+   /object/ with the SB_KEY bearer. Reuses Slate globals SB_URL / SB_KEY /
+   esc / setStatus / hideStatus / fmtDateTime / JSZip.
+   Six sub-sections: Events, Feed, IG Drip, Bans, Stats, Download.
+   NOTE: the IG Drip auto-publisher worker does not exist yet — the queue
+   management UI is ported as-is and writes snapshot.ig_queue rows only.
+   ══════════════════════════════════════════════════════════════════════ */
+const _ppState = { events: [], sub: 'events', editId: null };
+const _ppBucket = 'snapshot';
+const _ppDripMax = 10;
+const _ppDripSelected = new Set();     // ordered post ids — insertion order is carousel slide order
+let _ppDripRenderedById = new Map();    // post.id -> post row, populated by ppLoadAdminFeed
+
+/* ── cross-schema fetch onto Slate's SB_URL + SB_KEY ── */
+function _ppHeaders(write) {
+  const h = { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Accept-Profile': 'snapshot' };
+  if (write) { h['Content-Type'] = 'application/json'; h['Content-Profile'] = 'snapshot'; h['Prefer'] = 'return=representation'; }
+  return h;
+}
+async function _ppSb(method, path, body, extra) {
+  const opts = { method, headers: _ppHeaders(method !== 'GET') };
+  if (extra) opts.headers = Object.assign({}, opts.headers, extra);
+  if (body !== undefined && body !== null && method !== 'GET' && method !== 'DELETE') opts.body = JSON.stringify(body);
+  const res = await fetch(SB_URL + '/rest/v1/' + path, opts);
+  if (!res.ok) { const t = await res.text(); throw new Error('Supabase ' + res.status + ': ' + t.substring(0, 300)); }
+  if (res.status === 204) return null;
+  const ct = res.headers.get('content-type') || '';
+  return ct.includes('json') ? res.json() : null;
+}
+async function _ppCount(path) {
+  const res = await fetch(SB_URL + '/rest/v1/' + path, { headers: Object.assign({}, _ppHeaders(false), { Prefer: 'count=exact' }) });
+  const cr = res.headers.get('Content-Range') || '';
+  const m = cr.match(/\/(\d+)$/);
+  return m ? parseInt(m[1], 10) : 0;
+}
+function _ppPhotoUrl(p) { return SB_URL + '/storage/v1/object/public/' + _ppBucket + '/' + p; }
+async function _ppStorageDelete(p) {
+  await fetch(SB_URL + '/storage/v1/object/' + _ppBucket + '/' + encodeURIComponent(p), {
+    method: 'DELETE', headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY }
+  });
+}
+function _ppSlugify(s) {
+  return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').substring(0, 60);
+}
+function _ppCsvEscape(s) {
+  s = String(s == null ? '' : s);
+  if (/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
+
+/* ── init + sub-tab router ── */
+async function ppInit() {
+  try { await ppLoadEvents(); }
+  catch (e) { setStatus('ppEvCreateStatus', 'Load failed: ' + e.message, 'err'); }
+  ppSwitchSub(_ppState.sub || 'events');
+}
+function ppSwitchSub(name) {
+  _ppState.sub = name;
+  document.querySelectorAll('#tab-poolpics .pp-subtab').forEach(t => t.classList.toggle('pp-active', t.dataset.ppsub === name));
+  document.querySelectorAll('#tab-poolpics .pp-subpanel').forEach(p => p.classList.toggle('pp-active', p.id === 'ppsub-' + name));
+  if (name === 'feed')      ppLoadAdminFeed();
+  if (name === 'dripqueue') ppLoadDripQueue();
+  if (name === 'bans')      ppLoadBans();
+  if (name === 'stats')     ppLoadStats();
+  if (name === 'download')  ppPopulateDownloadEvents();
+}
+
+/* ══ Events ══ */
+async function ppLoadEvents() {
+  _ppState.events = (await _ppSb('GET', 'events?select=*&order=start_date.desc')) || [];
+  ppRenderEventsTable();
+  _ppPopulateSelector('ppFeedEvent', true);
+  _ppPopulateSelector('ppStatsEvent', true);
+  _ppPopulateSelector('ppDlEvent', false);
+}
+function _ppPopulateSelector(id, includeAll) {
+  const sel = document.getElementById(id);
+  if (!sel) return;
+  const allOpt = includeAll ? '<option value="">All events</option>' : '';
+  sel.innerHTML = allOpt + _ppState.events.map(e => '<option value="' + e.id + '">' + esc(e.name) + '</option>').join('');
+}
+async function ppRenderEventsTable() {
+  const body = document.getElementById('ppEvBody');
+  if (!body) return;
+  if (!_ppState.events.length) { body.innerHTML = '<tr><td colspan="7" class="hint">No events yet.</td></tr>'; return; }
+  let counts = {};
+  try {
+    const rows = (await _ppSb('GET', 'posts?select=event_id&hidden=eq.false')) || [];
+    for (const r of rows) counts[r.event_id] = (counts[r.event_id] || 0) + 1;
+  } catch (_) {}
+  body.innerHTML = _ppState.events.map(e => {
+    const dates = esc(e.start_date) + ' &rarr; ' + esc(e.end_date);
+    const status = e.posting_open ? '<span class="badge ok">Open</span>' : '<span class="badge warn">Closed</span>';
+    const priv = e.is_private ? ' <span class="badge" style="background:#fef3c7; color:#92400e; border:1px solid #fcd34d">&#128274; Private</span>' : '';
+    return '<tr>'
+      + '<td><strong>' + esc(e.name) + '</strong>' + priv + '</td>'
+      + '<td><code>' + esc(e.slug) + '</code></td>'
+      + '<td>' + dates + '</td>'
+      + '<td>' + esc(e.location || '') + '</td>'
+      + '<td>' + (counts[e.id] || 0) + '</td>'
+      + '<td>' + status + '</td>'
+      + '<td style="white-space:nowrap">'
+        + '<button class="btn btn-outline btn-sm" onclick="ppOpenEdit(' + e.id + ')" style="margin-right:4px">Edit</button>'
+        + '<button class="btn ' + (e.posting_open ? 'pp-btn-warn' : 'pp-btn-success') + ' btn-sm" onclick="ppToggleEventPosting(' + e.id + ',' + (!e.posting_open) + ')">' + (e.posting_open ? 'Close posting' : 'Open posting') + '</button>'
+      + '</td>'
+    + '</tr>';
+  }).join('');
+}
+async function ppCreateEvent() {
+  hideStatus('ppEvCreateStatus');
+  const name = document.getElementById('ppEvName').value.trim();
+  const start = document.getElementById('ppEvStart').value;
+  const end = document.getElementById('ppEvEnd').value;
+  const loc = document.getElementById('ppEvLoc').value.trim();
+  const cover = document.getElementById('ppEvCover').value.trim();
+  const desc = document.getElementById('ppEvDesc').value.trim();
+  if (!name || !start || !end) return setStatus('ppEvCreateStatus', 'Name, start, and end are required.', 'err');
+  if (end < start) return setStatus('ppEvCreateStatus', 'End date cannot be before start.', 'err');
+  const slug = _ppSlugify(name);
+  if (!slug) return setStatus('ppEvCreateStatus', 'Could not generate a slug. Pick a different name.', 'err');
+  const isPriv = document.getElementById('ppEvPrivate').checked;
+  try {
+    await _ppSb('POST', 'events', { slug, name, start_date: start, end_date: end, location: loc || null, cover_photo_url: cover || null, description: desc || null, posting_open: true, is_private: isPriv });
+    setStatus('ppEvCreateStatus', 'Created.', 'ok');
+    ['ppEvName', 'ppEvStart', 'ppEvEnd', 'ppEvLoc', 'ppEvCover', 'ppEvDesc'].forEach(id => { document.getElementById(id).value = ''; });
+    document.getElementById('ppEvPrivate').checked = false;
+    await ppLoadEvents();
+  } catch (e) { setStatus('ppEvCreateStatus', 'Failed: ' + e.message, 'err'); }
+}
+async function ppToggleEventPosting(id, open) {
+  try { await _ppSb('PATCH', 'events?id=eq.' + id, { posting_open: open }); await ppLoadEvents(); }
+  catch (e) { alert('Failed: ' + e.message); }
+}
+/* Edit event — inline card. Slug renames only change the deep-link URL;
+   post photo_paths are stored at upload time so existing photos still resolve. */
+function ppOpenEdit(id) {
+  const e = _ppState.events.find(x => x.id === id);
+  if (!e) return;
+  _ppState.editId = id;
+  document.getElementById('ppEeName').value = e.name || '';
+  document.getElementById('ppEeSlug').value = e.slug || '';
+  document.getElementById('ppEeStart').value = e.start_date || '';
+  document.getElementById('ppEeEnd').value = e.end_date || '';
+  document.getElementById('ppEeLoc').value = e.location || '';
+  document.getElementById('ppEeCover').value = e.cover_photo_url || '';
+  document.getElementById('ppEeDesc').value = e.description || '';
+  document.getElementById('ppEeOpen').checked = !!e.posting_open;
+  document.getElementById('ppEePrivate').checked = !!e.is_private;
+  hideStatus('ppEeStatus');
+  const card = document.getElementById('ppEditCard');
+  card.style.display = 'block';
+  card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+function ppCloseEdit() {
+  document.getElementById('ppEditCard').style.display = 'none';
+  _ppState.editId = null;
+}
+async function ppSaveEdit() {
+  if (_ppState.editId == null) return;
+  hideStatus('ppEeStatus');
+  const name = document.getElementById('ppEeName').value.trim();
+  const slug = document.getElementById('ppEeSlug').value.trim();
+  const start = document.getElementById('ppEeStart').value;
+  const end = document.getElementById('ppEeEnd').value;
+  const loc = document.getElementById('ppEeLoc').value.trim();
+  const cover = document.getElementById('ppEeCover').value.trim();
+  const desc = document.getElementById('ppEeDesc').value.trim();
+  const open = document.getElementById('ppEeOpen').checked;
+  const isPriv = document.getElementById('ppEePrivate').checked;
+  if (!name || !slug || !start || !end) return setStatus('ppEeStatus', 'Name, slug, start, and end are required.', 'err');
+  if (end < start) return setStatus('ppEeStatus', 'End date cannot be before start.', 'err');
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) return setStatus('ppEeStatus', 'Slug must be lowercase letters, digits, and hyphens.', 'err');
+  try {
+    await _ppSb('PATCH', 'events?id=eq.' + _ppState.editId, { name, slug, start_date: start, end_date: end, location: loc || null, cover_photo_url: cover || null, description: desc || null, posting_open: open, is_private: isPriv });
+    setStatus('ppEeStatus', 'Saved.', 'ok');
+    await ppLoadEvents();
+    setTimeout(ppCloseEdit, 600);
+  } catch (e) {
+    const msg = String(e.message || '').toLowerCase();
+    if (msg.includes('duplicate') || msg.includes('unique') || msg.includes('23505')) setStatus('ppEeStatus', 'That slug is already used by another event.', 'err');
+    else setStatus('ppEeStatus', 'Save failed: ' + e.message, 'err');
+  }
+}
+
+/* ══ Feed moderation + IG drip multi-select ══ */
+async function ppLoadAdminFeed() {
+  const evId = document.getElementById('ppFeedEvent').value;
+  const filter = document.getElementById('ppFeedFilter').value;
+  const wrap = document.getElementById('ppAdminFeed');
+  wrap.innerHTML = '<div class="hint">Loading&hellip;</div>';
+  hideStatus('ppAdminFeedStatus');
+  try {
+    let q = 'posts?select=*&order=posted_at.desc&limit=500';
+    if (evId) q += '&event_id=eq.' + evId;
+    const posts = (await _ppSb('GET', q)) || [];
+    const bans = (await _ppSb('GET', 'bans?select=identifier_type,identifier_value')) || [];
+    const banSet = new Set(bans.map(b => b.identifier_type + ':' + b.identifier_value));
+    const isBanned = p => banSet.has('client_id:' + (p.client_id || '')) || banSet.has('canvas_fp:' + (p.canvas_fp || '')) || banSet.has('ip:' + (p.ip_address || ''));
+    const eventById = {};
+    _ppState.events.forEach(e => { eventById[e.id] = e; });
+    const filtered = posts.filter(p => {
+      if (filter === 'visible') return !p.hidden && !isBanned(p);
+      if (filter === 'hidden') return p.hidden || isBanned(p);
+      return true;
+    });
+    if (!filtered.length) { wrap.innerHTML = '<div class="hint">No posts match this filter.</div>'; _ppDripUpdateBar(); return; }
+    _ppDripRenderedById = new Map(filtered.map(p => [p.id, p]));
+    wrap.innerHTML = filtered.map(p => {
+      const banned = isBanned(p);
+      const ev = eventById[p.event_id];
+      const isSel = _ppDripSelected.has(p.id);
+      const selIdx = isSel ? Array.from(_ppDripSelected).indexOf(p.id) + 1 : null;
+      return '<div class="pp-post' + (isSel ? ' is-sel' : '') + (p.hidden ? ' pp-hidden-post' : '') + (banned ? ' pp-banned' : '') + '" data-post-id="' + p.id + '">'
+        + '<div class="pp-check" onclick="event.stopPropagation();ppDripToggleSelect(' + p.id + ')" title="Toggle select for IG drip">' + (isSel ? selIdx : '&#9733;') + '</div>'
+        + '<img loading="lazy" src="' + esc(_ppPhotoUrl(p.photo_path)) + '" alt="" onclick="ppDripToggleSelect(' + p.id + ')">'
+        + '<div class="pp-meta">' + (ev ? esc(ev.name) + ' &middot; ' : '') + esc(fmtDateTime(p.posted_at)) + '</div>'
+        + (p.caption ? '<div class="pp-caption">' + esc(p.caption) + '</div>' : '')
+        + '<div class="pp-meta" style="font-size:0.7rem">device: <code>' + esc((p.client_id || '').substring(0, 12)) + '&hellip;</code></div>'
+        + '<div class="pp-row">'
+          + (p.hidden
+              ? '<button class="btn pp-btn-success btn-sm" onclick="ppSetHidden(' + p.id + ',false)">Unhide</button>'
+              : '<button class="btn pp-btn-warn btn-sm" onclick="ppSetHidden(' + p.id + ',true)">Hide</button>')
+          + (banned
+              ? '<button class="btn pp-btn-success btn-sm" onclick=\'ppUnbanFromPost(' + JSON.stringify(p.client_id || '') + ',' + JSON.stringify(p.canvas_fp || '') + ',' + JSON.stringify(p.ip_address || '') + ')\'>Unban device</button>'
+              : '<button class="btn btn-danger btn-sm" onclick=\'ppBanFromPost(' + p.id + ',' + JSON.stringify(p.client_id || '') + ',' + JSON.stringify(p.canvas_fp || '') + ',' + JSON.stringify(p.ip_address || '') + ')\'>Ban device</button>')
+          + '<button class="btn btn-outline btn-sm" onclick=\'ppDeletePost(' + p.id + ',' + JSON.stringify(p.photo_path) + ')\'>Delete</button>'
+        + '</div>'
+      + '</div>';
+    }).join('');
+    _ppDripUpdateBar();
+  } catch (e) { wrap.innerHTML = ''; setStatus('ppAdminFeedStatus', 'Failed: ' + e.message, 'err'); }
+}
+function ppDripToggleSelect(id) {
+  if (_ppDripSelected.has(id)) _ppDripSelected.delete(id);
+  else {
+    if (_ppDripSelected.size >= _ppDripMax) { _ppDripFlash('Carousel max is ' + _ppDripMax + ' photos - deselect one first'); return; }
+    _ppDripSelected.add(id);
+  }
+  ppLoadAdminFeed();
+}
+function ppDripClearSelection() { _ppDripSelected.clear(); ppLoadAdminFeed(); }
+function _ppDripUpdateBar() {
+  const bar = document.getElementById('ppDripBar');
+  if (!bar) return;
+  if (_ppDripSelected.size === 0) { bar.style.display = 'none'; return; }
+  bar.style.display = 'flex';
+  document.getElementById('ppDripCount').textContent = _ppDripSelected.size + ' selected';
+  const hint = document.getElementById('ppDripHint');
+  const addBtn = document.getElementById('ppDripAddBtn');
+  if (_ppDripSelected.size > _ppDripMax) {
+    hint.textContent = 'Max ' + _ppDripMax + ' - deselect ' + (_ppDripSelected.size - _ppDripMax);
+    addBtn.disabled = true; addBtn.style.opacity = '0.45'; addBtn.style.cursor = 'not-allowed';
+  } else {
+    hint.textContent = _ppDripSelected.size === _ppDripMax ? 'At cap - numbers are carousel slide order' : 'Numbers are carousel slide order';
+    addBtn.disabled = false; addBtn.style.opacity = '1'; addBtn.style.cursor = 'pointer';
+  }
+}
+function _ppDripFlash(msg) {
+  const bar = document.getElementById('ppDripBar');
+  const hint = document.getElementById('ppDripHint');
+  if (!bar || !hint) return;
+  bar.style.display = 'flex';
+  hint.textContent = msg; hint.style.color = '#fca5a5';
+  setTimeout(() => { hint.style.color = '#9ca3af'; _ppDripUpdateBar(); }, 1800);
+}
+async function ppDripAddSelectionToQueue() {
+  if (_ppDripSelected.size === 0) return;
+  const ids = Array.from(_ppDripSelected);
+  const evs = new Set();
+  for (const id of ids) { const p = _ppDripRenderedById.get(id); if (p) { const e = _ppState.events.find(x => x.id === p.event_id); if (e) evs.add(e.name); } }
+  const sourceNote = 'From: ' + Array.from(evs).join(', ');
+  try {
+    await _ppSb('POST', 'ig_queue', { status: 'needs_review', photo_ids: ids, hook_slide_idx: 0, source_note: sourceNote, created_by: 'admin' });
+    _ppDripSelected.clear();
+    ppLoadAdminFeed();
+    setStatus('ppAdminFeedStatus', 'Carousel of ' + ids.length + ' photos added to the IG drip queue.', 'ok');
+    setTimeout(() => hideStatus('ppAdminFeedStatus'), 3200);
+  } catch (e) { setStatus('ppAdminFeedStatus', 'Failed: ' + e.message, 'err'); }
+}
+async function ppSetHidden(id, hidden) {
+  try { await _ppSb('PATCH', 'posts?id=eq.' + id, { hidden }); await ppLoadAdminFeed(); }
+  catch (e) { alert('Failed: ' + e.message); }
+}
+async function ppDeletePost(id, photoPath) {
+  if (!confirm('Delete this post permanently? The photo file will also be removed.')) return;
+  try {
+    await _ppSb('DELETE', 'posts?id=eq.' + id);
+    if (photoPath) await _ppStorageDelete(photoPath);
+    await ppLoadAdminFeed();
+  } catch (e) { alert('Delete failed: ' + e.message); }
+}
+async function ppBanFromPost(postId, clientId, canvasFp, ip) {
+  const reason = prompt('Optional reason for the ban:', '');
+  if (reason === null) return;
+  try {
+    const rows = [];
+    if (clientId) rows.push({ identifier_type: 'client_id', identifier_value: clientId, reason: reason || '', display_label: 'device ' + clientId.substring(0, 8) });
+    if (canvasFp) rows.push({ identifier_type: 'canvas_fp', identifier_value: canvasFp, reason: reason || '', display_label: 'fp ' + canvasFp.substring(0, 8) });
+    if (ip) rows.push({ identifier_type: 'ip', identifier_value: ip, reason: reason || '', display_label: 'ip ' + ip });
+    if (!rows.length) return alert('No identifiers on this post to ban.');
+    await _ppSb('POST', 'bans', rows, { Prefer: 'resolution=merge-duplicates,return=minimal' });
+    await ppLoadAdminFeed();
+  } catch (e) { alert('Ban failed: ' + e.message); }
+}
+async function ppUnbanFromPost(clientId, canvasFp, ip) {
+  if (!confirm('Unban this device? Their posts will become visible again.')) return;
+  const ors = [];
+  if (clientId) ors.push('and(identifier_type.eq.client_id,identifier_value.eq.' + encodeURIComponent(clientId) + ')');
+  if (canvasFp) ors.push('and(identifier_type.eq.canvas_fp,identifier_value.eq.' + encodeURIComponent(canvasFp) + ')');
+  if (ip) ors.push('and(identifier_type.eq.ip,identifier_value.eq.' + encodeURIComponent(ip) + ')');
+  if (!ors.length) return;
+  try { await _ppSb('DELETE', 'bans?or=(' + ors.join(',') + ')'); await ppLoadAdminFeed(); }
+  catch (e) { alert('Unban failed: ' + e.message); }
+}
+
+/* ══ Bans list ══ */
+async function ppLoadBans() {
+  const body = document.getElementById('ppBanBody');
+  if (!body) return;
+  body.innerHTML = '<tr><td colspan="6" class="hint">Loading&hellip;</td></tr>';
+  try {
+    const rows = (await _ppSb('GET', 'bans?select=*&order=banned_at.desc')) || [];
+    if (!rows.length) { body.innerHTML = '<tr><td colspan="6" class="hint">No active bans.</td></tr>'; return; }
+    body.innerHTML = rows.map(b => '<tr>'
+      + '<td>' + esc(b.identifier_type) + '</td>'
+      + '<td><code>' + esc(b.identifier_value) + '</code></td>'
+      + '<td>' + esc(b.display_label || '') + '</td>'
+      + '<td>' + esc(b.reason || '') + '</td>'
+      + '<td>' + esc(fmtDateTime(b.banned_at)) + '</td>'
+      + '<td><button class="btn btn-outline btn-sm" onclick="ppUnbanRow(' + b.id + ')">Unban</button></td>'
+    + '</tr>').join('');
+  } catch (e) { body.innerHTML = '<tr><td colspan="6" class="hint">Failed: ' + esc(e.message) + '</td></tr>'; }
+}
+async function ppUnbanRow(id) {
+  if (!confirm('Remove this ban row?')) return;
+  try { await _ppSb('DELETE', 'bans?id=eq.' + id); await ppLoadBans(); }
+  catch (e) { alert('Failed: ' + e.message); }
+}
+
+/* ══ Stats — pull rows client-side and reduce; PostgREST count via Content-Range ══ */
+async function ppLoadStats() {
+  const evId = document.getElementById('ppStatsEvent').value;
+  const evScope = evId ? '&event_id=eq.' + evId : '';
+  const headEl = document.getElementById('ppStatsHeader');
+  headEl.innerHTML = '<div class="hint" style="grid-column:1/-1">Loading&hellip;</div>';
+  try {
+    const loadCount = await _ppCount('page_loads?select=id' + evScope + '&limit=1');
+    const postCount = await _ppCount('posts?select=id&hidden=eq.false' + evScope + '&limit=1');
+    const hiddenCount = await _ppCount('posts?select=id&hidden=eq.true' + evScope + '&limit=1');
+    const allLoads = (await _ppSb('GET', 'page_loads?select=client_id,ip_address,user_agent,event_id,loaded_at' + evScope + '&order=loaded_at.desc&limit=10000')) || [];
+    const byDevice = new Map();
+    for (const l of allLoads) {
+      if (!l.client_id) continue;
+      const v = byDevice.get(l.client_id) || { client_id: l.client_id, ip: l.ip_address, ua: l.user_agent, loads: 0, first: l.loaded_at, last: l.loaded_at, posts: 0, banned: false };
+      v.loads++;
+      if (l.loaded_at < v.first) v.first = l.loaded_at;
+      if (l.loaded_at > v.last) v.last = l.loaded_at;
+      byDevice.set(l.client_id, v);
+    }
+    const allPosts = (await _ppSb('GET', 'posts?select=client_id' + evScope)) || [];
+    for (const p of allPosts) { if (!p.client_id) continue; const v = byDevice.get(p.client_id); if (v) v.posts++; }
+    const bans = (await _ppSb('GET', 'bans?select=identifier_type,identifier_value')) || [];
+    const banSet = new Set(bans.map(b => b.identifier_type + ':' + b.identifier_value));
+    for (const v of byDevice.values()) v.banned = banSet.has('client_id:' + v.client_id);
+    headEl.innerHTML = _ppStat(loadCount, 'Page loads') + _ppStat(byDevice.size, 'Unique devices') + _ppStat(postCount, 'Posts visible') + _ppStat(hiddenCount, 'Posts hidden');
+    const top = Array.from(byDevice.values()).sort((a, b) => b.loads - a.loads).slice(0, 50);
+    document.getElementById('ppTopDevicesBody').innerHTML = top.map(v => '<tr>'
+      + '<td><code>' + esc((v.client_id || '').substring(0, 14)) + '&hellip;</code></td>'
+      + '<td>' + esc(v.ip || '') + '</td>'
+      + '<td>' + v.loads + '</td>'
+      + '<td>' + v.posts + '</td>'
+      + '<td>' + esc(fmtDateTime(v.first)) + '</td>'
+      + '<td>' + esc(fmtDateTime(v.last)) + '</td>'
+      + '<td>' + (v.banned ? '<span class="pp-badge-danger">Banned</span>' : '<span class="badge ok">No</span>') + '</td>'
+      + '<td>' + (v.banned
+          ? '<button class="btn pp-btn-success btn-sm" onclick=\'ppUnbanByClientId(' + JSON.stringify(v.client_id) + ')\'>Unban</button>'
+          : '<button class="btn btn-danger btn-sm" onclick=\'ppBanByClientId(' + JSON.stringify(v.client_id) + ',' + JSON.stringify(v.ip || '') + ')\'>Ban</button>') + '</td>'
+    + '</tr>').join('') || '<tr><td colspan="8" class="hint">No devices.</td></tr>';
+    const recent = allLoads.slice(0, 100);
+    const eventById = {};
+    _ppState.events.forEach(e => { eventById[e.id] = e; });
+    document.getElementById('ppRecentLoadsBody').innerHTML = recent.map(l => '<tr>'
+      + '<td>' + esc(fmtDateTime(l.loaded_at)) + '</td>'
+      + '<td>' + (eventById[l.event_id] ? esc(eventById[l.event_id].name) : (l.event_id ? '#' + esc(l.event_id) : '&mdash;')) + '</td>'
+      + '<td><code>' + esc((l.client_id || '').substring(0, 10)) + '&hellip;</code></td>'
+      + '<td>' + esc(l.ip_address || '') + '</td>'
+      + '<td style="font-size:0.7rem; color:var(--muted)">' + esc((l.user_agent || '').substring(0, 60)) + '</td>'
+    + '</tr>').join('') || '<tr><td colspan="5" class="hint">No loads.</td></tr>';
+  } catch (e) {
+    headEl.innerHTML = '<div class="hint" style="grid-column:1/-1; color:#dc2626">Failed: ' + esc(e.message) + '</div>';
+  }
+}
+function _ppStat(num, label) {
+  return '<div class="pp-stat"><div class="pp-stat-num">' + num + '</div><div class="pp-stat-label">' + esc(label) + '</div></div>';
+}
+async function ppBanByClientId(clientId, ip) {
+  if (!confirm('Ban device ' + String(clientId).substring(0, 12) + '?')) return;
+  const rows = [{ identifier_type: 'client_id', identifier_value: clientId, reason: '', display_label: 'device ' + String(clientId).substring(0, 8) }];
+  if (ip) rows.push({ identifier_type: 'ip', identifier_value: ip, reason: '', display_label: 'ip ' + ip });
+  try { await _ppSb('POST', 'bans', rows, { Prefer: 'resolution=merge-duplicates,return=minimal' }); await ppLoadStats(); }
+  catch (e) { alert('Ban failed: ' + e.message); }
+}
+async function ppUnbanByClientId(clientId) {
+  if (!confirm('Unban device ' + String(clientId).substring(0, 12) + '?')) return;
+  try { await _ppSb('DELETE', 'bans?identifier_type=eq.client_id&identifier_value=eq.' + encodeURIComponent(clientId)); await ppLoadStats(); }
+  catch (e) { alert('Unban failed: ' + e.message); }
+}
+
+/* ══ Download — client-side ZIP via Slate's existing JSZip global ══ */
+function ppPopulateDownloadEvents() {
+  const sel = document.getElementById('ppDlEvent');
+  if (sel) sel.innerHTML = _ppState.events.map(e => '<option value="' + e.id + '">' + esc(e.name) + '</option>').join('');
+}
+async function ppDownloadEventPhotos() {
+  const evId = parseInt(document.getElementById('ppDlEvent').value, 10);
+  if (!evId) return;
+  const ev = _ppState.events.find(e => e.id === evId);
+  if (!ev) return;
+  const btn = document.getElementById('ppDlBtn');
+  if (typeof JSZip === 'undefined') { setStatus('ppDlStatus', 'JSZip library is not available on this page.', 'err'); return; }
+  btn.disabled = true;
+  setStatus('ppDlStatus', 'Loading post list&hellip;', 'progress');
+  try {
+    const posts = (await _ppSb('GET', 'posts?event_id=eq.' + evId + '&select=id,photo_path,caption,posted_at,client_id,canvas_fp,ip_address,hidden&order=posted_at.asc&limit=2000')) || [];
+    if (!posts.length) { setStatus('ppDlStatus', 'No posts to download.', 'err'); btn.disabled = false; return; }
+    const bans = (await _ppSb('GET', 'bans?select=identifier_type,identifier_value')) || [];
+    const banSet = new Set(bans.map(b => b.identifier_type + ':' + b.identifier_value));
+    const isBanned = p => banSet.has('client_id:' + (p.client_id || '')) || banSet.has('canvas_fp:' + (p.canvas_fp || '')) || banSet.has('ip:' + (p.ip_address || ''));
+    const zip = new JSZip();
+    const csvLines = ['filename,posted_at,caption,hidden,banned,device_client_id,canvas_fp,ip_address'];
+    let i = 0;
+    for (const p of posts) {
+      i++;
+      setStatus('ppDlStatus', 'Fetching photo ' + i + ' of ' + posts.length + '&hellip;', 'progress');
+      try {
+        const res = await fetch(_ppPhotoUrl(p.photo_path));
+        if (!res.ok) continue;
+        const blob = await res.blob();
+        const fn = String(p.id).padStart(6, '0') + '.jpg';
+        zip.file(ev.slug + '/' + fn, blob);
+        csvLines.push([ev.slug + '/' + fn, p.posted_at, _ppCsvEscape(p.caption || ''), p.hidden ? 'true' : 'false', isBanned(p) ? 'true' : 'false', p.client_id || '', p.canvas_fp || '', p.ip_address || ''].join(','));
+      } catch (_) {}
+    }
+    zip.file(ev.slug + '/manifest.csv', csvLines.join('\n'));
+    setStatus('ppDlStatus', 'Building ZIP&hellip;', 'progress');
+    const blob = await zip.generateAsync({ type: 'blob' }, meta => { setStatus('ppDlStatus', 'Compressing&hellip; ' + Math.round(meta.percent) + '%', 'progress'); });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = ev.slug + '-photos.zip';
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    setStatus('ppDlStatus', 'Done. Downloaded ' + posts.length + ' photos.', 'ok');
+  } catch (e) {
+    setStatus('ppDlStatus', 'Failed: ' + e.message, 'err');
+  } finally { btn.disabled = false; }
+}
+
+/* ══ IG Drip queue — management UI only; auto-publisher worker not built yet ══ */
+async function ppLoadDripQueue() {
+  const targets = [
+    { id: 'ppDripNeedsReview', status: 'needs_review', empty: 'No carousels awaiting review.' },
+    { id: 'ppDripScheduled', status: 'scheduled', empty: 'No carousels scheduled.' },
+    { id: 'ppDripPublished', status: 'published', empty: 'No carousels published yet.' }
+  ];
+  let rows = [];
+  try { rows = (await _ppSb('GET', 'ig_queue?select=*&order=created_at.desc')) || []; }
+  catch (e) {
+    for (const t of targets) { const el = document.getElementById(t.id); if (el) el.innerHTML = '<div class="hint">Failed: ' + esc(e.message) + '</div>'; }
+    return;
+  }
+  const allPhotoIds = new Set();
+  for (const r of rows) for (const pid of (r.photo_ids || [])) allPhotoIds.add(pid);
+  let postsById = new Map();
+  if (allPhotoIds.size) {
+    try {
+      const idList = Array.from(allPhotoIds).join(',');
+      const posts = (await _ppSb('GET', 'posts?select=id,photo_path,caption,event_id&id=in.(' + idList + ')')) || [];
+      postsById = new Map(posts.map(p => [p.id, p]));
+    } catch (_) {}
+  }
+  for (const t of targets) {
+    const el = document.getElementById(t.id);
+    if (!el) continue;
+    const subset = rows.filter(r => r.status === t.status);
+    if (!subset.length) { el.innerHTML = '<div class="hint">' + t.empty + '</div>'; continue; }
+    el.innerHTML = subset.map(r => _ppDripRenderRow(r, postsById)).join('');
+  }
+  _ppDripUpdateCountdown(rows);
+}
+function _ppDripRenderRow(r, postsById) {
+  const ids = r.photo_ids || [];
+  const thumbs = ids.slice(0, 10).map((pid, i) => {
+    const p = postsById.get(pid);
+    if (!p) return '<div class="pp-drip-thumb" title="post ' + pid + ' missing" style="display:flex; align-items:center; justify-content:center; font-size:0.7rem; color:#9ca3af">' + pid + '</div>';
+    return '<div class="pp-drip-thumb' + (i === r.hook_slide_idx ? ' is-hook' : '') + '" title="' + esc(p.caption || '') + '">'
+      + '<img src="' + esc(_ppPhotoUrl(p.photo_path)) + '" alt="" loading="lazy">'
+      + '<span class="pp-drip-thumb-idx">' + (i + 1) + '</span>'
+    + '</div>';
+  }).join('');
+  const created = esc(fmtDateTime(r.created_at));
+  const badges = {
+    needs_review: '<span class="badge" style="background:#fef3c7; color:#92400e">Needs review</span>',
+    scheduled: '<span class="badge" style="background:#dbeafe; color:#1e40af">Scheduled</span>',
+    publishing: '<span class="badge" style="background:#fed7aa; color:#9a3412">Publishing</span>',
+    published: '<span class="badge ok">Published</span>',
+    error: '<span class="badge warn">Error</span>',
+    cancelled: '<span class="badge">Cancelled</span>'
+  };
+  const statusBadge = badges[r.status] || '';
+  const actions = '<div class="actions" style="margin-top:8px">'
+    + (r.status === 'needs_review'
+        ? '<button class="btn btn-outline btn-sm" onclick="ppDripCancel(' + r.id + ')">Remove from queue</button>'
+        : r.status === 'scheduled'
+        ? '<button class="btn btn-outline btn-sm" onclick="ppDripCancel(' + r.id + ')">Unschedule</button>'
+        : '')
+    + '</div>';
+  return '<div class="pp-drip-row">'
+    + '<div style="display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:8px">'
+      + '<div>' + statusBadge + ' <span class="hint" style="margin-left:8px">#' + r.id + ' &middot; ' + created + '</span></div>'
+      + (r.scheduled_for ? '<div class="hint">Goes live: <strong>' + esc(fmtDateTime(r.scheduled_for)) + '</strong></div>' : '')
+      + (r.posted_at ? '<div class="hint">Posted: <strong>' + esc(fmtDateTime(r.posted_at)) + '</strong></div>' : '')
+    + '</div>'
+    + '<div class="pp-drip-thumbs">' + thumbs + '</div>'
+    + (r.source_note ? '<div class="hint" style="margin-top:6px">' + esc(r.source_note) + '</div>' : '')
+    + (r.caption ? '<div class="pp-drip-caption">' + esc(r.caption) + '</div>' : '<div class="hint" style="margin-top:6px; font-style:italic">No caption yet</div>')
+    + actions
+  + '</div>';
+}
+async function ppDripCancel(id) {
+  if (!confirm('Remove this carousel from the queue? Photos are not deleted.')) return;
+  try { await _ppSb('DELETE', 'ig_queue?id=eq.' + id); await ppLoadDripQueue(); }
+  catch (e) { alert('Failed: ' + e.message); }
+}
+function _ppDripUpdateCountdown(rows) {
+  const el = document.getElementById('ppDripCountdownText');
+  if (!el) return;
+  const next = (rows || []).filter(r => r.status === 'scheduled' && r.scheduled_for)
+    .map(r => ({ ts: new Date(r.scheduled_for).getTime(), row: r }))
+    .filter(x => x.ts > Date.now())
+    .sort((a, b) => a.ts - b.ts)[0];
+  if (!next) { el.textContent = 'no posts scheduled'; return; }
+  const ms = next.ts - Date.now();
+  const days = Math.floor(ms / 86400000);
+  const hours = Math.floor((ms % 86400000) / 3600000);
+  const mins = Math.floor((ms % 3600000) / 60000);
+  const parts = [];
+  if (days) parts.push(days + 'd');
+  if (hours) parts.push(hours + 'h');
+  parts.push(mins + 'm');
+  el.textContent = 'in ' + parts.join(' ') + ' - ' + fmtDateTime(next.row.scheduled_for);
+}
+/* PP_TAB_END */
 
 
 /* ══════════════════════════════════════════════════════════════════════
