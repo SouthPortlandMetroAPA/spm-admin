@@ -3804,6 +3804,27 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         </div>
       </div>
 
+      <!-- ─── YouTube stream copy generator ─── -->
+      <div class="card" id="otfStreamCard">
+        <h2>YouTube stream copy</h2>
+        <p class="hint" style="margin-top:-4px; margin-bottom:12px">Pick a match to auto-fill its YouTube stream title and description — locked to Pacific time, not your browser's. Copy each with one click.</p>
+        <div class="form-row">
+          <div style="flex:2"><label for="otfStreamMatch">Match</label><select id="otfStreamMatch" class="form-input"></select></div>
+        </div>
+        <div class="form-row" style="align-items:flex-end">
+          <div style="flex:1"><label for="otfStreamTitle">Stream title</label><input type="text" id="otfStreamTitle" class="form-input" readonly></div>
+          <div style="flex:0 0 auto"><button class="btn btn-outline btn-sm" id="otfStreamTitleCopy" type="button">Copy title</button></div>
+          <span class="hint" id="otfStreamTitleStatus" style="min-width:64px"></span>
+        </div>
+        <div class="form-row">
+          <div style="flex:1"><label for="otfStreamDesc">Stream description</label><textarea id="otfStreamDesc" class="form-input" readonly style="min-height:240px; font-family:ui-monospace,monospace; font-size:0.82rem; line-height:1.5"></textarea></div>
+        </div>
+        <div class="actions" style="align-items:center">
+          <button class="btn btn-primary btn-sm" id="otfStreamDescCopy" type="button">Copy description</button>
+          <span class="hint" id="otfStreamDescStatus"></span>
+        </div>
+      </div>
+
       <!-- ─── Add participant ─── -->
       <div class="card">
         <h2>Add a player or team</h2>
@@ -3843,7 +3864,8 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <div class="card">
         <h2>Add a match time</h2>
         <div class="form-row">
-          <div><label for="otfNewMPart">Player or team</label><select id="otfNewMPart" class="form-input"></select></div>
+          <div style="flex:2"><label for="otfNewMPart">Player or team</label><select id="otfNewMPart" class="form-input"></select></div>
+          <div style="flex:1"><label for="otfNewMatchOpponent">Opponent</label><input type="text" id="otfNewMatchOpponent" class="form-input" placeholder="e.g. Prodigy — leave blank if TBD"></div>
         </div>
         <div class="form-row">
           <div style="flex:0 0 180px"><label for="otfNewMDate">Date</label><input type="date" id="otfNewMDate" class="form-input"></div>
@@ -3884,13 +3906,14 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
                 <th style="width:180px">When — viewer local</th>
                 <th style="width:150px">Category</th>
                 <th>Player or team</th>
+                <th style="width:150px">Opponent</th>
                 <th style="width:80px">Table</th>
                 <th>Stream URL</th>
                 <th style="width:150px">Result</th>
                 <th style="width:80px"></th>
               </tr>
             </thead>
-            <tbody id="otfMBody"><tr><td colspan="7" class="hint">Loading&hellip;</td></tr></tbody>
+            <tbody id="otfMBody"><tr><td colspan="8" class="hint">Loading&hellip;</td></tr></tbody>
           </table>
         </div>
       </div>
@@ -4366,7 +4389,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.306';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.308';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -9542,6 +9565,9 @@ function otfWire() {
     _otfState.matchSearch = (ev.target.value || '').trim();
     otfRenderMatchFilterTabs(); otfRenderMatchTable();
   });
+  document.getElementById('otfStreamMatch').addEventListener('change', otfFillStreamCopy);
+  document.getElementById('otfStreamTitleCopy').addEventListener('click', () => otfCopyStream('title'));
+  document.getElementById('otfStreamDescCopy').addEventListener('click', () => otfCopyStream('desc'));
 }
 function otfToggleManage() {
   const p = document.getElementById('otfManagePanel');
@@ -9842,6 +9868,7 @@ function otfRenderMatchFilterTabs() {
     });
   });
   otfRefreshIssueFilters();
+  otfRenderStreamCopy();
 }
 function otfSplitDateTime(ts) {
   if (!ts) return { date: '', time: '' };
@@ -9859,13 +9886,13 @@ function otfRenderMatchTable() {
     if (view.length === total) countEl.textContent = total + ' match' + (total === 1 ? '' : 'es');
     else countEl.textContent = view.length + ' of ' + total + ' shown';
   }
-  if (!_otfState.activeId) { body.innerHTML = '<tr><td colspan="7" class="hint">Select or create a tournament first.</td></tr>'; return; }
-  if (!total) { body.innerHTML = '<tr><td colspan="7" class="hint">No matches yet. Add some on the form above.</td></tr>'; return; }
+  if (!_otfState.activeId) { body.innerHTML = '<tr><td colspan="8" class="hint">Select or create a tournament first.</td></tr>'; return; }
+  if (!total) { body.innerHTML = '<tr><td colspan="8" class="hint">No matches yet. Add some on the form above.</td></tr>'; return; }
   if (!view.length) {
     const why = _otfState.matchSearch
       ? 'No matches found for "' + esc(_otfState.matchSearch) + '".'
       : 'No matches in ' + esc(_otfState.matchTab) + '.';
-    body.innerHTML = '<tr><td colspan="7" class="hint">' + why + '</td></tr>';
+    body.innerHTML = '<tr><td colspan="8" class="hint">' + why + '</td></tr>';
     return;
   }
   body.innerHTML = view.map(m => {
@@ -9878,6 +9905,7 @@ function otfRenderMatchTable() {
       + '<td>' + whenCell + '</td>'
       + '<td>' + catCell + '</td>'
       + '<td><select data-mfield="participant_id" data-id="' + m.id + '">' + otfParticipantOptionsHtml(m.participant_id) + '</select></td>'
+      + '<td><input type="text" value="' + esc(m.opponent || '') + '" placeholder="\u2014" data-mfield="opponent" data-id="' + m.id + '" style="width:130px"></td>'
       + '<td><input type="text" value="' + esc(m.table_number || '') + '" placeholder="\u2014" data-mfield="table_number" data-id="' + m.id + '" style="width:60px"></td>'
       + '<td>'
       +   '<input type="url" value="' + esc(m.stream_url || '') + '" placeholder="https://&hellip;" data-mfield="stream_url" data-id="' + m.id + '"' + (m.not_streamed ? ' disabled style="opacity:0.45"' : '') + '>'
@@ -9907,7 +9935,7 @@ function otfRenderMatchTable() {
       if (badge) badge.textContent = newPart.category;
     });
   });
-  body.querySelectorAll('input[data-mfield="table_number"], input[data-mfield="stream_url"]').forEach(inp => {
+  body.querySelectorAll('input[data-mfield="table_number"], input[data-mfield="stream_url"], input[data-mfield="opponent"]').forEach(inp => {
     inp.addEventListener('change', () => {
       const id = parseInt(inp.dataset.id, 10);
       const field = inp.dataset.mfield;
@@ -9915,7 +9943,7 @@ function otfRenderMatchTable() {
       const m = _otfState.matches.find(x => x.id === id);
       const orig = m && m[field] ? m[field] : '';
       if (orig && value !== orig) {
-        const label = field === 'stream_url' ? 'stream URL' : 'table number';
+        const label = field === 'stream_url' ? 'stream URL' : field === 'opponent' ? 'opponent' : 'table number';
         const newDisp = value == null ? '\u2014 blank' : value;
         if (!confirm('Replace existing ' + label + '?\n\nFrom: ' + orig + '\nTo:   ' + newDisp)) { inp.value = orig; return; }
       }
@@ -9987,6 +10015,7 @@ async function otfAddMatch() {
   const time = document.getElementById('otfNewMTime').value;
   const table = document.getElementById('otfNewMTable').value.trim();
   const stream = document.getElementById('otfNewMStream').value.trim();
+  const opponent = document.getElementById('otfNewMatchOpponent').value.trim();
   const noStr = document.getElementById('otfNewMNotStreamed').checked;
   if (!partId) { otfSetStatus('otfAddMStatus', 'Pick a player or team', 'err'); return; }
   if (!date || !time) { otfSetStatus('otfAddMStatus', 'Date + time required', 'err'); return; }
@@ -9998,12 +10027,13 @@ async function otfAddMatch() {
   try {
     await _otfSb('POST', 'matches', {
       category: part.category, participant_id: partId, display_name: part.name,
-      scheduled_at: dt.toISOString(), table_number: table || null,
+      scheduled_at: dt.toISOString(), table_number: table || null, opponent: opponent || null,
       stream_url: finalUrl, not_streamed: noStr, tournament_id: _otfState.activeId
     });
     otfSetStatus('otfAddMStatus', 'Added.', 'ok');
     document.getElementById('otfNewMTable').value = '';
     document.getElementById('otfNewMStream').value = '';
+    document.getElementById('otfNewMatchOpponent').value = '';
     document.getElementById('otfNewMNotStreamed').checked = false;
     await otfReloadData();
   } catch (e) {
@@ -10022,6 +10052,150 @@ function otfPopulateCategoryDropdowns() {
     pcat.innerHTML = cats.length
       ? cats.map(c => '<option value="' + esc(c) + '">' + esc(c) + '</option>').join('')
       : '<option value="">No categories — edit the tournament</option>';
+  }
+}
+/* ── YouTube stream copy generator (3.307). For the active tournament, pick a
+   match and auto-fill a ready-to-paste YouTube stream title + description.
+   Reuses _otfState.matches / _otfState.participants — no re-fetch. All output
+   is timezone-locked to Pacific via Intl timeZone America/Los_Angeles, never
+   the browser tz. ── */
+const OTF_STREAM_TZ = 'America/Los_Angeles';
+const OTF_STREAM_SCHED_URL = 'https://southportlandmetroapa.github.io/onthefelt/?t=world-pool-championships-2026';
+
+/* Format a timestamptz in Pacific → { day, date, time }. */
+function otfStreamPacific(ts) {
+  if (!ts) return { day: '', date: '', time: '' };
+  const d = new Date(ts);
+  const f = (opts) => new Intl.DateTimeFormat('en-US', Object.assign({ timeZone: OTF_STREAM_TZ }, opts)).format(d);
+  return {
+    day:  f({ weekday: 'long' }),
+    date: f({ month: 'short', day: 'numeric', year: 'numeric' }),
+    time: f({ hour: 'numeric', minute: '2-digit', hour12: true })
+  };
+}
+
+/* This team's 1-based match sequence: among ALL tournament matches for the
+   same participant_id, sorted by scheduled_at ascending (id tiebreak), the
+   selected match's position. 1 today; becomes 2 when a 2nd match is added. */
+function otfStreamMatchNumber(m) {
+  if (!m) return 1;
+  const mine = _otfState.matches
+    .filter(x => x.participant_id === m.participant_id)
+    .slice()
+    .sort((a, b) => {
+      const ta = new Date(a.scheduled_at || 0).getTime();
+      const tb = new Date(b.scheduled_at || 0).getTime();
+      if (ta !== tb) return ta - tb;
+      return (a.id || 0) - (b.id || 0);
+    });
+  const idx = mine.findIndex(x => x.id === m.id);
+  return idx < 0 ? 1 : idx + 1;
+}
+
+/* Team / opponent / division / hashtag derived from a match row. Team prefers
+   participant.name; opponent prefers the match's own opponent column, else the
+   part of display_name after " vs ", else TBD. */
+function otfStreamParts(m) {
+  const p = otfPartOf(m);
+  const dn = String(m.display_name || '');
+  const vs = dn.match(/^(.*?)\s+vs\s+(.+)$/i);
+  const team = (p && p.name) ? p.name : (vs ? vs[1].trim() : dn.trim());
+  const oppRaw = String(m.opponent || '').trim() || (vs && vs[2] ? vs[2].trim() : '');
+  const opponent = oppRaw || 'TBD';
+  const hasOpp = !!oppRaw;
+  const division = String(m.category || '');
+  const divTag = division.replace(/[^A-Za-z0-9]+/g, '');
+  return { team, opponent, hasOpp, division, divTag };
+}
+
+function otfStreamTitle(m) {
+  const s = otfStreamParts(m);
+  const num = otfStreamMatchNumber(m);
+  return `${s.team} vs ${s.opponent} | ${s.division} Match ${num} | 2026 APA World Pool Championships`;
+}
+
+function otfStreamDesc(m) {
+  const s = otfStreamParts(m);
+  const num = otfStreamMatchNumber(m);
+  const pt = otfStreamPacific(m.scheduled_at);
+  const lead = s.hasOpp
+    ? `${s.team} vs ${s.opponent} — ${s.division} team match at the 2026 APA World Pool Championships in Las Vegas, NV.`
+    : `${s.team} — ${s.division} team match at the 2026 APA World Pool Championships in Las Vegas, NV. Opponent TBD.`;
+  return `${lead}
+
+The APA World Pool Championships is the world's largest pool tournament — nearly 16,000 amateur players on 400+ tables at the Westgate Las Vegas, all chasing a world title. Watch this ${s.division} team match live, then find every team's schedule and stream below.
+
+🔢 Match #${num}
+📅 ${pt.day}, ${pt.date} · ${pt.time} PT
+🎱 ${s.division} team play · 2026 APA World Pool Championships
+
+📺 Full schedule & live streams: ${OTF_STREAM_SCHED_URL}
+🔔 Subscribe for every SPM APA stream.
+
+#APA #WorldPoolChampionships #${s.divTag}`;
+}
+
+/* Human-readable dropdown label for a match. */
+function otfStreamMatchLabel(m) {
+  const s = otfStreamParts(m);
+  const pt = otfStreamPacific(m.scheduled_at);
+  const when = pt.date ? pt.date + ' · ' + pt.time + ' PT' : 'time TBD';
+  const vs = s.team + ' vs ' + s.opponent;
+  return vs + '  —  ' + (s.division || 'uncategorized') + '  ·  ' + when;
+}
+
+/* Signature of the loaded match set — rebuild the dropdown only when it
+   changes, so search/filter re-renders never disturb the current selection. */
+function otfStreamSig() {
+  return _otfState.matches
+    .map(m => [m.id, m.participant_id, m.display_name, m.category, m.scheduled_at].join('\u241f'))
+    .join('\u2016');
+}
+
+function otfRenderStreamCopy() {
+  const sel = document.getElementById('otfStreamMatch');
+  if (!sel) return;
+  const sig = otfStreamSig();
+  if (sel._otfSig !== sig) {
+    sel._otfSig = sig;
+    const prev = sel.value;
+    const list = _otfState.matches.slice().sort((a, b) => {
+      const ta = new Date(a.scheduled_at || 0).getTime();
+      const tb = new Date(b.scheduled_at || 0).getTime();
+      if (ta !== tb) return ta - tb;
+      return (a.id || 0) - (b.id || 0);
+    });
+    if (!list.length) {
+      sel.innerHTML = '<option value="">No matches yet — add one below</option>';
+    } else {
+      sel.innerHTML = list.map(m => '<option value="' + m.id + '">' + esc(otfStreamMatchLabel(m)) + '</option>').join('');
+      if (prev && list.some(m => String(m.id) === String(prev))) sel.value = prev;
+    }
+  }
+  otfFillStreamCopy();
+}
+
+function otfFillStreamCopy() {
+  const sel = document.getElementById('otfStreamMatch');
+  const titleEl = document.getElementById('otfStreamTitle');
+  const descEl = document.getElementById('otfStreamDesc');
+  if (!sel || !titleEl || !descEl) return;
+  const id = parseInt(sel.value, 10);
+  const m = _otfState.matches.find(x => x.id === id);
+  if (!m) { titleEl.value = ''; descEl.value = ''; return; }
+  titleEl.value = otfStreamTitle(m);
+  descEl.value = otfStreamDesc(m);
+}
+
+async function otfCopyStream(kind) {
+  const el = document.getElementById(kind === 'title' ? 'otfStreamTitle' : 'otfStreamDesc');
+  const st = document.getElementById(kind === 'title' ? 'otfStreamTitleStatus' : 'otfStreamDescStatus');
+  if (!el || !el.value) return;
+  try {
+    await navigator.clipboard.writeText(el.value);
+    if (st) { st.textContent = 'Copied ✓'; clearTimeout(st._otfTimer); st._otfTimer = setTimeout(() => { st.textContent = ''; }, 2000); }
+  } catch (e) {
+    if (st) st.textContent = 'Copy failed';
   }
 }
 /* OTF_TAB_END */
