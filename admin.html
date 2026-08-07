@@ -4392,7 +4392,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.309';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.310';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -7540,6 +7540,15 @@ async function nrLoadTracker() {
     const shown = (rows || []).filter(r =>
       (!_nr.trackerFilter || _nr.trackerFilter === 'all' || r.status === _nr.trackerFilter)
       && (fmtFilter === 'all' || _famByTeam.get(r.team_id) === fmtFilter));
+    /* Default order: team number ascending, which naturally groups teams by
+       division — a team's division is the high digits of its team number.
+       Rows whose team can't be resolved (e.g. prior-session) sort to the end. */
+    shown.sort((a, b) => {
+      const ta = byId.get(a.team_id), tb = byId.get(b.team_id);
+      const na = ta ? parseInt(ta.team_number, 10) : NaN;
+      const nb = tb ? parseInt(tb.team_number, 10) : NaN;
+      return (Number.isFinite(na) ? na : Infinity) - (Number.isFinite(nb) ? nb : Infinity);
+    });
     /* Count reflects the FILTER, so the operator can see how many a filter
        matched — including zero, which reads as an empty table otherwise. */
     const _cntEl = document.getElementById('nrTrkCount');
