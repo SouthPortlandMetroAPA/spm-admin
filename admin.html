@@ -3741,6 +3741,8 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       #tab-onthefelt textarea { min-height: 70px; font-family: inherit; font-size: 0.9rem; white-space: pre-wrap; }
       #tab-onthefelt .otf-win.active  { background: var(--success);     color: #fff; border-color: var(--success); }
       #tab-onthefelt .otf-loss.active { background: var(--spm-primary); color: #fff; border-color: var(--spm-primary); }
+      #tab-onthefelt .table tr.otf-row-hidden { background: rgba(0,0,0,0.03); }
+      #tab-onthefelt .table tr.otf-row-hidden td:not(:last-child) { opacity: 0.5; font-style: italic; }
       #tab-onthefelt .table td, #tab-onthefelt .table th { vertical-align: middle; }
       #tab-onthefelt .table input[type="text"],
       #tab-onthefelt .table input[type="url"],
@@ -3911,9 +3913,10 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
                 <th>Stream URL</th>
                 <th style="width:150px">Result</th>
                 <th style="width:80px"></th>
+                <th style="width:60px;text-align:center">Hide</th>
               </tr>
             </thead>
-            <tbody id="otfMBody"><tr><td colspan="8" class="hint">Loading&hellip;</td></tr></tbody>
+            <tbody id="otfMBody"><tr><td colspan="9" class="hint">Loading&hellip;</td></tr></tbody>
           </table>
         </div>
       </div>
@@ -4389,7 +4392,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.308';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.309';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -9886,13 +9889,13 @@ function otfRenderMatchTable() {
     if (view.length === total) countEl.textContent = total + ' match' + (total === 1 ? '' : 'es');
     else countEl.textContent = view.length + ' of ' + total + ' shown';
   }
-  if (!_otfState.activeId) { body.innerHTML = '<tr><td colspan="8" class="hint">Select or create a tournament first.</td></tr>'; return; }
-  if (!total) { body.innerHTML = '<tr><td colspan="8" class="hint">No matches yet. Add some on the form above.</td></tr>'; return; }
+  if (!_otfState.activeId) { body.innerHTML = '<tr><td colspan="9" class="hint">Select or create a tournament first.</td></tr>'; return; }
+  if (!total) { body.innerHTML = '<tr><td colspan="9" class="hint">No matches yet. Add some on the form above.</td></tr>'; return; }
   if (!view.length) {
     const why = _otfState.matchSearch
       ? 'No matches found for "' + esc(_otfState.matchSearch) + '".'
       : 'No matches in ' + esc(_otfState.matchTab) + '.';
-    body.innerHTML = '<tr><td colspan="8" class="hint">' + why + '</td></tr>';
+    body.innerHTML = '<tr><td colspan="9" class="hint">' + why + '</td></tr>';
     return;
   }
   body.innerHTML = view.map(m => {
@@ -9901,7 +9904,7 @@ function otfRenderMatchTable() {
         '<input type="date" data-mfield="date" data-id="' + m.id + '" value="' + esc(dt.date) + '" style="margin-bottom:4px">'
       + '<input type="time" data-mfield="time" data-id="' + m.id + '" value="' + esc(dt.time) + '">';
     const catCell = '<span class="badge gold" data-catbadge="' + m.id + '">' + esc(m.category) + '</span>';
-    return '<tr data-row-id="' + m.id + '">'
+    return '<tr data-row-id="' + m.id + '"' + (m.hidden ? ' class="otf-row-hidden"' : '') + '>'
       + '<td>' + whenCell + '</td>'
       + '<td>' + catCell + '</td>'
       + '<td><select data-mfield="participant_id" data-id="' + m.id + '">' + otfParticipantOptionsHtml(m.participant_id) + '</select></td>'
@@ -9915,6 +9918,7 @@ function otfRenderMatchTable() {
       + '</td>'
       + '<td data-result-cell="' + m.id + '">' + otfResultCellHtml(m) + '</td>'
       + '<td><button class="btn btn-danger btn-sm" onclick="otfDeleteMatch(' + m.id + ')">Delete</button></td>'
+      + '<td style="text-align:center"><input type="checkbox" data-mfield="hidden" data-id="' + m.id + '"' + (m.hidden ? ' checked' : '') + '></td>'
       + '</tr>';
   }).join('');
 
@@ -9935,12 +9939,15 @@ function otfRenderMatchTable() {
       if (badge) badge.textContent = newPart.category;
     });
   });
-  body.querySelectorAll('input[data-mfield="table_number"], input[data-mfield="stream_url"], input[data-mfield="opponent"]').forEach(inp => {
+  body.querySelectorAll('input[data-mfield="table_number"], input[data-mfield="stream_url"], input[data-mfield="opponent"], input[data-mfield="hidden"]').forEach(inp => {
     inp.addEventListener('change', () => {
       const id = parseInt(inp.dataset.id, 10);
       const field = inp.dataset.mfield;
-      const value = inp.value.trim() || null;
+      const isCheckbox = inp.type === 'checkbox';
+      const value = isCheckbox ? inp.checked : (inp.value.trim() || null);
       const m = _otfState.matches.find(x => x.id === id);
+      // Checkboxes such as Hide toggle a boolean — no replace-confirm dialog, patch straight through.
+      if (isCheckbox) { otfPatchMatch(id, { [field]: value }); return; }
       const orig = m && m[field] ? m[field] : '';
       if (orig && value !== orig) {
         const label = field === 'stream_url' ? 'stream URL' : field === 'opponent' ? 'opponent' : 'table number';
