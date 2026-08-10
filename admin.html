@@ -1071,6 +1071,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="eventhorizon">Event Horizon</button>
       <button class="tab" data-tab="onthefelt">OnTheFelt</button>
       <button class="tab" data-tab="poolpics">PoolPics</button>
+      <button class="tab" data-tab="chalktalk">ChalkTalk</button>
     </div>
 
     <div id="globalStatus" class="status-line"></div>
@@ -3965,6 +3966,37 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
     <!-- ══════════════════════════════════════════════════════════════
          TAB: POOLPICS — ported from Apps/Snapshot/site/admin.html (3.306)
          ══════════════════════════════════════════════════════════════ -->
+    <!-- ═══════════════ ChalkTalk — player question submissions (v0.1) ═══════════════
+         Reads chalktalk.questions (service-role; Accept-Profile override on sb()).
+         Each submitter email resolves → slate.players (0/1/many) for name / APA# /
+         phones. Newest first, live-polled. Public submit form: Apps/ChalkTalk/site.
+         Requires the admin loaded with ?key=<service-role JWT>. -->
+    <div id="tab-chalktalk" class="tab-panel">
+      <style>
+        #tab-chalktalk .ct-head{display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px}
+        #tab-chalktalk .ct-count{color:var(--muted); font-size:.9rem}
+        #tab-chalktalk .ct-list{display:flex; flex-direction:column; gap:12px}
+        #tab-chalktalk .ct-q{border:1px solid var(--border); border-radius:10px; background:var(--card); padding:14px 16px}
+        #tab-chalktalk .ct-q-text{font-size:1rem; line-height:1.5; color:var(--text); white-space:pre-wrap; overflow-wrap:anywhere}
+        #tab-chalktalk .ct-meta{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:10px; padding-top:10px; border-top:1px solid var(--border)}
+        #tab-chalktalk .ct-who{font-weight:700; color:var(--text)}
+        #tab-chalktalk .ct-sub{color:var(--muted); font-size:.85rem}
+        #tab-chalktalk .ct-phones{color:var(--muted); font-size:.84rem}
+        #tab-chalktalk .ct-nomatch{color:var(--spm-primary); font-weight:600}
+        #tab-chalktalk a.ct-mail{color:var(--spm-accent); text-decoration:none}
+        #tab-chalktalk a.ct-mail:hover{text-decoration:underline}
+        #tab-chalktalk .ct-empty{color:var(--muted); padding:28px; text-align:center}
+      </style>
+      <div class="card">
+        <div class="ct-head">
+          <h2 style="margin:0">ChalkTalk &mdash; Player Questions</h2>
+          <button class="btn btn-outline btn-sm" onclick="ctInit()">Refresh</button>
+          <span class="ct-count" id="ctCount"></span>
+        </div>
+        <div class="ct-list" id="ctList"><div class="ct-empty">Loading&hellip;</div></div>
+      </div>
+    </div>
+
     <div id="tab-poolpics" class="tab-panel">
 
       <div class="pp-subtabs">
@@ -4392,7 +4424,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.310';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.311';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -9475,7 +9507,8 @@ const TAB_LABEL = {
   banlist:       'No-Contact — DNC',
   housecue:      'House Cue',
   onthefelt:     'OnTheFelt',
-  poolpics:      'PoolPics'
+  poolpics:      'PoolPics',
+  chalktalk:     'ChalkTalk'
 };
 
 function switchTab(name) {
@@ -9507,6 +9540,135 @@ function switchTab(name) {
   if (name === 'eventhorizon') ehInit();
   if (name === 'onthefelt') otfInit();
   if (name === 'poolpics') ppInit();
+  if (name === 'chalktalk') ctInit();
+}
+
+/* ═══════════════ ChalkTalk tab (v0.1) — player question submissions ═══════════════
+   Reads chalktalk.questions (service-role; Accept-Profile override on the shared
+   sb() helper). For each row the submitter email resolves → slate.players (0 / 1 /
+   many matches) for name / APA# / phones. Newest first. Live-polls every 20s and
+   re-renders only when the row set changes (count + newest-id signature), keeping
+   the list scroll position. Public submit form lives in Apps/ChalkTalk/site.
+   Requires the admin loaded with ?key=<service-role JWT> (SB_KEY). */
+let _ctPoll = null, _ctSig = '';
+
+async function ctInit() {
+  const list = document.getElementById('ctList');
+  const count = document.getElementById('ctCount');
+  if (!SB_KEY) {
+    if (count) count.textContent = '';
+    if (list) list.innerHTML = '<div class="ct-empty">Add <code>?key=&lt;service-role JWT&gt;</code> to the URL to view questions.</div>';
+    return;
+  }
+  try {
+    const rows = await ctFetchQuestions();
+    _ctSig = ctSig(rows);
+    await ctRenderRows(rows);
+    ctStartPoll();
+  } catch (e) {
+    if (list) list.innerHTML = '<div class="ct-empty">Couldn\'t load questions: ' + esc(e.message || String(e)) + '</div>';
+  }
+}
+
+async function ctFetchQuestions() {
+  return await sb('GET',
+    'questions?select=id,email,question,created_at,ack_status,status,source&order=created_at.desc&limit=500',
+    null, { 'Accept-Profile': 'chalktalk' }) || [];
+}
+
+function ctSig(rows) { return rows.length + ':' + (rows[0] ? rows[0].id : 0); }
+
+/* distinct, lowercased submitter emails → players (slate profile = default sb()).
+   ilike with no wildcard = case-insensitive exact match; emails carry no LIKE
+   metachars. One small query per distinct email (submission set is tiny). */
+async function ctResolveEmails(emails) {
+  const uniq = [...new Set(emails.map(e => String(e || '').trim().toLowerCase()).filter(Boolean))];
+  const map = {};
+  await Promise.all(uniq.map(async em => {
+    try {
+      const ps = await sb('GET',
+        'players?email=ilike.' + encodeURIComponent(em) +
+        '&select=member_number,first_name,last_name,nickname,cell_phone,home_phone,alt_phone,work_phone') || [];
+      map[em] = ps;
+    } catch { map[em] = []; }
+  }));
+  return map;
+}
+
+function ctFmtPhone(v) {
+  const d = String(v || '').replace(/\D/g, '');
+  if (d.length === 11 && d[0] === '1') return ctFmtPhone(d.slice(1));
+  if (d.length === 10) return '(' + d.slice(0, 3) + ') ' + d.slice(3, 6) + '-' + d.slice(6);
+  return d;
+}
+
+function ctPhones(p) {
+  const raw = [p.cell_phone, p.home_phone, p.alt_phone, p.work_phone]
+    .map(v => String(v || '').replace(/\D/g, '')).filter(d => d.length >= 7);
+  return [...new Set(raw)].map(ctFmtPhone);
+}
+
+function ctPlayerLine(p) {
+  const nm = [p.first_name, p.last_name].filter(Boolean).join(' ').trim() || '(no name on file)';
+  const nick = p.nickname ? ' &ldquo;' + esc(p.nickname) + '&rdquo;' : '';
+  const ph = ctPhones(p);
+  const phTxt = ph.length ? ' &middot; <span class="ct-phones">' + ph.map(esc).join(' &middot; ') + '</span>' : '';
+  return '<span class="ct-who">' + esc(nm) + nick + '</span> &middot; APA #' + esc(p.member_number || '?') + phTxt;
+}
+
+function ctAckChip(s) {
+  if (s === 'sent')    return '<span class="badge ok">Ack sent</span>';
+  if (s === 'blocked') return '<span class="badge warn">Ack blocked (DNC)</span>';
+  if (s === 'failed')  return '<span class="badge" style="background:rgba(234,0,42,.12); color:var(--spm-primary)">Ack failed</span>';
+  return '<span class="badge muted">' + esc(s || 'no ack') + '</span>';
+}
+
+function ctFmtWhen(ts) {
+  if (!ts) return '';
+  try { return new Date(ts).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }); }
+  catch { return String(ts); }
+}
+
+function ctCard(r, resolveMap) {
+  const em = String(r.email || '').trim().toLowerCase();
+  const players = resolveMap[em] || [];
+  const mail = '<a class="ct-mail" href="mailto:' + esc(r.email) + '">' + esc(r.email) + '</a>';
+  const who = players.length
+    ? players.map(ctPlayerLine).join('<br>') + ' &middot; ' + mail
+    : '<span class="ct-nomatch">No player match</span> &middot; ' + mail;
+  const src = r.source ? ' &middot; <span class="ct-sub">' + esc(r.source) + '</span>' : '';
+  return '<div class="ct-q">'
+    + '<div class="ct-q-text">' + esc(r.question) + '</div>'
+    + '<div class="ct-meta">' + who + '</div>'
+    + '<div class="ct-meta" style="border-top:none; padding-top:2px; margin-top:2px">'
+    +   '<span class="ct-sub">' + esc(ctFmtWhen(r.created_at)) + '</span>' + src + ' ' + ctAckChip(r.ack_status)
+    + '</div>'
+    + '</div>';
+}
+
+async function ctRenderRows(rows) {
+  const list = document.getElementById('ctList');
+  const count = document.getElementById('ctCount');
+  if (count) count.textContent = rows.length ? (rows.length + ' question' + (rows.length === 1 ? '' : 's')) : '';
+  if (!list) return;
+  if (!rows.length) { list.innerHTML = '<div class="ct-empty">No questions yet.</div>'; return; }
+  const resolveMap = await ctResolveEmails(rows.map(r => r.email));
+  const scroll = list.scrollTop;
+  list.innerHTML = rows.map(r => ctCard(r, resolveMap)).join('');
+  list.scrollTop = scroll;
+}
+
+function ctStartPoll() {
+  if (_ctPoll) clearInterval(_ctPoll);
+  _ctPoll = setInterval(async () => {
+    const panel = document.getElementById('tab-chalktalk');
+    if (!panel || !panel.classList.contains('active')) return;   // only refresh when visible
+    try {
+      const rows = await ctFetchQuestions();
+      const sig = ctSig(rows);
+      if (sig !== _ctSig) { _ctSig = sig; await ctRenderRows(rows); }
+    } catch { /* transient — next tick retries */ }
+  }, 20000);
 }
 
 /* OTF_TAB_BEGIN — OnTheFelt tab logic (3.305). Ported + tournament-scoped.
