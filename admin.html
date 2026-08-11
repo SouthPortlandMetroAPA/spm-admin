@@ -3992,6 +3992,8 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <h2 style="margin:0">ChalkTalk &mdash; Player Questions</h2>
           <button class="btn btn-outline btn-sm" onclick="ctInit()">Refresh</button>
           <span class="ct-count" id="ctCount"></span>
+          <a class="btn btn-outline btn-sm" style="margin-left:auto; text-decoration:none"
+             href="https://southportlandmetroapa.github.io/chalktalk/" target="_blank" rel="noopener">View public form &#8599;</a>
         </div>
         <div class="ct-list" id="ctList"><div class="ct-empty">Loading&hellip;</div></div>
       </div>
@@ -4424,7 +4426,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.311';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.312';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
