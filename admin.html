@@ -1171,9 +1171,10 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <div class="card">
         <h2>County Lookup</h2>
         <p class="hint">
-          Fills in missing <code>county</code> on player records using zippopotam.us (zip &rarr; lat/long) +
-          FCC Census geocoder (lat/long &rarr; county). Free, no API keys, runs in your browser. One lookup per
-          unique zip so 5,000 players with 600 unique zips = 600 HTTP calls.
+          Fills in missing <code>county</code> by geocoding each player&rsquo;s <strong>full street address</strong>
+          through the US Census geocoder (server-side). Per-address exact &mdash; it splits multi-county zips
+          correctly (a zip that crosses a county line no longer stamps one county on everyone). Players with a
+          masked or absent street address are skipped and reported (those need a real address at import).
         </p>
         <div id="countyStatus" class="status-line"></div>
         <div class="actions">
@@ -4436,7 +4437,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.313';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.314';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -5668,87 +5669,88 @@ function setupDropZone() {
 }
 
 /* ══════════════════════════════════════════════════════════════════════
-   COUNTY LOOKUP — zip → lat/long → county (free APIs, no keys)
-   Copied from TeamRegistration/site/admin.html lookupCounties().
+   COUNTY LOOKUP — full street address → county (US Census geocoder)
 
-   1. Pull players with zip but county null/empty
-   2. Unique the zips
-   3. Each zip → zippopotam.us (lat/lon) → FCC Census geocoder (county)
-   4. Batch-update players with resolved county
+   Rewritten 2026-08-11 (debug-Cascade). The prior version mapped
+   zip → one centroid → county and stamped it on every player in the zip;
+   ~30% of US zips cross a county line, so cross-line addresses got the
+   WRONG county (the reported bug). Now:
+   1. Pull players with zip present + county null/empty
+   2. Keep only those with a real (non-masked) street address
+   3. Geocode each FULL address via the Census geocoder, SERVER-SIDE through
+      the GAS mailer (county_geocode action — the browser can't call Census,
+      no CORS). Per-address exact: correctly splits multi-county zips.
+   4. Group resolved members by county, PATCH. Masked/absent addresses are
+      skipped and reported (a zip alone can't place a cross-line address).
    ══════════════════════════════════════════════════════════════════════ */
 async function runCountyLookup() {
   const btn = document.getElementById('countyBtn');
   btn.disabled = true;
-  setStatus('countyStatus', 'Fetching players missing county…', 'progress');
+  setStatus('countyStatus', 'Fetching players missing county...', 'progress');
 
   try {
-    // Pull all players with zip present and county missing. PostgREST
-    // defaults cap at 1000 rows — paginate if we have more.
     const missing = [];
     const PAGE = 1000;
     let offset = 0;
     while (true) {
-      const q = 'players?select=member_number,zip&zip=not.is.null&zip=neq.&or=(county.is.null,county.eq.)'
+      const q = 'players?select=member_number,address1,city,state,zip&zip=not.is.null&zip=neq.&or=(county.is.null,county.eq.)'
               + '&order=member_number.asc&limit=' + PAGE + '&offset=' + offset;
       const rows = await sb('GET', q);
       missing.push(...rows);
       if (rows.length < PAGE) break;
       offset += PAGE;
     }
-
     if (!missing.length) {
       setStatus('countyStatus', 'No players missing county. Nothing to do.', 'ok');
       return;
     }
 
-    // Group member_numbers by 5-digit zip.
-    const zipToMembers = {};
+    // Only players with a valid zip AND a real (non-masked) street address are
+    // geocodable. A zip alone cannot place a cross-county-line address.
+    const geocodable = [];
+    const skip = { masked: 0, noStreet: 0, badZip: 0 };
     for (const r of missing) {
-      const z = String(r.zip || '').trim().substring(0, 5);
-      if (!z || z.length < 5) continue;
-      (zipToMembers[z] = zipToMembers[z] || []).push(r.member_number);
+      const zip5 = String(r.zip || '').trim().slice(0, 5);
+      const street = String(r.address1 || '').trim();
+      if (!/^\d{5}$/.test(zip5)) { skip.badZip++; continue; }
+      if (!street) { skip.noStreet++; continue; }
+      if (/_/.test(street)) { skip.masked++; continue; }   // masked placeholder (e.g. "_____")
+      geocodable.push({ id: r.member_number, street, city: r.city || '', state: r.state || '', zip: zip5 });
     }
-    const zips = Object.keys(zipToMembers);
-    setStatus('countyStatus', 'Resolving ' + zips.length + ' unique zip(s) for ' + missing.length + ' player(s)…', 'progress');
-
-    const zipToCounty = {};
-    for (let z = 0; z < zips.length; z++) {
-      const zip5 = zips[z];
-      setStatus('countyStatus', 'Zip ' + (z + 1) + ' / ' + zips.length + ' (' + zip5 + ')…', 'progress');
-      try {
-        const zResp = await fetch('https://api.zippopotam.us/us/' + zip5);
-        if (!zResp.ok) continue;
-        const zData = await zResp.json();
-        const place = (zData.places && zData.places[0]) || null;
-        if (!place) continue;
-        const fResp = await fetch('https://geo.fcc.gov/api/census/area?lat=' + place.latitude + '&lon=' + place.longitude + '&format=json');
-        if (!fResp.ok) continue;
-        const fData = await fResp.json();
-        const county = fData.results && fData.results[0] ? fData.results[0].county_name : '';
-        if (county) zipToCounty[zip5] = county;
-      } catch (_) { /* skip silently */ }
+    if (!geocodable.length) {
+      setStatus('countyStatus', 'Nothing geocodable - skipped ' + (skip.masked + skip.noStreet + skip.badZip)
+        + ' (' + skip.masked + ' masked address, ' + skip.noStreet + ' no address, ' + skip.badZip + ' bad zip). Those need a real address at import.', 'ok');
+      return;
     }
 
-    // Batch-update players with resolved county.
-    let updated = 0;
-    const resolvedZips = Object.keys(zipToCounty);
-    for (let i = 0; i < resolvedZips.length; i++) {
-      const zip = resolvedZips[i];
-      const county = zipToCounty[zip];
-      const members = zipToMembers[zip];
-      for (let m = 0; m < members.length; m += 200) {
-        const batch = members.slice(m, m + 200);
-        await sb('PATCH',
-          'players?member_number=in.(' + batch.map(encodeURIComponent).join(',') + ')',
-          { county },
-          { Prefer: 'return=minimal' });
-        updated += batch.length;
+    // Geocode each full address server-side (US Census geocoder via GAS - no CORS),
+    // per-address exact, in chunks. Group resolved members by county and PATCH.
+    let updated = 0, nomatch = 0;
+    const CH = 100;
+    for (let i = 0; i < geocodable.length; i += CH) {
+      const chunk = geocodable.slice(i, i + CH);
+      setStatus('countyStatus', 'Geocoding ' + (i + 1) + '-' + Math.min(i + CH, geocodable.length) + ' / ' + geocodable.length + '...', 'progress');
+      const res = await fetch(CHALKTALK_MAILER_URL, {
+        method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'county_geocode', admin_key: SB_KEY, addresses: chunk })
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!j.ok) throw new Error(j.error || 'geocode service error');
+      nomatch += (j.nomatch || 0);
+      const byCounty = {};
+      for (const [id, county] of Object.entries(j.counties || {})) (byCounty[county] = byCounty[county] || []).push(id);
+      for (const [county, ids] of Object.entries(byCounty)) {
+        for (let m = 0; m < ids.length; m += 150) {
+          const batch = ids.slice(m, m + 150);
+          await sb('PATCH', 'players?member_number=in.(' + batch.map(encodeURIComponent).join(',') + ')', { county }, { Prefer: 'return=minimal' });
+          updated += batch.length;
+        }
       }
     }
 
-    const unresolved = missing.length - updated;
-    let msg = 'Resolved county for ' + updated + ' player(s) across ' + resolvedZips.length + ' unique zip(s).';
-    if (unresolved) msg += ' ' + unresolved + ' player(s) couldn\u2019t be resolved (zip not recognized / API error).';
+    let msg = 'Resolved county for ' + updated + ' player(s) by street address (exact).';
+    if (nomatch) msg += ' ' + nomatch + ' address(es) did not geocode.';
+    if (skip.masked || skip.noStreet) msg += ' Skipped ' + (skip.masked + skip.noStreet) + ' with masked/absent address (need a real address at import).';
     setStatus('countyStatus', msg, 'ok');
   } catch (e) {
     setStatus('countyStatus', 'County lookup failed: ' + esc(e.message), 'err');
