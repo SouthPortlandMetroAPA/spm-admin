@@ -3986,12 +3986,22 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         #tab-chalktalk a.ct-mail{color:var(--spm-accent); text-decoration:none}
         #tab-chalktalk a.ct-mail:hover{text-decoration:underline}
         #tab-chalktalk .ct-empty{color:var(--muted); padding:28px; text-align:center}
+        #tab-chalktalk .ct-q.ct-answered{border-left:3px solid var(--spm-accent)}
+        #tab-chalktalk .ct-q.ct-deleted{opacity:.6}
+        #tab-chalktalk .ct-response{margin-top:10px; padding:10px 12px; background:rgba(0,0,0,.03); border-radius:8px; font-size:.94rem; white-space:pre-wrap; overflow-wrap:anywhere}
+        #tab-chalktalk .ct-replybox{margin-top:12px}
+        #tab-chalktalk .ct-reply-ta{width:100%; box-sizing:border-box; border:1px solid var(--border); border-radius:8px; padding:8px 10px; font:inherit; font-size:.94rem; resize:vertical}
+        #tab-chalktalk .ct-actions{display:flex; gap:8px; flex-wrap:wrap; margin-top:8px}
+        #tab-chalktalk .ct-actions .ct-del{margin-left:auto; color:var(--spm-primary)}
+        @media (prefers-color-scheme: dark){ #tab-chalktalk .ct-response{background:rgba(255,255,255,.06)} }
       </style>
       <div class="card">
         <div class="ct-head">
           <h2 style="margin:0">ChalkTalk &mdash; Player Questions</h2>
           <button class="btn btn-outline btn-sm" onclick="ctInit()">Refresh</button>
           <span class="ct-count" id="ctCount"></span>
+          <button class="btn btn-outline btn-sm" id="ctShowDel" onclick="ctToggleDeleted()">Show deleted</button>
+          <span class="ct-sub" id="ctStatus" style="font-size:.85rem"></span>
           <a class="btn btn-outline btn-sm" style="margin-left:auto; text-decoration:none"
              href="https://southportlandmetroapa.github.io/chalktalk/" target="_blank" rel="noopener">View public form &#8599;</a>
         </div>
@@ -4426,7 +4436,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.312';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.313';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -9553,6 +9563,9 @@ function switchTab(name) {
    the list scroll position. Public submit form lives in Apps/ChalkTalk/site.
    Requires the admin loaded with ?key=<service-role JWT> (SB_KEY). */
 let _ctPoll = null, _ctSig = '';
+let _ctShowDeleted = false;   // toggled by "Show deleted"
+let _ctRows = [];             // last fetch (all rows, incl. soft-deleted) for client-side filter + re-render
+const CHALKTALK_MAILER_URL = 'https://script.google.com/macros/s/AKfycbzGTzkBRTrIIP_tD6sbtOOUmNZkXDdtxPoO4c8fdWt5h3tZFueNSISPv8Q3LWStx73Whw/exec';
 
 async function ctInit() {
   const list = document.getElementById('ctList');
@@ -9574,11 +9587,34 @@ async function ctInit() {
 
 async function ctFetchQuestions() {
   return await sb('GET',
-    'questions?select=id,email,question,created_at,ack_status,status,source&order=created_at.desc&limit=500',
+    'questions?select=id,email,question,created_at,ack_status,status,source,response,answered_at,reply_status,deleted_at&order=created_at.desc&limit=500',
     null, { 'Accept-Profile': 'chalktalk' }) || [];
 }
 
-function ctSig(rows) { return rows.length + ':' + (rows[0] ? rows[0].id : 0); }
+/* Signature covers status/reply/deleted so a poll re-renders when another
+   operator answers or deletes — not just when a new question arrives. */
+function ctSig(rows) {
+  return rows.length + ':' + rows.map(r =>
+    r.id + (r.status || '') + (r.reply_status || '') + (r.deleted_at ? 'D' : '') + (r.answered_at ? 'A' : '')
+  ).join(',');
+}
+
+/* PATCH one question row (service-role, chalktalk schema). */
+async function ctPatch(id, patch) {
+  await sb('PATCH', 'questions?id=eq.' + id, patch, { 'Content-Profile': 'chalktalk' });
+}
+async function ctReload() {
+  const rows = await ctFetchQuestions();
+  _ctSig = ctSig(rows);
+  await ctRenderRows(rows);
+}
+function ctSetStatus(msg, kind) {
+  const el = document.getElementById('ctStatus');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = kind === 'err' ? 'var(--spm-primary)' : (kind === 'warn' ? '#a15c00' : 'var(--muted)');
+  clearTimeout(el._t); el._t = setTimeout(() => { el.textContent = ''; }, 6000);
+}
 
 /* distinct, lowercased submitter emails → players (slate profile = default sb()).
    ilike with no wildcard = case-insensitive exact match; emails carry no LIKE
@@ -9631,6 +9667,17 @@ function ctFmtWhen(ts) {
   catch { return String(ts); }
 }
 
+function ctStatusChip(r) {
+  if (r.deleted_at)            return '<span class="badge muted">Deleted</span>';
+  if (r.status === 'answered') return '<span class="badge ok">Answered</span>';
+  return '<span class="badge warn">New</span>';
+}
+function ctReplyChip(s) {
+  if (s === 'blocked') return ' <span class="badge warn">Reply blocked (DNC)</span>';
+  if (s === 'failed')  return ' <span class="badge" style="background:rgba(234,0,42,.12); color:var(--spm-primary)">Reply failed</span>';
+  return '';
+}
+
 function ctCard(r, resolveMap) {
   const em = String(r.email || '').trim().toLowerCase();
   const players = resolveMap[em] || [];
@@ -9639,26 +9686,64 @@ function ctCard(r, resolveMap) {
     ? players.map(ctPlayerLine).join('<br>') + ' &middot; ' + mail
     : '<span class="ct-nomatch">No player match</span> &middot; ' + mail;
   const src = r.source ? ' &middot; <span class="ct-sub">' + esc(r.source) + '</span>' : '';
-  return '<div class="ct-q">'
+  const deleted  = !!r.deleted_at;
+  const answered = r.status === 'answered';
+
+  const responseBlock = r.response
+    ? '<div class="ct-response"><span class="ct-sub">Reply'
+        + (r.answered_at ? ' &middot; ' + esc(ctFmtWhen(r.answered_at)) : '')
+        + ':</span><br>' + esc(r.response) + '</div>'
+    : '';
+
+  let controls;
+  if (deleted) {
+    controls = '<div class="ct-actions"><button class="btn btn-outline btn-sm" onclick="ctRestore(' + r.id + ')">Restore</button></div>';
+  } else {
+    controls = '<div class="ct-replybox">'
+      + '<textarea id="ct-reply-' + r.id + '" class="ct-reply-ta" rows="2" '
+      +   'placeholder="Type a reply — emails ' + esc(r.email) + ' and marks this answered">' + (r.response ? esc(r.response) : '') + '</textarea>'
+      + '<div class="ct-actions">'
+      +   '<button id="ct-send-' + r.id + '" class="btn btn-sm" onclick="ctReply(' + r.id + ')">Send reply</button>'
+      +   (answered
+            ? '<button class="btn btn-outline btn-sm" onclick="ctMarkAnswered(' + r.id + ',false)">Reopen</button>'
+            : '<button class="btn btn-outline btn-sm" onclick="ctMarkAnswered(' + r.id + ',true)">Mark answered</button>')
+      +   '<button class="btn btn-outline btn-sm ct-del" onclick="ctDelete(' + r.id + ')">Delete</button>'
+      + '</div></div>';
+  }
+
+  return '<div class="ct-q' + (deleted ? ' ct-deleted' : '') + (answered ? ' ct-answered' : '') + '">'
     + '<div class="ct-q-text">' + esc(r.question) + '</div>'
     + '<div class="ct-meta">' + who + '</div>'
     + '<div class="ct-meta" style="border-top:none; padding-top:2px; margin-top:2px">'
-    +   '<span class="ct-sub">' + esc(ctFmtWhen(r.created_at)) + '</span>' + src + ' ' + ctAckChip(r.ack_status)
+    +   '<span class="ct-sub">' + esc(ctFmtWhen(r.created_at)) + '</span>' + src + ' '
+    +   ctStatusChip(r) + ' ' + ctAckChip(r.ack_status) + ctReplyChip(r.reply_status)
     + '</div>'
+    + responseBlock
+    + controls
     + '</div>';
 }
 
 async function ctRenderRows(rows) {
-  const list = document.getElementById('ctList');
+  _ctRows = rows || [];
+  await ctPaint();
+}
+async function ctPaint() {
+  const list  = document.getElementById('ctList');
   const count = document.getElementById('ctCount');
-  if (count) count.textContent = rows.length ? (rows.length + ' question' + (rows.length === 1 ? '' : 's')) : '';
+  const delBtn = document.getElementById('ctShowDel');
+  const all = _ctRows;
+  const delCount = all.filter(r => r.deleted_at).length;
+  const visible  = _ctShowDeleted ? all : all.filter(r => !r.deleted_at);
+  if (delBtn) delBtn.textContent = (_ctShowDeleted ? 'Hide deleted' : 'Show deleted') + (delCount ? ' (' + delCount + ')' : '');
+  if (count) { const n = all.filter(r => !r.deleted_at).length; count.textContent = n ? (n + ' question' + (n === 1 ? '' : 's')) : ''; }
   if (!list) return;
-  if (!rows.length) { list.innerHTML = '<div class="ct-empty">No questions yet.</div>'; return; }
-  const resolveMap = await ctResolveEmails(rows.map(r => r.email));
+  if (!visible.length) { list.innerHTML = '<div class="ct-empty">' + (_ctShowDeleted ? 'Nothing here.' : 'No questions yet.') + '</div>'; return; }
+  const resolveMap = await ctResolveEmails(visible.map(r => r.email));
   const scroll = list.scrollTop;
-  list.innerHTML = rows.map(r => ctCard(r, resolveMap)).join('');
+  list.innerHTML = visible.map(r => ctCard(r, resolveMap)).join('');
   list.scrollTop = scroll;
 }
+function ctToggleDeleted() { _ctShowDeleted = !_ctShowDeleted; ctPaint(); }
 
 function ctStartPoll() {
   if (_ctPoll) clearInterval(_ctPoll);
@@ -9671,6 +9756,57 @@ function ctStartPoll() {
       if (sig !== _ctSig) { _ctSig = sig; await ctRenderRows(rows); }
     } catch { /* transient — next tick retries */ }
   }, 20000);
+}
+
+/* Reply by email — routes through the GAS mailer (admin_key = SB_KEY). The
+   server derives the recipient from the row by id and sends via safeMailSend
+   (blocklist fail-closed); a delivered reply marks the question answered. */
+async function ctReply(id) {
+  const ta = document.getElementById('ct-reply-' + id);
+  const msg = ((ta && ta.value) || '').trim();
+  if (!msg) { ctSetStatus('Type a reply first.', 'warn'); if (ta) ta.focus(); return; }
+  const btn = document.getElementById('ct-send-' + id);
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+  try {
+    const res = await fetch(CHALKTALK_MAILER_URL, {
+      method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'question_reply', admin_key: SB_KEY, id: id, message: msg })
+    });
+    const j = await res.json().catch(() => ({}));
+    if (j.ok) { ctSetStatus('Reply sent — marked answered.', 'ok'); await ctReload(); }
+    else if (j.reply_status === 'blocked') { ctSetStatus('Not sent — that address is on the No-Contact list.', 'warn'); await ctReload(); }
+    else { ctSetStatus('Reply failed: ' + (j.error || j.reply_status || 'unknown'), 'err'); }
+  } catch (e) {
+    ctSetStatus('Reply failed: ' + (e.message || e), 'err');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Send reply'; }
+  }
+}
+
+async function ctMarkAnswered(id, answered) {
+  try {
+    await ctPatch(id, answered ? { status: 'answered', answered_at: new Date().toISOString() } : { status: 'new', answered_at: null });
+    ctSetStatus(answered ? 'Marked answered.' : 'Reopened.', 'ok');
+    await ctReload();
+  } catch (e) { ctSetStatus('Update failed: ' + (e.message || e), 'err'); }
+}
+
+async function ctDelete(id) {
+  try {
+    await ctPatch(id, { status: 'deleted', deleted_at: new Date().toISOString() });
+    ctSetStatus('Deleted — recoverable via “Show deleted”.', 'ok');
+    await ctReload();
+  } catch (e) { ctSetStatus('Delete failed: ' + (e.message || e), 'err'); }
+}
+
+async function ctRestore(id) {
+  const row = _ctRows.find(r => r.id === id);
+  const patch = (row && row.answered_at) ? { status: 'answered', deleted_at: null } : { status: 'new', deleted_at: null };
+  try {
+    await ctPatch(id, patch);
+    ctSetStatus('Restored.', 'ok');
+    await ctReload();
+  } catch (e) { ctSetStatus('Restore failed: ' + (e.message || e), 'err'); }
 }
 
 /* OTF_TAB_BEGIN — OnTheFelt tab logic (3.305). Ported + tournament-scoped.
