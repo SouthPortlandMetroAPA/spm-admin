@@ -1072,6 +1072,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="onthefelt">OnTheFelt</button>
       <button class="tab" data-tab="poolpics">PoolPics</button>
       <button class="tab" data-tab="chalktalk">ChalkTalk</button>
+      <button class="tab" data-tab="nickpick">NickPick</button>
     </div>
 
     <div id="globalStatus" class="status-line"></div>
@@ -4010,6 +4011,43 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       </div>
     </div>
 
+    <div id="tab-nickpick" class="tab-panel">
+      <style>
+        #tab-nickpick .np-head{display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px}
+        #tab-nickpick .np-count{color:var(--muted); font-size:.9rem}
+        #tab-nickpick .np-list{display:flex; flex-direction:column; gap:12px}
+        #tab-nickpick .np-r{border:1px solid var(--border); border-radius:10px; background:var(--card); padding:14px 16px}
+        #tab-nickpick .np-r.np-entered{border-left:3px solid var(--spm-accent)}
+        #tab-nickpick .np-r.np-denied{opacity:.65}
+        #tab-nickpick .np-nick{font-size:1.05rem; line-height:1.5; color:var(--text); overflow-wrap:anywhere}
+        #tab-nickpick .np-nick .np-arrow{color:var(--muted); margin:0 8px}
+        #tab-nickpick .np-nick .np-new{font-weight:700; color:var(--spm-accent)}
+        #tab-nickpick .np-nick .np-cur{color:var(--muted)}
+        #tab-nickpick .np-meta{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:10px; padding-top:10px; border-top:1px solid var(--border)}
+        #tab-nickpick .np-who{font-weight:700; color:var(--text)}
+        #tab-nickpick .np-sub{color:var(--muted); font-size:.85rem}
+        #tab-nickpick a.np-mail{color:var(--spm-accent); text-decoration:none}
+        #tab-nickpick a.np-mail:hover{text-decoration:underline}
+        #tab-nickpick .np-empty{color:var(--muted); padding:28px; text-align:center}
+        #tab-nickpick .np-note{width:100%; box-sizing:border-box; border:1px solid var(--border); border-radius:8px; padding:8px 10px; font:inherit; font-size:.94rem; resize:vertical; margin-top:10px}
+        #tab-nickpick .np-actions{display:flex; gap:8px; flex-wrap:wrap; margin-top:8px}
+        #tab-nickpick .np-actions .np-deny{margin-left:auto; color:var(--spm-primary)}
+      </style>
+      <div class="card">
+        <div class="np-head">
+          <h2 style="margin:0">NickPick &mdash; Nickname Requests</h2>
+          <button class="btn btn-outline btn-sm" onclick="npInit()">Refresh</button>
+          <span class="np-count" id="npCount"></span>
+          <button class="btn btn-outline btn-sm" id="npShowDone" onclick="npToggleDone()">Show resolved</button>
+          <span class="np-sub" id="npStatus" style="font-size:.85rem"></span>
+          <a class="btn btn-outline btn-sm" style="margin-left:auto; text-decoration:none"
+             href="https://southportlandmetroapa.github.io/nickpick/" target="_blank" rel="noopener">View public form &#8599;</a>
+        </div>
+        <p class="np-sub" style="margin:0 0 12px">Requests land here. Enter the change in <b>Nexus</b>, then click <b>Mark entered</b> &mdash; the player is emailed and the new nickname reaches Slate on the next player re-import. This tab never edits <code>slate.players</code>.</p>
+        <div class="np-list" id="npList"><div class="np-empty">Loading&hellip;</div></div>
+      </div>
+    </div>
+
     <div id="tab-poolpics" class="tab-panel">
 
       <div class="pp-subtabs">
@@ -4437,7 +4475,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.314';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.315';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -9522,7 +9560,8 @@ const TAB_LABEL = {
   housecue:      'House Cue',
   onthefelt:     'OnTheFelt',
   poolpics:      'PoolPics',
-  chalktalk:     'ChalkTalk'
+  chalktalk:     'ChalkTalk',
+  nickpick:      'NickPick'
 };
 
 function switchTab(name) {
@@ -9555,6 +9594,7 @@ function switchTab(name) {
   if (name === 'onthefelt') otfInit();
   if (name === 'poolpics') ppInit();
   if (name === 'chalktalk') ctInit();
+  if (name === 'nickpick') npInit();
 }
 
 /* ═══════════════ ChalkTalk tab (v0.1) — player question submissions ═══════════════
@@ -9809,6 +9849,181 @@ async function ctRestore(id) {
     ctSetStatus('Restored.', 'ok');
     await ctReload();
   } catch (e) { ctSetStatus('Restore failed: ' + (e.message || e), 'err'); }
+}
+
+/* ═══════════════ NickPick tab (v0.1) — nickname change requests ═══════════════
+   Reads nickpick.requests (service-role; Accept-Profile override on sb()). Each row
+   = a player's member_number + current/requested nickname + email. The operator
+   enters the change in NEXUS, then marks the request 'entered' (player emailed) or
+   'denied'. This tab NEVER writes slate.players — Nexus owns the nickname; Slate
+   reflects it on the next player re-import. Live-polls every 20s. Public form lives
+   in Apps/NickPick/site. Requires the admin loaded with ?key=<service-role JWT>. */
+let _npPoll = null, _npSig = '';
+let _npShowDone = false;   // include entered/denied in the list
+let _npRows = [];
+const NICKPICK_MAILER_URL = 'https://script.google.com/macros/s/AKfycbzGTzkBRTrIIP_tD6sbtOOUmNZkXDdtxPoO4c8fdWt5h3tZFueNSISPv8Q3LWStx73Whw/exec';
+
+async function npInit() {
+  const list = document.getElementById('npList');
+  const count = document.getElementById('npCount');
+  if (!SB_KEY) {
+    if (count) count.textContent = '';
+    if (list) list.innerHTML = '<div class="np-empty">Add <code>?key=&lt;service-role JWT&gt;</code> to the URL to view requests.</div>';
+    return;
+  }
+  try {
+    const rows = await npFetch();
+    _npSig = npSig(rows);
+    await npRenderRows(rows);
+    npStartPoll();
+  } catch (e) {
+    if (list) list.innerHTML = '<div class="np-empty">Couldn\'t load requests: ' + esc(e.message || String(e)) + '</div>';
+  }
+}
+
+async function npFetch() {
+  return await sb('GET',
+    'requests?select=id,member_number,email,current_nickname,requested_nickname,status,decided_at,decided_note,created_at,source&order=created_at.desc&limit=500',
+    null, { 'Accept-Profile': 'nickpick' }) || [];
+}
+
+function npSig(rows) {
+  return rows.length + ':' + rows.map(r => r.id + (r.status || '')).join(',');
+}
+async function npReload() {
+  const rows = await npFetch();
+  _npSig = npSig(rows);
+  await npRenderRows(rows);
+}
+function npSetStatus(msg, kind) {
+  const el = document.getElementById('npStatus');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = kind === 'err' ? 'var(--spm-primary)' : (kind === 'warn' ? '#a15c00' : 'var(--muted)');
+  clearTimeout(el._t); el._t = setTimeout(() => { el.textContent = ''; }, 6000);
+}
+
+/* member_number -> player (name) for display. One batched query. */
+async function npResolveMembers(mns) {
+  const uniq = [...new Set(mns.map(m => String(m || '').trim()).filter(Boolean))];
+  if (!uniq.length) return {};
+  const map = {};
+  try {
+    const ps = await sb('GET',
+      'players?member_number=in.(' + uniq.map(encodeURIComponent).join(',') + ')' +
+      '&select=member_number,first_name,last_name,nickname') || [];
+    ps.forEach(p => { map[String(p.member_number)] = p; });
+  } catch { /* names are best-effort */ }
+  return map;
+}
+
+function npFmtWhen(ts) {
+  if (!ts) return '';
+  try { return new Date(ts).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }); }
+  catch { return String(ts); }
+}
+function npStatusChip(r) {
+  if (r.status === 'entered') return '<span class="badge ok">Entered in Nexus</span>';
+  if (r.status === 'denied')  return '<span class="badge muted">Denied</span>';
+  return '<span class="badge warn">Pending</span>';
+}
+
+function npCard(r, memberMap) {
+  const p = memberMap[String(r.member_number)] || null;
+  const nm = p ? [p.first_name, p.last_name].filter(Boolean).join(' ').trim() : '';
+  const mail = '<a class="np-mail" href="mailto:' + esc(r.email) + '">' + esc(r.email) + '</a>';
+  const who = '<span class="np-who">' + esc(nm || '(no name on file)') + '</span> &middot; APA #' + esc(r.member_number || '?') + ' &middot; ' + mail;
+  const cur = r.current_nickname
+    ? '<span class="np-cur">&ldquo;' + esc(r.current_nickname) + '&rdquo;</span>'
+    : '<span class="np-cur">(no nickname yet)</span>';
+  const nick = cur + '<span class="np-arrow">&rarr;</span><span class="np-new">&ldquo;' + esc(r.requested_nickname) + '&rdquo;</span>';
+  const pending = r.status !== 'entered' && r.status !== 'denied';
+
+  let controls = '';
+  if (pending) {
+    controls = '<textarea id="np-note-' + r.id + '" class="np-note" rows="1" placeholder="Optional note to the player (used on Deny, or add context)"></textarea>'
+      + '<div class="np-actions">'
+      +   '<button id="np-ent-' + r.id + '" class="btn btn-sm" onclick="npDecide(' + r.id + ',\'entered\')">Mark entered</button>'
+      +   '<button class="btn btn-outline btn-sm np-deny" onclick="npDecide(' + r.id + ',\'denied\')">Deny</button>'
+      + '</div>';
+  } else {
+    const noteTxt = r.decided_note ? '<div class="np-sub" style="margin-top:6px">Note: ' + esc(r.decided_note) + '</div>' : '';
+    controls = '<div class="np-sub" style="margin-top:8px">' + (r.status === 'entered' ? 'Entered' : 'Denied')
+      + (r.decided_at ? ' &middot; ' + esc(npFmtWhen(r.decided_at)) : '') + '</div>' + noteTxt;
+  }
+
+  return '<div class="np-r' + (r.status === 'entered' ? ' np-entered' : '') + (r.status === 'denied' ? ' np-denied' : '') + '">'
+    + '<div class="np-nick">' + nick + '</div>'
+    + '<div class="np-meta">' + who + '</div>'
+    + '<div class="np-meta" style="border-top:none; padding-top:2px; margin-top:2px">'
+    +   '<span class="np-sub">' + esc(npFmtWhen(r.created_at)) + '</span> ' + npStatusChip(r)
+    + '</div>'
+    + controls
+    + '</div>';
+}
+
+async function npRenderRows(rows) { _npRows = rows || []; await npPaint(); }
+async function npPaint() {
+  const list = document.getElementById('npList');
+  const count = document.getElementById('npCount');
+  const doneBtn = document.getElementById('npShowDone');
+  const all = _npRows;
+  const pending = all.filter(r => r.status !== 'entered' && r.status !== 'denied');
+  const doneCount = all.length - pending.length;
+  const visible = _npShowDone ? all : pending;
+  if (doneBtn) doneBtn.textContent = (_npShowDone ? 'Hide resolved' : 'Show resolved') + (doneCount ? ' (' + doneCount + ')' : '');
+  if (count) count.textContent = pending.length ? (pending.length + ' pending') : 'No pending requests';
+  if (!list) return;
+  if (!visible.length) { list.innerHTML = '<div class="np-empty">' + (_npShowDone ? 'Nothing here yet.' : 'No pending requests.') + '</div>'; return; }
+  const memberMap = await npResolveMembers(visible.map(r => r.member_number));
+  const scroll = list.scrollTop;
+  list.innerHTML = visible.map(r => npCard(r, memberMap)).join('');
+  list.scrollTop = scroll;
+}
+function npToggleDone() { _npShowDone = !_npShowDone; npPaint(); }
+
+function npStartPoll() {
+  if (_npPoll) clearInterval(_npPoll);
+  _npPoll = setInterval(async () => {
+    const panel = document.getElementById('tab-nickpick');
+    if (!panel || !panel.classList.contains('active')) return;   // only refresh when visible
+    try {
+      const rows = await npFetch();
+      const sig = npSig(rows);
+      if (sig !== _npSig) { _npSig = sig; await npRenderRows(rows); }
+    } catch { /* transient — next tick retries */ }
+  }, 20000);
+}
+
+/* Decide a request — routes through the GAS mailer (admin_key = SB_KEY). The
+   server derives the recipient from the row by id and emails the player via
+   safeMailSend (blocklist fail-closed). 'entered' = you put it in Nexus. This
+   never writes slate.players. */
+async function npDecide(id, decision) {
+  const note = ((document.getElementById('np-note-' + id) || {}).value || '').trim();
+  if (decision === 'denied' && !confirm('Deny this nickname request? The player will be emailed.')) return;
+  const entBtn = document.getElementById('np-ent-' + id);
+  if (entBtn) entBtn.disabled = true;
+  npSetStatus(decision === 'entered' ? 'Marking entered…' : 'Denying…', 'muted');
+  try {
+    const res = await fetch(NICKPICK_MAILER_URL, {
+      method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'nickname_decide', admin_key: SB_KEY, id: id, decision: decision, note: note })
+    });
+    const j = await res.json().catch(() => ({}));
+    if (j.ok) {
+      npSetStatus(decision === 'entered'
+        ? (j.notified ? 'Marked entered — player emailed.' : 'Marked entered. Player email blocked by DNC.')
+        : (j.notified ? 'Denied — player emailed.' : 'Denied. Player email blocked by DNC.'), 'ok');
+      await npReload();
+    } else {
+      npSetStatus('Failed: ' + (j.error || 'unknown'), 'err');
+      if (entBtn) entBtn.disabled = false;
+    }
+  } catch (e) {
+    npSetStatus('Failed: ' + (e.message || e), 'err');
+    if (entBtn) entBtn.disabled = false;
+  }
 }
 
 /* OTF_TAB_BEGIN — OnTheFelt tab logic (3.305). Ported + tournament-scoped.
