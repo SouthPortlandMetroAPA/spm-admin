@@ -4647,7 +4647,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.318';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.320';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -6330,10 +6330,17 @@ async function init() {
   await refreshCounts();
   await loadReportStatus();
 
-  // Email HQ is the default tab (the static `active` class on tab-emailhq
-  // is set, but the data needs to be loaded explicitly — switchTab() is
-  // what triggers loadEmailHQ() and we never called it on startup).
-  if (document.querySelector('.tab.active')?.dataset.tab === 'emailhq') {
+  // Restore the last tab the operator was on (persisted by switchTab, 3.320).
+  // Falls back to the static default (Email HQ) when there's no saved tab or
+  // it no longer exists. switchTab() handles both the active state and the
+  // tab's data load, so we route startup through it.
+  let savedTab = null;
+  try { savedTab = localStorage.getItem('slateLastTab'); } catch (e) {}
+  if (savedTab && /^[a-z]+$/.test(savedTab) && document.querySelector('.tab[data-tab="' + savedTab + '"]')) {
+    switchTab(savedTab);
+  } else if (document.querySelector('.tab.active')?.dataset.tab === 'emailhq') {
+    // Email HQ is the default tab (its static `active` class is set, but the
+    // data load only happens via switchTab, which we never call on startup).
     loadEmailHQ();
   }
 }
@@ -9742,6 +9749,7 @@ const TAB_LABEL = {
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + name));
+  try { localStorage.setItem('slateLastTab', name); } catch (e) {}  // restored on next load (3.320)
   const sub = document.getElementById('appSubpage');
   if (sub) sub.textContent = TAB_LABEL[name] || '';
   if (name === 'emailhq')     loadEmailHQ();
@@ -10614,7 +10622,7 @@ async function cdLoadCatalog() {
   try {
     _cdCues = await sb('GET', 'cues?active=eq.true&order=sort.asc', null, CD_RP) || [];
     _cdCases = await sb('GET', 'cases?active=eq.true&order=sort.asc', null, CD_RP) || [];
-    const opt = a => '<option value="">Choose…</option>' + a.map(x => '<option value="' + esc(x.code) + '">' + esc(x.description) + ' (' + esc(x.code) + ')</option>').join('');
+    const opt = a => '<option value="">Choose…</option>' + a.map(x => '<option value="' + esc(x.code) + '">' + esc(x.friendly || x.description) + '</option>').join('');
     const cue = document.getElementById('cdCue'), kase = document.getElementById('cdCase');
     if (cue) cue.innerHTML = opt(_cdCues); if (kase) kase.innerHTML = opt(_cdCases);
   } catch (e) { cdSetStatus('Catalog load failed: ' + (e.message || e), true); }
@@ -10679,7 +10687,7 @@ async function cdAdd() {
   const cue = _cdCues.find(c => c.code === cueCode), kase = _cdCases.find(c => c.code === caseCode);
   const btn = document.getElementById('cdAddBtn'); btn.disabled = true;
   try {
-    await sb('POST', 'requests', { member_number: _cdPicked.member_number, player_name: _cdPicked.name, player_email: _cdPicked.email || null, cue_code: cueCode, cue_desc: cue ? cue.description : null, case_code: caseCode, case_desc: kase ? kase.description : null, source: 'cuedrop-slate' }, CD_WP);
+    await sb('POST', 'requests', { member_number: _cdPicked.member_number, player_name: _cdPicked.name, player_email: _cdPicked.email || null, cue_code: cueCode, cue_desc: cue ? cue.description : null, cue_friendly: cue ? (cue.friendly || cue.description) : null, case_code: caseCode, case_desc: kase ? kase.description : null, case_friendly: kase ? (kase.friendly || kase.description) : null, source: 'cuedrop-slate' }, CD_WP);
     cdSetStatus('Request added for ' + _cdPicked.name + '.');
     cdClearPick(); document.getElementById('cdCue').value = ''; document.getElementById('cdCase').value = '';
     await cdLoad();
@@ -10692,11 +10700,12 @@ function cdRender() {
   const pill = s => '<span class="badge st-' + s + '">' + (s === 'requested' ? 'Requested' : s === 'emailed' ? 'Emailed' : 'Delivered') + '</span>';
   list.innerHTML = _cdReqs.map(r => {
     const emailBtn = r.status !== 'delivered' ? '<button class="btn btn-sm" onclick="cdEmail(' + r.id + ')">' + (r.status === 'emailed' ? 'Re-email' : 'Email player') + '</button>' : '';
-    const delBtn = r.status !== 'delivered' ? '<button class="btn btn-outline btn-sm" onclick="cdDeliver(' + r.id + ')">Mark delivered</button>' : '';
+    const dlvBtn = r.status !== 'delivered' ? '<button class="btn btn-outline btn-sm" onclick="cdDeliver(' + r.id + ')">Mark delivered</button>' : '';
+    const delBtn = '<button class="btn btn-outline btn-sm" style="color:var(--spm-primary);border-color:var(--spm-primary)" onclick="cdDelete(' + r.id + ')">Delete</button>';
     const es = r.email_status && r.email_status !== 'sent' ? ' <span class="cd-gear" style="color:var(--spm-primary)">email ' + esc(r.email_status) + '</span>' : '';
     return '<div class="cd-row st-' + r.status + '"><div class="cd-who">' + esc(r.player_name || r.member_number) + ' <span class="cd-gear" style="font-weight:400">· APA #' + esc(r.member_number) + '</span></div>'
-      + '<div class="cd-gear"><b>' + esc(r.cue_desc || r.cue_code) + '</b> &nbsp;+&nbsp; <b>' + esc(r.case_desc || r.case_code) + '</b></div>'
-      + '<div class="cd-acts">' + pill(r.status) + emailBtn + delBtn + es + '</div></div>';
+      + '<div class="cd-gear"><b>' + esc(r.cue_friendly || r.cue_desc || r.cue_code) + '</b> &nbsp;+&nbsp; <b>' + esc(r.case_friendly || r.case_desc || r.case_code) + '</b></div>'
+      + '<div class="cd-acts">' + pill(r.status) + emailBtn + dlvBtn + delBtn + es + '</div></div>';
   }).join('');
 }
 
@@ -10713,6 +10722,29 @@ async function cdEmail(id) {
 async function cdDeliver(id) {
   if (!confirm('Mark this cue + case as delivered to the player?')) return;
   try { await sb('PATCH', 'requests?id=eq.' + id, { status: 'delivered', delivered_at: new Date().toISOString() }, CD_WP); const r = _cdReqs.find(x => x.id === id); if (r) { r.status = 'delivered'; } cdRender(); cdSetStatus('Marked delivered.'); } catch (e) { cdSetStatus('Update failed: ' + (e.message || e), true); }
+}
+/* Delete a giveaway via GAS (recipient derived server-side). The player is emailed
+   that their reserved cue is gone ONLY if they were already told it was reserved. */
+async function cdDelete(id) {
+  const r = _cdReqs.find(x => x.id === id);
+  const who = r ? (r.player_name || r.member_number) : 'this request';
+  const willEmail = !!(r && r.status && r.status !== 'requested');
+  const msg = 'Delete the giveaway for ' + who + '?' + (willEmail
+    ? '\n\nThe player will be emailed that their reserved cue has been removed.'
+    : '\n\n(The player was never emailed, so no notice will be sent.)');
+  if (!confirm(msg)) return;
+  cdSetStatus('Deleting…');
+  try {
+    const res = await fetch(CUEDROP_MAILER_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'cue_request_delete', admin_key: SB_KEY, id }) });
+    const j = await res.json().catch(() => ({}));
+    if (j.ok && j.deleted) {
+      cdSetStatus(j.emailed ? 'Deleted — player emailed that it was removed.'
+        : j.email_status === 'blocked' ? 'Deleted — player on No-Contact list, no email sent.'
+        : j.email_status === 'no-email' ? 'Deleted — no email on file, no notice sent.'
+        : 'Deleted.');
+      await cdLoad();
+    } else { cdSetStatus('Delete failed: ' + (j.error || 'unknown'), true); }
+  } catch (e) { cdSetStatus('Delete failed: ' + (e.message || e), true); }
 }
 
 function cdStartPoll() {
