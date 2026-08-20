@@ -4201,6 +4201,32 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         #tab-cuedrop .badge.st-requested{background:#fef3c7;color:#92600a}
         #tab-cuedrop .badge.st-emailed{background:#e6efff;color:#0046cc}
         #tab-cuedrop .badge.st-delivered{background:#e7f6ec;color:#12703f}
+        #tab-cuedrop .badge.st-scheduled{background:#e0f2fe;color:#075985}
+        #tab-cuedrop .cd-deliv{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:9px;padding-top:9px;border-top:1px dashed var(--border)}
+        #tab-cuedrop .cd-deliv label{font-size:.72rem;color:var(--muted);font-weight:600;align-self:center}
+        #tab-cuedrop .cd-deliv input{border:1px solid var(--border);border-radius:7px;padding:6px 8px;font:inherit;font-size:.85rem;background:var(--card);color:var(--text)}
+        #tab-cuedrop .cd-deliv input[type=text]{min-width:150px;flex:1}
+        #tab-cuedrop .cd-deliv select{border:1px solid var(--border);border-radius:7px;padding:6px 8px;font:inherit;font-size:.85rem;background:var(--card);color:var(--text);max-width:230px}
+        #tab-cuedrop .cd-set{color:var(--spm-accent);font-size:.85rem;margin-top:5px;font-weight:600}
+        #tab-cuedrop .cd-sched{border:1px solid var(--spm-accent);border-radius:12px;padding:14px 16px;margin-bottom:16px;background:#f5f9ff}
+        #tab-cuedrop .cd-sched-title{font-weight:800;color:var(--spm-accent);margin-bottom:6px}
+        #tab-cuedrop .cd-sched-day{font-weight:700;margin:10px 0 4px;border-bottom:1px solid var(--border);padding-bottom:2px}
+        #tab-cuedrop .cd-sched-row{display:flex;gap:12px;flex-wrap:wrap;padding:4px 0;font-size:.9rem}
+        #tab-cuedrop .cd-sched-time{font-weight:700;min-width:72px}
+        #tab-cuedrop .cd-sched-loc{min-width:110px;color:var(--spm-primary);font-weight:600}
+        #tab-cuedrop .cd-sched-who{font-weight:600}
+        #tab-cuedrop .cd-sched-cue{color:var(--muted)}
+        #tab-cuedrop .cd-inv{border:1px solid var(--border);border-radius:12px;padding:14px 16px;background:#fbfbfd}
+        #tab-cuedrop .cd-inv-title{font-weight:800;margin-bottom:8px}
+        #tab-cuedrop .cd-inv-cols{display:grid;grid-template-columns:1fr 1fr;gap:0 22px}
+        @media(max-width:640px){#tab-cuedrop .cd-inv-cols{grid-template-columns:1fr}}
+        #tab-cuedrop .cd-inv-h{font-weight:700;color:var(--spm-accent);font-size:.82rem;text-transform:uppercase;letter-spacing:.04em;margin:6px 0 4px}
+        #tab-cuedrop .cd-inv-row{display:flex;align-items:center;gap:8px;padding:3px 0;font-size:.88rem}
+        #tab-cuedrop .cd-inv-name{flex:1;min-width:90px}
+        #tab-cuedrop .cd-inv-row input{width:56px;border:1px solid var(--border);border-radius:6px;padding:4px 6px;font:inherit;font-size:.85rem;background:var(--card);color:var(--text)}
+        #tab-cuedrop .cd-inv-left{color:var(--muted);min-width:96px;text-align:right}
+        #tab-cuedrop .cd-inv-low .cd-inv-left{color:#92600a}
+        #tab-cuedrop .cd-inv-out .cd-inv-left{color:var(--spm-primary);font-weight:700}
       </style>
       <div class="card">
         <div class="ps-row" style="margin-bottom:12px"><h2 style="margin:0">CueDrop &mdash; Cue &amp; Case Giveaways</h2>
@@ -4217,6 +4243,9 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <button class="btn" id="cdAddBtn" onclick="cdAdd()">Add request</button>
         </div>
         <div class="cd-picked" id="cdPicked" style="display:none;margin-bottom:14px"></div>
+        <div class="cd-inv" id="cdInv" style="margin-bottom:16px"></div>
+        <div class="cd-sched" id="cdScheduleWrap" style="display:none"></div>
+        <datalist id="cdLocList"></datalist>
         <div class="cd-list" id="cdList"><div class="cd-empty">Loading&hellip;</div></div>
       </div>
     </div>
@@ -4709,7 +4738,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.321';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.322';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10696,7 +10725,7 @@ async function cdLoad() {
   if (!SB_KEY) { if (list) list.innerHTML = '<div class="cd-empty">Add <code>?key=&lt;service-role JWT&gt;</code> to the URL to manage giveaways.</div>'; return; }
   try {
     _cdReqs = await sb('GET', 'requests?select=*&order=created_at.desc&limit=500', null, CD_RP) || [];
-    _cdSig = _cdReqs.length + ':' + _cdReqs.map(r => r.id + r.status).join(',');
+    _cdSig = cdSig(_cdReqs);
     cdRender();
   } catch (e) { if (list) list.innerHTML = '<div class="cd-empty">Couldn\'t load: ' + esc(e.message || String(e)) + '</div>'; }
 }
@@ -10749,6 +10778,13 @@ async function cdAdd() {
   const cueCode = document.getElementById('cdCue').value, caseCode = document.getElementById('cdCase').value;
   if (!cueCode || !caseCode) { cdSetStatus('Pick a cue and a case.', true); return; }
   const cue = _cdCues.find(c => c.code === cueCode), kase = _cdCases.find(c => c.code === caseCode);
+  // Inventory guard: warn (don't hard-block — the operator decides) when out of stock.
+  const cueLeft = (cue ? (cue.stock || 0) : 0) - _cdReqs.filter(r => r.cue_code === cueCode).length;
+  const caseLeft = (kase ? (kase.stock || 0) : 0) - _cdReqs.filter(r => r.case_code === caseCode).length;
+  const outItems = [];
+  if (cueLeft <= 0) outItems.push('cue "' + (cue ? (cue.friendly || cue.description) : cueCode) + '"');
+  if (caseLeft <= 0) outItems.push('case "' + (kase ? (kase.friendly || kase.description) : caseCode) + '"');
+  if (outItems.length && !confirm('Heads up — you are out of that ' + outItems.join(' and ') + '. Add this request anyway?')) return;
   const btn = document.getElementById('cdAddBtn'); btn.disabled = true;
   try {
     await sb('POST', 'requests', { member_number: _cdPicked.member_number, player_name: _cdPicked.name, player_email: _cdPicked.email || null, cue_code: cueCode, cue_desc: cue ? cue.description : null, cue_friendly: cue ? (cue.friendly || cue.description) : null, case_code: caseCode, case_desc: kase ? kase.description : null, case_friendly: kase ? (kase.friendly || kase.description) : null, source: 'cuedrop-slate' }, CD_WP);
@@ -10758,19 +10794,100 @@ async function cdAdd() {
   } catch (e) { cdSetStatus('Add failed: ' + (e.message || e), true); } finally { btn.disabled = false; }
 }
 
+const CD_DOW = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const CD_MON = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+function cdFmtDay(d) { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d || ''); if (!m) return d || ''; return CD_DOW[new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).getUTCDay()] + ', ' + CD_MON[+m[2] - 1] + ' ' + (+m[3]); }
+function cdFmtTime(t) { const m = /^(\d{1,2}):(\d{2})$/.exec(t || ''); if (!m) return t || ''; let h = +m[1]; const ap = h < 12 ? 'AM' : 'PM'; let h12 = h % 12; if (h12 === 0) h12 = 12; return h12 + ':' + m[2] + ' ' + ap; }
+function cdWhen(d, t) { const day = cdFmtDay(d), tm = cdFmtTime(t); return day && tm ? day + ' at ' + tm : (day || tm || 'TBD'); }
+
+function cdRenderSchedule() {
+  const wrap = document.getElementById('cdScheduleWrap'); if (!wrap) return;
+  const loc = document.getElementById('cdLocList');
+  if (loc) loc.innerHTML = [...new Set(_cdReqs.map(r => r.delivery_location).filter(Boolean))].map(l => '<option value="' + esc(l) + '">').join('');
+  const sched = _cdReqs.filter(r => r.delivery_date && r.status !== 'delivered')
+    .sort((a, b) => (a.delivery_date + 'T' + (a.delivery_time || '')).localeCompare(b.delivery_date + 'T' + (b.delivery_time || '')));
+  if (!sched.length) { wrap.style.display = 'none'; wrap.innerHTML = ''; return; }
+  let html = '<div class="cd-sched-title">Delivery schedule &mdash; ' + sched.length + ' to hand out</div>';
+  let curDay = '';
+  sched.forEach(r => {
+    if (r.delivery_date !== curDay) { curDay = r.delivery_date; html += '<div class="cd-sched-day">' + esc(cdFmtDay(curDay)) + '</div>'; }
+    html += '<div class="cd-sched-row"><span class="cd-sched-time">' + esc(cdFmtTime(r.delivery_time) || 'anytime') + '</span>'
+      + '<span class="cd-sched-loc">' + esc(r.delivery_location || '(location TBD)') + '</span>'
+      + '<span class="cd-sched-who">' + esc(r.player_name || r.member_number) + '</span>'
+      + '<span class="cd-sched-cue">' + esc(r.cue_friendly || r.cue_desc || r.cue_code) + ' + ' + esc(r.case_friendly || r.case_desc || r.case_code) + '</span></div>';
+  });
+  wrap.innerHTML = html; wrap.style.display = 'block';
+}
+
+/* Inventory: purchased (editable) − given out (count of non-deleted requests using
+   the item) = remaining. Poll skips re-render while a stock input is focused. */
+function cdRenderInventory() {
+  const el = document.getElementById('cdInv'); if (!el) return;
+  const col = (list, reqField, kind) => '<div><div class="cd-inv-h">' + kind + '</div>' + (list || []).map(x => {
+    const out = _cdReqs.filter(r => r[reqField] === x.code).length, left = (x.stock || 0) - out;
+    const cls = left <= 0 ? 'cd-inv-out' : left <= 3 ? 'cd-inv-low' : '';
+    return '<div class="cd-inv-row ' + cls + '"><span class="cd-inv-name">' + esc(x.friendly || x.description) + '</span>'
+      + '<input type="number" min="0" id="cdStk_' + kind + '_' + esc(x.code) + '" value="' + (x.stock || 0) + '">'
+      + '<span class="cd-inv-left">' + out + ' out &middot; <b>' + left + ' left</b></span></div>';
+  }).join('') + '</div>';
+  el.innerHTML = '<div class="cd-inv-title">Inventory <span style="font-weight:400;color:var(--muted);font-size:.8rem">&mdash; set the purchased count; &ldquo;left&rdquo; = purchased &minus; given out</span></div>'
+    + '<div class="cd-inv-cols">' + col(_cdCues, 'cue_code', 'Cues') + col(_cdCases, 'case_code', 'Cases') + '</div>'
+    + '<button class="btn btn-sm" style="margin-top:10px" onclick="cdSaveStock()">Save stock</button>';
+}
+async function cdSaveStock() {
+  const changes = [];
+  const collect = (list, kind, table) => (list || []).forEach(x => { const inp = document.getElementById('cdStk_' + kind + '_' + x.code); if (!inp) return; const v = parseInt(inp.value, 10); if (!isNaN(v) && v >= 0 && v !== (x.stock || 0)) changes.push({ table, code: x.code, stock: v }); });
+  collect(_cdCues, 'cue', 'cues'); collect(_cdCases, 'case', 'cases');
+  if (!changes.length) { cdSetStatus('No stock changes to save.'); return; }
+  try {
+    for (const c of changes) await sb('PATCH', c.table + '?code=eq.' + encodeURIComponent(c.code), { stock: c.stock }, CD_WP);
+    cdSetStatus('Saved stock for ' + changes.length + ' item' + (changes.length === 1 ? '' : 's') + '.');
+    await cdLoadCatalog(); cdRender();
+  } catch (e) { cdSetStatus('Stock save failed: ' + (e.message || e), true); }
+}
+
 function cdRender() {
   const list = document.getElementById('cdList'); if (!list) return;
+  cdRenderSchedule(); cdRenderInventory();
   if (!_cdReqs.length) { list.innerHTML = '<div class="cd-empty">No giveaway requests yet. Search a player above, pick a cue + case, and add one.</div>'; return; }
-  const pill = s => '<span class="badge st-' + s + '">' + (s === 'requested' ? 'Requested' : s === 'emailed' ? 'Emailed' : 'Delivered') + '</span>';
+  const pill = s => '<span class="badge st-' + s + '">' + (s === 'requested' ? 'Requested' : s === 'emailed' ? 'Emailed' : s === 'scheduled' ? 'Scheduled' : 'Delivered') + '</span>';
   list.innerHTML = _cdReqs.map(r => {
-    const emailBtn = r.status !== 'delivered' ? '<button class="btn btn-sm" onclick="cdEmail(' + r.id + ')">' + (r.status === 'emailed' ? 'Re-email' : 'Email player') + '</button>' : '';
+    const emailBtn = r.status !== 'delivered' ? '<button class="btn btn-sm" onclick="cdEmail(' + r.id + ')">' + (r.status === 'requested' ? 'Email player' : 'Re-email') + '</button>' : '';
     const dlvBtn = r.status !== 'delivered' ? '<button class="btn btn-outline btn-sm" onclick="cdDeliver(' + r.id + ')">Mark delivered</button>' : '';
     const delBtn = '<button class="btn btn-outline btn-sm" style="color:var(--spm-primary);border-color:var(--spm-primary)" onclick="cdDelete(' + r.id + ')">Delete</button>';
     const es = r.email_status && r.email_status !== 'sent' ? ' <span class="cd-gear" style="color:var(--spm-primary)">email ' + esc(r.email_status) + '</span>' : '';
+    const hasDeliv = r.delivery_date || r.delivery_time || r.delivery_location;
+    const setLine = hasDeliv ? '<div class="cd-set">📅 ' + esc(cdWhen(r.delivery_date, r.delivery_time)) + (r.delivery_location ? ' · ' + esc(r.delivery_location) : '') + '</div>' : '';
+    const editBtn = r.status !== 'delivered' ? '<button class="btn btn-outline btn-sm" onclick="cdEditItems(' + r.id + ')">Edit items</button>' : '';
+    const deliv = r.status !== 'delivered'
+      ? '<div class="cd-deliv"><label>Deliver</label>'
+        + '<input type="date" id="cdDdate' + r.id + '" value="' + esc(r.delivery_date || '') + '">'
+        + '<input type="time" id="cdDtime' + r.id + '" value="' + esc(r.delivery_time || '') + '">'
+        + '<input type="text" list="cdLocList" id="cdDloc' + r.id + '" placeholder="Location" value="' + esc(r.delivery_location || '') + '">'
+        + '<button class="btn btn-sm" onclick="cdSchedule(' + r.id + ')">' + (hasDeliv ? 'Update + re-email' : 'Schedule + email') + '</button></div>' : '';
+    const editor = r.status !== 'delivered'
+      ? '<div class="cd-deliv" id="cdEdit' + r.id + '" style="display:none"><label>Fix items</label>'
+        + '<select id="cdEcue' + r.id + '">' + cdItemOpts(_cdCues, r.cue_code) + '</select>'
+        + '<select id="cdEcase' + r.id + '">' + cdItemOpts(_cdCases, r.case_code) + '</select>'
+        + '<button class="btn btn-sm" onclick="cdSaveItems(' + r.id + ')">Save items</button></div>' : '';
     return '<div class="cd-row st-' + r.status + '"><div class="cd-who">' + esc(r.player_name || r.member_number) + ' <span class="cd-gear" style="font-weight:400">· APA #' + esc(r.member_number) + '</span></div>'
       + '<div class="cd-gear"><b>' + esc(r.cue_friendly || r.cue_desc || r.cue_code) + '</b> &nbsp;+&nbsp; <b>' + esc(r.case_friendly || r.case_desc || r.case_code) + '</b></div>'
-      + '<div class="cd-acts">' + pill(r.status) + emailBtn + dlvBtn + delBtn + es + '</div></div>';
+      + setLine
+      + '<div class="cd-acts">' + pill(r.status) + emailBtn + editBtn + dlvBtn + delBtn + es + '</div>'
+      + editor + deliv + '</div>';
   }).join('');
+}
+function cdItemOpts(list, sel) { return (list || []).map(x => '<option value="' + esc(x.code) + '"' + (x.code === sel ? ' selected' : '') + '>' + esc(x.friendly || x.description) + '</option>').join(''); }
+function cdEditItems(id) { const e = document.getElementById('cdEdit' + id); if (e) e.style.display = e.style.display === 'none' ? 'flex' : 'none'; }
+async function cdSaveItems(id) {
+  const cueCode = (document.getElementById('cdEcue' + id) || {}).value, caseCode = (document.getElementById('cdEcase' + id) || {}).value;
+  const cue = _cdCues.find(c => c.code === cueCode), kase = _cdCases.find(c => c.code === caseCode);
+  if (!cue || !kase) { cdSetStatus('Pick a cue and a case.', true); return; }
+  try {
+    await sb('PATCH', 'requests?id=eq.' + id, { cue_code: cueCode, cue_desc: cue.description, cue_friendly: cue.friendly || cue.description, case_code: caseCode, case_desc: kase.description, case_friendly: kase.friendly || kase.description }, CD_WP);
+    cdSetStatus('Items updated. (Re-email the player if they were already told the old ones.)');
+    await cdLoad();
+  } catch (e) { cdSetStatus('Update failed: ' + (e.message || e), true); }
 }
 
 async function cdEmail(id) {
@@ -10811,15 +10928,35 @@ async function cdDelete(id) {
   } catch (e) { cdSetStatus('Delete failed: ' + (e.message || e), true); }
 }
 
+/* Set a delivery day/time/location (service-role write) then email the player the
+   pickup plan via GAS (recipient derived server-side). Re-runs re-email. */
+async function cdSchedule(id) {
+  const d = (document.getElementById('cdDdate' + id) || {}).value || '';
+  const t = (document.getElementById('cdDtime' + id) || {}).value || '';
+  const loc = ((document.getElementById('cdDloc' + id) || {}).value || '').trim();
+  if (!d && !t && !loc) { cdSetStatus('Set a day, time, or location first.', true); return; }
+  cdSetStatus('Scheduling…');
+  try {
+    await sb('PATCH', 'requests?id=eq.' + id, { delivery_date: d || null, delivery_time: t || null, delivery_location: loc || null, status: 'scheduled', scheduled_at: new Date().toISOString() }, CD_WP);
+    const res = await fetch(CUEDROP_MAILER_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'cue_delivery_notify', admin_key: SB_KEY, id }) });
+    const j = await res.json().catch(() => ({}));
+    if (j.ok) cdSetStatus('Scheduled — player emailed the pickup details.');
+    else if (j.email_status === 'blocked') cdSetStatus('Scheduled — player on No-Contact list, no email sent.', true);
+    else cdSetStatus('Scheduled, but the email failed: ' + (j.error || j.email_status || 'unknown'), true);
+    await cdLoad();
+  } catch (e) { cdSetStatus('Schedule failed: ' + (e.message || e), true); }
+}
+
 function cdStartPoll() {
   if (_cdPoll) clearInterval(_cdPoll);
   _cdPoll = setInterval(async () => {
     const panel = document.getElementById('tab-cuedrop'); if (!panel || !panel.classList.contains('active')) return;
     if (document.getElementById('cdAc').classList.contains('show')) return;
     if (document.activeElement && /INPUT|SELECT/.test(document.activeElement.tagName)) return;
-    try { const rows = await sb('GET', 'requests?select=*&order=created_at.desc&limit=500', null, CD_RP) || []; const sig = rows.length + ':' + rows.map(r => r.id + r.status).join(','); if (sig !== _cdSig) { _cdReqs = rows; _cdSig = sig; cdRender(); } } catch { /* transient */ }
+    try { const rows = await sb('GET', 'requests?select=*&order=created_at.desc&limit=500', null, CD_RP) || []; const sig = cdSig(rows); if (sig !== _cdSig) { _cdReqs = rows; _cdSig = sig; cdRender(); } } catch { /* transient */ }
   }, 20000);
 }
+function cdSig(rows) { return rows.length + ':' + rows.map(r => r.id + r.status + (r.delivery_date || '') + (r.delivery_time || '') + (r.delivery_location || '')).join(','); }
 
 /* ═══════════════ CountMeIn tab (0.1) — party RSVPs ═══════════════
    Reads/writes the countmein schema with SB_KEY (service-role). Operator edits
