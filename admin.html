@@ -1076,6 +1076,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="ourrack">OurRack</button>
       <button class="tab" data-tab="preshot">PreShot</button>
       <button class="tab" data-tab="cuedrop">CueDrop</button>
+      <button class="tab" data-tab="countmein">CountMeIn</button>
     </div>
 
     <div id="globalStatus" class="status-line"></div>
@@ -4220,6 +4221,67 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       </div>
     </div>
 
+    <div id="tab-countmein" class="tab-panel">
+      <style>
+        #tab-countmein .cm-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}
+        @media(max-width:640px){#tab-countmein .cm-grid{grid-template-columns:1fr}}
+        #tab-countmein .cm-fld{display:flex;flex-direction:column;gap:4px;margin-bottom:11px}
+        #tab-countmein .cm-fld.full{grid-column:1/-1}
+        #tab-countmein .cm-fld label{font-size:.78rem;font-weight:600;color:var(--muted)}
+        #tab-countmein .cm-fld input,#tab-countmein .cm-fld textarea{border:1px solid var(--border);border-radius:8px;padding:9px 11px;font:inherit;background:var(--card);color:var(--text)}
+        #tab-countmein .cm-fld textarea{min-height:72px;resize:vertical}
+        #tab-countmein .cm-fld.chk{flex-direction:row;align-items:center;gap:8px}
+        #tab-countmein .cm-fld.chk input{width:22px;height:22px}
+        #tab-countmein .cm-counts{display:flex;gap:10px;flex-wrap:wrap;margin:4px 0 16px}
+        #tab-countmein .cm-stat{border:1px solid var(--border);border-radius:12px;padding:10px 16px;background:var(--card);text-align:center;min-width:90px}
+        #tab-countmein .cm-stat .n{font-size:1.5rem;font-weight:800;line-height:1}
+        #tab-countmein .cm-stat .l{font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-top:4px}
+        #tab-countmein .cm-stat.head{border-color:var(--spm-accent)}
+        #tab-countmein .cm-stat.head .n{color:var(--spm-accent)}
+        #tab-countmein .cm-list{display:flex;flex-direction:column;gap:8px}
+        #tab-countmein .cm-row{border:1px solid var(--border);border-radius:10px;background:var(--card);padding:10px 13px}
+        #tab-countmein .cm-who{font-weight:700}
+        #tab-countmein .cm-meta{color:var(--muted);font-size:.85rem;margin-top:3px}
+        #tab-countmein .cm-note{font-size:.85rem;margin-top:5px;color:var(--text);font-style:italic}
+        #tab-countmein .cm-empty{color:var(--muted);padding:22px;text-align:center}
+        #tab-countmein .badge.st-yes{background:#e7f6ec;color:#12703f}
+        #tab-countmein .badge.st-maybe{background:#fef3c7;color:#92600a}
+        #tab-countmein .badge.st-no{background:#fde8ea;color:#a3172b}
+        #tab-countmein .cm-link{font-size:.82rem;color:var(--muted);word-break:break-all}
+        #tab-countmein .cm-link a{color:var(--spm-accent)}
+        #tab-countmein hr{border:none;border-top:1px solid var(--border);margin:18px 0}
+      </style>
+      <div class="card">
+        <div class="ps-row" style="margin-bottom:12px"><h2 style="margin:0">CountMeIn &mdash; Party RSVPs</h2>
+          <span class="ps-status" id="cmStatus"></span></div>
+        <div id="cmGate" class="cm-empty" style="display:none">Add <code>?key=&lt;service-role JWT&gt;</code> to the URL to manage RSVPs.</div>
+        <div id="cmMain">
+          <h3 style="margin:6px 0 10px;font-size:1rem">Event details <span style="font-weight:400;color:var(--muted);font-size:.85rem">&mdash; this is what players see on the RSVP page</span></h3>
+          <div class="cm-grid">
+            <div class="cm-fld full"><label>Party name</label><input id="cmName" placeholder="SPM APA Celebration Party"></div>
+            <div class="cm-fld full"><label>Subtitle / tagline</label><input id="cmSubtitle" placeholder="Session-End Bash + We Bought the League!"></div>
+            <div class="cm-fld"><label>Date</label><input id="cmDate" type="date"></div>
+            <div class="cm-fld chk"><input id="cmActive" type="checkbox"><label for="cmActive" style="margin:0">Accepting RSVPs</label></div>
+            <div class="cm-fld"><label>Start time</label><input id="cmStart" type="time"></div>
+            <div class="cm-fld"><label>End time</label><input id="cmEnd" type="time"></div>
+            <div class="cm-fld"><label>Venue</label><input id="cmVenue" placeholder="The venue name"></div>
+            <div class="cm-fld"><label>RSVP by</label><input id="cmRsvpBy" type="date"></div>
+            <div class="cm-fld full"><label>Address</label><input id="cmAddress" placeholder="123 Main St, South Portland ME"></div>
+            <div class="cm-fld full"><label>Description</label><textarea id="cmDesc"></textarea></div>
+          </div>
+          <div class="ps-row"><button class="btn" onclick="cmSaveEvent()">Save event</button>
+            <span class="cm-link">Public link: <a id="cmPublicLink" href="#" target="_blank" rel="noopener"></a></span></div>
+
+          <hr>
+          <div class="ps-row" style="margin-bottom:8px"><h3 style="margin:0;font-size:1rem">Responses</h3>
+            <button class="btn btn-outline btn-sm" onclick="cmLoad()">Refresh</button>
+            <button class="btn btn-outline btn-sm" onclick="cmCopyEmails()">Copy attendee emails</button></div>
+          <div class="cm-counts" id="cmCounts"></div>
+          <div class="cm-list" id="cmList"><div class="cm-empty">Loading&hellip;</div></div>
+        </div>
+      </div>
+    </div>
+
     <div id="tab-poolpics" class="tab-panel">
 
       <div class="pp-subtabs">
@@ -4647,7 +4709,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.320';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.321';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -9743,7 +9805,8 @@ const TAB_LABEL = {
   nickpick:      'NickPick',
   ourrack:       'OurRack',
   preshot:       'PreShot',
-  cuedrop:       'CueDrop'
+  cuedrop:       'CueDrop',
+  countmein:     'CountMeIn'
 };
 
 function switchTab(name) {
@@ -9781,6 +9844,7 @@ function switchTab(name) {
   if (name === 'ourrack') orInit();
   if (name === 'preshot') psInit();
   if (name === 'cuedrop') cdInit();
+  if (name === 'countmein') cmInit();
 }
 
 /* ═══════════════ ChalkTalk tab (v0.1) — player question submissions ═══════════════
@@ -10754,6 +10818,99 @@ function cdStartPoll() {
     if (document.getElementById('cdAc').classList.contains('show')) return;
     if (document.activeElement && /INPUT|SELECT/.test(document.activeElement.tagName)) return;
     try { const rows = await sb('GET', 'requests?select=*&order=created_at.desc&limit=500', null, CD_RP) || []; const sig = rows.length + ':' + rows.map(r => r.id + r.status).join(','); if (sig !== _cdSig) { _cdReqs = rows; _cdSig = sig; cdRender(); } } catch { /* transient */ }
+  }, 20000);
+}
+
+/* ═══════════════ CountMeIn tab (0.1) — party RSVPs ═══════════════
+   Reads/writes the countmein schema with SB_KEY (service-role). Operator edits
+   ONE event's details (players see them on the public RSVP page) and watches
+   RSVPs roll in live. RSVPs themselves arrive via the public page → GAS
+   rsvp_submit; this tab never sends the confirmation (that is server-side).
+   Namespaced cm* / _cm*. */
+const CM_RP = { 'Accept-Profile': 'countmein' };
+const CM_WP = { 'Accept-Profile': 'countmein', 'Content-Profile': 'countmein' };
+const COUNTMEIN_URL = 'https://southportlandmetroapa.github.io/countmein/';
+let _cmEvent = null, _cmRsvps = [], _cmSig = '', _cmPoll = null;
+
+async function cmInit() {
+  if (!SB_KEY) { document.getElementById('cmGate').style.display = 'block'; document.getElementById('cmMain').style.display = 'none'; return; }
+  await cmLoadEvent(); await cmLoad(); cmStartPoll();
+}
+function cmSetStatus(m, err) { const el = document.getElementById('cmStatus'); if (el) { el.textContent = m; el.style.color = err ? 'var(--spm-primary)' : 'var(--muted)'; clearTimeout(el._t); el._t = setTimeout(() => { el.textContent = ''; }, 6000); } }
+
+async function cmLoadEvent() {
+  try {
+    const rows = await sb('GET', 'events?select=*&order=created_at.desc&limit=1', null, CM_RP) || [];
+    _cmEvent = rows[0] || null;
+    if (!_cmEvent) return;
+    const g = (id, v) => { const e = document.getElementById(id); if (e) e.value = v == null ? '' : v; };
+    g('cmName', _cmEvent.name); g('cmSubtitle', _cmEvent.subtitle); g('cmDate', _cmEvent.event_date);
+    g('cmStart', _cmEvent.start_time); g('cmEnd', _cmEvent.end_time); g('cmVenue', _cmEvent.venue);
+    g('cmAddress', _cmEvent.address); g('cmDesc', _cmEvent.description); g('cmRsvpBy', _cmEvent.rsvp_by);
+    document.getElementById('cmActive').checked = !!_cmEvent.active;
+    const a = document.getElementById('cmPublicLink'); a.href = COUNTMEIN_URL; a.textContent = COUNTMEIN_URL;
+  } catch (e) { cmSetStatus('Event load failed: ' + (e.message || e), true); }
+}
+async function cmSaveEvent() {
+  if (!_cmEvent) { cmSetStatus('No event to save.', true); return; }
+  const v = id => { const e = document.getElementById(id); return e ? e.value.trim() : ''; };
+  const body = {
+    name: v('cmName') || 'SPM APA Party', subtitle: v('cmSubtitle') || null, event_date: v('cmDate') || null,
+    start_time: v('cmStart') || null, end_time: v('cmEnd') || null, venue: v('cmVenue') || null,
+    address: v('cmAddress') || null, description: v('cmDesc') || null, rsvp_by: v('cmRsvpBy') || null,
+    active: document.getElementById('cmActive').checked, updated_at: new Date().toISOString()
+  };
+  try { await sb('PATCH', 'events?slug=eq.' + encodeURIComponent(_cmEvent.slug), body, CM_WP); cmSetStatus('Event saved — the RSVP page is updated.'); await cmLoadEvent(); }
+  catch (e) { cmSetStatus('Save failed: ' + (e.message || e), true); }
+}
+
+async function cmLoad() {
+  const list = document.getElementById('cmList'); if (!SB_KEY) return;
+  try {
+    const slug = _cmEvent ? _cmEvent.slug : '';
+    _cmRsvps = await sb('GET', 'rsvps?' + (slug ? 'event_slug=eq.' + encodeURIComponent(slug) + '&' : '') + 'select=*&order=created_at.desc&limit=1000', null, CM_RP) || [];
+    _cmSig = _cmRsvps.length + ':' + _cmRsvps.map(r => r.id + r.status + r.party_size).join(',');
+    cmRender();
+  } catch (e) { if (list) list.innerHTML = '<div class="cm-empty">Couldn\'t load: ' + esc(e.message || String(e)) + '</div>'; }
+}
+function cmStat(n, l, cls) { return '<div class="cm-stat' + (cls ? ' ' + cls : '') + '"><div class="n">' + n + '</div><div class="l">' + l + '</div></div>'; }
+function cmRender() {
+  const list = document.getElementById('cmList'), counts = document.getElementById('cmCounts'); if (!list) return;
+  const yes = _cmRsvps.filter(r => r.status === 'yes'), maybe = _cmRsvps.filter(r => r.status === 'maybe'), no = _cmRsvps.filter(r => r.status === 'no');
+  const head = yes.reduce((s, r) => s + (r.party_size || 1), 0);
+  if (counts) counts.innerHTML = cmStat(yes.length, 'Coming') + cmStat(head, 'Headcount', 'head') + cmStat(maybe.length, 'Maybe') + cmStat(no.length, 'Can’t make it') + cmStat(_cmRsvps.length, 'Responded');
+  if (!_cmRsvps.length) { list.innerHTML = '<div class="cm-empty">No RSVPs yet. Share the public link above to start collecting responses.</div>'; return; }
+  const pill = s => '<span class="badge st-' + s + '">' + (s === 'yes' ? 'Coming' : s === 'maybe' ? 'Maybe' : 'Can’t') + '</span>';
+  list.innerHTML = _cmRsvps.map(r => {
+    const size = r.status === 'no' ? '' : ' &middot; party of ' + (r.party_size || 1) + ((r.party_size || 1) > 1 ? ' (+' + ((r.party_size || 1) - 1) + ')' : '');
+    return '<div class="cm-row"><div class="cm-who">' + esc(r.name || '(no name)') + ' ' + pill(r.status) + '</div>'
+      + '<div class="cm-meta">' + esc(r.email || '') + (r.member_number ? ' &middot; #' + esc(r.member_number) : ' &middot; no roster match') + size + '</div>'
+      + (r.note ? '<div class="cm-note">“' + esc(r.note) + '”</div>' : '') + '</div>';
+  }).join('');
+}
+
+async function cmCopyEmails() {
+  const emails = _cmRsvps.filter(r => r.status === 'yes' || r.status === 'maybe').map(r => r.email).filter(Boolean);
+  const uniq = [...new Set(emails.map(e => e.toLowerCase()))];
+  if (!uniq.length) { cmSetStatus('No attendee emails yet.', true); return; }
+  // Route through the DNC-safe copier: No-Contact attendees are filtered + logged
+  // (they were blocked from the confirmation email too — same posture on copy).
+  const r = await sbCopyEmails(uniq.join(', '), 'slate:countmein-copy');
+  if (!r.ok) { cmSetStatus(r.error || 'Copy failed.', true); return; }
+  cmSetStatus('Copied ' + r.copied + ' email' + (r.copied === 1 ? '' : 's') + (r.removed ? ' (' + r.removed + ' on No-Contact skipped)' : '') + '.');
+}
+
+function cmStartPoll() {
+  if (_cmPoll) clearInterval(_cmPoll);
+  _cmPoll = setInterval(async () => {
+    const panel = document.getElementById('tab-countmein'); if (!panel || !panel.classList.contains('active')) return;
+    if (document.activeElement && /INPUT|TEXTAREA/.test(document.activeElement.tagName)) return;
+    try {
+      const slug = _cmEvent ? _cmEvent.slug : '';
+      const rows = await sb('GET', 'rsvps?' + (slug ? 'event_slug=eq.' + encodeURIComponent(slug) + '&' : '') + 'select=*&order=created_at.desc&limit=1000', null, CM_RP) || [];
+      const sig = rows.length + ':' + rows.map(r => r.id + r.status + r.party_size).join(',');
+      if (sig !== _cmSig) { _cmRsvps = rows; _cmSig = sig; cmRender(); }
+    } catch { /* transient */ }
   }, 20000);
 }
 
