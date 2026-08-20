@@ -4201,7 +4201,21 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         #tab-cuedrop .badge.st-requested{background:#fef3c7;color:#92600a}
         #tab-cuedrop .badge.st-emailed{background:#e6efff;color:#0046cc}
         #tab-cuedrop .badge.st-delivered{background:#e7f6ec;color:#12703f}
-        #tab-cuedrop .badge.st-scheduled{background:#e0f2fe;color:#075985}
+        #tab-cuedrop .badge.st-scheduled{background:#fef0d9;color:#92600a}
+        #tab-cuedrop .cd-hdr{display:flex;flex-wrap:wrap;align-items:center;gap:8px;cursor:pointer}
+        #tab-cuedrop .cd-hdr-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+        #tab-cuedrop .cd-chev{color:var(--muted);transition:transform .15s;font-size:.9rem}
+        #tab-cuedrop .cd-row:not(.cd-collapsed) .cd-chev{transform:rotate(90deg)}
+        #tab-cuedrop .cd-body{margin-top:9px}
+        #tab-cuedrop .cd-row.cd-collapsed .cd-body{display:none}
+        #tab-cuedrop .cd-row{border-left:4px solid var(--border)}
+        #tab-cuedrop .cd-row.st-requested{border-left-color:#cbd5e1}
+        #tab-cuedrop .cd-row.st-emailed{border-left-color:var(--spm-accent)}
+        #tab-cuedrop .cd-row.st-scheduled{border-left-color:#f59e0b}
+        #tab-cuedrop .cd-row.st-delivered{border-left-color:#16a34a}
+        #tab-cuedrop .cd-legend{font-size:.78rem;color:var(--muted);display:flex;gap:14px;flex-wrap:wrap;margin-bottom:10px}
+        #tab-cuedrop .cd-legend span{display:inline-flex;align-items:center;gap:5px}
+        #tab-cuedrop .cd-legend i{width:12px;height:12px;border-radius:3px;display:inline-block}
         #tab-cuedrop .cd-deliv{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:9px;padding-top:9px;border-top:1px dashed var(--border)}
         #tab-cuedrop .cd-deliv label{font-size:.72rem;color:var(--muted);font-weight:600;align-self:center}
         #tab-cuedrop .cd-deliv input{border:1px solid var(--border);border-radius:7px;padding:6px 8px;font:inherit;font-size:.85rem;background:var(--card);color:var(--text)}
@@ -4738,7 +4752,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.322';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.323';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10705,7 +10719,7 @@ function psStartPoll() {
 const CD_RP = { 'Accept-Profile': 'cuedrop' };
 const CD_WP = { 'Accept-Profile': 'cuedrop', 'Content-Profile': 'cuedrop' };
 const CUEDROP_MAILER_URL = 'https://script.google.com/macros/s/AKfycbzGTzkBRTrIIP_tD6sbtOOUmNZkXDdtxPoO4c8fdWt5h3tZFueNSISPv8Q3LWStx73Whw/exec';
-let _cdCues = [], _cdCases = [], _cdReqs = [], _cdPicked = null, _cdAc = [], _cdAcFocus = -1, _cdTimer = null, _cdPoll = null, _cdSig = '';
+let _cdCues = [], _cdCases = [], _cdReqs = [], _cdPicked = null, _cdAc = [], _cdAcFocus = -1, _cdTimer = null, _cdPoll = null, _cdSig = '', _cdExpanded = new Set();
 
 async function cdInit() { await cdLoadCatalog(); await cdLoad(); cdWireSearch(); cdStartPoll(); }
 function cdSetStatus(m, err) { const el = document.getElementById('cdStatus'); if (el) { el.textContent = m; el.style.color = err ? 'var(--spm-primary)' : 'var(--muted)'; clearTimeout(el._t); el._t = setTimeout(() => { el.textContent = ''; }, 6000); } }
@@ -10851,7 +10865,8 @@ function cdRender() {
   cdRenderSchedule(); cdRenderInventory();
   if (!_cdReqs.length) { list.innerHTML = '<div class="cd-empty">No giveaway requests yet. Search a player above, pick a cue + case, and add one.</div>'; return; }
   const pill = s => '<span class="badge st-' + s + '">' + (s === 'requested' ? 'Requested' : s === 'emailed' ? 'Emailed' : s === 'scheduled' ? 'Scheduled' : 'Delivered') + '</span>';
-  list.innerHTML = _cdReqs.map(r => {
+  const legend = '<div class="cd-legend"><span><i style="background:#cbd5e1"></i>Requested</span><span><i style="background:var(--spm-accent)"></i>Emailed</span><span><i style="background:#f59e0b"></i>Delivery scheduled</span><span><i style="background:#16a34a"></i>Delivered</span></div>';
+  list.innerHTML = legend + _cdReqs.map(r => {
     const emailBtn = r.status !== 'delivered' ? '<button class="btn btn-sm" onclick="cdEmail(' + r.id + ')">' + (r.status === 'requested' ? 'Email player' : 'Re-email') + '</button>' : '';
     const dlvBtn = r.status !== 'delivered' ? '<button class="btn btn-outline btn-sm" onclick="cdDeliver(' + r.id + ')">Mark delivered</button>' : '';
     const delBtn = '<button class="btn btn-outline btn-sm" style="color:var(--spm-primary);border-color:var(--spm-primary)" onclick="cdDelete(' + r.id + ')">Delete</button>';
@@ -10870,12 +10885,24 @@ function cdRender() {
         + '<select id="cdEcue' + r.id + '">' + cdItemOpts(_cdCues, r.cue_code) + '</select>'
         + '<select id="cdEcase' + r.id + '">' + cdItemOpts(_cdCases, r.case_code) + '</select>'
         + '<button class="btn btn-sm" onclick="cdSaveItems(' + r.id + ')">Save items</button></div>' : '';
-    return '<div class="cd-row st-' + r.status + '"><div class="cd-who">' + esc(r.player_name || r.member_number) + ' <span class="cd-gear" style="font-weight:400">· APA #' + esc(r.member_number) + '</span></div>'
-      + '<div class="cd-gear"><b>' + esc(r.cue_friendly || r.cue_desc || r.cue_code) + '</b> &nbsp;+&nbsp; <b>' + esc(r.case_friendly || r.case_desc || r.case_code) + '</b></div>'
-      + setLine
-      + '<div class="cd-acts">' + pill(r.status) + emailBtn + editBtn + dlvBtn + delBtn + es + '</div>'
-      + editor + deliv + '</div>';
+    const collapsed = _cdExpanded.has(r.id) ? '' : ' cd-collapsed';
+    return '<div class="cd-row st-' + r.status + collapsed + '" id="cdCard' + r.id + '">'
+      + '<div class="cd-hdr" onclick="cdToggle(' + r.id + ')">'
+        + '<div class="cd-who">' + esc(r.player_name || r.member_number) + ' <span class="cd-gear" style="font-weight:400">· APA #' + esc(r.member_number) + '</span></div>'
+        + '<div class="cd-gear"><b>' + esc(r.cue_friendly || r.cue_desc || r.cue_code) + '</b> + <b>' + esc(r.case_friendly || r.case_desc || r.case_code) + '</b></div>'
+        + setLine
+        + '<div class="cd-hdr-right">' + pill(r.status) + es + '<span class="cd-chev">&#9654;</span></div>'
+      + '</div>'
+      + '<div class="cd-body">'
+        + '<div class="cd-acts">' + emailBtn + editBtn + dlvBtn + delBtn + '</div>'
+        + editor + deliv
+      + '</div></div>';
   }).join('');
+}
+function cdToggle(id) {
+  if (_cdExpanded.has(id)) _cdExpanded.delete(id); else _cdExpanded.add(id);
+  const card = document.getElementById('cdCard' + id);
+  if (card) card.classList.toggle('cd-collapsed', !_cdExpanded.has(id));
 }
 function cdItemOpts(list, sel) { return (list || []).map(x => '<option value="' + esc(x.code) + '"' + (x.code === sel ? ' selected' : '') + '>' + esc(x.friendly || x.description) + '</option>').join(''); }
 function cdEditItems(id) { const e = document.getElementById('cdEdit' + id); if (e) e.style.display = e.style.display === 'none' ? 'flex' : 'none'; }
