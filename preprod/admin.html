@@ -4647,7 +4647,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.319';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.320';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -6330,10 +6330,17 @@ async function init() {
   await refreshCounts();
   await loadReportStatus();
 
-  // Email HQ is the default tab (the static `active` class on tab-emailhq
-  // is set, but the data needs to be loaded explicitly — switchTab() is
-  // what triggers loadEmailHQ() and we never called it on startup).
-  if (document.querySelector('.tab.active')?.dataset.tab === 'emailhq') {
+  // Restore the last tab the operator was on (persisted by switchTab, 3.320).
+  // Falls back to the static default (Email HQ) when there's no saved tab or
+  // it no longer exists. switchTab() handles both the active state and the
+  // tab's data load, so we route startup through it.
+  let savedTab = null;
+  try { savedTab = localStorage.getItem('slateLastTab'); } catch (e) {}
+  if (savedTab && /^[a-z]+$/.test(savedTab) && document.querySelector('.tab[data-tab="' + savedTab + '"]')) {
+    switchTab(savedTab);
+  } else if (document.querySelector('.tab.active')?.dataset.tab === 'emailhq') {
+    // Email HQ is the default tab (its static `active` class is set, but the
+    // data load only happens via switchTab, which we never call on startup).
     loadEmailHQ();
   }
 }
@@ -9742,6 +9749,7 @@ const TAB_LABEL = {
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + name));
+  try { localStorage.setItem('slateLastTab', name); } catch (e) {}  // restored on next load (3.320)
   const sub = document.getElementById('appSubpage');
   if (sub) sub.textContent = TAB_LABEL[name] || '';
   if (name === 'emailhq')     loadEmailHQ();
