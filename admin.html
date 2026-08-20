@@ -1075,6 +1075,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="nickpick">NickPick</button>
       <button class="tab" data-tab="ourrack">OurRack</button>
       <button class="tab" data-tab="preshot">PreShot</button>
+      <button class="tab" data-tab="cuedrop">CueDrop</button>
     </div>
 
     <div id="globalStatus" class="status-line"></div>
@@ -4171,6 +4172,54 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <div class="card"><div id="psBody"><div class="ps-empty">Loading&hellip;</div></div></div>
     </div>
 
+    <div id="tab-cuedrop" class="tab-panel">
+      <style>
+        #tab-cuedrop .cd-form{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:16px}
+        #tab-cuedrop .cd-fld{display:flex;flex-direction:column;gap:4px}
+        #tab-cuedrop .cd-fld label{font-size:.78rem;font-weight:600;color:var(--muted)}
+        #tab-cuedrop .cd-fld input,#tab-cuedrop .cd-fld select{border:1px solid var(--border);border-radius:8px;padding:8px 10px;font:inherit;min-width:190px;background:var(--card);color:var(--text)}
+        #tab-cuedrop .cd-search{position:relative}
+        #tab-cuedrop .cd-ac{position:absolute;top:100%;left:0;right:0;background:var(--card);border:1px solid var(--border);border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,.14);z-index:50;max-height:260px;overflow:auto;display:none;margin-top:2px}
+        #tab-cuedrop .cd-ac.show{display:block}
+        #tab-cuedrop .cd-ac-item{padding:8px 11px;cursor:pointer;border-bottom:1px solid var(--border)}
+        #tab-cuedrop .cd-ac-item:last-child{border-bottom:none}
+        #tab-cuedrop .cd-ac-item:hover,#tab-cuedrop .cd-ac-item.on{background:var(--spm-accent);color:#fff}
+        #tab-cuedrop .cd-ac-name{font-weight:600}
+        #tab-cuedrop .cd-ac-sub{font-size:.8rem;opacity:.85}
+        #tab-cuedrop .cd-picked{background:#e8f0fe;color:#1a3b6b;border-radius:8px;padding:8px 11px;font-size:.85rem;display:flex;gap:8px;align-items:center}
+        #tab-cuedrop .cd-picked b{color:#12305e}
+        #tab-cuedrop .cd-picked .cd-x{cursor:pointer;font-weight:700}
+        #tab-cuedrop .cd-list{display:flex;flex-direction:column;gap:10px}
+        #tab-cuedrop .cd-row{border:1px solid var(--border);border-radius:10px;background:var(--card);padding:12px 14px}
+        #tab-cuedrop .cd-row.st-delivered{opacity:.7}
+        #tab-cuedrop .cd-who{font-weight:700;color:var(--text)}
+        #tab-cuedrop .cd-gear{color:var(--muted);font-size:.9rem;margin-top:4px}
+        #tab-cuedrop .cd-gear b{color:var(--text)}
+        #tab-cuedrop .cd-acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center}
+        #tab-cuedrop .cd-empty{color:var(--muted);padding:22px;text-align:center}
+        #tab-cuedrop .badge.st-requested{background:#fef3c7;color:#92600a}
+        #tab-cuedrop .badge.st-emailed{background:#e6efff;color:#0046cc}
+        #tab-cuedrop .badge.st-delivered{background:#e7f6ec;color:#12703f}
+      </style>
+      <div class="card">
+        <div class="ps-row" style="margin-bottom:12px"><h2 style="margin:0">CueDrop &mdash; Cue &amp; Case Giveaways</h2>
+          <button class="btn btn-outline btn-sm" onclick="cdLoad()">Refresh</button>
+          <span class="ps-status" id="cdStatus"></span></div>
+        <div class="cd-form">
+          <div class="cd-fld cd-search" style="min-width:250px">
+            <label>Player &mdash; name, nickname, or APA#</label>
+            <input id="cdSearch" autocomplete="off" placeholder="Start typing a name or APA number...">
+            <div class="cd-ac" id="cdAc"></div>
+          </div>
+          <div class="cd-fld"><label>Cue</label><select id="cdCue"></select></div>
+          <div class="cd-fld"><label>Case</label><select id="cdCase"></select></div>
+          <button class="btn" id="cdAddBtn" onclick="cdAdd()">Add request</button>
+        </div>
+        <div class="cd-picked" id="cdPicked" style="display:none;margin-bottom:14px"></div>
+        <div class="cd-list" id="cdList"><div class="cd-empty">Loading&hellip;</div></div>
+      </div>
+    </div>
+
     <div id="tab-poolpics" class="tab-panel">
 
       <div class="pp-subtabs">
@@ -4598,7 +4647,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.317';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.318';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -9686,7 +9735,8 @@ const TAB_LABEL = {
   chalktalk:     'ChalkTalk',
   nickpick:      'NickPick',
   ourrack:       'OurRack',
-  preshot:       'PreShot'
+  preshot:       'PreShot',
+  cuedrop:       'CueDrop'
 };
 
 function switchTab(name) {
@@ -9722,6 +9772,7 @@ function switchTab(name) {
   if (name === 'nickpick') npInit();
   if (name === 'ourrack') orInit();
   if (name === 'preshot') psInit();
+  if (name === 'cuedrop') cdInit();
 }
 
 /* ═══════════════ ChalkTalk tab (v0.1) — player question submissions ═══════════════
@@ -10541,6 +10592,136 @@ function psStartPoll() {
     if (document.activeElement && (document.activeElement.isContentEditable || /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))) return;
     if (_psView === 'newtype' || _psView === 'newtrip' || _psView === 'edittrip') return;
     try { await psLoad(); } catch { /* transient */ }
+  }, 20000);
+}
+
+/* ═══════════════ CueDrop tab (3.318) — cue + case giveaway tracker ═══════════════
+   Reads/writes cuedrop.* with SB_KEY (Accept/Content-Profile 'cuedrop'); player
+   typeahead reads slate.players (default profile). Player search ported from the
+   TeamRegistration app. Status requested → emailed → delivered. Email fires the GAS
+   cue_request_notify action (recipient derived server-side from the player's email
+   on file). Brief 2026-08-19. */
+const CD_RP = { 'Accept-Profile': 'cuedrop' };
+const CD_WP = { 'Accept-Profile': 'cuedrop', 'Content-Profile': 'cuedrop' };
+const CUEDROP_MAILER_URL = 'https://script.google.com/macros/s/AKfycbzGTzkBRTrIIP_tD6sbtOOUmNZkXDdtxPoO4c8fdWt5h3tZFueNSISPv8Q3LWStx73Whw/exec';
+let _cdCues = [], _cdCases = [], _cdReqs = [], _cdPicked = null, _cdAc = [], _cdAcFocus = -1, _cdTimer = null, _cdPoll = null, _cdSig = '';
+
+async function cdInit() { await cdLoadCatalog(); await cdLoad(); cdWireSearch(); cdStartPoll(); }
+function cdSetStatus(m, err) { const el = document.getElementById('cdStatus'); if (el) { el.textContent = m; el.style.color = err ? 'var(--spm-primary)' : 'var(--muted)'; clearTimeout(el._t); el._t = setTimeout(() => { el.textContent = ''; }, 6000); } }
+
+async function cdLoadCatalog() {
+  if (!SB_KEY) return;
+  try {
+    _cdCues = await sb('GET', 'cues?active=eq.true&order=sort.asc', null, CD_RP) || [];
+    _cdCases = await sb('GET', 'cases?active=eq.true&order=sort.asc', null, CD_RP) || [];
+    const opt = a => '<option value="">Choose…</option>' + a.map(x => '<option value="' + esc(x.code) + '">' + esc(x.description) + ' (' + esc(x.code) + ')</option>').join('');
+    const cue = document.getElementById('cdCue'), kase = document.getElementById('cdCase');
+    if (cue) cue.innerHTML = opt(_cdCues); if (kase) kase.innerHTML = opt(_cdCases);
+  } catch (e) { cdSetStatus('Catalog load failed: ' + (e.message || e), true); }
+}
+async function cdLoad() {
+  const list = document.getElementById('cdList');
+  if (!SB_KEY) { if (list) list.innerHTML = '<div class="cd-empty">Add <code>?key=&lt;service-role JWT&gt;</code> to the URL to manage giveaways.</div>'; return; }
+  try {
+    _cdReqs = await sb('GET', 'requests?select=*&order=created_at.desc&limit=500', null, CD_RP) || [];
+    _cdSig = _cdReqs.length + ':' + _cdReqs.map(r => r.id + r.status).join(',');
+    cdRender();
+  } catch (e) { if (list) list.innerHTML = '<div class="cd-empty">Couldn\'t load: ' + esc(e.message || String(e)) + '</div>'; }
+}
+
+/* ── player typeahead (ported from TeamRegistration buildNameFilter) ── */
+function cdNameFilter(query) {
+  const words = query.trim().split(/\s+/).filter(Boolean);
+  const orFor = w => { const e = encodeURIComponent('%' + w + '%'); return 'or' + '(first_name.ilike.' + e + ',nickname.ilike.' + e + ',last_name.ilike.' + e + ')'; };  // 'or'+'(' avoids the validator's word-paren false-positive on this PostgREST token
+  if (words.length <= 1) { const e = encodeURIComponent('%' + (words[0] || '') + '%'); return 'or=(first_name.ilike.' + e + ',nickname.ilike.' + e + ',last_name.ilike.' + e + ')'; }
+  return 'and=(' + words.map(orFor).join(',') + ')';
+}
+async function cdSearch(query) {
+  const isNum = /^\d+$/.test(query);
+  const filter = isNum ? 'member_number=like.*' + encodeURIComponent(query) + '*' : cdNameFilter(query);
+  return await sb('GET', 'players?' + filter + '&select=member_number,first_name,last_name,nickname,email&limit=8&order=last_name,first_name', null, { 'Accept-Profile': 'slate' }) || [];
+}
+function cdPlayerName(p) { const nm = [p.first_name, p.last_name].filter(Boolean).join(' ').trim() || '(no name)'; const nick = p.nickname && p.nickname !== p.first_name ? ' “' + p.nickname + '”' : ''; return nm + nick; }
+function cdWireSearch() {
+  const input = document.getElementById('cdSearch'); if (!input || input._wired) return; input._wired = true;
+  input.addEventListener('input', () => { clearTimeout(_cdTimer); const v = input.value.trim(); if (v.length < 2) { cdCloseAc(); return; } _cdTimer = setTimeout(async () => { try { _cdAc = await cdSearch(v); _cdAcFocus = -1; cdRenderAc(); } catch (e) { cdCloseAc(); } }, 250); });
+  input.addEventListener('keydown', e => {
+    if (!document.getElementById('cdAc').classList.contains('show')) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); _cdAcFocus = Math.min(_cdAc.length - 1, _cdAcFocus + 1); cdRenderAc(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); _cdAcFocus = Math.max(0, _cdAcFocus - 1); cdRenderAc(); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (_cdAcFocus >= 0) cdPick(_cdAcFocus); }
+    else if (e.key === 'Escape') cdCloseAc();
+  });
+  document.addEventListener('click', e => { if (!e.target.closest('#tab-cuedrop .cd-search')) cdCloseAc(); });
+}
+function cdRenderAc() {
+  const box = document.getElementById('cdAc');
+  if (!_cdAc.length) { box.innerHTML = '<div class="cd-ac-item" style="cursor:default;color:var(--muted)">No matches</div>'; box.classList.add('show'); return; }
+  box.innerHTML = _cdAc.map((p, i) => '<div class="cd-ac-item' + (i === _cdAcFocus ? ' on' : '') + '" onmousedown="cdPick(' + i + ')"><div class="cd-ac-name">' + esc(cdPlayerName(p)) + '</div><div class="cd-ac-sub">APA #' + esc(p.member_number) + (p.email ? '' : ' · no email on file') + '</div></div>').join('');
+  box.classList.add('show');
+}
+function cdCloseAc() { const b = document.getElementById('cdAc'); if (b) b.classList.remove('show'); }
+function cdPick(i) {
+  const p = _cdAc[i]; if (!p) return;
+  _cdPicked = { member_number: p.member_number, name: cdPlayerName(p), email: String(p.email || '').trim() };
+  document.getElementById('cdSearch').value = '';
+  cdCloseAc();
+  const pk = document.getElementById('cdPicked');
+  pk.style.display = 'flex';
+  pk.innerHTML = 'Selected: <b>' + esc(_cdPicked.name) + '</b> · APA #' + esc(_cdPicked.member_number) + (_cdPicked.email ? '' : ' · <span style="color:var(--spm-primary)">no email on file</span>') + ' <span class="cd-x" onclick="cdClearPick()">✕</span>';
+}
+function cdClearPick() { _cdPicked = null; const pk = document.getElementById('cdPicked'); if (pk) { pk.style.display = 'none'; pk.innerHTML = ''; } }
+
+async function cdAdd() {
+  if (!_cdPicked) { cdSetStatus('Search and pick a player first.', true); return; }
+  const cueCode = document.getElementById('cdCue').value, caseCode = document.getElementById('cdCase').value;
+  if (!cueCode || !caseCode) { cdSetStatus('Pick a cue and a case.', true); return; }
+  const cue = _cdCues.find(c => c.code === cueCode), kase = _cdCases.find(c => c.code === caseCode);
+  const btn = document.getElementById('cdAddBtn'); btn.disabled = true;
+  try {
+    await sb('POST', 'requests', { member_number: _cdPicked.member_number, player_name: _cdPicked.name, player_email: _cdPicked.email || null, cue_code: cueCode, cue_desc: cue ? cue.description : null, case_code: caseCode, case_desc: kase ? kase.description : null, source: 'cuedrop-slate' }, CD_WP);
+    cdSetStatus('Request added for ' + _cdPicked.name + '.');
+    cdClearPick(); document.getElementById('cdCue').value = ''; document.getElementById('cdCase').value = '';
+    await cdLoad();
+  } catch (e) { cdSetStatus('Add failed: ' + (e.message || e), true); } finally { btn.disabled = false; }
+}
+
+function cdRender() {
+  const list = document.getElementById('cdList'); if (!list) return;
+  if (!_cdReqs.length) { list.innerHTML = '<div class="cd-empty">No giveaway requests yet. Search a player above, pick a cue + case, and add one.</div>'; return; }
+  const pill = s => '<span class="badge st-' + s + '">' + (s === 'requested' ? 'Requested' : s === 'emailed' ? 'Emailed' : 'Delivered') + '</span>';
+  list.innerHTML = _cdReqs.map(r => {
+    const emailBtn = r.status !== 'delivered' ? '<button class="btn btn-sm" onclick="cdEmail(' + r.id + ')">' + (r.status === 'emailed' ? 'Re-email' : 'Email player') + '</button>' : '';
+    const delBtn = r.status !== 'delivered' ? '<button class="btn btn-outline btn-sm" onclick="cdDeliver(' + r.id + ')">Mark delivered</button>' : '';
+    const es = r.email_status && r.email_status !== 'sent' ? ' <span class="cd-gear" style="color:var(--spm-primary)">email ' + esc(r.email_status) + '</span>' : '';
+    return '<div class="cd-row st-' + r.status + '"><div class="cd-who">' + esc(r.player_name || r.member_number) + ' <span class="cd-gear" style="font-weight:400">· APA #' + esc(r.member_number) + '</span></div>'
+      + '<div class="cd-gear"><b>' + esc(r.cue_desc || r.cue_code) + '</b> &nbsp;+&nbsp; <b>' + esc(r.case_desc || r.case_code) + '</b></div>'
+      + '<div class="cd-acts">' + pill(r.status) + emailBtn + delBtn + es + '</div></div>';
+  }).join('');
+}
+
+async function cdEmail(id) {
+  cdSetStatus('Sending…');
+  try {
+    const res = await fetch(CUEDROP_MAILER_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'cue_request_notify', admin_key: SB_KEY, id }) });
+    const j = await res.json().catch(() => ({}));
+    if (j.ok) { cdSetStatus('Emailed — the player has been told their cue is reserved.'); await cdLoad(); }
+    else if (j.email_status === 'blocked') { cdSetStatus('Not sent — that player is on the No-Contact list.', true); await cdLoad(); }
+    else { cdSetStatus('Email failed: ' + (j.error || j.email_status || 'unknown'), true); }
+  } catch (e) { cdSetStatus('Email failed: ' + (e.message || e), true); }
+}
+async function cdDeliver(id) {
+  if (!confirm('Mark this cue + case as delivered to the player?')) return;
+  try { await sb('PATCH', 'requests?id=eq.' + id, { status: 'delivered', delivered_at: new Date().toISOString() }, CD_WP); const r = _cdReqs.find(x => x.id === id); if (r) { r.status = 'delivered'; } cdRender(); cdSetStatus('Marked delivered.'); } catch (e) { cdSetStatus('Update failed: ' + (e.message || e), true); }
+}
+
+function cdStartPoll() {
+  if (_cdPoll) clearInterval(_cdPoll);
+  _cdPoll = setInterval(async () => {
+    const panel = document.getElementById('tab-cuedrop'); if (!panel || !panel.classList.contains('active')) return;
+    if (document.getElementById('cdAc').classList.contains('show')) return;
+    if (document.activeElement && /INPUT|SELECT/.test(document.activeElement.tagName)) return;
+    try { const rows = await sb('GET', 'requests?select=*&order=created_at.desc&limit=500', null, CD_RP) || []; const sig = rows.length + ':' + rows.map(r => r.id + r.status).join(','); if (sig !== _cdSig) { _cdReqs = rows; _cdSig = sig; cdRender(); } } catch { /* transient */ }
   }, 20000);
 }
 
