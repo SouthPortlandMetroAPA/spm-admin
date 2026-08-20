@@ -4017,25 +4017,37 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 
     <div id="tab-nickpick" class="tab-panel">
       <style>
-        #tab-nickpick .np-head{display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px}
-        #tab-nickpick .np-count{color:var(--muted); font-size:.9rem}
-        #tab-nickpick .np-list{display:flex; flex-direction:column; gap:12px}
-        #tab-nickpick .np-r{border:1px solid var(--border); border-radius:10px; background:var(--card); padding:14px 16px}
-        #tab-nickpick .np-r.np-entered{border-left:3px solid var(--spm-accent)}
-        #tab-nickpick .np-r.np-denied{opacity:.65}
-        #tab-nickpick .np-nick{font-size:1.05rem; line-height:1.5; color:var(--text); overflow-wrap:anywhere}
-        #tab-nickpick .np-nick .np-arrow{color:var(--muted); margin:0 8px}
+        #tab-nickpick .np-head{display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:12px}
+        #tab-nickpick .np-count{color:var(--muted); font-size:.9rem; font-weight:600}
+        #tab-nickpick .np-list{display:flex; flex-direction:column; gap:8px}
+        #tab-nickpick .np-r{border:1px solid var(--border); border-left:4px solid var(--border); border-radius:10px; background:var(--card); padding:11px 14px}
+        #tab-nickpick .np-r.np-pending{border-left-color:#f59e0b}
+        #tab-nickpick .np-r.np-entered{border-left-color:#16a34a}
+        #tab-nickpick .np-r.np-denied{border-left-color:#9ca3af; opacity:.72}
+        #tab-nickpick .np-top{display:flex; align-items:center; gap:12px; flex-wrap:wrap}
+        #tab-nickpick .np-main{flex:1; min-width:220px}
+        #tab-nickpick .np-nick{font-size:1.02rem; line-height:1.4; color:var(--text); overflow-wrap:anywhere}
+        #tab-nickpick .np-nick .np-arrow{color:var(--muted); margin:0 7px}
         #tab-nickpick .np-nick .np-new{font-weight:700; color:var(--spm-accent)}
         #tab-nickpick .np-nick .np-cur{color:var(--muted)}
-        #tab-nickpick .np-meta{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:10px; padding-top:10px; border-top:1px solid var(--border)}
-        #tab-nickpick .np-who{font-weight:700; color:var(--text)}
+        #tab-nickpick .np-metaline{margin-top:3px}
+        #tab-nickpick .np-who{font-weight:600; color:var(--text)}
         #tab-nickpick .np-sub{color:var(--muted); font-size:.85rem}
         #tab-nickpick a.np-mail{color:var(--spm-accent); text-decoration:none}
         #tab-nickpick a.np-mail:hover{text-decoration:underline}
+        #tab-nickpick .np-right{display:flex; align-items:center; gap:8px; margin-left:auto}
+        #tab-nickpick .np-acts{display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:flex-end}
+        #tab-nickpick .np-notebtn{background:none; border:none; color:var(--spm-accent); cursor:pointer; font:inherit; font-size:.85rem; padding:4px 2px}
+        #tab-nickpick .np-notebtn:hover{text-decoration:underline}
+        #tab-nickpick .np-deny{color:var(--spm-primary)}
+        #tab-nickpick .np-deny-confirm{background:var(--spm-primary); color:#fff; border:1px solid var(--spm-primary)}
+        #tab-nickpick .np-badge{font-size:.66rem; font-weight:800; letter-spacing:.04em; padding:2px 8px; border-radius:999px; text-transform:uppercase; margin-right:6px; white-space:nowrap}
+        #tab-nickpick .np-badge.pending{background:#fef0d9; color:#92600a}
+        #tab-nickpick .np-badge.entered{background:#e7f6ec; color:#12703f}
+        #tab-nickpick .np-badge.denied{background:#f1f3f5; color:#55606b}
+        #tab-nickpick .np-note{width:100%; box-sizing:border-box; border:1px solid var(--border); border-radius:8px; padding:8px 10px; font:inherit; font-size:.92rem; resize:vertical; margin-top:10px}
+        #tab-nickpick .np-decnote{margin-top:6px; font-style:italic; color:var(--text)}
         #tab-nickpick .np-empty{color:var(--muted); padding:28px; text-align:center}
-        #tab-nickpick .np-note{width:100%; box-sizing:border-box; border:1px solid var(--border); border-radius:8px; padding:8px 10px; font:inherit; font-size:.94rem; resize:vertical; margin-top:10px}
-        #tab-nickpick .np-actions{display:flex; gap:8px; flex-wrap:wrap; margin-top:8px}
-        #tab-nickpick .np-actions .np-deny{margin-left:auto; color:var(--spm-primary)}
       </style>
       <div class="card">
         <div class="np-head">
@@ -4241,6 +4253,12 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         #tab-cuedrop .cd-inv-left{color:var(--muted);min-width:96px;text-align:right}
         #tab-cuedrop .cd-inv-low .cd-inv-left{color:#92600a}
         #tab-cuedrop .cd-inv-out .cd-inv-left{color:var(--spm-primary);font-weight:700}
+        #tab-cuedrop .cd-inv-left b{font-size:1rem}
+        #tab-cuedrop .cd-inv-bar{flex:0 0 54px;height:6px;background:var(--border);border-radius:3px;overflow:hidden}
+        #tab-cuedrop .cd-inv-bar i{display:block;height:100%;background:#16a34a;border-radius:3px;transition:width .2s}
+        #tab-cuedrop .cd-inv-low .cd-inv-bar i{background:#f59e0b}
+        #tab-cuedrop .cd-inv-out .cd-inv-bar i{background:var(--spm-primary)}
+        #tab-cuedrop .cd-inv-tot{font-weight:400;color:var(--muted);font-size:.72rem;text-transform:none;letter-spacing:0;margin-left:6px}
       </style>
       <div class="card">
         <div class="ps-row" style="margin-bottom:12px"><h2 style="margin:0">CueDrop &mdash; Cue &amp; Case Giveaways</h2>
@@ -4752,7 +4770,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.323';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.324';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10215,44 +10233,71 @@ function npFmtWhen(ts) {
   try { return new Date(ts).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }); }
   catch { return String(ts); }
 }
-function npStatusChip(r) {
-  if (r.status === 'entered') return '<span class="badge ok">Entered in Nexus</span>';
-  if (r.status === 'denied')  return '<span class="badge muted">Denied</span>';
-  return '<span class="badge warn">Pending</span>';
+function npBadge(st) {
+  return '<span class="np-badge ' + st + '">' + (st === 'entered' ? 'Entered' : st === 'denied' ? 'Denied' : 'Pending') + '</span>';
+}
+function npRelTime(ts) {
+  if (!ts) return '';
+  const s = (Date.now() - new Date(ts).getTime()) / 1000;
+  if (s < 60) return 'just now';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+  if (s < 604800) return Math.floor(s / 86400) + 'd ago';
+  try { return new Date(ts).toLocaleDateString(undefined, { dateStyle: 'medium' }); } catch { return ''; }
 }
 
+/* Compact one-row card (UX research 2026): badge + left-stripe status, nickname
+   change + player in the always-visible summary, one-click Mark entered (stays
+   on-brand), Deny as a separated secondary, and the note textarea revealed on
+   demand (+ note) instead of always open. */
 function npCard(r, memberMap) {
   const p = memberMap[String(r.member_number)] || null;
   const nm = p ? [p.first_name, p.last_name].filter(Boolean).join(' ').trim() : '';
-  const mail = '<a class="np-mail" href="mailto:' + esc(r.email) + '">' + esc(r.email) + '</a>';
-  const who = '<span class="np-who">' + esc(nm || '(no name on file)') + '</span> &middot; APA #' + esc(r.member_number || '?') + ' &middot; ' + mail;
-  const cur = r.current_nickname
-    ? '<span class="np-cur">&ldquo;' + esc(r.current_nickname) + '&rdquo;</span>'
-    : '<span class="np-cur">(no nickname yet)</span>';
-  const nick = cur + '<span class="np-arrow">&rarr;</span><span class="np-new">&ldquo;' + esc(r.requested_nickname) + '&rdquo;</span>';
-  const pending = r.status !== 'entered' && r.status !== 'denied';
+  const st = r.status === 'entered' ? 'entered' : r.status === 'denied' ? 'denied' : 'pending';
+  const nick = (r.current_nickname ? '<span class="np-cur">&ldquo;' + esc(r.current_nickname) + '&rdquo;</span>' : '<span class="np-cur">(no nickname yet)</span>')
+    + '<span class="np-arrow">&rarr;</span><span class="np-new">&ldquo;' + esc(r.requested_nickname) + '&rdquo;</span>';
+  const meta = '<span class="np-who">' + esc(nm || '(no name on file)') + '</span>'
+    + ' <span class="np-sub">&middot; APA #' + esc(r.member_number || '?')
+    + ' &middot; <a class="np-mail" href="mailto:' + esc(r.email) + '">' + esc(r.email) + '</a>'
+    + ' &middot; ' + esc(npRelTime(r.created_at)) + '</span>';
 
-  let controls = '';
-  if (pending) {
-    controls = '<textarea id="np-note-' + r.id + '" class="np-note" rows="1" placeholder="Optional note to the player (used on Deny, or add context)"></textarea>'
-      + '<div class="np-actions">'
-      +   '<button id="np-ent-' + r.id + '" class="btn btn-sm" onclick="npDecide(' + r.id + ',\'entered\')">Mark entered</button>'
-      +   '<button class="btn btn-outline btn-sm np-deny" onclick="npDecide(' + r.id + ',\'denied\')">Deny</button>'
+  let right, note;
+  if (st === 'pending') {
+    right = '<div class="np-acts" id="np-acts-' + r.id + '">'
+      + '<button class="np-notebtn" onclick="npToggleNote(' + r.id + ')">+ note</button>'
+      + '<button id="np-ent-' + r.id + '" class="btn btn-sm" onclick="npDecide(' + r.id + ',\'entered\')">Mark entered</button>'
+      + '<button class="btn btn-outline btn-sm np-deny" onclick="npDeny(' + r.id + ')">Deny</button>'
       + '</div>';
+    note = '<textarea id="np-note-' + r.id + '" class="np-note" style="display:none" rows="2" placeholder="Note to the player (optional)"></textarea>';
   } else {
-    const noteTxt = r.decided_note ? '<div class="np-sub" style="margin-top:6px">Note: ' + esc(r.decided_note) + '</div>' : '';
-    controls = '<div class="np-sub" style="margin-top:8px">' + (r.status === 'entered' ? 'Entered' : 'Denied')
-      + (r.decided_at ? ' &middot; ' + esc(npFmtWhen(r.decided_at)) : '') + '</div>' + noteTxt;
+    right = '<span class="np-sub">' + (st === 'entered' ? 'Entered' : 'Denied') + (r.decided_at ? ' &middot; ' + esc(npFmtWhen(r.decided_at)) : '') + '</span>';
+    note = r.decided_note ? '<div class="np-sub np-decnote">&ldquo;' + esc(r.decided_note) + '&rdquo;</div>' : '';
   }
 
-  return '<div class="np-r' + (r.status === 'entered' ? ' np-entered' : '') + (r.status === 'denied' ? ' np-denied' : '') + '">'
-    + '<div class="np-nick">' + nick + '</div>'
-    + '<div class="np-meta">' + who + '</div>'
-    + '<div class="np-meta" style="border-top:none; padding-top:2px; margin-top:2px">'
-    +   '<span class="np-sub">' + esc(npFmtWhen(r.created_at)) + '</span> ' + npStatusChip(r)
+  return '<div class="np-r np-' + st + '">'
+    + '<div class="np-top">'
+    +   '<div class="np-main"><div class="np-nick">' + npBadge(st) + nick + '</div><div class="np-metaline">' + meta + '</div></div>'
+    +   '<div class="np-right">' + right + '</div>'
     + '</div>'
-    + controls
+    + note
     + '</div>';
+}
+
+function npToggleNote(id) {
+  const ta = document.getElementById('np-note-' + id); if (!ta) return;
+  const show = ta.style.display === 'none';
+  ta.style.display = show ? 'block' : 'none';
+  if (show) ta.focus();
+}
+/* Deny = destructive minority path: reveal an inline reason + a red Confirm-deny
+   (two-step that doubles as the mistake guard) rather than a browser confirm(). */
+function npDeny(id) {
+  const ta = document.getElementById('np-note-' + id);
+  if (ta) { ta.style.display = 'block'; ta.placeholder = 'Reason for denying (optional — emailed to the player)'; ta.focus(); }
+  const acts = document.getElementById('np-acts-' + id);
+  if (acts) acts.innerHTML = '<span class="np-sub" style="margin-right:auto">Deny this request?</span>'
+    + '<button class="btn btn-outline btn-sm" onclick="npPaint()">Cancel</button>'
+    + '<button class="btn btn-sm np-deny-confirm" onclick="npDecide(' + id + ',\'denied\')">Confirm deny</button>';
 }
 
 async function npRenderRows(rows) { _npRows = rows || []; await npPaint(); }
@@ -10267,7 +10312,7 @@ async function npPaint() {
   if (doneBtn) doneBtn.textContent = (_npShowDone ? 'Hide resolved' : 'Show resolved') + (doneCount ? ' (' + doneCount + ')' : '');
   if (count) count.textContent = pending.length ? (pending.length + ' pending') : 'No pending requests';
   if (!list) return;
-  if (!visible.length) { list.innerHTML = '<div class="np-empty">' + (_npShowDone ? 'Nothing here yet.' : 'No pending requests.') + '</div>'; return; }
+  if (!visible.length) { list.innerHTML = '<div class="np-empty">' + (_npShowDone ? 'Nothing here yet.' : 'You&rsquo;re all caught up &mdash; no pending requests. &#127881;') + '</div>'; return; }
   const memberMap = await npResolveMembers(visible.map(r => r.member_number));
   const scroll = list.scrollTop;
   list.innerHTML = visible.map(r => npCard(r, memberMap)).join('');
@@ -10294,7 +10339,6 @@ function npStartPoll() {
    never writes slate.players. */
 async function npDecide(id, decision) {
   const note = ((document.getElementById('np-note-' + id) || {}).value || '').trim();
-  if (decision === 'denied' && !confirm('Deny this nickname request? The player will be emailed.')) return;
   const entBtn = document.getElementById('np-ent-' + id);
   if (entBtn) entBtn.disabled = true;
   npSetStatus(decision === 'entered' ? 'Marking entered…' : 'Denying…', 'muted');
@@ -10837,16 +10881,24 @@ function cdRenderSchedule() {
    the item) = remaining. Poll skips re-render while a stock input is focused. */
 function cdRenderInventory() {
   const el = document.getElementById('cdInv'); if (!el) return;
-  const col = (list, reqField, kind) => '<div><div class="cd-inv-h">' + kind + '</div>' + (list || []).map(x => {
-    const out = _cdReqs.filter(r => r[reqField] === x.code).length, left = (x.stock || 0) - out;
-    const cls = left <= 0 ? 'cd-inv-out' : left <= 3 ? 'cd-inv-low' : '';
-    return '<div class="cd-inv-row ' + cls + '"><span class="cd-inv-name">' + esc(x.friendly || x.description) + '</span>'
-      + '<input type="number" min="0" id="cdStk_' + kind + '_' + esc(x.code) + '" value="' + (x.stock || 0) + '">'
-      + '<span class="cd-inv-left">' + out + ' out &middot; <b>' + left + ' left</b></span></div>';
-  }).join('') + '</div>';
-  el.innerHTML = '<div class="cd-inv-title">Inventory <span style="font-weight:400;color:var(--muted);font-size:.8rem">&mdash; set the purchased count; &ldquo;left&rdquo; = purchased &minus; given out</span></div>'
-    + '<div class="cd-inv-cols">' + col(_cdCues, 'cue_code', 'Cues') + col(_cdCases, 'case_code', 'Cases') + '</div>'
-    + '<button class="btn btn-sm" style="margin-top:10px" onclick="cdSaveStock()">Save stock</button>';
+  // kind is 'cue' / 'case' so the input ids match cdSaveStock's lookup; label is the heading.
+  const build = (list, reqField, kind, label) => {
+    let totLeft = 0, totStock = 0;
+    const rows = (list || []).map(x => {
+      const out = _cdReqs.filter(r => r[reqField] === x.code).length, stock = x.stock || 0, left = stock - out;
+      totLeft += Math.max(0, left); totStock += stock;
+      const cls = left <= 0 ? 'cd-inv-out' : left <= 3 ? 'cd-inv-low' : '';
+      const pct = stock > 0 ? Math.max(0, Math.min(100, Math.round(left / stock * 100))) : 0;
+      return '<div class="cd-inv-row ' + cls + '"><span class="cd-inv-name">' + esc(x.friendly || x.description) + '</span>'
+        + '<input type="number" min="0" id="cdStk_' + kind + '_' + esc(x.code) + '" value="' + stock + '">'
+        + '<div class="cd-inv-bar" title="' + left + ' of ' + stock + '"><i style="width:' + pct + '%"></i></div>'
+        + '<span class="cd-inv-left"><b>' + left + '</b> left</span></div>';
+    }).join('');
+    return '<div><div class="cd-inv-h">' + label + '<span class="cd-inv-tot">' + totLeft + ' of ' + totStock + ' left</span></div>' + rows + '</div>';
+  };
+  el.innerHTML = '<div class="cd-inv-title">Inventory <span style="font-weight:400;color:var(--muted);font-size:.8rem">&mdash; purchased &minus; given out = left</span></div>'
+    + '<div class="cd-inv-cols">' + build(_cdCues, 'cue_code', 'cue', 'Cues') + build(_cdCases, 'case_code', 'case', 'Cases') + '</div>'
+    + '<button class="btn btn-sm" style="margin-top:12px" onclick="cdSaveStock()">Save stock</button>';
 }
 async function cdSaveStock() {
   const changes = [];
