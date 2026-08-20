@@ -1073,6 +1073,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="poolpics">PoolPics</button>
       <button class="tab" data-tab="chalktalk">ChalkTalk</button>
       <button class="tab" data-tab="nickpick">NickPick</button>
+      <button class="tab" data-tab="ourrack">OurRack</button>
     </div>
 
     <div id="globalStatus" class="status-line"></div>
@@ -4048,6 +4049,90 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       </div>
     </div>
 
+    <div id="tab-ourrack" class="tab-panel">
+      <style>
+        #tab-ourrack .or-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+        #tab-ourrack .or-views{display:flex;gap:6px;flex-wrap:wrap}
+        #tab-ourrack .or-vbtn{padding:6px 12px;border:1px solid var(--border);border-radius:999px;background:var(--card);cursor:pointer;font-size:.9rem;color:var(--text)}
+        #tab-ourrack .or-vbtn.active{background:var(--spm-accent);color:#fff;border-color:var(--spm-accent)}
+        #tab-ourrack .or-vbtn .or-ct{font-weight:700;margin-left:5px}
+        #tab-ourrack .or-cols{display:grid;grid-template-columns:1fr;gap:14px}
+        @media(min-width:768px){ #tab-ourrack .or-cols.two{grid-template-columns:1fr 1fr} }
+        #tab-ourrack .or-col h3{margin:0 0 8px;font-size:.95rem}
+        #tab-ourrack .or-list{display:flex;flex-direction:column;gap:10px}
+        #tab-ourrack .or-card{border:1px solid var(--border);border-left:4px solid var(--muted);border-radius:10px;background:var(--card);padding:10px 12px}
+        #tab-ourrack .or-card.paul{border-left-color:#0046cc}
+        #tab-ourrack .or-card.michelle{border-left-color:#c026d3}
+        #tab-ourrack .or-card.both{border-left-color:#7c3aed}
+        #tab-ourrack .or-card.urgent{border-left-width:6px;border-left-color:var(--spm-primary)}
+        #tab-ourrack .or-title{font-weight:600;font-size:1rem;color:var(--text);outline:none}
+        #tab-ourrack .or-title[contenteditable]:focus{background:rgba(0,49,161,.06);border-radius:4px;padding:0 3px}
+        #tab-ourrack .or-note{color:var(--muted);font-size:.85rem;margin-top:4px;white-space:pre-wrap;overflow-wrap:anywhere}
+        #tab-ourrack .or-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:8px}
+        #tab-ourrack .or-badge{font-size:.72rem;padding:3px 9px;border-radius:999px;cursor:pointer;border:1px solid transparent}
+        #tab-ourrack .or-b-small{background:#e7f6ec;color:#12703f}
+        #tab-ourrack .or-b-medium{background:#fef3c7;color:#92600a}
+        #tab-ourrack .or-b-large{background:#fdecec;color:#a02030}
+        #tab-ourrack .or-b-paul{background:#e6efff;color:#0046cc}
+        #tab-ourrack .or-b-michelle{background:#fbe8ff;color:#a21caf}
+        #tab-ourrack .or-b-both{background:#eee;color:#333}
+        #tab-ourrack .or-b-urgent{background:var(--spm-primary);color:#fff}
+        #tab-ourrack .or-b-un{background:var(--card);color:var(--muted);border:1px dashed var(--border)}
+        #tab-ourrack .or-acts{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;align-items:center}
+        #tab-ourrack .or-sub{color:var(--muted);font-size:.8rem;margin-left:auto}
+        #tab-ourrack .or-empty{color:var(--muted);padding:24px;text-align:center}
+        #tab-ourrack .or-mask{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;z-index:9998;padding:16px}
+        #tab-ourrack .or-mask.show{display:flex}
+        #tab-ourrack .or-modal{background:var(--card);border-radius:14px;padding:20px;max-width:460px;width:100%;max-height:90vh;overflow:auto}
+        #tab-ourrack .or-modal h3{margin:0 0 12px}
+        #tab-ourrack .or-modal label{display:block;font-weight:600;font-size:.85rem;margin:12px 0 4px}
+        #tab-ourrack .or-modal input[type=text],#tab-ourrack .or-modal textarea{width:100%;box-sizing:border-box;border:1px solid var(--border);border-radius:8px;padding:9px 11px;font:inherit}
+        #tab-ourrack .or-seg{display:flex;gap:6px;flex-wrap:wrap}
+        #tab-ourrack .or-seg button{flex:1;min-width:70px;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--card);cursor:pointer;font:inherit;color:var(--text)}
+        #tab-ourrack .or-seg button.on{background:var(--spm-accent);color:#fff;border-color:var(--spm-accent)}
+        #tab-ourrack .or-mrow{display:flex;gap:8px;margin-top:18px}
+      </style>
+      <div class="card">
+        <div class="or-head">
+          <h2 style="margin:0">OurRack &mdash; Task Tracker</h2>
+          <button class="btn btn-sm" onclick="orOpenNew()">+ New task</button>
+          <button class="btn btn-outline btn-sm" onclick="orLoad()">Refresh</button>
+          <span class="or-sub" id="orStatus" style="margin-left:0"></span>
+        </div>
+        <div class="or-views" id="orViews"></div>
+        <div id="orBody" style="margin-top:12px"><div class="or-empty">Loading&hellip;</div></div>
+      </div>
+
+      <div class="or-mask" id="orMask">
+        <div class="or-modal">
+          <h3 id="orMTitle">New task</h3>
+          <label>Title</label>
+          <input type="text" id="orMName" maxlength="200" placeholder="What needs doing?">
+          <label>Details (optional)</label>
+          <textarea id="orMDetails" rows="3" maxlength="2000"></textarea>
+          <label>Effort</label>
+          <div class="or-seg" id="orMEffort" data-v="medium"></div>
+          <label>Time</label>
+          <div class="or-seg" id="orMTime" data-v="medium"></div>
+          <label>Assignee</label>
+          <div class="or-seg" id="orMAsg" data-v=""></div>
+          <label style="display:flex;align-items:center;gap:8px;margin-top:14px"><input type="checkbox" id="orMUrgent" style="width:auto"> Urgent <span class="or-sub" id="orMUHint" style="margin-left:0"></span></label>
+          <div class="or-mrow">
+            <button class="btn" style="flex:1" onclick="orSaveModal()">Save</button>
+            <button class="btn btn-outline" style="flex:1" onclick="orCloseModal()">Cancel</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="or-mask" id="orAsgMask">
+        <div class="or-modal" style="max-width:360px;text-align:center">
+          <h3>Assign to</h3>
+          <div class="or-seg" style="flex-direction:column" id="orAsgOpts"></div>
+          <div class="or-mrow"><button class="btn btn-outline" style="flex:1" onclick="orAsgResolve(undefined)">Cancel</button></div>
+        </div>
+      </div>
+    </div>
+
     <div id="tab-poolpics" class="tab-panel">
 
       <div class="pp-subtabs">
@@ -4475,7 +4560,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.315';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.316';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -9561,7 +9646,8 @@ const TAB_LABEL = {
   onthefelt:     'OnTheFelt',
   poolpics:      'PoolPics',
   chalktalk:     'ChalkTalk',
-  nickpick:      'NickPick'
+  nickpick:      'NickPick',
+  ourrack:       'OurRack'
 };
 
 function switchTab(name) {
@@ -9595,6 +9681,7 @@ function switchTab(name) {
   if (name === 'poolpics') ppInit();
   if (name === 'chalktalk') ctInit();
   if (name === 'nickpick') npInit();
+  if (name === 'ourrack') orInit();
 }
 
 /* ═══════════════ ChalkTalk tab (v0.1) — player question submissions ═══════════════
@@ -10024,6 +10111,158 @@ async function npDecide(id, decision) {
     npSetStatus('Failed: ' + (e.message || e), 'err');
     if (entBtn) entBtn.disabled = false;
   }
+}
+
+/* ═══════════════ OurRack tab (3.316) — Paul + Michelle task tracker ═══════════════
+   Native port of Apps/OurRack/site. Reads/writes ourrack.tasks with SB_KEY
+   (Accept/Content-Profile 'ourrack'). Four-status kanban (backlog / in_progress /
+   done / archived), two axes effort+time (small|medium|large), assignee
+   Paul|Michelle|Both|null, is_urgent. No stored order — all sorts derived. 15s poll. */
+const OR_RP = { 'Accept-Profile': 'ourrack' };
+const OR_WP = { 'Accept-Profile': 'ourrack', 'Content-Profile': 'ourrack' };
+const OR_SCORE = { small: 1, medium: 2, large: 3 };
+const OR_STATUS = ['backlog', 'in_progress', 'done', 'archived'];
+let _orTasks = [], _orView = 'backlog', _orPoll = null, _orSig = '', _orEditId = null, _orAsgResolve = null;
+const orNow = () => new Date().toISOString();
+
+async function orInit() { await orLoad(); orStartPoll(); }
+async function orLoad() {
+  const body = document.getElementById('orBody');
+  if (!SB_KEY) { if (body) body.innerHTML = '<div class="or-empty">Add <code>?key=&lt;service-role JWT&gt;</code> to the URL to manage tasks.</div>'; return; }
+  try {
+    _orTasks = await sb('GET', 'tasks?select=*', null, OR_RP) || [];
+    _orSig = orSig(_orTasks);
+    orRender();
+  } catch (e) { if (body) body.innerHTML = '<div class="or-empty">Couldn\'t load tasks: ' + esc(e.message || String(e)) + '</div>'; }
+}
+function orSig(t) { return t.length + ':' + t.map(x => x.id + x.status + x.assignee + x.effort + x.time_size + x.is_urgent + (x.title || '') + (x.details || '')).join('|'); }
+async function orPatch(id, patch) {
+  patch.updated_at = orNow();
+  try { await sb('PATCH', 'tasks?id=eq.' + id, patch, OR_WP); const t = _orTasks.find(x => x.id === id); if (t) Object.assign(t, patch); orRender(); }
+  catch (e) { orSetStatus('Save failed: ' + (e.message || e), 'err'); orLoad(); }
+}
+
+const orUrg = (a, b) => (b.is_urgent ? 1 : 0) - (a.is_urgent ? 1 : 0);
+const orBacklog = () => _orTasks.filter(t => t.status === 'backlog').sort((a, b) => orUrg(a, b) || OR_SCORE[a.effort] - OR_SCORE[b.effort] || OR_SCORE[a.time_size] - OR_SCORE[b.time_size] || (a.created_at || '').localeCompare(b.created_at || ''));
+const orIpFor = (name) => _orTasks.filter(t => t.status === 'in_progress' && (t.assignee === name || t.assignee === 'Both')).sort((a, b) => orUrg(a, b) || (a.status_changed_at || '').localeCompare(b.status_changed_at || ''));
+const orDone = () => _orTasks.filter(t => t.status === 'done').sort((a, b) => (b.status_changed_at || '').localeCompare(a.status_changed_at || ''));
+const orArch = () => _orTasks.filter(t => t.status === 'archived').sort((a, b) => (b.status_changed_at || '').localeCompare(a.status_changed_at || ''));
+
+function orRel(ts) { if (!ts) return ''; const s = (Date.now() - new Date(ts).getTime()) / 1000; if (s < 3600) return Math.max(1, Math.round(s / 60)) + 'm ago'; if (s < 86400) return Math.round(s / 3600) + 'h ago'; return Math.round(s / 86400) + 'd ago'; }
+function orSetStatus(m, k) { const el = document.getElementById('orStatus'); if (!el) return; el.textContent = m; el.style.color = k === 'err' ? 'var(--spm-primary)' : 'var(--muted)'; clearTimeout(el._t); el._t = setTimeout(() => { el.textContent = ''; }, 5000); }
+
+function orRender() {
+  const views = document.getElementById('orViews'), body = document.getElementById('orBody');
+  if (!body) return;
+  const nB = _orTasks.filter(t => t.status === 'backlog').length, nI = _orTasks.filter(t => t.status === 'in_progress').length;
+  const tabs = [['backlog', 'Backlog', nB], ['in_progress', 'Active', nI], ['done', 'Done', null], ['archived', 'Archive', null]];
+  if (views) views.innerHTML = tabs.map(([v, l, c]) => '<button class="or-vbtn' + (v === _orView ? ' active' : '') + '" onclick="orSetView(\'' + v + '\')">' + l + (c != null ? '<span class="or-ct">' + c + '</span>' : '') + '</button>').join('');
+  if (_orView === 'backlog') body.innerHTML = orListHtml(orBacklog(), '📝 Empty backlog. Tap “+ New task”.');
+  else if (_orView === 'in_progress') body.innerHTML = '<div class="or-cols two">'
+    + '<div class="or-col"><h3 style="color:#0046cc">Paul</h3>' + orListHtml(orIpFor('Paul'), 'Nothing in progress for Paul.') + '</div>'
+    + '<div class="or-col"><h3 style="color:#c026d3">Michelle</h3>' + orListHtml(orIpFor('Michelle'), 'Nothing in progress for Michelle.') + '</div></div>';
+  else if (_orView === 'done') body.innerHTML = orListHtml(orDone(), '🎉 Nothing finished yet.');
+  else body.innerHTML = orListHtml(orArch(), '🗄️ Archive is empty.');
+  orWire();
+}
+function orSetView(v) { _orView = v; orRender(); }
+function orListHtml(tasks, empty) { return tasks.length ? '<div class="or-list">' + tasks.map(orCard).join('') + '</div>' : '<div class="or-empty">' + empty + '</div>'; }
+
+function orCard(t) {
+  const cls = t.assignee === 'Paul' ? 'paul' : t.assignee === 'Michelle' ? 'michelle' : t.assignee === 'Both' ? 'both' : '';
+  const idx = OR_STATUS.indexOf(t.status);
+  const back = idx > 0 ? '<button class="btn btn-outline btn-sm" onclick="orMove(' + t.id + ',-1)">&lsaquo; Back</button>' : '';
+  const fwd = idx < 3 ? '<button class="btn btn-sm" onclick="orMove(' + t.id + ',1)">' + (idx === 2 ? 'Archive &rsaquo;' : 'Forward &rsaquo;') + '</button>' : '';
+  const canUrgent = t.status === 'backlog' || t.status === 'in_progress';
+  const urgentBadge = canUrgent
+    ? '<span class="or-badge ' + (t.is_urgent ? 'or-b-urgent' : 'or-b-un') + '" onclick="orUrgent(' + t.id + ')">' + (t.is_urgent ? '⚡ Urgent' : 'Not urgent') + '</span>'
+    : (t.is_urgent ? '<span class="or-badge or-b-urgent">⚡ Urgent</span>' : '');
+  const asg = t.assignee
+    ? '<span class="or-badge or-b-' + (t.assignee === 'Paul' ? 'paul' : t.assignee === 'Michelle' ? 'michelle' : 'both') + '" onclick="orAssign(' + t.id + ')">' + t.assignee + '</span>'
+    : '<span class="or-badge or-b-un" onclick="orAssign(' + t.id + ')">Unassigned</span>';
+  const when = t.status === 'in_progress' ? '<span class="or-sub">picked up ' + orRel(t.status_changed_at) + '</span>'
+    : (t.status === 'done' || t.status === 'archived') ? '<span class="or-sub">' + orRel(t.status_changed_at) + '</span>' : '';
+  return '<div class="or-card ' + cls + (t.is_urgent ? ' urgent' : '') + '" data-id="' + t.id + '">'
+    + '<div class="or-title" contenteditable="true" spellcheck="false">' + esc(t.title || '') + '</div>'
+    + (t.details ? '<div class="or-note">' + esc(t.details) + '</div>' : '')
+    + '<div class="or-meta">' + urgentBadge
+    + '<span class="or-badge or-b-' + t.effort + '" onclick="orCycle(' + t.id + ',\'effort\')">Effort: ' + t.effort + '</span>'
+    + '<span class="or-badge or-b-' + t.time_size + '" onclick="orCycle(' + t.id + ',\'time_size\')">Time: ' + t.time_size + '</span>'
+    + asg + when + '</div>'
+    + '<div class="or-acts">' + back + fwd
+    + '<button class="btn btn-outline btn-sm" onclick="orOpenEdit(' + t.id + ')">Edit</button>'
+    + '<button class="btn btn-outline btn-sm" style="color:var(--spm-primary)" onclick="orDelete(' + t.id + ')">Delete</button></div>'
+    + '</div>';
+}
+function orWire() {
+  document.querySelectorAll('#tab-ourrack .or-title[contenteditable]').forEach(el => {
+    el.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); el.blur(); } if (e.key === 'Escape') { const t = _orTasks.find(x => x.id === +el.closest('.or-card').dataset.id); el.textContent = t ? t.title : el.textContent; el.blur(); } });
+    el.addEventListener('blur', async () => {
+      const id = +el.closest('.or-card').dataset.id, t = _orTasks.find(x => x.id === id); if (!t) return;
+      const val = el.textContent.trim();
+      if (!val) { el.textContent = t.title; orSetStatus("Title can't be empty", 'err'); return; }
+      if (val !== t.title) await orPatch(id, { title: val });
+    });
+  });
+}
+
+async function orCycle(id, field) { const t = _orTasks.find(x => x.id === id); if (!t) return; const o = ['small', 'medium', 'large']; await orPatch(id, { [field]: o[(o.indexOf(t[field]) + 1) % 3] }); }
+async function orUrgent(id) { const t = _orTasks.find(x => x.id === id); if (!t) return; await orPatch(id, { is_urgent: !t.is_urgent }); }
+async function orMove(id, dir) {
+  const t = _orTasks.find(x => x.id === id); if (!t) return; const ni = OR_STATUS.indexOf(t.status) + dir; if (ni < 0 || ni > 3) return;
+  if (t.status === 'backlog' && dir === 1 && !t.assignee) { const a = await orPickAssignee(false); if (!a) return; await orPatch(id, { assignee: a, status: 'in_progress', status_changed_at: orNow() }); return; }
+  await orPatch(id, { status: OR_STATUS[ni], status_changed_at: orNow() });
+}
+async function orAssign(id) { const t = _orTasks.find(x => x.id === id); if (!t) return; const a = await orPickAssignee(t.status === 'backlog'); if (a === undefined) return; await orPatch(id, { assignee: a }); }
+async function orDelete(id) { if (!confirm('Delete this task? This is a hard delete and cannot be undone.')) return; try { await sb('DELETE', 'tasks?id=eq.' + id, null, OR_WP); _orTasks = _orTasks.filter(x => x.id !== id); orRender(); } catch (e) { orSetStatus('Delete failed: ' + (e.message || e), 'err'); } }
+
+/* assignee picker — returns 'Paul'|'Michelle'|'Both'| null (unassigned) | undefined (cancel) */
+function orPickAssignee(allowUnassigned) {
+  const opts = document.getElementById('orAsgOpts');
+  const buttons = [['Paul', 'Paul'], ['Michelle', 'Michelle'], ['Both', 'Both']];
+  if (allowUnassigned) buttons.push(['null', 'Unassigned']);
+  opts.innerHTML = buttons.map(([v, l]) => '<button onclick="orAsgResolve(\'' + v + '\')">' + l + '</button>').join('');
+  document.getElementById('orAsgMask').classList.add('show');
+  return new Promise(res => { _orAsgResolve = res; });
+}
+function orAsgResolve(v) { document.getElementById('orAsgMask').classList.remove('show'); if (_orAsgResolve) { const r = _orAsgResolve; _orAsgResolve = null; r(v === undefined ? undefined : (v === 'null' ? null : v)); } }
+
+/* create / edit modal */
+function orSeg(id, opts, val) { const c = document.getElementById(id); c.dataset.v = val; c.innerHTML = opts.map(([v, l]) => '<button class="' + (v === val ? 'on' : '') + '" onclick="orSegPick(\'' + id + '\',\'' + v + '\')">' + l + '</button>').join(''); }
+function orSegPick(id, v) { const c = document.getElementById(id); c.dataset.v = v; [...c.children].forEach(b => b.classList.toggle('on', b.textContent.toLowerCase() === (v === '' ? 'unassigned' : v).toLowerCase() || b.getAttribute('onclick').indexOf("'" + v + "'") >= 0)); if (id === 'orMAsg') orUHint(); }
+function orUHint() { const urgent = document.getElementById('orMUrgent').checked, asg = document.getElementById('orMAsg').dataset.v; document.getElementById('orMUHint').textContent = urgent ? (asg ? '(goes straight to Active)' : '(assignee required)') : ''; }
+function orOpenNew() { _orEditId = null; document.getElementById('orMTitle').textContent = 'New task'; document.getElementById('orMName').value = ''; document.getElementById('orMDetails').value = ''; document.getElementById('orMUrgent').checked = false; orSeg('orMEffort', [['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']], 'medium'); orSeg('orMTime', [['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']], 'medium'); orSeg('orMAsg', [['', 'Unassigned'], ['Paul', 'Paul'], ['Michelle', 'Michelle'], ['Both', 'Both']], ''); orUHint(); document.getElementById('orMask').classList.add('show'); document.getElementById('orMName').focus(); }
+function orOpenEdit(id) { const t = _orTasks.find(x => x.id === id); if (!t) return; _orEditId = id; document.getElementById('orMTitle').textContent = 'Edit task'; document.getElementById('orMName').value = t.title || ''; document.getElementById('orMDetails').value = t.details || ''; document.getElementById('orMUrgent').checked = !!t.is_urgent; orSeg('orMEffort', [['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']], t.effort); orSeg('orMTime', [['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']], t.time_size); orSeg('orMAsg', [['', 'Unassigned'], ['Paul', 'Paul'], ['Michelle', 'Michelle'], ['Both', 'Both']], t.assignee || ''); orUHint(); document.getElementById('orMask').classList.add('show'); }
+function orCloseModal() { document.getElementById('orMask').classList.remove('show'); }
+async function orSaveModal() {
+  const title = document.getElementById('orMName').value.trim();
+  if (!title) { orSetStatus('Enter a title', 'err'); return; }
+  const details = document.getElementById('orMDetails').value.trim() || null;
+  const effort = document.getElementById('orMEffort').dataset.v, time_size = document.getElementById('orMTime').dataset.v;
+  const assignee = document.getElementById('orMAsg').dataset.v || null;
+  const urgent = document.getElementById('orMUrgent').checked;
+  if (urgent && !assignee) { orSetStatus('Urgent tasks need an assignee', 'err'); return; }
+  try {
+    if (_orEditId) {
+      await sb('PATCH', 'tasks?id=eq.' + _orEditId, { title, details, effort, time_size, assignee, is_urgent: urgent, updated_at: orNow() }, OR_WP);
+    } else {
+      const row = { title, details, effort, time_size, assignee, is_urgent: urgent, updated_at: orNow(), status: urgent ? 'in_progress' : 'backlog', status_changed_at: orNow() };
+      await sb('POST', 'tasks', row, OR_WP);
+    }
+    orCloseModal(); await orLoad();
+  } catch (e) { orSetStatus('Save failed: ' + (e.message || e), 'err'); }
+}
+document.addEventListener('change', e => { if (e.target && e.target.id === 'orMUrgent') orUHint(); });
+
+function orStartPoll() {
+  if (_orPoll) clearInterval(_orPoll);
+  _orPoll = setInterval(async () => {
+    const panel = document.getElementById('tab-ourrack');
+    if (!panel || !panel.classList.contains('active')) return;
+    if (document.activeElement && (document.activeElement.isContentEditable || /INPUT|TEXTAREA/.test(document.activeElement.tagName))) return;
+    if (document.getElementById('orMask').classList.contains('show') || document.getElementById('orAsgMask').classList.contains('show')) return;
+    try { const rows = await sb('GET', 'tasks?select=*', null, OR_RP) || []; const sig = orSig(rows); if (sig !== _orSig) { _orTasks = rows; _orSig = sig; orRender(); } } catch { /* transient */ }
+  }, 15000);
 }
 
 /* OTF_TAB_BEGIN — OnTheFelt tab logic (3.305). Ported + tournament-scoped.
