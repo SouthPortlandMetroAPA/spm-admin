@@ -1074,6 +1074,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="chalktalk">ChalkTalk</button>
       <button class="tab" data-tab="nickpick">NickPick</button>
       <button class="tab" data-tab="ourrack">OurRack</button>
+      <button class="tab" data-tab="preshot">PreShot</button>
     </div>
 
     <div id="globalStatus" class="status-line"></div>
@@ -4133,6 +4134,43 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       </div>
     </div>
 
+    <div id="tab-preshot" class="tab-panel">
+      <style>
+        #tab-preshot .ps-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+        #tab-preshot .ps-crumb{color:var(--spm-accent);cursor:pointer;font-size:.9rem}
+        #tab-preshot .ps-grid{display:grid;grid-template-columns:1fr;gap:14px}
+        @media(min-width:820px){ #tab-preshot .ps-grid.two{grid-template-columns:1fr 1fr} }
+        #tab-preshot .ps-card{border:1px solid var(--border);border-radius:12px;background:var(--card);padding:14px}
+        #tab-preshot .ps-card.next{border:2px solid var(--spm-accent)}
+        #tab-preshot .ps-trip{cursor:pointer}
+        #tab-preshot .ps-name{font-weight:700;font-size:1.05rem;color:var(--text)}
+        #tab-preshot .ps-sub{color:var(--muted);font-size:.85rem}
+        #tab-preshot .ps-pill{display:inline-block;font-size:.72rem;padding:2px 9px;border-radius:999px;background:var(--spm-accent);color:#fff}
+        #tab-preshot .ps-pill.today{background:#fab219;color:#4a2a00}
+        #tab-preshot .ps-pill.past{background:var(--border);color:var(--muted)}
+        #tab-preshot .ps-prog{margin-top:10px}
+        #tab-preshot .ps-prog .ps-lab{display:flex;justify-content:space-between;font-size:.8rem;color:var(--muted)}
+        #tab-preshot .ps-bar{height:8px;border-radius:999px;background:var(--border);overflow:hidden;margin-top:3px}
+        #tab-preshot .ps-bar > i{display:block;height:100%;width:0;background:var(--spm-accent)}
+        #tab-preshot .ps-bar.full > i{background:#3b6d11}
+        #tab-preshot .ps-pane h3{margin:0 0 8px;display:flex;justify-content:space-between;font-size:.95rem}
+        #tab-preshot .ps-item{display:flex;align-items:center;gap:8px;padding:7px 2px;border-bottom:1px solid var(--border)}
+        #tab-preshot .ps-item .ps-lbl{flex:1;outline:none;overflow-wrap:anywhere}
+        #tab-preshot .ps-item.done .ps-lbl{text-decoration:line-through;color:var(--muted)}
+        #tab-preshot .ps-tag{font-size:.64rem;padding:2px 7px;border-radius:999px;border:1px solid var(--border);color:var(--muted);white-space:nowrap}
+        #tab-preshot .ps-tag.inst{color:var(--spm-accent);border-color:var(--spm-accent);cursor:pointer}
+        #tab-preshot .ps-mini{border:none;background:none;cursor:pointer;color:var(--muted);font-size:.95rem;padding:2px 4px;line-height:1}
+        #tab-preshot .ps-mini.del{color:var(--spm-primary)}
+        #tab-preshot .ps-add{display:flex;gap:6px;margin-top:10px}
+        #tab-preshot .ps-add input{flex:1;border:1px solid var(--border);border-radius:8px;padding:8px 10px;font:inherit}
+        #tab-preshot .ps-empty{color:var(--muted);padding:22px;text-align:center}
+        #tab-preshot .ps-f label{display:block;font-weight:600;font-size:.85rem;margin:12px 0 4px}
+        #tab-preshot .ps-f input,#tab-preshot .ps-f select,#tab-preshot .ps-f textarea{width:100%;max-width:440px;box-sizing:border-box;border:1px solid var(--border);border-radius:8px;padding:9px 11px;font:inherit}
+        #tab-preshot .ps-status{color:var(--muted);font-size:.85rem}
+      </style>
+      <div class="card"><div id="psBody"><div class="ps-empty">Loading&hellip;</div></div></div>
+    </div>
+
     <div id="tab-poolpics" class="tab-panel">
 
       <div class="pp-subtabs">
@@ -4560,7 +4598,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.316';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.317';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -9647,7 +9685,8 @@ const TAB_LABEL = {
   poolpics:      'PoolPics',
   chalktalk:     'ChalkTalk',
   nickpick:      'NickPick',
-  ourrack:       'OurRack'
+  ourrack:       'OurRack',
+  preshot:       'PreShot'
 };
 
 function switchTab(name) {
@@ -9682,6 +9721,7 @@ function switchTab(name) {
   if (name === 'chalktalk') ctInit();
   if (name === 'nickpick') npInit();
   if (name === 'ourrack') orInit();
+  if (name === 'preshot') psInit();
 }
 
 /* ═══════════════ ChalkTalk tab (v0.1) — player question submissions ═══════════════
@@ -10263,6 +10303,245 @@ function orStartPoll() {
     if (document.getElementById('orMask').classList.contains('show') || document.getElementById('orAsgMask').classList.contains('show')) return;
     try { const rows = await sb('GET', 'tasks?select=*', null, OR_RP) || []; const sig = orSig(rows); if (sig !== _orSig) { _orTasks = rows; _orSig = sig; orRender(); } } catch { /* transient */ }
   }, 15000);
+}
+
+/* ═══════════════ PreShot tab (3.317) — tournament-prep packing + to-do ═══════════════
+   Native port of Apps/PreShot/site. Reads/writes the preshot schema with SB_KEY
+   (Accept/Content-Profile 'preshot'). Model: TYPES (templates) → type_items;
+   INSTANCES (trips) → instance_items; per-trip COMPLETIONS (polymorphic:
+   source_kind type|instance). A trip's list = its type's items THEN its own
+   one-offs. Reload-after-write for correctness. Reorder via up/down (admin). */
+const PS_RP = { 'Accept-Profile': 'preshot' };
+const PS_WP = { 'Accept-Profile': 'preshot', 'Content-Profile': 'preshot' };
+const PS_KINDS = [['packing', 'Packing'], ['todo', 'To-Do']];
+let _psTypes = [], _psInst = [], _psTI = {}, _psII = {}, _psComp = {}, _psView = 'dash', _psCur = null, _psPoll = null;
+const psByPos = (a, b) => (a.position - b.position) || (a.id - b.id);
+const psToday = () => new Date().toISOString().slice(0, 10);
+
+async function psInit() { await psLoad(); psStartPoll(); }
+async function psLoad() {
+  const body = document.getElementById('psBody');
+  if (!SB_KEY) { if (body) body.innerHTML = '<div class="ps-empty">Add <code>?key=&lt;service-role JWT&gt;</code> to the URL to manage PreShot.</div>'; return; }
+  try {
+    const [types, inst, ti, ii, comp] = await Promise.all([
+      sb('GET', 'types?archived_at=is.null&order=name.asc', null, PS_RP),
+      sb('GET', 'instances?archived_at=is.null&order=start_date.asc', null, PS_RP),
+      sb('GET', 'type_items?order=type_id.asc,list_kind.asc,position.asc', null, PS_RP),
+      sb('GET', 'instance_items?order=instance_id.asc,list_kind.asc,position.asc', null, PS_RP),
+      sb('GET', 'completions?select=instance_id,source_kind,source_item_id', null, PS_RP)
+    ]);
+    _psTypes = types || []; _psInst = inst || [];
+    _psTI = {}; (ti || []).forEach(i => { (_psTI[i.type_id] = _psTI[i.type_id] || []).push(i); });
+    _psII = {}; (ii || []).forEach(i => { (_psII[i.instance_id] = _psII[i.instance_id] || []).push(i); });
+    _psComp = {}; (comp || []).forEach(c => { (_psComp[c.instance_id] = _psComp[c.instance_id] || new Set()).add(c.source_kind + ':' + c.source_item_id); });
+    psRender();
+  } catch (e) { if (body) body.innerHTML = '<div class="ps-empty">Couldn\'t load PreShot: ' + esc(e.message || String(e)) + '</div>'; }
+}
+const psW = (m, p, b) => sb(m, p, b, PS_WP);
+function psSetStatus(msg, err) { const el = document.getElementById('psStatus'); if (el) { el.textContent = msg; el.style.color = err ? 'var(--spm-primary)' : 'var(--muted)'; clearTimeout(el._t); el._t = setTimeout(() => { el.textContent = ''; }, 5000); } }
+
+/* helpers */
+const psType = id => _psTypes.find(t => t.id === +id);
+const psInstOf = id => _psInst.find(i => i.id === +id);
+function psItemsFor(inst, kind) {
+  const ti = (_psTI[inst.type_id] || []).filter(i => i.list_kind === kind).sort(psByPos).map(i => ({ ...i, origin: 'type' }));
+  const ii = (_psII[inst.id] || []).filter(i => i.list_kind === kind).sort(psByPos).map(i => ({ ...i, origin: 'instance' }));
+  return ti.concat(ii);
+}
+const psDone = (inst, it) => (_psComp[inst.id] || new Set()).has(it.origin + ':' + it.id);
+function psProg(inst, kind) { const items = psItemsFor(inst, kind); return { done: items.filter(it => psDone(inst, it)).length, total: items.length }; }
+function psCountdown(d) { const days = Math.round((new Date(d + 'T00:00:00') - new Date(psToday() + 'T00:00:00')) / 86400000); if (days < 0) return ['past', 'past']; if (days === 0) return ['today', 'today']; return ['', 'in ' + days + ' day' + (days === 1 ? '' : 's')]; }
+function psDates(a, b) { const f = s => s ? new Date(s + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : ''; return b && b !== a ? f(a) + ' – ' + f(b) : f(a); }
+function psSlug(name, existing) { let base = String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64) || 'x'; let s = base, n = 2; while (existing.includes(s)) s = base + '-' + (n++); return s; }
+
+/* ── render dispatch ── */
+function psRender() {
+  const body = document.getElementById('psBody'); if (!body) return;
+  if (_psView === 'dash') body.innerHTML = psDash();
+  else if (_psView === 'trip') body.innerHTML = psTrip();
+  else if (_psView === 'types') body.innerHTML = psTypesList();
+  else if (_psView === 'typeedit') body.innerHTML = psTypeEdit();
+  else if (_psView === 'newtype') body.innerHTML = psNewTypeForm();
+  else if (_psView === 'newtrip') body.innerHTML = psNewTripForm();
+  else if (_psView === 'edittrip') body.innerHTML = psEditTripForm();
+  psWireLabels();
+}
+function psGo(v, cur) { _psView = v; _psCur = cur != null ? cur : _psCur; document.getElementById('psBody').scrollTop = 0; psRender(); }
+
+function psDash() {
+  const today = psToday();
+  const up = _psInst.filter(x => !x.end_date || x.end_date >= today);
+  const past = _psInst.filter(x => x.end_date && x.end_date < today);
+  const head = '<div class="ps-row"><h2 style="margin:0">PreShot &mdash; Trips</h2>'
+    + '<button class="btn btn-sm" onclick="psGo(\'newtrip\')">+ New trip</button>'
+    + '<button class="btn btn-outline btn-sm" onclick="psGo(\'types\')">Manage types</button>'
+    + '<span class="ps-status" id="psStatus"></span></div>';
+  if (!_psInst.length) return head + '<div class="ps-empty">🧳 No trips yet. Create a template type first, then add a trip.</div>';
+  const card = (t, first) => {
+    const [cc, cl] = psCountdown(t.start_date), P = psProg(t, 'packing'), T = psProg(t, 'todo');
+    const bar = (lab, p) => '<div class="ps-prog"><div class="ps-lab"><span>' + lab + '</span><span>' + p.done + ' / ' + p.total + '</span></div><div class="ps-bar' + (p.total && p.done === p.total ? ' full' : '') + '"><i style="width:' + (p.total ? Math.round(100 * p.done / p.total) : 0) + '%"></i></div></div>';
+    return '<div class="ps-card ps-trip' + (first ? ' next' : '') + '" onclick="psGo(\'trip\',' + t.id + ')">'
+      + '<div class="ps-name">' + esc(t.name) + '</div>'
+      + '<div class="ps-sub">' + esc(psDates(t.start_date, t.end_date)) + ' &middot; <span class="ps-pill ' + cc + '">' + cl + '</span></div>'
+      + bar('Packing', P) + bar('To-Do', T) + '</div>';
+  };
+  let html = head + '<div class="ps-grid two">' + up.map((t, i) => card(t, i === 0)).join('') + '</div>';
+  if (past.length) html += '<h3 style="margin:18px 0 8px;color:var(--muted)">Past</h3><div class="ps-grid two">' + past.map(t => card(t, false)).join('') + '</div>';
+  return html;
+}
+
+function psTrip() {
+  const t = psInstOf(_psCur); if (!t) return psBackDash('Trip not found.');
+  const [cc, cl] = psCountdown(t.start_date), ty = psType(t.type_id);
+  const head = '<div class="ps-row"><span class="ps-crumb" onclick="psGo(\'dash\')">&larr; All trips</span><span class="ps-status" id="psStatus"></span></div>'
+    + '<div class="ps-row"><div><div class="ps-name">' + esc(t.name) + '</div>'
+    + '<div class="ps-sub">' + esc(psDates(t.start_date, t.end_date)) + ' &middot; ' + esc(ty ? ty.name : '?') + ' &middot; <span class="ps-pill ' + cc + '">' + cl + '</span></div></div>'
+    + '<button class="btn btn-outline btn-sm" onclick="psGo(\'edittrip\',' + t.id + ')">Edit details</button>'
+    + '<button class="btn btn-outline btn-sm" style="color:var(--spm-primary)" onclick="psDelTrip(' + t.id + ')">Delete trip</button></div>';
+  const pane = (kind, label) => {
+    const items = psItemsFor(t, kind), done = items.filter(it => psDone(t, it)).length;
+    const rows = items.length ? items.map(it => psItemRow(t, it, true)).join('') : '<div class="ps-empty">Nothing here yet.</div>';
+    return '<div class="ps-card ps-pane"><h3>' + label + ' <span class="ps-sub">' + done + ' / ' + items.length + '</span></h3>' + rows
+      + '<div class="ps-add"><input id="psAdd-' + kind + '" placeholder="Add a ' + label.toLowerCase() + ' item" onkeydown="if(event.key===\'Enter\')psAddInst(' + t.id + ',\'' + kind + '\')"><button class="btn btn-sm" onclick="psAddInst(' + t.id + ',\'' + kind + '\')">Add</button></div></div>';
+  };
+  return head + '<div class="ps-grid two">' + PS_KINDS.map(([k, l]) => pane(k, l)).join('') + '</div>';
+}
+
+function psItemRow(inst, it, withCheck) {
+  const done = withCheck && psDone(inst, it);
+  const tag = it.origin === 'type'
+    ? '<span class="ps-tag">template</span>'
+    : '<span class="ps-tag inst" title="Promote to the template (adds it to every trip of this type)" onclick="psPromote(' + inst.id + ',' + it.id + ')">this trip</span>';
+  const chk = withCheck ? '<input type="checkbox" ' + (done ? 'checked' : '') + ' onchange="psToggle(' + inst.id + ',\'' + it.origin + '\',' + it.id + ')">' : '';
+  return '<div class="ps-item' + (done ? ' done' : '') + '" data-origin="' + it.origin + '" data-id="' + it.id + '">'
+    + chk + '<span class="ps-lbl" contenteditable="true" spellcheck="false">' + esc(it.label) + '</span>' + tag
+    + '<button class="ps-mini" title="Up" onclick="psMove(\'' + it.origin + '\',' + it.id + ',-1)">▲</button>'
+    + '<button class="ps-mini" title="Down" onclick="psMove(\'' + it.origin + '\',' + it.id + ',1)">▼</button>'
+    + '<button class="ps-mini del" title="Delete" onclick="psDelItem(\'' + it.origin + '\',' + it.id + ')">🗑</button></div>';
+}
+function psWireLabels() {
+  document.querySelectorAll('#tab-preshot .ps-lbl[contenteditable]').forEach(el => {
+    el.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); el.blur(); } if (e.key === 'Escape') { el.blur(); psRender(); } });
+    el.addEventListener('blur', async () => {
+      const row = el.closest('[data-id]'); if (!row) return; const origin = row.dataset.origin, id = +row.dataset.id;
+      const val = el.textContent.trim(); const arr = origin === 'type' ? flatTI() : flatII(); const cur = arr.find(x => x.id === id);
+      if (!cur || !val || val === cur.label) { if (cur && !val) el.textContent = cur.label; return; }
+      try { await psW('PATCH', (origin === 'type' ? 'type_items' : 'instance_items') + '?id=eq.' + id, { label: val }); cur.label = val; } catch (e) { psSetStatus('Rename failed', true); psLoad(); }
+    });
+  });
+}
+const flatTI = () => Object.values(_psTI).flat();
+const flatII = () => Object.values(_psII).flat();
+
+/* ── item CRUD ── */
+async function psAddInst(instId, kind) { const el = document.getElementById('psAdd-' + kind); const label = (el.value || '').trim(); if (!label) return; const inst = psInstOf(instId); const peers = (_psII[instId] || []).filter(i => i.list_kind === kind); const pos = peers.reduce((m, i) => Math.max(m, i.position), 0) + 1; try { await psW('POST', 'instance_items', { instance_id: instId, list_kind: kind, position: pos, label }); await psLoad(); } catch (e) { psSetStatus('Add failed: ' + (e.message || e), true); } }
+async function psAddType(typeId, kind) { const el = document.getElementById('psTAdd-' + kind); const label = (el.value || '').trim(); if (!label) return; const peers = (_psTI[typeId] || []).filter(i => i.list_kind === kind); const pos = peers.reduce((m, i) => Math.max(m, i.position), 0) + 1; try { await psW('POST', 'type_items', { type_id: typeId, list_kind: kind, position: pos, label }); await psLoad(); } catch (e) { psSetStatus('Add failed: ' + (e.message || e), true); } }
+async function psToggle(instId, origin, itemId) {
+  const set = _psComp[instId] || (_psComp[instId] = new Set()); const key = origin + ':' + itemId;
+  try {
+    if (set.has(key)) { await psW('DELETE', 'completions?instance_id=eq.' + instId + '&source_kind=eq.' + origin + '&source_item_id=eq.' + itemId); set.delete(key); }
+    else { try { await psW('POST', 'completions', { instance_id: instId, source_kind: origin, source_item_id: itemId }); } catch (e) { /* unique = already done */ } set.add(key); }
+    psRender();
+  } catch (e) { psSetStatus('Update failed', true); psLoad(); }
+}
+async function psMove(origin, id, dir) {
+  const arr = origin === 'type' ? flatTI() : flatII(); const it = arr.find(x => x.id === id); if (!it) return;
+  const scopeKey = origin === 'type' ? 'type_id' : 'instance_id';
+  const peers = (origin === 'type' ? (_psTI[it.type_id] || []) : (_psII[it.instance_id] || [])).filter(x => x.list_kind === it.list_kind).sort(psByPos);
+  const idx = peers.findIndex(x => x.id === id), ni = idx + dir; if (ni < 0 || ni >= peers.length) return;
+  const reordered = peers.slice(); reordered.splice(ni, 0, reordered.splice(idx, 1)[0]);
+  try { for (let i = 0; i < reordered.length; i++) { if (reordered[i].position !== i + 1) { await psW('PATCH', (origin === 'type' ? 'type_items' : 'instance_items') + '?id=eq.' + reordered[i].id, { position: i + 1 }); } } await psLoad(); } catch (e) { psSetStatus('Reorder failed', true); psLoad(); }
+}
+async function psDelItem(origin, id) {
+  if (origin === 'type' && !confirm('Delete this TEMPLATE item? It is removed from every trip of this type.')) return;
+  try { await psW('DELETE', (origin === 'type' ? 'type_items' : 'instance_items') + '?id=eq.' + id); await psW('DELETE', 'completions?source_kind=eq.' + origin + '&source_item_id=eq.' + id).catch(() => {}); await psLoad(); } catch (e) { psSetStatus('Delete failed', true); }
+}
+async function psPromote(instId, itemId) {
+  const inst = psInstOf(instId); const item = (_psII[instId] || []).find(x => x.id === itemId); if (!inst || !item) return;
+  const wasDone = (_psComp[instId] || new Set()).has('instance:' + itemId);
+  const peers = (_psTI[inst.type_id] || []).filter(i => i.list_kind === item.list_kind); const pos = peers.reduce((m, i) => Math.max(m, i.position), 0) + 1;
+  try {
+    const rows = await psW('POST', 'type_items', { type_id: inst.type_id, list_kind: item.list_kind, position: pos, label: item.label });
+    const newId = Array.isArray(rows) && rows[0] ? rows[0].id : null;
+    if (wasDone && newId) { try { await psW('POST', 'completions', { instance_id: instId, source_kind: 'type', source_item_id: newId }); } catch (e) {} }
+    await psW('DELETE', 'instance_items?id=eq.' + itemId);
+    await psW('DELETE', 'completions?instance_id=eq.' + instId + '&source_kind=eq.instance&source_item_id=eq.' + itemId).catch(() => {});
+    psSetStatus('Promoted to the template.'); await psLoad();
+  } catch (e) { psSetStatus('Promote failed: ' + (e.message || e), true); psLoad(); }
+}
+
+/* ── types ── */
+function psTypesList() {
+  const head = '<div class="ps-row"><span class="ps-crumb" onclick="psGo(\'dash\')">&larr; Trips</span><h2 style="margin:0">Types &mdash; reusable templates</h2><button class="btn btn-sm" onclick="psGo(\'newtype\')">+ New type</button><span class="ps-status" id="psStatus"></span></div>';
+  if (!_psTypes.length) return head + '<div class="ps-empty">📋 No types yet. A type is a reusable packing + to-do template you stamp trips from.</div>';
+  return head + '<div class="ps-grid">' + _psTypes.map(ty => {
+    const items = (_psTI[ty.id] || []).length, trips = _psInst.filter(i => i.type_id === ty.id).length;
+    return '<div class="ps-card"><div class="ps-row" style="margin:0"><div><div class="ps-name">' + esc(ty.name) + '</div><div class="ps-sub">' + items + ' item' + (items === 1 ? '' : 's') + ' &middot; ' + trips + ' trip' + (trips === 1 ? '' : 's') + '</div></div>'
+      + '<button class="btn btn-outline btn-sm" onclick="psClone(' + ty.id + ')">Clone</button>'
+      + '<button class="btn btn-outline btn-sm" onclick="psGo(\'typeedit\',' + ty.id + ')">Edit</button>'
+      + '<button class="btn btn-outline btn-sm" style="color:var(--spm-primary)" onclick="psDelType(' + ty.id + ')">Delete</button></div></div>';
+  }).join('') + '</div>';
+}
+function psTypeEdit() {
+  const ty = psType(_psCur); if (!ty) return psBackTypes('Type not found.');
+  const trips = _psInst.filter(i => i.type_id === ty.id).length;
+  const head = '<div class="ps-row"><span class="ps-crumb" onclick="psGo(\'types\')">&larr; Types</span><span class="ps-status" id="psStatus"></span></div>'
+    + '<div class="ps-row"><div><input id="psTypeName" value="' + esc(ty.name) + '" style="font-size:1.05rem;font-weight:700;border:1px solid var(--border);border-radius:8px;padding:6px 10px" onblur="psRenameType(' + ty.id + ',this.value)"><div class="ps-sub" style="margin-top:4px">Template &middot; used by ' + trips + ' trip' + (trips === 1 ? '' : 's') + '</div></div>'
+    + '<button class="btn btn-outline btn-sm" onclick="psClone(' + ty.id + ')">Clone</button></div>';
+  const pane = (kind, label) => {
+    const items = (_psTI[ty.id] || []).filter(i => i.list_kind === kind).sort(psByPos).map(i => ({ ...i, origin: 'type' }));
+    const rows = items.length ? items.map(it => psItemRow(ty, it, false)).join('') : '<div class="ps-empty">Nothing here yet.</div>';
+    return '<div class="ps-card ps-pane"><h3>' + label + ' <span class="ps-sub">' + items.length + ' items</span></h3>' + rows
+      + '<div class="ps-add"><input id="psTAdd-' + kind + '" placeholder="Add a ' + label.toLowerCase() + ' item" onkeydown="if(event.key===\'Enter\')psAddType(' + ty.id + ',\'' + kind + '\')"><button class="btn btn-sm" onclick="psAddType(' + ty.id + ',\'' + kind + '\')">Add</button></div></div>';
+  };
+  return head + '<div class="ps-grid two">' + PS_KINDS.map(([k, l]) => pane(k, l)).join('') + '</div>';
+}
+async function psRenameType(id, name) { name = (name || '').trim(); const ty = psType(id); if (!ty || !name || name === ty.name) { return; } try { await psW('PATCH', 'types?id=eq.' + id, { name }); ty.name = name; psSetStatus('Renamed.'); } catch (e) { psSetStatus('Rename failed', true); psLoad(); } }
+async function psClone(id) { const src = psType(id); if (!src) return; try { const rows = await psW('POST', 'types', { slug: psSlug(src.name + ' copy', _psTypes.map(t => t.slug)), name: src.name + ' (copy)', description: src.description || null }); const nt = rows[0]; const items = (_psTI[id] || []).map(i => ({ type_id: nt.id, list_kind: i.list_kind, position: i.position, label: i.label })); if (items.length) await psW('POST', 'type_items', items); await psLoad(); psGo('typeedit', nt.id); } catch (e) { psSetStatus('Clone failed: ' + (e.message || e), true); } }
+async function psDelType(id) { if (_psInst.some(i => i.type_id === id)) { alert('This type is used by one or more trips. Delete those trips first.'); return; } if (!confirm('Delete this type and its template items? Cannot be undone.')) return; try { await psW('DELETE', 'types?id=eq.' + id); await psLoad(); } catch (e) { psSetStatus('Delete failed', true); } }
+
+/* ── forms ── */
+function psNewTypeForm() {
+  return '<div class="ps-row"><span class="ps-crumb" onclick="psGo(\'types\')">&larr; Types</span><h2 style="margin:0">New type</h2><span class="ps-status" id="psStatus"></span></div>'
+    + '<div class="ps-f"><label>Name</label><input id="psNTName" placeholder="e.g. Tri-Annuals"><label>Description (optional)</label><textarea id="psNTDesc" rows="2"></textarea>'
+    + '<div style="margin-top:16px"><button class="btn" onclick="psCreateType()">Create</button> <button class="btn btn-outline" onclick="psGo(\'types\')">Cancel</button></div></div>';
+}
+async function psCreateType() { const name = (document.getElementById('psNTName').value || '').trim(); if (!name) { psSetStatus('Enter a name', true); return; } const desc = (document.getElementById('psNTDesc').value || '').trim() || null; try { const rows = await psW('POST', 'types', { slug: psSlug(name, _psTypes.map(t => t.slug)), name, description: desc }); await psLoad(); psGo('typeedit', rows[0].id); } catch (e) { psSetStatus('Create failed: ' + (e.message || e), true); } }
+function psNewTripForm() {
+  if (!_psTypes.length) return '<div class="ps-row"><span class="ps-crumb" onclick="psGo(\'dash\')">&larr; Trips</span></div><div class="ps-empty">Create a template type first, then add a trip.</div>';
+  const opts = _psTypes.map(t => '<option value="' + t.id + '">' + esc(t.name) + '</option>').join('');
+  return '<div class="ps-row"><span class="ps-crumb" onclick="psGo(\'dash\')">&larr; Trips</span><h2 style="margin:0">New trip</h2><span class="ps-status" id="psStatus"></span></div>'
+    + '<div class="ps-f"><label>Type</label><select id="psNIType">' + opts + '</select><label>Name</label><input id="psNIName" placeholder="e.g. 9-Ball Tri-Annuals — May 2026"><label>Start date</label><input id="psNIStart" type="date" value="' + psToday() + '"><label>End date (optional)</label><input id="psNIEnd" type="date">'
+    + '<div style="margin-top:16px"><button class="btn" onclick="psCreateTrip()">Create</button> <button class="btn btn-outline" onclick="psGo(\'dash\')">Cancel</button></div></div>';
+}
+async function psCreateTrip() {
+  const type_id = +document.getElementById('psNIType').value, name = (document.getElementById('psNIName').value || '').trim();
+  const start = document.getElementById('psNIStart').value, end = document.getElementById('psNIEnd').value || null;
+  if (!type_id || !name || !start) { psSetStatus('Type, name and start date are required', true); return; }
+  if (end && end < start) { psSetStatus('End date is before start', true); return; }
+  try { const rows = await psW('POST', 'instances', { type_id, slug: psSlug(name, _psInst.map(i => i.slug)), name, start_date: start, end_date: end }); await psLoad(); psGo('trip', rows[0].id); } catch (e) { psSetStatus('Create failed: ' + (e.message || e), true); }
+}
+function psEditTripForm() {
+  const t = psInstOf(_psCur); if (!t) return psBackDash('Trip not found.');
+  return '<div class="ps-row"><span class="ps-crumb" onclick="psGo(\'trip\',' + t.id + ')">&larr; Back to trip</span><h2 style="margin:0">Edit trip</h2><span class="ps-status" id="psStatus"></span></div>'
+    + '<div class="ps-f"><label>Name</label><input id="psEIName" value="' + esc(t.name) + '"><label>Start date</label><input id="psEIStart" type="date" value="' + esc(t.start_date) + '"><label>End date (optional)</label><input id="psEIEnd" type="date" value="' + esc(t.end_date || '') + '">'
+    + '<div style="margin-top:16px"><button class="btn" onclick="psSaveTrip(' + t.id + ')">Save</button> <button class="btn btn-outline" onclick="psGo(\'trip\',' + t.id + ')">Cancel</button></div></div>';
+}
+async function psSaveTrip(id) { const name = (document.getElementById('psEIName').value || '').trim(), start = document.getElementById('psEIStart').value, end = document.getElementById('psEIEnd').value || null; if (!name || !start) { psSetStatus('Name and start required', true); return; } if (end && end < start) { psSetStatus('End before start', true); return; } try { await psW('PATCH', 'instances?id=eq.' + id, { name, start_date: start, end_date: end }); await psLoad(); psGo('trip', id); } catch (e) { psSetStatus('Save failed', true); } }
+async function psDelTrip(id) { if (!confirm('Delete this trip? Its one-off items and checked-off state are removed. Cannot be undone.')) return; try { await psW('DELETE', 'instances?id=eq.' + id); await psLoad(); psGo('dash'); } catch (e) { psSetStatus('Delete failed', true); } }
+
+function psBackDash(msg) { return '<div class="ps-row"><span class="ps-crumb" onclick="psGo(\'dash\')">&larr; All trips</span></div><div class="ps-empty">' + msg + '</div>'; }
+function psBackTypes(msg) { return '<div class="ps-row"><span class="ps-crumb" onclick="psGo(\'types\')">&larr; Types</span></div><div class="ps-empty">' + msg + '</div>'; }
+
+function psStartPoll() {
+  if (_psPoll) clearInterval(_psPoll);
+  _psPoll = setInterval(async () => {
+    const panel = document.getElementById('tab-preshot');
+    if (!panel || !panel.classList.contains('active')) return;
+    if (document.activeElement && (document.activeElement.isContentEditable || /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))) return;
+    if (_psView === 'newtype' || _psView === 'newtrip' || _psView === 'edittrip') return;
+    try { await psLoad(); } catch { /* transient */ }
+  }, 20000);
 }
 
 /* OTF_TAB_BEGIN — OnTheFelt tab logic (3.305). Ported + tournament-scoped.
