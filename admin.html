@@ -4243,21 +4243,25 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         #tab-cuedrop .cd-sched-who{font-weight:600}
         #tab-cuedrop .cd-sched-cue{color:var(--muted)}
         #tab-cuedrop .cd-inv{border:1px solid var(--border);border-radius:12px;padding:14px 16px;background:#fbfbfd}
-        #tab-cuedrop .cd-inv-title{font-weight:800;margin-bottom:8px}
-        #tab-cuedrop .cd-inv-cols{display:grid;grid-template-columns:1fr 1fr;gap:0 22px}
-        @media(max-width:640px){#tab-cuedrop .cd-inv-cols{grid-template-columns:1fr}}
-        #tab-cuedrop .cd-inv-h{font-weight:700;color:var(--spm-accent);font-size:.82rem;text-transform:uppercase;letter-spacing:.04em;margin:6px 0 4px}
-        #tab-cuedrop .cd-inv-row{display:flex;align-items:center;gap:8px;padding:3px 0;font-size:.88rem}
-        #tab-cuedrop .cd-inv-name{flex:1;min-width:90px}
-        #tab-cuedrop .cd-inv-row input{width:56px;border:1px solid var(--border);border-radius:6px;padding:4px 6px;font:inherit;font-size:.85rem;background:var(--card);color:var(--text)}
-        #tab-cuedrop .cd-inv-left{color:var(--muted);min-width:96px;text-align:right}
-        #tab-cuedrop .cd-inv-low .cd-inv-left{color:#92600a}
-        #tab-cuedrop .cd-inv-out .cd-inv-left{color:var(--spm-primary);font-weight:700}
-        #tab-cuedrop .cd-inv-left b{font-size:1rem}
-        #tab-cuedrop .cd-inv-bar{flex:0 0 54px;height:6px;background:var(--border);border-radius:3px;overflow:hidden}
+        #tab-cuedrop .cd-inv-title{font-weight:800;margin-bottom:10px}
+        /* Two mini-tables packed to content width and sitting close — NOT 1fr/1fr (which spreads them apart and re-opens gaps). */
+        #tab-cuedrop .cd-inv-cols{display:flex;flex-wrap:wrap;gap:12px 44px;align-items:start}
+        /* Each column is ONE grid: name column = max-content (hugs the longest name, no stretch), controls auto-align across rows. */
+        #tab-cuedrop .cd-inv-col{display:grid;grid-template-columns:max-content auto;column-gap:12px;row-gap:5px;align-items:center;width:max-content}
+        @media(max-width:640px){#tab-cuedrop .cd-inv-cols{gap:18px}#tab-cuedrop .cd-inv-col{width:100%}}
+        #tab-cuedrop .cd-inv-h{grid-column:1/-1;font-weight:700;color:var(--spm-accent);font-size:.82rem;text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px}
+        #tab-cuedrop .cd-inv-name{white-space:nowrap;font-size:.9rem}
+        #tab-cuedrop .cd-inv-controls{display:flex;align-items:center;gap:9px}
+        #tab-cuedrop .cd-inv-controls input{width:3ch;box-sizing:content-box;-moz-appearance:textfield;appearance:textfield;border:1px solid var(--border);border-radius:6px;padding:4px 8px;font:inherit;font-size:.85rem;background:var(--card);color:var(--text);text-align:right;font-variant-numeric:tabular-nums}
+        #tab-cuedrop .cd-inv-controls input::-webkit-outer-spin-button,#tab-cuedrop .cd-inv-controls input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+        #tab-cuedrop .cd-inv-bar{flex:none;width:56px;height:6px;background:var(--border);border-radius:3px;overflow:hidden}
         #tab-cuedrop .cd-inv-bar i{display:block;height:100%;background:#16a34a;border-radius:3px;transition:width .2s}
+        #tab-cuedrop .cd-inv-left{min-width:6ch;text-align:right;color:var(--muted);font-size:.85rem;font-variant-numeric:tabular-nums}
+        #tab-cuedrop .cd-inv-left b{font-size:1rem;color:var(--text)}
         #tab-cuedrop .cd-inv-low .cd-inv-bar i{background:#f59e0b}
         #tab-cuedrop .cd-inv-out .cd-inv-bar i{background:var(--spm-primary)}
+        #tab-cuedrop .cd-inv-low .cd-inv-left,#tab-cuedrop .cd-inv-low .cd-inv-left b{color:#92600a}
+        #tab-cuedrop .cd-inv-out .cd-inv-left,#tab-cuedrop .cd-inv-out .cd-inv-left b{color:var(--spm-primary)}
         #tab-cuedrop .cd-inv-tot{font-weight:400;color:var(--muted);font-size:.72rem;text-transform:none;letter-spacing:0;margin-left:6px}
       </style>
       <div class="card">
@@ -4770,7 +4774,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.324';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.325';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10889,12 +10893,14 @@ function cdRenderInventory() {
       totLeft += Math.max(0, left); totStock += stock;
       const cls = left <= 0 ? 'cd-inv-out' : left <= 3 ? 'cd-inv-low' : '';
       const pct = stock > 0 ? Math.max(0, Math.min(100, Math.round(left / stock * 100))) : 0;
-      return '<div class="cd-inv-row ' + cls + '"><span class="cd-inv-name">' + esc(x.friendly || x.description) + '</span>'
+      // name = grid col 1 (max-content, hugs the value); controls = col 2 (input+bar+left as one tight trio).
+      return '<span class="cd-inv-name">' + esc(x.friendly || x.description) + '</span>'
+        + '<span class="cd-inv-controls ' + cls + '">'
         + '<input type="number" min="0" id="cdStk_' + kind + '_' + esc(x.code) + '" value="' + stock + '">'
-        + '<div class="cd-inv-bar" title="' + left + ' of ' + stock + '"><i style="width:' + pct + '%"></i></div>'
-        + '<span class="cd-inv-left"><b>' + left + '</b> left</span></div>';
+        + '<span class="cd-inv-bar" title="' + left + ' of ' + stock + '"><i style="width:' + pct + '%"></i></span>'
+        + '<span class="cd-inv-left"><b>' + left + '</b> left</span></span>';
     }).join('');
-    return '<div><div class="cd-inv-h">' + label + '<span class="cd-inv-tot">' + totLeft + ' of ' + totStock + ' left</span></div>' + rows + '</div>';
+    return '<div class="cd-inv-col"><div class="cd-inv-h">' + label + '<span class="cd-inv-tot">' + totLeft + ' of ' + totStock + ' left</span></div>' + rows + '</div>';
   };
   el.innerHTML = '<div class="cd-inv-title">Inventory <span style="font-weight:400;color:var(--muted);font-size:.8rem">&mdash; purchased &minus; given out = left</span></div>'
     + '<div class="cd-inv-cols">' + build(_cdCues, 'cue_code', 'cue', 'Cues') + build(_cdCases, 'case_code', 'case', 'Cases') + '</div>'
