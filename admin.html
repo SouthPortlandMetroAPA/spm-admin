@@ -5092,7 +5092,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.333';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.334';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -23268,7 +23268,7 @@ window.dpCopyFormLink     = dpCopyFormLink;
    Module-level so the banner render + rules UI share one source of truth. */
 let _cpHostRules = [];   // [{ id, match_name, required_host }]
 async function cpLoadHostRules() {
-  try { _cpHostRules = await sb('GET', 'roster_host_rules?select=id,match_name,required_host&order=match_name', null, { 'Accept-Profile': 'slate' }) || []; }
+  try { _cpHostRules = await sb('GET', 'roster_host_rules?select=id,match_name,required_host,member_number&order=match_name', null, { 'Accept-Profile': 'slate' }) || []; }
   catch (e) { console.error('host rules load failed', e); _cpHostRules = []; }
 }
 /* Order-independent name match: every alphabetic token of the rule name must
