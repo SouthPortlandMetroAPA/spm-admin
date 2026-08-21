@@ -3981,24 +3981,40 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <style>
         #tab-chalktalk .ct-head{display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px}
         #tab-chalktalk .ct-count{color:var(--muted); font-size:.9rem}
-        #tab-chalktalk .ct-list{display:flex; flex-direction:column; gap:12px}
-        #tab-chalktalk .ct-q{border:1px solid var(--border); border-radius:10px; background:var(--card); padding:14px 16px}
-        #tab-chalktalk .ct-q-text{font-size:1rem; line-height:1.5; color:var(--text); white-space:pre-wrap; overflow-wrap:anywhere}
-        #tab-chalktalk .ct-meta{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:10px; padding-top:10px; border-top:1px solid var(--border)}
-        #tab-chalktalk .ct-who{font-weight:700; color:var(--text)}
-        #tab-chalktalk .ct-sub{color:var(--muted); font-size:.85rem}
-        #tab-chalktalk .ct-phones{color:var(--muted); font-size:.84rem}
+        #tab-chalktalk .ct-list{display:flex; flex-direction:column; gap:10px}
+        /* Card + left status stripe: amber = needs a reply, green = answered. */
+        #tab-chalktalk .ct-q{position:relative; border:1px solid var(--border); border-radius:10px; background:var(--card); padding:13px 16px 13px 18px}
+        #tab-chalktalk .ct-q::before{content:""; position:absolute; left:0; top:0; bottom:0; width:3px; border-radius:10px 0 0 10px; background:var(--ct-stripe,#f59e0b)}
+        #tab-chalktalk .ct-q.ct-answered{--ct-stripe:#16a34a}
+        #tab-chalktalk .ct-q.ct-deleted{opacity:.55; --ct-stripe:var(--muted)}
+        /* Tier 1: the question dominates. */
+        #tab-chalktalk .ct-q-text{font-size:1.05rem; font-weight:600; line-height:1.45; color:var(--text); white-space:pre-wrap; overflow-wrap:anywhere}
+        /* Tier 2: status + time + source. */
+        #tab-chalktalk .ct-metarow{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:8px}
+        #tab-chalktalk .ct-time{color:var(--muted); font-size:.8rem}
+        #tab-chalktalk .ct-src{color:var(--muted); font-size:.72rem}
+        /* Tier 3: muted, compact identity line. */
+        #tab-chalktalk .ct-identity{margin-top:6px; font-size:.82rem; color:var(--muted); line-height:1.5}
+        #tab-chalktalk .ct-identity .ct-who{font-weight:600; color:var(--text)}
+        #tab-chalktalk .ct-phones{color:var(--muted)}
         #tab-chalktalk .ct-nomatch{color:var(--spm-primary); font-weight:600}
         #tab-chalktalk a.ct-mail{color:var(--spm-accent); text-decoration:none}
         #tab-chalktalk a.ct-mail:hover{text-decoration:underline}
         #tab-chalktalk .ct-empty{color:var(--muted); padding:28px; text-align:center}
-        #tab-chalktalk .ct-q.ct-answered{border-left:3px solid var(--spm-accent)}
-        #tab-chalktalk .ct-q.ct-deleted{opacity:.6}
-        #tab-chalktalk .ct-response{margin-top:10px; padding:10px 12px; background:rgba(0,0,0,.03); border-radius:8px; font-size:.94rem; white-space:pre-wrap; overflow-wrap:anywhere}
-        #tab-chalktalk .ct-replybox{margin-top:12px}
-        #tab-chalktalk .ct-reply-ta{width:100%; box-sizing:border-box; border:1px solid var(--border); border-radius:8px; padding:8px 10px; font:inherit; font-size:.94rem; resize:vertical}
-        #tab-chalktalk .ct-actions{display:flex; gap:8px; flex-wrap:wrap; margin-top:8px}
-        #tab-chalktalk .ct-actions .ct-del{margin-left:auto; color:var(--spm-primary)}
+        /* Read-only threaded reply — the sent reply lives HERE, once. */
+        #tab-chalktalk .ct-response{margin-top:10px; padding:8px 12px; border-left:3px solid var(--border); background:rgba(0,0,0,.03); border-radius:0 8px 8px 0; font-size:.92rem; white-space:pre-wrap; overflow-wrap:anywhere}
+        #tab-chalktalk .ct-response .ct-sub{display:block; margin-bottom:3px; color:var(--muted); font-size:.76rem; white-space:normal}
+        #tab-chalktalk .ct-composer{margin-top:10px}
+        #tab-chalktalk .ct-reply-ta{width:100%; box-sizing:border-box; border:1px solid var(--border); border-radius:8px; padding:8px 10px; font:inherit; font-size:.92rem; resize:vertical}
+        #tab-chalktalk .ct-actions{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:8px}
+        #tab-chalktalk .ct-actions .ct-spacer{flex:1}
+        #tab-chalktalk .ct-actions .ct-del{color:var(--muted); border-color:var(--border)}
+        #tab-chalktalk .ct-actions .ct-del:hover{color:var(--spm-primary); border-color:var(--spm-primary)}
+        /* Editor is mutually exclusive with the read-only reply: hidden on
+           answered cards until "Edit reply" adds .ct-editing. */
+        #tab-chalktalk .ct-q.ct-answered .ct-composer{display:none}
+        #tab-chalktalk .ct-q.ct-editing .ct-response{display:none}
+        #tab-chalktalk .ct-q.ct-answered.ct-editing .ct-composer{display:block}
         @media (prefers-color-scheme: dark){ #tab-chalktalk .ct-response{background:rgba(255,255,255,.06)} }
       </style>
       <div class="card">
@@ -4774,7 +4790,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.326';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.327';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10027,7 +10043,7 @@ function ctFmtWhen(ts) {
 function ctStatusChip(r) {
   if (r.deleted_at)            return '<span class="badge muted">Deleted</span>';
   if (r.status === 'answered') return '<span class="badge ok">Answered</span>';
-  return '<span class="badge warn">New</span>';
+  return '<span class="badge warn">Needs reply</span>';
 }
 function ctReplyChip(s) {
   if (s === 'blocked') return ' <span class="badge warn">Reply blocked (DNC)</span>';
@@ -10042,42 +10058,72 @@ function ctCard(r, resolveMap) {
   const who = players.length
     ? players.map(ctPlayerLine).join('<br>') + ' &middot; ' + mail
     : '<span class="ct-nomatch">No player match</span> &middot; ' + mail;
-  const src = r.source ? ' &middot; <span class="ct-sub">' + esc(r.source) + '</span>' : '';
+  const src = r.source ? '<span class="ct-src">via ' + esc(r.source) + '</span>' : '';
   const deleted  = !!r.deleted_at;
   const answered = r.status === 'answered';
 
-  const responseBlock = r.response
-    ? '<div class="ct-response"><span class="ct-sub">Reply'
-        + (r.answered_at ? ' &middot; ' + esc(ctFmtWhen(r.answered_at)) : '')
-        + ':</span><br>' + esc(r.response) + '</div>'
+  // Tier 2: status + time + source (one row, badges then muted meta).
+  const metaRow = '<div class="ct-metarow">'
+    + ctStatusChip(r) + ctAckChip(r.ack_status) + ctReplyChip(r.reply_status)
+    + '<span class="ct-time">' + esc(ctFmtWhen(r.created_at)) + '</span>' + src
+    + '</div>';
+
+  // Read-only threaded reply — the sent reply appears HERE, once (answered only).
+  const thread = (answered && r.response)
+    ? '<div class="ct-response"><span class="ct-sub">You replied'
+        + (r.answered_at ? ' &middot; ' + esc(ctFmtWhen(r.answered_at)) : '') + '</span>'
+        + esc(r.response) + '</div>'
     : '';
+
+  // Composer — open on unanswered; on answered it's hidden (CSS) until "Edit reply".
+  const composer = '<div class="ct-composer">'
+    + '<textarea id="ct-reply-' + r.id + '" class="ct-reply-ta" rows="3"'
+    +   (answered ? '' : ' placeholder="Type a reply — emails ' + esc(r.email) + ' and marks this answered"')
+    +   '>' + (answered && r.response ? esc(r.response) : '') + '</textarea>'
+    + '<div class="ct-actions">'
+    +   '<button id="ct-send-' + r.id + '" class="btn btn-sm" onclick="ctReply(' + r.id + ')">Send reply</button>'
+    +   (answered
+          ? '<button class="btn btn-outline btn-sm" onclick="ctCancelEdit(' + r.id + ')">Cancel</button>'
+          : '<button class="btn btn-outline btn-sm" onclick="ctMarkAnswered(' + r.id + ',true)">Mark answered</button>'
+            + '<span class="ct-spacer"></span>'
+            + '<button class="btn btn-outline btn-sm ct-del" onclick="ctDelete(' + r.id + ')">Delete</button>')
+    + '</div></div>';
 
   let controls;
   if (deleted) {
     controls = '<div class="ct-actions"><button class="btn btn-outline btn-sm" onclick="ctRestore(' + r.id + ')">Restore</button></div>';
+  } else if (answered) {
+    // Answered: view actions (Edit reveals the composer, mutually exclusive with the thread).
+    controls = '<div class="ct-actions">'
+      + '<button class="btn btn-outline btn-sm" onclick="ctEditReply(' + r.id + ')">Edit reply</button>'
+      + '<button class="btn btn-outline btn-sm" onclick="ctMarkAnswered(' + r.id + ',false)">Reopen for follow-up</button>'
+      + '<span class="ct-spacer"></span>'
+      + '<button class="btn btn-outline btn-sm ct-del" onclick="ctDelete(' + r.id + ')">Delete</button>'
+      + '</div>' + composer;
   } else {
-    controls = '<div class="ct-replybox">'
-      + '<textarea id="ct-reply-' + r.id + '" class="ct-reply-ta" rows="2" '
-      +   'placeholder="Type a reply — emails ' + esc(r.email) + ' and marks this answered">' + (r.response ? esc(r.response) : '') + '</textarea>'
-      + '<div class="ct-actions">'
-      +   '<button id="ct-send-' + r.id + '" class="btn btn-sm" onclick="ctReply(' + r.id + ')">Send reply</button>'
-      +   (answered
-            ? '<button class="btn btn-outline btn-sm" onclick="ctMarkAnswered(' + r.id + ',false)">Reopen</button>'
-            : '<button class="btn btn-outline btn-sm" onclick="ctMarkAnswered(' + r.id + ',true)">Mark answered</button>')
-      +   '<button class="btn btn-outline btn-sm ct-del" onclick="ctDelete(' + r.id + ')">Delete</button>'
-      + '</div></div>';
+    controls = composer;
   }
 
-  return '<div class="ct-q' + (deleted ? ' ct-deleted' : '') + (answered ? ' ct-answered' : '') + '">'
+  return '<div id="ct-q-' + r.id + '" class="ct-q' + (deleted ? ' ct-deleted' : (answered ? ' ct-answered' : ' ct-new')) + '">'
     + '<div class="ct-q-text">' + esc(r.question) + '</div>'
-    + '<div class="ct-meta">' + who + '</div>'
-    + '<div class="ct-meta" style="border-top:none; padding-top:2px; margin-top:2px">'
-    +   '<span class="ct-sub">' + esc(ctFmtWhen(r.created_at)) + '</span>' + src + ' '
-    +   ctStatusChip(r) + ' ' + ctAckChip(r.ack_status) + ctReplyChip(r.reply_status)
-    + '</div>'
-    + responseBlock
+    + metaRow
+    + '<div class="ct-identity">' + who + '</div>'
+    + thread
     + controls
     + '</div>';
+}
+
+/* Answered card: reveal the pre-filled editor in place of the read-only reply. */
+function ctEditReply(id) {
+  const c = document.getElementById('ct-q-' + id); if (!c) return;
+  c.classList.add('ct-editing');
+  const ta = document.getElementById('ct-reply-' + id); if (ta) ta.focus();
+}
+function ctCancelEdit(id) {
+  const c = document.getElementById('ct-q-' + id); if (!c) return;
+  c.classList.remove('ct-editing');
+  const ta = document.getElementById('ct-reply-' + id), row = _ctRows.find(r => r.id === id);
+  if (ta && row) ta.value = row.response || '';
 }
 
 async function ctRenderRows(rows) {
@@ -10096,8 +10142,12 @@ async function ctPaint() {
   if (!list) return;
   if (!visible.length) { list.innerHTML = '<div class="ct-empty">' + (_ctShowDeleted ? 'Nothing here.' : 'No questions yet.') + '</div>'; return; }
   const resolveMap = await ctResolveEmails(visible.map(r => r.email));
+  // Work-queue order: unanswered first, then answered, then deleted; newest first within each.
+  const rank = r => r.deleted_at ? 2 : (r.status === 'answered' ? 1 : 0);
+  const ordered = visible.slice().sort((a, b) =>
+    rank(a) - rank(b) || String(b.created_at || '').localeCompare(String(a.created_at || '')));
   const scroll = list.scrollTop;
-  list.innerHTML = visible.map(r => ctCard(r, resolveMap)).join('');
+  list.innerHTML = ordered.map(r => ctCard(r, resolveMap)).join('');
   list.scrollTop = scroll;
 }
 function ctToggleDeleted() { _ctShowDeleted = !_ctShowDeleted; ctPaint(); }
@@ -28727,6 +28777,20 @@ function rolProgress(pct, subtext) {
   if (subtext != null) sub.textContent = subtext;
 }
 
+/* 3.327 — surface upload problems in a MODAL (persistent, unmissable) plus
+   the inline status. The old inline-only status was easy to miss and, on a
+   stray drop, the page could navigate away before it was read. */
+function rolFail(bodyHtml, plainForStatus) {
+  const status = document.getElementById('rolUploadStatus');
+  if (status) { status.innerHTML = plainForStatus || bodyHtml; status.style.color = 'var(--danger)'; }
+  if (typeof rolProgress === 'function') rolProgress(null);
+  rtShowModal('<div class="modal-box">'
+    + '<h3 style="margin:0 0 10px;color:var(--spm-primary);font-size:1.05rem">Schedule upload problem</h3>'
+    + '<div style="font-size:.92rem;line-height:1.55;color:var(--text)">' + bodyHtml + '</div>'
+    + '<div style="margin-top:16px;text-align:right"><button class="btn btn-sm" onclick="rtCloseModal()">Got it</button></div>'
+    + '</div>');
+}
+
 async function rolHandleFile(file) {
   const status = document.getElementById('rolUploadStatus');
   status.textContent = 'Reading PDF…';
@@ -28735,9 +28799,7 @@ async function rolHandleFile(file) {
   try {
     /* Current session — same lookup the rest of the tabs use. */
     if (!currentSession) {
-      status.textContent = 'No current session selected.';
-      status.style.color = 'var(--danger)';
-      rolProgress(null);
+      rolFail('No current session is selected. Pick the session in the header first, then try the upload again.', 'No current session selected.');
       return;
     }
 
@@ -28755,10 +28817,8 @@ async function rolHandleFile(file) {
     const unmatched = perPage.filter(p => !p.division_number);
     rolProgress(20, 'Detected ' + matched.length + ' page(s) with division headers');
     if (!matched.length) {
-      status.textContent = 'No division numbers detected on any page. '
-        + 'Check the PDF format (expecting "### - Name" header on each page).';
-      status.style.color = 'var(--danger)';
-      rolProgress(null);
+      rolFail('No division numbers were found in this PDF.<br>Rolodex expects a schedule/captain PDF with a <code>### - Division Name</code> header on each page (e.g. <code>010 - West Hills 8 Ball</code>).',
+        'No division numbers detected on any page.');
       return;
     }
 
@@ -28815,11 +28875,11 @@ async function rolHandleFile(file) {
         console.warn('[Rolodex] skipped ' + skippedNonSpm.length + ' non-SPM division(s): ' + skippedNonSpm.join(' | '));
       }
       if (!divisionList.length) {
-        status.innerHTML = 'No SPM divisions detected.<br>'
-          + 'Detected division numbers: <code>' + esc(divNums.join(', ')) + '</code><br>'
-          + 'All were skipped: <code>' + esc(skippedNonSpm.join(', ')) + '</code>';
-        status.style.color = 'var(--danger)';
-        rolProgress(null);
+        rolFail('None of the detected divisions are tagged <b>SPM</b> in this session, so nothing was uploaded.<br><br>'
+          + 'Detected: <code>' + esc(divNums.join(', ')) + '</code><br>'
+          + 'Skipped: <code>' + esc(skippedNonSpm.join(', ')) + '</code><br><br>'
+          + 'If these should be SPM, tag them on the <b>Divisions</b> tab first, then re-upload.',
+          'No SPM divisions detected — see the popup.');
         return;
       }
     }
@@ -28970,12 +29030,10 @@ async function rolHandleFile(file) {
             '· Div ' + u.division_number
             + (u.team_number ? ' (team ' + u.team_number + ')' : '')
             + ' — ' + u.first_name + ' ' + u.last_name);
-          status.innerHTML = '⚠ Uploaded ' + splits.length + ' division(s), but '
-            + unmatched.length + ' captain(s) couldn’t be matched to an APA #:<br>'
-            + lines.join('<br>')
-            + '<br>Fix the source PDF or update slate.players, then re-upload.';
-          status.style.color = 'var(--danger)';
-          rolProgress(null);
+          rolFail('Uploaded ' + splits.length + ' division(s), but ' + unmatched.length
+            + ' captain(s) couldn’t be matched to an APA #:<br>' + lines.join('<br>')
+            + '<br><br>Fix the source PDF or update the player record, then re-upload.',
+            '⚠ ' + unmatched.length + ' captain(s) unmatched — see the popup.');
           rolRenderList();
           return;
         }
@@ -28989,8 +29047,7 @@ async function rolHandleFile(file) {
     rolProgress(100, '✓ Done — ' + splits.length + ' division(s) uploaded');
     setTimeout(() => { status.textContent = ''; rolProgress(null); rolRenderList(); }, 1800);
   } catch (e) {
-    status.textContent = 'Failed: ' + e.message;
-    status.style.color = 'var(--danger)';
+    rolFail('Upload failed: ' + esc(e && e.message ? e.message : String(e)));
   }
 }
 
@@ -29208,17 +29265,7 @@ function rolSafeHandle(f) {
     .then(() => rolHandleFile(f))
     .catch(e => {
       console.error('[rolodex] upload failed', e);
-      const status = document.getElementById('rolUploadStatus');
-      const msg = 'Upload error: ' + (e && e.message ? e.message : String(e));
-      if (status) {
-        status.textContent = msg;
-        status.style.color = 'var(--danger)';
-      } else {
-        alert(msg);
-      }
-      /* Hide the progress widget on any error so the user isn't left
-         staring at a half-filled bar that looks "in progress" forever. */
-      if (typeof rolProgress === 'function') rolProgress(null);
+      rolFail('Upload error: ' + esc(e && e.message ? e.message : String(e)));
     });
 }
 /* Idempotent — safe to call N times. First call binds, subsequent calls
@@ -29386,6 +29433,17 @@ function rolBindUpload() {
     return;
   }
   _rolBindingsApplied = true;
+
+  /* 3.327 — a file dropped ANYWHERE outside a drop zone makes the browser
+     navigate to (open) the file, blowing away the admin page + any error just
+     shown ("the error goes away too soon"). A global guard prevents that; real
+     zones still handle their own drops (this adds only a redundant
+     preventDefault, never stopPropagation). */
+  if (!window._apaDocDropGuard) {
+    window._apaDocDropGuard = true;
+    window.addEventListener('dragover', e => e.preventDefault());
+    window.addEventListener('drop',     e => e.preventDefault());
+  }
 
   const onFile = (f) => {
     if (!f) return;
