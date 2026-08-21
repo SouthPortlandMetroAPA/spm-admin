@@ -5094,7 +5094,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.336';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.337';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -35717,6 +35717,17 @@ async function ehDeleteForeign() {
   /* ── Util ─────────────────────────────────── */
   function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
   function slugify(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').substring(0, 64); }
+  async function rktSha256Hex(str) {
+    const dig = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(str == null ? '' : str)));
+    return Array.from(new Uint8Array(dig)).map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+  /* "Updated" stamp — weekday + date + time, e.g. "Mon, Aug 25, 2026, 3:42 PM". */
+  function rktFmtUpdated(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d)) return '';
+    return d.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+  }
   function setStatus(id, msg, kind) { const el = document.getElementById(id); if (!el) return; el.className = 'status-line shown ' + (kind || ''); el.textContent = msg; }
   function hideStatus(id) { const el = document.getElementById(id); if (!el) return; el.className = 'status-line'; el.textContent = ''; }
   function publicHostUrl(slug) { return RACKTIME_PUBLIC + '?host=' + encodeURIComponent(slug); }
@@ -35893,7 +35904,17 @@ async function ehDeleteForeign() {
           width: it.width || 0
         }));
       const r = _parsePageItems(items);
-      if (r.division) results.push({ ...r, pageIndex: i, totalPages: total });
+      if (r.division) {
+        // Deterministic content signal for this division's page: all text
+        // items in reading order, whitespace-normalized. Hashing this (not the
+        // re-extracted PDF bytes, which pdf-lib doesn't emit deterministically)
+        // is what lets saveOnePreview tell a real schedule change from a
+        // byte-different re-export of the same schedule.
+        const pageText = items.slice()
+          .sort((a, b) => b.y - a.y || a.x - b.x)
+          .map(it => it.str).join(' ').replace(/\s+/g, ' ').trim();
+        results.push({ ...r, pageIndex: i, totalPages: total, pageText });
+      }
       /* Pages with no division header are silently skipped (cover sheets,
          blank trailing pages). The completion report tells the operator
          "N divisions parsed from M pages" so a partial parse is visible. */
@@ -35990,6 +36011,7 @@ async function ehDeleteForeign() {
       entry.division   = first.division;
       entry.pageIndex  = first.pageIndex;
       entry.totalPages = first.totalPages;
+      entry.pageText   = first.pageText;
       entry.hosts      = mapHosts(first.venues);
       entry.status     = 'ready';
       renderPreview(entry, /*append=*/false);
@@ -36005,6 +36027,7 @@ async function ehDeleteForeign() {
           division: p.division,
           pageIndex: p.pageIndex,
           totalPages: p.totalPages,
+          pageText: p.pageText,
           hosts: mapHosts(p.venues),
           error: null
         };
@@ -36149,15 +36172,19 @@ async function ehDeleteForeign() {
     // Refresh model state and tables
     try { await loadAll(); } catch (_) {}
     renderDivisions(); renderHostsList();
+    const unchangedN = items.filter(e => e._unchanged).length;
+    const unchTail = unchangedN ? ' (' + unchangedN + ' unchanged — not re-marked updated)' : '';
     setStatus('rktUploadStatus',
       fail === 0
-        ? ('Saved ' + ok + ' PDF' + (ok === 1 ? '' : 's') + '.')
-        : (ok + ' saved, ' + fail + ' failed — see error tiles above.'),
+        ? ('Saved ' + ok + ' PDF' + (ok === 1 ? '' : 's') + '.' + unchTail)
+        : (ok + ' saved, ' + fail + ' failed — see error tiles above.' + unchTail),
       fail === 0 ? 'ok' : 'err');
     btn.disabled = !_previews.some(p => p.status === 'ready');
   }
 
-  /* COMMIT LOGIC — KEPT VERBATIM from the source. Do not alter semantics. */
+  /* COMMIT LOGIC — ported from the source; the only added semantics is the
+     content-hash change detection (skip re-upload + updated_at when a division's
+     page text and fields are unchanged). Everything else is as-was. */
   async function saveOnePreview(entry) {
     const d = entry.division || {};
     const number = String(d.number || '').trim();
@@ -36172,39 +36199,45 @@ async function ehDeleteForeign() {
     const dayOfPlay = (d.day_of_play || '').trim() || null;
     const startTime = (d.start_time  || '').trim() || null;
 
-    // Build storage path: <number>/<unix-ts>-<safe-filename>.pdf
-    // For multi-page bulk PDFs (a single file with one division per page),
-    // split out just this division's page before uploading. Otherwise the
-    // public /?host=X&div=Y view would serve the entire bulk document.
-    const ts = Date.now();
-    const isMultiPage = (entry.totalPages || 1) > 1 && (entry.pageIndex || 0) >= 1;
-    const baseSafe = entry.file.name.replace(/[^a-zA-Z0-9._-]+/g, '-').toLowerCase();
-    const safeName = isMultiPage
-      ? baseSafe.replace(/\.pdf$/i, '') + '-p' + entry.pageIndex + '-div' + number + '.pdf'
-      : baseSafe;
-    const pdfPath = number + '/' + ts + '-' + safeName;
+    // Change detection: hash this division page's extracted text. We re-upload
+    // + bump updated_at ONLY when the content (or an operator field edit) has
+    // actually changed — an identical re-upload leaves the division and its
+    // "updated" timestamp untouched (the "don't mark unchanged schedules
+    // updated" rule).
+    const contentHash = await rktSha256Hex(entry.pageText || (number + '|' + name + '|' + dayOfPlay + '|' + startTime));
+    const fieldsSame  = division && division.name === name
+      && (division.day_of_play || null) === dayOfPlay
+      && (division.start_time  || null) === startTime;
+    const unchanged   = !!(division && division.pdf_sha256 && division.pdf_sha256 === contentHash && fieldsSame);
+    entry._unchanged  = unchanged;
 
-    // Extract single-page when needed, upload as a stable PDF blob.
-    const uploadBlob = isMultiPage
-      ? await extractPageAsPdf(entry.file, entry.pageIndex)
-      : entry.file;
-
-    // Upload PDF to Storage first; if it fails, we don't pollute the DB
-    await storageUpload(pdfPath, uploadBlob, 'application/pdf');
-
-    if (division) {
-      // Update existing — clobber prior pdf_path; clean up the old object
-      const oldPath = division.pdf_path;
-      const patch = { name, day_of_play: dayOfPlay, start_time: startTime, pdf_path: pdfPath, updated_at: new Date().toISOString() };
-      const updated = await sb('PATCH', 'divisions?id=eq.' + division.id, patch);
-      division = (Array.isArray(updated) ? updated[0] : updated) || division;
-      if (oldPath && oldPath !== pdfPath) { try { await storageDelete(oldPath); } catch (_) {} }
-    } else {
-      const created = await sb('POST', 'divisions', {
-        number, name, day_of_play: dayOfPlay, start_time: startTime, pdf_path: pdfPath, session_id: _sessionId
-      });
-      division = Array.isArray(created) ? created[0] : created;
-      _divisions.push(division);
+    if (!unchanged) {
+      // Build storage path: <number>/<unix-ts>-<safe-filename>.pdf. For multi-page
+      // bulk PDFs (one division per page) split out just this division's page —
+      // else the public /?host=X&div=Y view would serve the whole bulk document.
+      const ts = Date.now();
+      const isMultiPage = (entry.totalPages || 1) > 1 && (entry.pageIndex || 0) >= 1;
+      const baseSafe = entry.file.name.replace(/[^a-zA-Z0-9._-]+/g, '-').toLowerCase();
+      const safeName = isMultiPage
+        ? baseSafe.replace(/\.pdf$/i, '') + '-p' + entry.pageIndex + '-div' + number + '.pdf'
+        : baseSafe;
+      const pdfPath = number + '/' + ts + '-' + safeName;
+      const uploadBlob = isMultiPage ? await extractPageAsPdf(entry.file, entry.pageIndex) : entry.file;
+      // Upload PDF to Storage first; if it fails, we don't pollute the DB.
+      await storageUpload(pdfPath, uploadBlob, 'application/pdf');
+      if (division) {
+        const oldPath = division.pdf_path;
+        const patch = { name, day_of_play: dayOfPlay, start_time: startTime, pdf_path: pdfPath, pdf_sha256: contentHash, updated_at: new Date().toISOString() };
+        const updated = await sb('PATCH', 'divisions?id=eq.' + division.id, patch);
+        division = (Array.isArray(updated) ? updated[0] : updated) || division;
+        if (oldPath && oldPath !== pdfPath) { try { await storageDelete(oldPath); } catch (_) {} }
+      } else {
+        const created = await sb('POST', 'divisions', {
+          number, name, day_of_play: dayOfPlay, start_time: startTime, pdf_path: pdfPath, pdf_sha256: contentHash, session_id: _sessionId
+        });
+        division = Array.isArray(created) ? created[0] : created;
+        _divisions.push(division);
+      }
     }
 
     // 2. Resolve every parsed venue to a host id (creating new hosts as needed).
@@ -36275,9 +36308,11 @@ async function ehDeleteForeign() {
       const pdfBtn = d.pdf_path
         ? '<a class="btn btn-outline btn-sm" target="_blank" rel="noopener" href="' + esc(SB_URL + '/storage/v1/object/public/' + BUCKET + '/' + d.pdf_path.split('/').map(encodeURIComponent).join('/')) + '">Open</a>'
         : '<span class="hint">none</span>';
+      const upd = rktFmtUpdated(d.updated_at);
       return '<tr>'
         + '<td><code>' + esc(d.number) + '</code></td>'
-        + '<td><strong>' + esc(d.name) + '</strong></td>'
+        + '<td><strong>' + esc(d.name) + '</strong>'
+          + (upd ? '<div class="hint" style="font-size:0.72rem;font-weight:400">Updated ' + esc(upd) + '</div>' : '') + '</td>'
         + '<td>' + esc(dt || '—') + '</td>'
         + '<td>' + (hs.length
               ? hs.map(h => '<span class="host-chip existing">' + esc(h.name) + '</span>').join(' ')
