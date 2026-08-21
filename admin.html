@@ -1077,6 +1077,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="preshot">PreShot</button>
       <button class="tab" data-tab="cuedrop">CueDrop</button>
       <button class="tab" data-tab="countmein">CountMeIn</button>
+      <button class="tab" data-tab="racktime">RackTime</button>
     </div>
 
     <div id="globalStatus" class="status-line"></div>
@@ -4015,6 +4016,25 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         #tab-chalktalk .ct-q.ct-answered .ct-composer{display:none}
         #tab-chalktalk .ct-q.ct-editing .ct-response{display:none}
         #tab-chalktalk .ct-q.ct-answered.ct-editing .ct-composer{display:block}
+        /* Collapsible answered cards: collapse to just the question + status. */
+        #tab-chalktalk .ct-q-head{display:flex;align-items:flex-start;gap:8px}
+        #tab-chalktalk .ct-chevron{display:none;color:var(--muted);font-size:.9rem;line-height:1.5;transition:transform .15s;user-select:none}
+        #tab-chalktalk .ct-q.ct-answered .ct-q-head{cursor:pointer}
+        #tab-chalktalk .ct-q.ct-answered .ct-chevron{display:inline}
+        #tab-chalktalk .ct-q.ct-answered.ct-open .ct-chevron{transform:rotate(90deg)}
+        #tab-chalktalk .ct-q.ct-answered:not(.ct-open) .ct-body{display:none}
+        /* Find-player widget (mirrors CueDrop's cd-search — identical look/behavior). */
+        #tab-chalktalk .cd-search{position:relative}
+        #tab-chalktalk .cd-ac{position:absolute;top:100%;left:0;right:0;background:var(--card);border:1px solid var(--border);border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,.14);z-index:50;max-height:260px;overflow:auto;display:none;margin-top:2px}
+        #tab-chalktalk .cd-ac.show{display:block}
+        #tab-chalktalk .cd-ac-item{padding:8px 11px;cursor:pointer;border-bottom:1px solid var(--border)}
+        #tab-chalktalk .cd-ac-item:last-child{border-bottom:none}
+        #tab-chalktalk .cd-ac-item:hover,#tab-chalktalk .cd-ac-item.on{background:var(--spm-accent);color:#fff}
+        #tab-chalktalk .cd-ac-name{font-weight:600}
+        #tab-chalktalk .cd-ac-sub{font-size:.8rem;opacity:.85}
+        #tab-chalktalk .cd-picked{background:#e8f0fe;color:#1a3b6b;border-radius:8px;padding:8px 11px;font-size:.85rem;display:flex;gap:8px;align-items:center}
+        #tab-chalktalk .cd-picked b{color:#12305e}
+        #tab-chalktalk .cd-picked .cd-x{cursor:pointer;font-weight:700}
         @media (prefers-color-scheme: dark){ #tab-chalktalk .ct-response{background:rgba(255,255,255,.06)} }
       </style>
       <div class="card">
@@ -4030,14 +4050,18 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         <details style="margin:2px 0 14px">
           <summary style="cursor:pointer;font-weight:600;color:var(--spm-accent);font-size:.9rem">+ Add a question (someone emailed / texted / DM&rsquo;d it)</summary>
           <div style="display:grid;gap:8px;margin-top:10px;max-width:580px">
-            <div style="display:flex;gap:8px;flex-wrap:wrap">
-              <input id="ctAddFrom" placeholder="Their email or APA #" style="flex:1;min-width:200px;padding:7px 9px;border:1px solid var(--border);border-radius:8px;font:inherit;background:var(--card);color:var(--text)">
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start">
+              <div class="cd-search" style="flex:1;min-width:220px">
+                <input id="ctAddSearch" autocomplete="off" placeholder="Search player by name or APA #" style="width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:8px;font:inherit;background:var(--card);color:var(--text)">
+                <div class="cd-ac" id="ctAddAc"></div>
+              </div>
               <select id="ctAddChannel" style="padding:7px 9px;border:1px solid var(--border);border-radius:8px;font:inherit;background:var(--card);color:var(--text)">
                 <option value="email">Email</option><option value="text">Text</option>
                 <option value="dm">DM</option><option value="phone">Phone</option>
                 <option value="in person">In person</option><option value="other">Other</option>
               </select>
             </div>
+            <div class="cd-picked" id="ctAddPicked" style="display:none"></div>
             <textarea id="ctAddQuestion" rows="3" placeholder="The question, in their words&hellip;" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font:inherit;resize:vertical;background:var(--card);color:var(--text)"></textarea>
             <div style="display:flex;gap:10px;align-items:center">
               <button class="btn btn-sm" onclick="ctAddQuestion()">Add to ChalkTalk</button>
@@ -4787,6 +4811,223 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
     </div>
     <!-- ════════════════ /Contacts ════════════════ -->
 
+    <!-- ════════════════ RackTime ════════════════
+         Faithful port of the standalone RackTime admin (Apps/RackTime/site/
+         admin.html). All CSS is scoped under #tab-racktime; all JS lives in a
+         single IIFE at the end of <body> exposing only window.rktInit. -->
+    <div id="tab-racktime" class="tab-panel">
+      <style>
+        /* RackTime brings its own token values that Slate's :root doesn't
+           define (--border-strong/--warn/--danger/--radius/--pill) plus a few
+           it defines with different shades. Redefine the full set locally so
+           the port renders exactly like the standalone app WITHOUT leaking
+           outside the panel (custom props cascade only to descendants). */
+        #tab-racktime {
+          --bg: #f3f3f3; --card: #ffffff; --text: #1a1a1a; --muted: #6b7280;
+          --border: #e5e7eb; --border-strong: #d1d5db; --success: #16a34a;
+          --warn: #f59e0b; --danger: #dc2626; --radius: 14px; --pill: 999px;
+        }
+        #tab-racktime .card { background: var(--card); border-radius: var(--radius); padding: 18px 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border: 1px solid var(--border); margin-bottom: 14px; }
+        #tab-racktime .card h2 { font-size: 0.78rem; font-weight: 800; color: var(--spm-accent); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 12px; }
+        #tab-racktime .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 8px; }
+        #tab-racktime .row > * { flex: 1; min-width: 140px; }
+        #tab-racktime label { display: block; font-size: 0.72rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px; }
+        #tab-racktime input[type="text"], #tab-racktime input[type="file"], #tab-racktime textarea, #tab-racktime select {
+          width: 100%; border: 1.5px solid var(--border-strong); border-radius: 10px;
+          padding: 9px 11px; font-family: inherit; font-size: 0.9rem; background: #fff;
+        }
+        #tab-racktime input:focus, #tab-racktime textarea:focus, #tab-racktime select:focus { outline: none; border-color: var(--spm-accent); }
+        #tab-racktime .btn { padding: 9px 18px; border-radius: var(--pill); font-size: 0.85rem; font-weight: 700; border: 0; cursor: pointer; font-family: inherit; }
+        #tab-racktime .btn-primary { background: var(--spm-accent); color: #fff; }
+        #tab-racktime .btn-primary:hover:not(:disabled) { background: #0046cc; }
+        #tab-racktime .btn-primary:disabled { background: #93c5fd; cursor: not-allowed; }
+        #tab-racktime .btn-outline { background: #fff; border: 1.5px solid var(--border-strong); color: var(--text); }
+        #tab-racktime .btn-outline:hover { background: #f5f5f5; }
+        #tab-racktime .btn-danger { background: var(--danger); color: #fff; }
+        #tab-racktime .btn-danger:hover { opacity: 0.92; }
+        #tab-racktime .btn-sm { padding: 5px 12px; font-size: 0.76rem; }
+        #tab-racktime .actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+        #tab-racktime .table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+        #tab-racktime .table th { text-align: left; padding: 9px 8px; border-bottom: 2px solid var(--border); color: var(--muted); font-weight: 700; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; }
+        #tab-racktime .table td { padding: 10px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+        #tab-racktime .table tr:hover { background: #fafafa; }
+        #tab-racktime .table-wrap { overflow-x: auto; }
+        #tab-racktime code { background: #eef1f7; padding: 2px 6px; border-radius: 4px; font-size: 0.86em; color: var(--spm-accent); font-weight: 700; }
+        #tab-racktime .status-line { padding: 9px 13px; border-radius: 10px; font-size: 0.84rem; font-weight: 600; margin: 6px 0; display: none; }
+        #tab-racktime .status-line.shown { display: block; }
+        #tab-racktime .status-line.ok       { background: rgba(22,163,74,0.10); color: var(--success); }
+        #tab-racktime .status-line.err      { background: rgba(220,38,38,0.10); color: var(--danger); }
+        #tab-racktime .status-line.progress { background: rgba(0,49,161,0.10); color: var(--spm-accent); }
+        #tab-racktime .hint { font-size: 0.82rem; color: var(--muted); line-height: 1.5; }
+        /* Drop zone */
+        #tab-racktime .drop-zone { border: 2px dashed var(--border-strong); border-radius: var(--radius); padding: 28px 20px; text-align: center; background: #fafafa; cursor: pointer; transition: border-color 0.15s, background 0.15s; }
+        #tab-racktime .drop-zone:hover, #tab-racktime .drop-zone.dragover { border-color: var(--spm-accent); background: rgba(0,49,161,0.04); }
+        #tab-racktime .drop-zone .dz-emoji { font-size: 2rem; display: block; margin-bottom: 6px; }
+        #tab-racktime .drop-zone .dz-title { font-weight: 800; }
+        #tab-racktime .drop-zone .dz-sub   { color: var(--muted); font-size: 0.84rem; margin-top: 2px; }
+        /* Preview tiles */
+        #tab-racktime .preview-list { display: grid; gap: 10px; margin-top: 14px; }
+        #tab-racktime .pv { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; border-left: 4px solid var(--border-strong); }
+        #tab-racktime .pv.parsing  { border-left-color: var(--warn); }
+        #tab-racktime .pv.ready    { border-left-color: var(--success); }
+        #tab-racktime .pv.error    { border-left-color: var(--danger); }
+        #tab-racktime .pv.saved    { border-left-color: var(--success); background: #f0fdf4; }
+        #tab-racktime .pv-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        #tab-racktime .pv-filename { font-weight: 700; font-size: 0.9rem; flex: 1; min-width: 200px; word-break: break-all; }
+        #tab-racktime .pv-status { font-size: 0.74rem; font-weight: 700; padding: 2px 8px; border-radius: var(--pill); }
+        #tab-racktime .pv-status.parsing { background: rgba(245,158,11,0.15); color: #b45309; }
+        #tab-racktime .pv-status.ready   { background: rgba(22,163,74,0.15); color: var(--success); }
+        #tab-racktime .pv-status.error   { background: rgba(220,38,38,0.15); color: var(--danger); }
+        #tab-racktime .pv-status.saved   { background: rgba(22,163,74,0.15); color: var(--success); }
+        #tab-racktime .pv-row { margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+        #tab-racktime .pv-field { flex: 1; min-width: 180px; }
+        #tab-racktime .pv-field label { font-size: 0.65rem; }
+        #tab-racktime .pv-field input[type="text"] { padding: 6px 9px; font-size: 0.86rem; }
+        #tab-racktime .pv-hosts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+        #tab-racktime .host-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 0.74rem; font-weight: 700; padding: 3px 9px; border-radius: var(--pill); background: #f3f4f6; color: var(--muted); border: 1px solid transparent; }
+        #tab-racktime .host-chip.existing { background: rgba(22,163,74,0.10); color: var(--success); border-color: rgba(22,163,74,0.25); }
+        #tab-racktime .host-chip.new      { background: rgba(245,158,11,0.12); color: #b45309; border-color: rgba(245,158,11,0.30); }
+        #tab-racktime .host-chip .x { cursor: pointer; opacity: 0.5; font-weight: 700; margin-left: 2px; }
+        #tab-racktime .host-chip .x:hover { opacity: 1; }
+        #tab-racktime .pv-error { color: var(--danger); font-size: 0.82rem; margin-top: 6px; }
+        /* Modals (scoped; only open while the RackTime tab is active) */
+        #tab-racktime .modal { position: fixed; inset: 0; background: rgba(10,20,40,0.6); z-index: 200; display: none; align-items: center; justify-content: center; padding: 16px; }
+        #tab-racktime .modal.shown { display: flex; }
+        #tab-racktime .modal-box { background: #fff; border-radius: var(--radius); max-width: 460px; width: 100%; max-height: 90vh; overflow-y: auto; padding: 22px; box-shadow: 0 20px 60px rgba(0,0,0,0.4); }
+        #tab-racktime .modal-title { font-size: 1.05rem; font-weight: 800; color: var(--spm-accent); margin-bottom: 12px; }
+        #tab-racktime .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; flex-wrap: wrap; }
+        /* Internal sub-tabs (renamed from RackTime's generic .tab/.panel so they
+           can't touch Slate's main tab bar). */
+        #tab-racktime .rkt-subtabs { display: flex; flex-wrap: wrap; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+        #tab-racktime .rkt-tab { padding: 10px 18px; border: 0; background: transparent; cursor: pointer; font-size: 0.9rem; font-weight: 700; color: var(--muted); border-bottom: 3px solid transparent; font-family: inherit; }
+        #tab-racktime .rkt-tab:hover { color: var(--text); }
+        #tab-racktime .rkt-tab.active { color: var(--spm-accent); border-bottom-color: var(--spm-accent); }
+        #tab-racktime .rkt-panel { display: none; }
+        #tab-racktime .rkt-panel.active { display: block; }
+      </style>
+
+      <div id="rktKeyNote" class="card" style="display:none">
+        <h2>Admin key required</h2>
+        <p class="hint">Load Slate with <code>?key=&lt;service_role&gt;</code> to manage RackTime divisions and hosts.</p>
+      </div>
+
+      <div id="rktMain">
+        <div class="rkt-subtabs">
+          <button class="rkt-tab active" data-subtab="upload">Upload</button>
+          <button class="rkt-tab" data-subtab="divisions">Divisions</button>
+          <button class="rkt-tab" data-subtab="hosts">Hosts</button>
+        </div>
+
+        <!-- ─── Upload sub-tab ─── -->
+        <div class="rkt-panel active" id="rkt-sub-upload">
+          <div class="card">
+            <h2>Bulk upload division PDFs</h2>
+            <p class="hint" style="margin-bottom:10px">Drop one or more APA division-schedule PDFs. Each is parsed for the division number/name (from the header) and the unique host venues (from the team list at the bottom). New divisions and hosts are auto-created; existing ones are matched and linked.</p>
+            <div class="drop-zone" id="rktDropZone">
+              <span class="dz-emoji">&#x1F4C4;</span>
+              <div class="dz-title">Tap to choose PDFs or drop them here</div>
+              <div class="dz-sub">Multiple at once is fine</div>
+            </div>
+            <input type="file" id="rktPdfPicker" accept="application/pdf" multiple style="display:none">
+            <div class="actions" style="margin-top:14px;justify-content:space-between">
+              <button class="btn btn-outline" id="rktClearBtn">Clear</button>
+              <button class="btn btn-primary" id="rktSaveAllBtn" disabled>Save all</button>
+            </div>
+            <div id="rktUploadStatus" class="status-line"></div>
+            <div class="preview-list" id="rktPreviewList"></div>
+          </div>
+        </div>
+
+        <!-- ─── Divisions sub-tab ─── -->
+        <div class="rkt-panel" id="rkt-sub-divisions">
+          <div class="card">
+            <h2>Divisions</h2>
+            <div class="table-wrap">
+              <table class="table">
+                <thead><tr><th>#</th><th>Name</th><th>Day · Time</th><th>Hosts</th><th>PDF</th><th></th></tr></thead>
+                <tbody id="rktDivisionsBody"><tr><td colspan="6" class="hint">Loading&hellip;</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- ─── Hosts sub-tab ─── -->
+        <div class="rkt-panel" id="rkt-sub-hosts">
+          <div class="card">
+            <h2>New host</h2>
+            <div class="row">
+              <div style="flex:2"><label for="rktNewHostName">Name</label><input type="text" id="rktNewHostName" placeholder="89 Sports Bar &amp; Billiards"></div>
+              <div style="flex:2"><label for="rktNewHostSlug">Slug</label><input type="text" id="rktNewHostSlug" placeholder="89-sports-bar"></div>
+              <div style="flex:0 0 auto"><button class="btn btn-primary" id="rktCreateHostBtn">Create</button></div>
+            </div>
+            <p class="hint" style="margin-top:4px">Slug becomes part of the public URL: <code>/?host=&lt;slug&gt;</code>. Auto-fills from name as you type.</p>
+            <div id="rktNewHostStatus" class="status-line"></div>
+          </div>
+          <div class="card">
+            <h2>Hosts</h2>
+            <div class="table-wrap">
+              <table class="table">
+                <thead><tr><th>Name</th><th>Slug</th><th>Divisions</th><th></th></tr></thead>
+                <tbody id="rktHostsBody"><tr><td colspan="4" class="hint">Loading&hellip;</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Confirm modal -->
+      <div class="modal" id="rktConfirmModal">
+        <div class="modal-box">
+          <div class="modal-title" id="rktConfirmTitle">Confirm</div>
+          <div id="rktConfirmMsg" style="font-size:0.92rem;color:var(--muted);line-height:1.5"></div>
+          <div class="modal-actions">
+            <button class="btn btn-outline" id="rktConfirmCancel">Cancel</button>
+            <button class="btn btn-danger" id="rktConfirmOkBtn">Confirm</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Edit host modal -->
+      <div class="modal" id="rktEditHostModal">
+        <div class="modal-box">
+          <div class="modal-title">Edit host</div>
+          <div class="row">
+            <div style="flex:2"><label>Name</label><input type="text" id="rktEhName"></div>
+            <div style="flex:2"><label>Slug</label><input type="text" id="rktEhSlug"></div>
+          </div>
+          <div id="rktEhStatus" class="status-line"></div>
+          <p class="hint" style="margin-top:6px">Public URL: <a id="rktEhPublicUrl" target="_blank" rel="noopener"></a></p>
+          <div class="modal-actions">
+            <button class="btn btn-outline" id="rktEhCancel">Cancel</button>
+            <button class="btn btn-danger" id="rktEhDelete">Delete host</button>
+            <button class="btn btn-primary" id="rktEhSave">Save</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Edit division modal -->
+      <div class="modal" id="rktEditDivModal">
+        <div class="modal-box">
+          <div class="modal-title">Edit division</div>
+          <div class="row">
+            <div style="flex:1"><label>Number</label><input type="text" id="rktEdNumber"></div>
+            <div style="flex:2"><label>Name</label><input type="text" id="rktEdName"></div>
+          </div>
+          <div class="row">
+            <div><label>Day of play</label><input type="text" id="rktEdDay"></div>
+            <div><label>Start time</label><input type="text" id="rktEdStart"></div>
+          </div>
+          <div id="rktEdStatus" class="status-line"></div>
+          <div class="modal-actions">
+            <button class="btn btn-outline" id="rktEdCancel">Cancel</button>
+            <button class="btn btn-danger" id="rktEdDelete">Delete division</button>
+            <button class="btn btn-primary" id="rktEdSave">Save</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- ════════════════ /RackTime ════════════════ -->
+
   </div>
 
   <div class="footer" id="appFooter">Slate v0.1 · Phase 1 · Supabase-backed</div>
@@ -4809,7 +5050,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.328';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.329';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -9906,7 +10147,8 @@ const TAB_LABEL = {
   ourrack:       'OurRack',
   preshot:       'PreShot',
   cuedrop:       'CueDrop',
-  countmein:     'CountMeIn'
+  countmein:     'CountMeIn',
+  racktime:      'RackTime'
 };
 
 function switchTab(name) {
@@ -9945,6 +10187,7 @@ function switchTab(name) {
   if (name === 'preshot') psInit();
   if (name === 'cuedrop') cdInit();
   if (name === 'countmein') cmInit();
+  if (name === 'racktime') rktInit();
 }
 
 /* ═══════════════ ChalkTalk tab (v0.1) — player question submissions ═══════════════
@@ -9967,6 +10210,7 @@ async function ctInit() {
     if (list) list.innerHTML = '<div class="ct-empty">Add <code>?key=&lt;service-role JWT&gt;</code> to the URL to view questions.</div>';
     return;
   }
+  ctAddWireSearch();
   try {
     const rows = await ctFetchQuestions();
     _ctSig = ctSig(rows);
@@ -10123,13 +10367,22 @@ function ctCard(r, resolveMap) {
     controls = composer;
   }
 
+  // Answered cards collapse to just the question + status (chevron toggles);
+  // the identity/reply/actions live in .ct-body. New + deleted stay expanded.
   return '<div id="ct-q-' + r.id + '" class="ct-q' + (deleted ? ' ct-deleted' : (answered ? ' ct-answered' : ' ct-new')) + '">'
-    + '<div class="ct-q-text">' + esc(r.question) + '</div>'
+    + '<div class="ct-q-head" onclick="ctToggleCard(' + r.id + ')"><span class="ct-chevron">&#9656;</span>'
+    +   '<div class="ct-q-text">' + esc(r.question) + '</div></div>'
     + metaRow
-    + '<div class="ct-identity">' + who + '</div>'
-    + thread
-    + controls
+    + '<div class="ct-body">'
+    +   '<div class="ct-identity">' + who + '</div>'
+    +   thread
+    +   controls
+    + '</div>'
     + '</div>';
+}
+function ctToggleCard(id) {
+  const c = document.getElementById('ct-q-' + id);
+  if (c && c.classList.contains('ct-answered')) c.classList.toggle('ct-open');
 }
 
 /* Answered card: reveal the pre-filled editor in place of the read-only reply. */
@@ -10176,35 +10429,60 @@ function ctToggleDeleted() { _ctShowDeleted = !_ctShowDeleted; ctPaint(); }
    auto-ack (they didn't submit the form). Then it flows through the normal
    answer/reply UI. The schema requires an email, so an APA# is resolved to
    the player's on-file email. */
+/* Find-player box — identical to CueDrop's (reuses cdSearch / cdPlayerName). */
+let _ctAddAc = [], _ctAddPicked = null, _ctAddFocus = -1, _ctAddTimer = null;
+function ctAddWireSearch() {
+  const input = document.getElementById('ctAddSearch'); if (!input || input._wired) return; input._wired = true;
+  input.addEventListener('input', () => {
+    clearTimeout(_ctAddTimer); const v = input.value.trim();
+    if (v.length < 2) { ctAddCloseAc(); return; }
+    _ctAddTimer = setTimeout(async () => { try { _ctAddAc = await cdSearch(v); _ctAddFocus = -1; ctAddRenderAc(); } catch (e) { ctAddCloseAc(); } }, 250);
+  });
+  input.addEventListener('keydown', e => {
+    const ac = document.getElementById('ctAddAc'); if (!ac || !ac.classList.contains('show')) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); _ctAddFocus = Math.min(_ctAddAc.length - 1, _ctAddFocus + 1); ctAddRenderAc(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); _ctAddFocus = Math.max(0, _ctAddFocus - 1); ctAddRenderAc(); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (_ctAddFocus >= 0) ctAddPick(_ctAddFocus); }
+    else if (e.key === 'Escape') ctAddCloseAc();
+  });
+  document.addEventListener('click', e => { if (!e.target.closest('#tab-chalktalk .cd-search')) ctAddCloseAc(); });
+}
+function ctAddRenderAc() {
+  const box = document.getElementById('ctAddAc'); if (!box) return;
+  if (!_ctAddAc.length) { box.innerHTML = '<div class="cd-ac-item" style="cursor:default;color:var(--muted)">No matches</div>'; box.classList.add('show'); return; }
+  box.innerHTML = _ctAddAc.map((p, i) => '<div class="cd-ac-item' + (i === _ctAddFocus ? ' on' : '') + '" onmousedown="ctAddPick(' + i + ')"><div class="cd-ac-name">' + esc(cdPlayerName(p)) + '</div><div class="cd-ac-sub">APA #' + esc(p.member_number) + (p.email ? '' : ' &middot; no email on file') + '</div></div>').join('');
+  box.classList.add('show');
+}
+function ctAddCloseAc() { const b = document.getElementById('ctAddAc'); if (b) b.classList.remove('show'); }
+function ctAddPick(i) {
+  const p = _ctAddAc[i]; if (!p) return;
+  _ctAddPicked = { member_number: p.member_number, name: cdPlayerName(p), email: String(p.email || '').trim() };
+  const inp = document.getElementById('ctAddSearch'); if (inp) inp.value = '';
+  ctAddCloseAc();
+  const pk = document.getElementById('ctAddPicked');
+  pk.style.display = 'flex';
+  pk.innerHTML = 'From: <b>' + esc(_ctAddPicked.name) + '</b> &middot; APA #' + esc(_ctAddPicked.member_number)
+    + (_ctAddPicked.email ? '' : ' &middot; <span style="color:var(--spm-primary)">no email on file</span>')
+    + ' <span class="cd-x" onclick="ctAddClearPick()">&#10005;</span>';
+}
+function ctAddClearPick() { _ctAddPicked = null; const pk = document.getElementById('ctAddPicked'); if (pk) { pk.style.display = 'none'; pk.innerHTML = ''; } }
+
 async function ctAddQuestion() {
-  const from = (document.getElementById('ctAddFrom').value || '').trim();
-  const q    = (document.getElementById('ctAddQuestion').value || '').trim();
-  const ch   = document.getElementById('ctAddChannel').value || 'other';
-  const st   = document.getElementById('ctAddStatus');
+  const q  = (document.getElementById('ctAddQuestion').value || '').trim();
+  const ch = document.getElementById('ctAddChannel').value || 'other';
+  const st = document.getElementById('ctAddStatus');
   const setSt = (m, k) => { st.textContent = m; st.style.color = k === 'err' ? 'var(--spm-primary)' : (k === 'ok' ? '#1a6a30' : 'var(--muted)'); };
-  if (!q)    { setSt('Enter the question.', 'err'); return; }
-  if (!from) { setSt('Enter their email or APA #.', 'err'); return; }
-  let email = '';
-  if (from.indexOf('@') >= 0) {
-    email = from.toLowerCase();
-  } else {
-    const digits = from.replace(/\D/g, '');
-    const apa = digits.length === 5 ? '972' + digits : digits;
-    if (!/^\d{8}$/.test(apa)) { setSt('APA # should be 5 or 8 digits, or enter an email.', 'err'); return; }
-    setSt('Looking up email…', '');
-    try {
-      const p = await sb('GET', 'players?select=email&member_number=eq.' + apa + '&limit=1');
-      email = (p && p[0] && p[0].email) ? String(p[0].email).trim() : '';
-    } catch (e) { setSt('Lookup failed: ' + (e.message || e), 'err'); return; }
-    if (!email) { setSt('No email on file for that APA # — enter their email instead.', 'err'); return; }
-  }
+  if (!q) { setSt('Enter the question.', 'err'); return; }
+  if (!_ctAddPicked) { setSt('Search and pick the player it’s from.', 'err'); return; }
+  const email = String(_ctAddPicked.email || '').trim();
+  if (!email) { setSt('That player has no email on file — add one on their record first.', 'err'); return; }
   setSt('Adding…', '');
   try {
     await sb('POST', 'questions',
       { email: email, question: q, status: 'new', source: 'admin: ' + ch, ack_status: 'skipped' },
       { 'Content-Profile': 'chalktalk' });
     document.getElementById('ctAddQuestion').value = '';
-    document.getElementById('ctAddFrom').value = '';
+    ctAddClearPick();
     setSt('✓ Added — it’s in the list below.', 'ok');
     await ctReload();
   } catch (e) { setSt('Add failed: ' + (e.message || e), 'err'); }
@@ -35209,6 +35487,908 @@ async function ehDeleteForeign() {
   }
 }
 
+</script>
+<!-- ══════════════════════════════════════════════════════════════════════
+     RACKTIME — faithful port of Apps/RackTime/site/admin.html.
+     Everything is wrapped in ONE IIFE so RackTime's generic function names
+     (switchTab, renderDivisions, createHost, saveOnePreview, sb, esc, …) are
+     module-scoped and cannot collide with Slate's globals. The only global
+     exposed is window.rktInit, called from switchTab() on tab activation.
+
+     Auth is adapted to Slate: reads SB_URL / SB_KEY / SB_ANON from Slate's
+     config (defined in the main script above) and builds racktime-schema
+     headers locally. pdf.js is reused from Slate's window.ensurePdfJs;
+     pdf-lib is lazy-imported locally. The parser (_parsePageItems /
+     parsePdfPages) and the commit logic (saveOnePreview) are kept VERBATIM
+     from the source — they have a documented silent-truncation history.
+     ══════════════════════════════════════════════════════════════════════ -->
+<script>
+(function () {
+  'use strict';
+
+  const SCHEMA = 'racktime';
+  const BUCKET = 'racktime';
+  // Public RackTime schedule viewer (org repo `racktime` → GitHub Pages).
+  const RACKTIME_PUBLIC = 'https://southportlandmetroapa.github.io/racktime/';
+
+  // Slate's SB_URL / SB_KEY / SB_ANON live in the main <script>'s global
+  // lexical scope; this later script reads them after that script has run.
+  const HEADERS_READ  = SB_KEY
+    ? { apikey: SB_KEY,  Authorization: 'Bearer ' + SB_KEY,  'Accept-Profile': SCHEMA }
+    : { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON, 'Accept-Profile': SCHEMA };
+  const HEADERS_WRITE = { ...HEADERS_READ, 'Content-Type': 'application/json', 'Content-Profile': SCHEMA, Prefer: 'return=representation' };
+
+  let _hosts = [];
+  let _divisions = [];
+  let _hostDivisions = [];        // [{ host_id, division_id }]
+
+  let _previews = [];             // { id, file, status, division?, hosts?, error? }
+  let _newHostSlugAutoFollow = true;
+  let _wired = false;             // rktWireOnce() guard (idempotent re-entry)
+
+  /* ── pdf-lib (local lazy loader; pdf.js is reused from Slate) ─────────── */
+  let _pdfLibPromise = null;
+  function ensurePdfLib() {
+    if (!_pdfLibPromise) {
+      _pdfLibPromise = import('https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/+esm');
+    }
+    return _pdfLibPromise;
+  }
+
+  /* ── Util ─────────────────────────────────── */
+  function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+  function slugify(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').substring(0, 64); }
+  function setStatus(id, msg, kind) { const el = document.getElementById(id); if (!el) return; el.className = 'status-line shown ' + (kind || ''); el.textContent = msg; }
+  function hideStatus(id) { const el = document.getElementById(id); if (!el) return; el.className = 'status-line'; el.textContent = ''; }
+  function publicHostUrl(slug) { return RACKTIME_PUBLIC + '?host=' + encodeURIComponent(slug); }
+  function normalizeKey(s) { return String(s || '').trim().toLowerCase().replace(/\s+/g, ' '); }
+
+  /* ── Supabase ─────────────────────────────── */
+  async function sb(method, path, body, extra) {
+    const opts = { method, headers: method === 'GET' ? { ...HEADERS_READ } : { ...HEADERS_WRITE } };
+    if (extra) opts.headers = { ...opts.headers, ...extra };
+    if (body !== undefined) opts.body = JSON.stringify(body);
+    const r = await fetch(SB_URL + '/rest/v1/' + path, opts);
+    if (!r.ok) throw new Error('Supabase ' + r.status + ': ' + (await r.text()).substring(0, 300));
+    if (r.status === 204) return null;
+    // Prefer: return=minimal yields a 201 with an empty body — r.json() blows
+    // up on that. Guard against any empty/non-JSON response.
+    const ct = r.headers.get('Content-Type') || '';
+    if (!ct.includes('json')) return null;
+    const text = await r.text();
+    return text ? JSON.parse(text) : null;
+  }
+  async function loadAll() {
+    _hosts          = await sb('GET', 'hosts?order=name.asc') || [];
+    _divisions      = await sb('GET', 'divisions?order=number.asc') || [];
+    _hostDivisions  = await sb('GET', 'host_divisions?select=host_id,division_id') || [];
+  }
+
+  /* ── Storage helpers ──────────────────────── */
+  async function storageUpload(path, blob, contentType, opts) {
+    const upsert = opts && opts.upsert;
+    const url = SB_URL + '/storage/v1/object/' + BUCKET + '/' + path.split('/').map(encodeURIComponent).join('/');
+    const r = await fetch(url, {
+      method: upsert ? 'PUT' : 'POST',
+      headers: {
+        apikey: SB_KEY,
+        Authorization: 'Bearer ' + SB_KEY,
+        'Content-Type': contentType || 'application/octet-stream',
+        'Cache-Control': 'public, max-age=31536000',
+        ...(upsert ? { 'x-upsert': 'true' } : {})
+      },
+      body: blob
+    });
+    if (!r.ok) throw new Error('Upload failed: ' + (await r.text()).substring(0, 200));
+    return r.json();
+  }
+  async function storageDelete(path) {
+    await fetch(SB_URL + '/storage/v1/object/' + BUCKET + '/' + path.split('/').map(encodeURIComponent).join('/'), {
+      method: 'DELETE',
+      headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY }
+    });
+  }
+
+  /* ════════════════════════════════════════════════════════════════════════
+     PDF PARSING — extract division number/name + venue names per page.
+     KEPT VERBATIM from the source (documented silent-truncation history).
+     ════════════════════════════════════════════════════════════════════════ */
+  function _parsePageItems(items) {
+    /* Group page text items into rows by Y; extract division header,
+       day, start time, and venue names from team rows. */
+    const rowsByY = new Map();
+    for (const it of items) {
+      if (!rowsByY.has(it.y)) rowsByY.set(it.y, []);
+      rowsByY.get(it.y).push(it);
+    }
+    const yKeys = [...rowsByY.keys()].sort((a, b) => b - a);
+
+    let divNumber = null, divName = null;
+    for (const y of yKeys) {
+      const row = rowsByY.get(y).sort((a, b) => a.x - b.x);
+      const text = row.map(r => r.str).join(' ').replace(/\s+/g, ' ').trim();
+      const m = text.match(/^(\d{3,4})\s*[-–—]\s*(.+)$/);
+      if (m) { divNumber = m[1]; divName = m[2].trim(); break; }
+    }
+
+    let dayOfPlay = null, startTime = null;
+    for (const y of yKeys) {
+      const text = rowsByY.get(y).sort((a, b) => a.x - b.x).map(r => r.str).join(' ').replace(/\s+/g, ' ').trim();
+      const md = text.match(/Day of Play:\s*(\w+)/i);
+      if (md && !dayOfPlay) dayOfPlay = md[1];
+      const mt = text.match(/Start Time:\s*([\d:]+\s*[apAP][mM])/i);
+      if (mt && !startTime) startTime = mt[1].trim();
+    }
+
+    const teamRows = [];
+    for (const y of yKeys) {
+      const row = rowsByY.get(y).sort((a, b) => a.x - b.x);
+      if (!row.length) continue;
+      const first = row[0].str.trim();
+      if (/^\d{4,5}$/.test(first)) teamRows.push(row);
+    }
+
+    let columnXs = [];
+    if (teamRows.length) {
+      const firstNoWS = teamRows[0].filter(it => it.str.trim().length > 0).sort((a, b) => a.x - b.x);
+      let prevX = -Infinity;
+      for (const it of firstNoWS) {
+        if (it.x - prevX > 15) columnXs.push(it.x);
+        prevX = it.x;
+      }
+    }
+
+    const venues = new Set();
+    if (columnXs.length >= 3) {
+      const venueStart = columnXs[2] - 2;
+      const venueEnd   = (columnXs[3] || Infinity) - 2;
+      for (const row of teamRows) {
+        const chunk = row
+          .filter(it => it.str.trim().length > 0)
+          .filter(it => it.x >= venueStart && it.x < venueEnd)
+          .sort((a, b) => a.x - b.x)
+          .map(it => it.str)
+          .join(' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+        if (chunk && !isPlaceholderVenue(chunk)) venues.add(chunk);
+      }
+    }
+
+    return {
+      division: divNumber ? { number: divNumber, name: divName, day_of_play: dayOfPlay, start_time: startTime } : null,
+      venues: [...venues].sort()
+    };
+  }
+
+  /* Placeholder text the team-list uses for non-venue rows (bye rows, unfilled
+     slots). Match is case-insensitive, whitespace-normalized, whole-string. */
+  const _PLACEHOLDER_VENUES = new Set([
+    'no match this week',
+    'no match',
+    'bye',
+    'bye week',
+    'to be announced',
+    'tba',
+    'tbd',
+    'forfeit',
+    'forfeited',
+    'open',
+    'pending'
+  ]);
+  function isPlaceholderVenue(s) {
+    const norm = String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    return _PLACEHOLDER_VENUES.has(norm);
+  }
+
+  async function parsePdfPages(file) {
+    const lib = await window.ensurePdfJs();
+    const data = await file.arrayBuffer();
+    const pdf = await lib.getDocument({ data }).promise;
+    const results = [];
+    const total = pdf.numPages;
+    for (let i = 1; i <= total; i++) {
+      const page = await pdf.getPage(i);
+      const tc = await page.getTextContent();
+      const items = tc.items
+        .filter(it => it && it.str != null)
+        .map(it => ({
+          x: it.transform[4],
+          y: Math.round(it.transform[5]),
+          str: it.str,
+          width: it.width || 0
+        }));
+      const r = _parsePageItems(items);
+      if (r.division) results.push({ ...r, pageIndex: i, totalPages: total });
+      /* Pages with no division header are silently skipped (cover sheets,
+         blank trailing pages). The completion report tells the operator
+         "N divisions parsed from M pages" so a partial parse is visible. */
+    }
+    return results;
+  }
+
+  /* Split a single page out of a multi-page PDF and return it as a Blob.
+     pageIndex is 1-based to match parsePdfPages(). Throws on out-of-range.
+     (Adapted from source only in its pdf-lib acquisition — uses the local
+     ensurePdfLib() instead of window.ensurePdfLib.) */
+  async function extractPageAsPdf(file, pageIndex) {
+    const PDFLib = await ensurePdfLib();
+    const bytes = await file.arrayBuffer();
+    const src = await PDFLib.PDFDocument.load(bytes);
+    const total = src.getPageCount();
+    if (pageIndex < 1 || pageIndex > total) {
+      throw new Error('Page ' + pageIndex + ' out of range (PDF has ' + total + ' page' + (total === 1 ? '' : 's') + ')');
+    }
+    const dst = await PDFLib.PDFDocument.create();
+    const [copied] = await dst.copyPages(src, [pageIndex - 1]);
+    dst.addPage(copied);
+    const out = await dst.save();
+    return new Blob([out], { type: 'application/pdf' });
+  }
+
+  /* Legacy single-result entry point — kept for shape-compatibility. */
+  async function parsePdf(file) {
+    const pages = await parsePdfPages(file);
+    return pages[0] || { division: null, venues: [] };
+  }
+
+  /* ════════════════════════════════════════════════════════════════════════
+     UPLOAD SUB-TAB — file picker, parsing, preview, save
+     ════════════════════════════════════════════════════════════════════════ */
+  function wireUpload() {
+    const dz = document.getElementById('rktDropZone');
+    const picker = document.getElementById('rktPdfPicker');
+    if (!dz || !picker) return;
+    dz.addEventListener('click', () => picker.click());
+    picker.addEventListener('change', (ev) => {
+      queueFiles(ev.target.files);
+      picker.value = '';
+    });
+    ['dragenter','dragover'].forEach(ev => dz.addEventListener(ev, e => {
+      e.preventDefault(); dz.classList.add('dragover');
+    }));
+    ['dragleave','drop'].forEach(ev => dz.addEventListener(ev, e => {
+      e.preventDefault(); dz.classList.remove('dragover');
+    }));
+    dz.addEventListener('drop', (e) => {
+      e.preventDefault();
+      const files = e.dataTransfer && e.dataTransfer.files;
+      if (files && files.length) queueFiles(files);
+    });
+  }
+
+  function queueFiles(fileList) {
+    for (const file of fileList) {
+      if (!/\.pdf$/i.test(file.name)) continue;
+      const entry = {
+        id: 'pv-' + Math.random().toString(36).slice(2, 9),
+        file,
+        status: 'parsing',
+        division: null,
+        hosts: [],     // [{ name, kind: 'existing'|'new', host_id? }]
+        error: null
+      };
+      _previews.push(entry);
+      renderPreview(entry, /*append=*/true);
+      runParseForEntry(entry);
+    }
+    updateSaveAllState();
+  }
+
+  async function runParseForEntry(entry) {
+    try {
+      /* Parse EVERY page — SPM bulk schedule PDFs have one division per page.
+         Each detected division becomes its own preview card. */
+      const pages = await parsePdfPages(entry.file);
+      if (!pages.length) {
+        throw new Error("Couldn't find a division number/name in any page of this PDF.");
+      }
+      const existingByKey = new Map(_hosts.map(h => [normalizeKey(h.name), h]));
+      const mapHosts = (venues) => venues.map(name => {
+        const existing = existingByKey.get(normalizeKey(name));
+        return existing
+          ? { name: existing.name, kind: 'existing', host_id: existing.id }
+          : { name, kind: 'new' };
+      });
+
+      /* Promote the first page into this entry. */
+      const first = pages[0];
+      entry.division   = first.division;
+      entry.pageIndex  = first.pageIndex;
+      entry.totalPages = first.totalPages;
+      entry.hosts      = mapHosts(first.venues);
+      entry.status     = 'ready';
+      renderPreview(entry, /*append=*/false);
+
+      /* For each additional page, spawn a new preview entry sharing the
+         SAME file reference. Each card saves independently. */
+      for (let i = 1; i < pages.length; i++) {
+        const p = pages[i];
+        const sibling = {
+          id: 'pv-' + Math.random().toString(36).slice(2, 9),
+          file: entry.file,
+          status: 'ready',
+          division: p.division,
+          pageIndex: p.pageIndex,
+          totalPages: p.totalPages,
+          hosts: mapHosts(p.venues),
+          error: null
+        };
+        _previews.push(sibling);
+        renderPreview(sibling, /*append=*/true);
+      }
+
+      const status = document.getElementById('rktUploadStatus');
+      if (status) {
+        const msg = pages.length === 1
+          ? '✓ Parsed 1 division from ' + entry.file.name
+          : '✓ Parsed ' + pages.length + ' divisions from ' + entry.file.name;
+        setStatus('rktUploadStatus', msg, 'ok');
+      }
+    } catch (e) {
+      entry.status = 'error';
+      entry.error = e.message || String(e);
+      renderPreview(entry, /*append=*/false);
+    }
+    updateSaveAllState();
+  }
+
+  function renderPreview(entry, append) {
+    const list = document.getElementById('rktPreviewList');
+    const existing = document.getElementById(entry.id);
+    const html = previewHtml(entry);
+    if (existing) {
+      existing.outerHTML = html;
+    } else if (append) {
+      list.insertAdjacentHTML('beforeend', html);
+    } else {
+      list.insertAdjacentHTML('beforeend', html);
+    }
+    wirePreviewHandlers(entry.id);
+  }
+
+  function previewHtml(e) {
+    const d = e.division;
+    const hostsHtml = (e.hosts || []).map((h, idx) => '<span class="host-chip ' + h.kind + '" data-idx="' + idx + '">'
+      + esc(h.name)
+      + ' <span class="x" title="Remove" data-act="rmhost">×</span>'
+      + '</span>').join('');
+    const statusLabel = e.status === 'parsing' ? 'Parsing…'
+                      : e.status === 'ready' ? 'Ready'
+                      : e.status === 'saved' ? 'Saved'
+                      : 'Error';
+    let body = '';
+    if (e.status === 'error') {
+      body = '<div class="pv-error">' + esc(e.error || 'Unknown error') + '</div>';
+    } else {
+      body = '<div class="pv-row">'
+        + '<div class="pv-field"><label>Number</label><input type="text" data-fld="number" value="' + esc(d ? d.number : '') + '"></div>'
+        + '<div class="pv-field" style="flex:2"><label>Name</label><input type="text" data-fld="name" value="' + esc(d ? d.name : '') + '"></div>'
+        + '</div>'
+        + '<div class="pv-row">'
+        + '<div class="pv-field"><label>Day of play</label><input type="text" data-fld="day_of_play" value="' + esc(d && d.day_of_play || '') + '"></div>'
+        + '<div class="pv-field"><label>Start time</label><input type="text" data-fld="start_time" value="' + esc(d && d.start_time || '') + '"></div>'
+        + '</div>'
+        + '<div class="pv-row"><div class="pv-field" style="flex:1 1 100%;">'
+        +   '<label>Host venues found in team list</label>'
+        +   '<div class="pv-hosts" data-host-grid="1">' + (hostsHtml || '<span class="hint">None detected.</span>') + '</div>'
+        + '</div></div>';
+    }
+    const pageLabel = e.pageIndex && e.pageIndex > 0
+      ? ' <span class="hint" style="font-size:0.78rem">· page ' + e.pageIndex + '</span>'
+      : '';
+    return '<div class="pv ' + e.status + '" id="' + e.id + '">'
+      + '<div class="pv-head">'
+      +   '<div class="pv-filename">' + esc(e.file.name) + pageLabel + '</div>'
+      +   '<span class="pv-status ' + e.status + '">' + statusLabel + '</span>'
+      +   (e.status !== 'saved' ? '<button class="btn btn-outline btn-sm" data-act="remove">Remove</button>' : '')
+      + '</div>'
+      + body
+      + '</div>';
+  }
+
+  function wirePreviewHandlers(entryId) {
+    const root = document.getElementById(entryId);
+    if (!root) return;
+    const entry = _previews.find(p => p.id === entryId);
+    if (!entry) return;
+    // Field edits sync back into entry.division
+    root.querySelectorAll('input[data-fld]').forEach(inp => {
+      inp.addEventListener('input', () => {
+        if (!entry.division) entry.division = {};
+        entry.division[inp.dataset.fld] = inp.value;
+        updateSaveAllState();
+      });
+    });
+    // Host chip remove
+    root.querySelectorAll('.host-chip .x[data-act="rmhost"]').forEach(x => {
+      x.addEventListener('click', () => {
+        const chip = x.closest('.host-chip');
+        const idx = parseInt(chip.dataset.idx, 10);
+        entry.hosts.splice(idx, 1);
+        renderPreview(entry, false);
+        updateSaveAllState();
+      });
+    });
+    // Remove this preview entry
+    const rm = root.querySelector('button[data-act="remove"]');
+    if (rm) rm.addEventListener('click', () => {
+      _previews = _previews.filter(p => p.id !== entryId);
+      root.remove();
+      updateSaveAllState();
+    });
+  }
+
+  function updateSaveAllState() {
+    const anyReady = _previews.some(p => p.status === 'ready');
+    const btn = document.getElementById('rktSaveAllBtn');
+    if (btn) btn.disabled = !anyReady;
+  }
+
+  function clearPreview() {
+    _previews = [];
+    const list = document.getElementById('rktPreviewList');
+    if (list) list.innerHTML = '';
+    hideStatus('rktUploadStatus');
+    updateSaveAllState();
+  }
+
+  async function saveAllUploads() {
+    const items = _previews.filter(p => p.status === 'ready');
+    if (!items.length) return;
+    const btn = document.getElementById('rktSaveAllBtn');
+    btn.disabled = true;
+    setStatus('rktUploadStatus', 'Saving ' + items.length + ' PDF' + (items.length === 1 ? '' : 's') + '…', 'progress');
+    let ok = 0, fail = 0;
+    for (const e of items) {
+      try {
+        await saveOnePreview(e);
+        e.status = 'saved';
+        ok++;
+      } catch (err) {
+        e.status = 'error';
+        e.error = err.message || String(err);
+        fail++;
+      }
+      renderPreview(e, false);
+    }
+    // Refresh model state and tables
+    try { await loadAll(); } catch (_) {}
+    renderDivisions(); renderHostsList();
+    setStatus('rktUploadStatus',
+      fail === 0
+        ? ('Saved ' + ok + ' PDF' + (ok === 1 ? '' : 's') + '.')
+        : (ok + ' saved, ' + fail + ' failed — see error tiles above.'),
+      fail === 0 ? 'ok' : 'err');
+    btn.disabled = !_previews.some(p => p.status === 'ready');
+  }
+
+  /* COMMIT LOGIC — KEPT VERBATIM from the source. Do not alter semantics. */
+  async function saveOnePreview(entry) {
+    const d = entry.division || {};
+    const number = String(d.number || '').trim();
+    const name   = String(d.name   || '').trim();
+    if (!number || !name) throw new Error('Division number + name required.');
+
+    // 1. Upsert the division (match on number; insert if missing, update otherwise)
+    let division = _divisions.find(x => x.number === number);
+    const dayOfPlay = (d.day_of_play || '').trim() || null;
+    const startTime = (d.start_time  || '').trim() || null;
+
+    // Build storage path: <number>/<unix-ts>-<safe-filename>.pdf
+    // For multi-page bulk PDFs (a single file with one division per page),
+    // split out just this division's page before uploading. Otherwise the
+    // public /?host=X&div=Y view would serve the entire bulk document.
+    const ts = Date.now();
+    const isMultiPage = (entry.totalPages || 1) > 1 && (entry.pageIndex || 0) >= 1;
+    const baseSafe = entry.file.name.replace(/[^a-zA-Z0-9._-]+/g, '-').toLowerCase();
+    const safeName = isMultiPage
+      ? baseSafe.replace(/\.pdf$/i, '') + '-p' + entry.pageIndex + '-div' + number + '.pdf'
+      : baseSafe;
+    const pdfPath = number + '/' + ts + '-' + safeName;
+
+    // Extract single-page when needed, upload as a stable PDF blob.
+    const uploadBlob = isMultiPage
+      ? await extractPageAsPdf(entry.file, entry.pageIndex)
+      : entry.file;
+
+    // Upload PDF to Storage first; if it fails, we don't pollute the DB
+    await storageUpload(pdfPath, uploadBlob, 'application/pdf');
+
+    if (division) {
+      // Update existing — clobber prior pdf_path; clean up the old object
+      const oldPath = division.pdf_path;
+      const patch = { name, day_of_play: dayOfPlay, start_time: startTime, pdf_path: pdfPath, updated_at: new Date().toISOString() };
+      const updated = await sb('PATCH', 'divisions?id=eq.' + division.id, patch);
+      division = (Array.isArray(updated) ? updated[0] : updated) || division;
+      if (oldPath && oldPath !== pdfPath) { try { await storageDelete(oldPath); } catch (_) {} }
+    } else {
+      const created = await sb('POST', 'divisions', {
+        number, name, day_of_play: dayOfPlay, start_time: startTime, pdf_path: pdfPath
+      });
+      division = Array.isArray(created) ? created[0] : created;
+      _divisions.push(division);
+    }
+
+    // 2. Resolve every parsed venue to a host id (creating new hosts as needed).
+    const desiredHostIds = new Set();
+    for (const h of entry.hosts) {
+      let host = h.host_id ? _hosts.find(x => x.id === h.host_id) : null;
+      if (!host) {
+        const key = normalizeKey(h.name);
+        host = _hosts.find(x => normalizeKey(x.name) === key) || null;
+      }
+      if (!host) {
+        // Defensive: skip placeholder strings if any slip past the parser.
+        if (typeof isPlaceholderVenue === 'function' && isPlaceholderVenue(h.name)) {
+          continue;
+        }
+        // Auto-create with auto-slug (collision-safe)
+        let baseSlug = slugify(h.name) || 'host';
+        let cand = baseSlug, n = 1;
+        while (_hosts.some(x => x.slug === cand)) { n++; cand = baseSlug + '-' + n; }
+        const created = await sb('POST', 'hosts', { name: h.name, slug: cand });
+        host = Array.isArray(created) ? created[0] : created;
+        _hosts.push(host);
+      }
+      desiredHostIds.add(host.id);
+    }
+
+    // 3. Sync host_divisions for THIS division to exactly match the current
+    //    parse — delete-then-insert pattern.
+    const existingForDiv = _hostDivisions.filter(x => x.division_id === division.id);
+    const existingHostIds = new Set(existingForDiv.map(x => x.host_id));
+    const toDelete = [...existingHostIds].filter(hid => !desiredHostIds.has(hid));
+    const toInsert = [...desiredHostIds].filter(hid => !existingHostIds.has(hid));
+
+    if (toDelete.length) {
+      const idList = toDelete.join(',');
+      await sb('DELETE', 'host_divisions?division_id=eq.' + division.id + '&host_id=in.(' + idList + ')');
+      for (const hid of toDelete) {
+        const i = _hostDivisions.findIndex(x => x.host_id === hid && x.division_id === division.id);
+        if (i >= 0) _hostDivisions.splice(i, 1);
+      }
+    }
+    for (const hid of toInsert) {
+      await sb('POST', 'host_divisions', { host_id: hid, division_id: division.id },
+        { Prefer: 'resolution=merge-duplicates,return=minimal' });
+      _hostDivisions.push({ host_id: hid, division_id: division.id });
+    }
+  }
+
+  /* ════════════════════════════════════════════════════════════════════════
+     DIVISIONS SUB-TAB
+     ════════════════════════════════════════════════════════════════════════ */
+  function renderDivisions() {
+    const body = document.getElementById('rktDivisionsBody');
+    if (!body) return;
+    if (!_divisions.length) {
+      body.innerHTML = '<tr><td colspan="6" class="hint">No divisions yet — upload PDFs from the Upload tab.</td></tr>';
+      return;
+    }
+    const hostsByDiv = new Map();
+    for (const hd of _hostDivisions) {
+      if (!hostsByDiv.has(hd.division_id)) hostsByDiv.set(hd.division_id, []);
+      const h = _hosts.find(x => x.id === hd.host_id);
+      if (h) hostsByDiv.get(hd.division_id).push(h);
+    }
+    body.innerHTML = _divisions.map(d => {
+      const hs = (hostsByDiv.get(d.id) || []).sort((a,b) => a.name.localeCompare(b.name));
+      const dt = [d.day_of_play, d.start_time].filter(Boolean).join(' · ');
+      const pdfBtn = d.pdf_path
+        ? '<a class="btn btn-outline btn-sm" target="_blank" rel="noopener" href="' + esc(SB_URL + '/storage/v1/object/public/' + BUCKET + '/' + d.pdf_path.split('/').map(encodeURIComponent).join('/')) + '">Open</a>'
+        : '<span class="hint">none</span>';
+      return '<tr>'
+        + '<td><code>' + esc(d.number) + '</code></td>'
+        + '<td><strong>' + esc(d.name) + '</strong></td>'
+        + '<td>' + esc(dt || '—') + '</td>'
+        + '<td>' + (hs.length
+              ? hs.map(h => '<span class="host-chip existing">' + esc(h.name) + '</span>').join(' ')
+              : '<span class="hint">none</span>')
+          + '</td>'
+        + '<td>' + pdfBtn + '</td>'
+        + '<td><div class="actions">'
+        +   '<button class="btn btn-primary btn-sm" data-rkt-editdiv="' + d.id + '">Edit</button>'
+        + '</div></td>'
+        + '</tr>';
+    }).join('');
+  }
+
+  let _editDivId = null;
+  function openEditDiv(id) {
+    const d = _divisions.find(x => x.id === id);
+    if (!d) return;
+    _editDivId = id;
+    document.getElementById('rktEdNumber').value = d.number;
+    document.getElementById('rktEdName').value   = d.name;
+    document.getElementById('rktEdDay').value    = d.day_of_play || '';
+    document.getElementById('rktEdStart').value  = d.start_time || '';
+    hideStatus('rktEdStatus');
+    document.getElementById('rktEditDivModal').classList.add('shown');
+  }
+  function closeEditDiv() { document.getElementById('rktEditDivModal').classList.remove('shown'); _editDivId = null; }
+  async function saveEditDiv() {
+    if (_editDivId == null) return;
+    hideStatus('rktEdStatus');
+    const number = document.getElementById('rktEdNumber').value.trim();
+    const name   = document.getElementById('rktEdName').value.trim();
+    const day    = document.getElementById('rktEdDay').value.trim() || null;
+    const start  = document.getElementById('rktEdStart').value.trim() || null;
+    if (!number || !name) return setStatus('rktEdStatus', 'Number + name required.', 'err');
+    try {
+      await sb('PATCH', 'divisions?id=eq.' + _editDivId, {
+        number, name, day_of_play: day, start_time: start, updated_at: new Date().toISOString()
+      });
+      const d = _divisions.find(x => x.id === _editDivId);
+      if (d) { d.number = number; d.name = name; d.day_of_play = day; d.start_time = start; }
+      closeEditDiv();
+      renderDivisions();
+    } catch (e) {
+      const msg = String(e.message || '').toLowerCase();
+      if (msg.includes('duplicate') || msg.includes('unique') || msg.includes('23505')) {
+        setStatus('rktEdStatus', 'That division number is already in use.', 'err');
+      } else {
+        setStatus('rktEdStatus', 'Save failed: ' + e.message, 'err');
+      }
+    }
+  }
+  function askDeleteDivFromModal() {
+    const d = _divisions.find(x => x.id === _editDivId);
+    if (!d) return;
+    confirmModal({
+      title: 'Delete division?',
+      message: 'Removes "' + d.number + ' — ' + d.name + '", its PDF, and unlinks it from every host. Can’t be undone.',
+      okText: 'Delete',
+      onOk: async () => {
+        try {
+          if (d.pdf_path) { try { await storageDelete(d.pdf_path); } catch (_) {} }
+          await sb('DELETE', 'divisions?id=eq.' + d.id);
+          _divisions = _divisions.filter(x => x.id !== d.id);
+          _hostDivisions = _hostDivisions.filter(x => x.division_id !== d.id);
+          closeEditDiv();
+          renderDivisions(); renderHostsList();
+        } catch (e) { setStatus('rktEdStatus', 'Delete failed: ' + e.message, 'err'); }
+      }
+    });
+  }
+
+  /* ════════════════════════════════════════════════════════════════════════
+     HOSTS SUB-TAB
+     ════════════════════════════════════════════════════════════════════════ */
+  function wireSlugAutoFollow() {
+    const nameInput = document.getElementById('rktNewHostName');
+    const slugInput = document.getElementById('rktNewHostSlug');
+    if (!nameInput || !slugInput) return;
+    nameInput.addEventListener('input', () => {
+      if (_newHostSlugAutoFollow) slugInput.value = slugify(nameInput.value);
+    });
+    slugInput.addEventListener('input', () => {
+      _newHostSlugAutoFollow = (slugInput.value === '');
+    });
+    const onEnter = (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); createHost(); } };
+    nameInput.addEventListener('keydown', onEnter);
+    slugInput.addEventListener('keydown', onEnter);
+  }
+  async function createHost() {
+    hideStatus('rktNewHostStatus');
+    const name = document.getElementById('rktNewHostName').value.trim();
+    let slug = document.getElementById('rktNewHostSlug').value.trim();
+    if (!slug) slug = slugify(name);
+    if (!name) return setStatus('rktNewHostStatus', 'Name required.', 'err');
+    if (!slug) return setStatus('rktNewHostStatus', 'Could not derive slug from name.', 'err');
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) return setStatus('rktNewHostStatus', 'Slug must be lowercase letters, digits, hyphens.', 'err');
+    if (_hosts.some(h => h.slug === slug)) return setStatus('rktNewHostStatus', 'Slug already in use.', 'err');
+    try {
+      const created = await sb('POST', 'hosts', { slug, name });
+      _hosts.push(Array.isArray(created) ? created[0] : created);
+      _hosts.sort((a, b) => a.name.localeCompare(b.name));
+      document.getElementById('rktNewHostName').value = '';
+      document.getElementById('rktNewHostSlug').value = '';
+      _newHostSlugAutoFollow = true;
+      setStatus('rktNewHostStatus', 'Created.', 'ok');
+      renderHostsList();
+    } catch (e) {
+      setStatus('rktNewHostStatus', 'Failed: ' + e.message, 'err');
+    }
+  }
+  function renderHostsList() {
+    const body = document.getElementById('rktHostsBody');
+    if (!body) return;
+    if (!_hosts.length) {
+      body.innerHTML = '<tr><td colspan="4" class="hint">No hosts yet. Upload a PDF or add one manually above.</td></tr>';
+      return;
+    }
+    const divsByHost = new Map();
+    for (const hd of _hostDivisions) {
+      if (!divsByHost.has(hd.host_id)) divsByHost.set(hd.host_id, []);
+      const d = _divisions.find(x => x.id === hd.division_id);
+      if (d) divsByHost.get(hd.host_id).push(d);
+    }
+    body.innerHTML = _hosts.map(h => {
+      const ds = (divsByHost.get(h.id) || []).sort((a, b) => a.number.localeCompare(b.number));
+      return '<tr>'
+        + '<td><strong>' + esc(h.name) + '</strong></td>'
+        + '<td><code>' + esc(h.slug) + '</code></td>'
+        + '<td>' + (ds.length
+              ? ds.map(d => '<span class="host-chip existing">' + esc(d.number) + '</span>').join(' ')
+              : '<span class="hint">none</span>')
+          + '</td>'
+        + '<td><div class="actions">'
+        +   '<a class="btn btn-outline btn-sm" target="_blank" rel="noopener" href="' + esc(publicHostUrl(h.slug)) + '">View</a>'
+        +   '<button class="btn btn-primary btn-sm" data-rkt-edithost="' + h.id + '">Edit</button>'
+        + '</div></td>'
+        + '</tr>';
+    }).join('');
+  }
+
+  let _editHostId = null;
+  function openEditHost(id) {
+    const h = _hosts.find(x => x.id === id);
+    if (!h) return;
+    _editHostId = id;
+    document.getElementById('rktEhName').value = h.name;
+    document.getElementById('rktEhSlug').value = h.slug;
+    const url = publicHostUrl(h.slug);
+    const a = document.getElementById('rktEhPublicUrl');
+    a.textContent = url; a.href = url;
+    hideStatus('rktEhStatus');
+    document.getElementById('rktEditHostModal').classList.add('shown');
+  }
+  function closeEditHost() { document.getElementById('rktEditHostModal').classList.remove('shown'); _editHostId = null; }
+  async function saveEditHost() {
+    if (_editHostId == null) return;
+    hideStatus('rktEhStatus');
+    const h = _hosts.find(x => x.id === _editHostId);
+    const name = document.getElementById('rktEhName').value.trim();
+    const slug = document.getElementById('rktEhSlug').value.trim();
+    if (!name || !slug) return setStatus('rktEhStatus', 'Name + slug required.', 'err');
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) return setStatus('rktEhStatus', 'Slug must be lowercase letters, digits, hyphens.', 'err');
+    if (slug !== h.slug && _hosts.some(x => x.slug === slug && x.id !== _editHostId)) {
+      return setStatus('rktEhStatus', 'Slug already in use.', 'err');
+    }
+    try {
+      await sb('PATCH', 'hosts?id=eq.' + _editHostId, { name, slug, updated_at: new Date().toISOString() });
+      h.name = name; h.slug = slug;
+      _hosts.sort((a, b) => a.name.localeCompare(b.name));
+      closeEditHost();
+      renderHostsList();
+    } catch (e) {
+      const msg = String(e.message || '').toLowerCase();
+      if (msg.includes('duplicate') || msg.includes('unique') || msg.includes('23505')) {
+        setStatus('rktEhStatus', 'That slug is already used by another host.', 'err');
+      } else {
+        setStatus('rktEhStatus', 'Save failed: ' + e.message, 'err');
+      }
+    }
+  }
+  function askDeleteHostFromModal() {
+    const h = _hosts.find(x => x.id === _editHostId);
+    if (!h) return;
+    const dcount = _hostDivisions.filter(x => x.host_id === h.id).length;
+    confirmModal({
+      title: 'Delete host?',
+      message: 'Removes "' + h.name + '" and unlinks it from ' + dcount + ' division(s). Can’t be undone.',
+      okText: 'Delete',
+      onOk: async () => {
+        try {
+          await sb('DELETE', 'hosts?id=eq.' + h.id);
+          _hosts = _hosts.filter(x => x.id !== h.id);
+          _hostDivisions = _hostDivisions.filter(x => x.host_id !== h.id);
+          closeEditHost();
+          renderHostsList(); renderDivisions();
+        } catch (e) { setStatus('rktEhStatus', 'Delete failed: ' + e.message, 'err'); }
+      }
+    });
+  }
+
+  /* ════════════════════════════════════════════════════════════════════════
+     SUB-TABS (scoped to #tab-racktime — never touch Slate's main tab bar)
+     ════════════════════════════════════════════════════════════════════════ */
+  function rktSwitchSubTab(name) {
+    const root = document.getElementById('tab-racktime');
+    if (!root) return;
+    root.querySelectorAll('.rkt-tab').forEach(t => t.classList.toggle('active', t.dataset.subtab === name));
+    root.querySelectorAll('.rkt-panel').forEach(p => p.classList.toggle('active', p.id === 'rkt-sub-' + name));
+  }
+
+  /* ── Confirm modal ────────────────────────── */
+  function confirmModal(opts) {
+    const m = document.getElementById('rktConfirmModal');
+    document.getElementById('rktConfirmTitle').textContent = opts.title || 'Confirm';
+    document.getElementById('rktConfirmMsg').textContent = opts.message || '';
+    document.getElementById('rktConfirmOkBtn').textContent = opts.okText || 'Confirm';
+    m._onOk = opts.onOk || null;
+    m.classList.add('shown');
+  }
+  function closeConfirm(ok) {
+    const m = document.getElementById('rktConfirmModal');
+    m.classList.remove('shown');
+    if (ok && typeof m._onOk === 'function') m._onOk();
+    m._onOk = null;
+  }
+
+  /* ── One-time DOM wiring (replaces the source's inline onclick handlers so
+        the whole module can live in an IIFE exposing only window.rktInit) ── */
+  function rktWireOnce() {
+    if (_wired) return;
+    _wired = true;
+    const root = document.getElementById('tab-racktime');
+    if (!root) return;
+
+    // Sub-tab bar
+    root.querySelectorAll('.rkt-tab').forEach(t =>
+      t.addEventListener('click', () => rktSwitchSubTab(t.dataset.subtab)));
+
+    // Upload
+    wireUpload();
+    const clearBtn = document.getElementById('rktClearBtn');
+    if (clearBtn) clearBtn.addEventListener('click', clearPreview);
+    const saveAllBtn = document.getElementById('rktSaveAllBtn');
+    if (saveAllBtn) saveAllBtn.addEventListener('click', saveAllUploads);
+
+    // Hosts
+    wireSlugAutoFollow();
+    const createBtn = document.getElementById('rktCreateHostBtn');
+    if (createBtn) createBtn.addEventListener('click', createHost);
+
+    // Table row actions (event delegation — rows are re-rendered)
+    const divBody = document.getElementById('rktDivisionsBody');
+    if (divBody) divBody.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-rkt-editdiv]');
+      if (b) openEditDiv(parseInt(b.getAttribute('data-rkt-editdiv'), 10));
+    });
+    const hostBody = document.getElementById('rktHostsBody');
+    if (hostBody) hostBody.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-rkt-edithost]');
+      if (b) openEditHost(parseInt(b.getAttribute('data-rkt-edithost'), 10));
+    });
+
+    // Confirm modal
+    const cCancel = document.getElementById('rktConfirmCancel');
+    if (cCancel) cCancel.addEventListener('click', () => closeConfirm(false));
+    const cOk = document.getElementById('rktConfirmOkBtn');
+    if (cOk) cOk.addEventListener('click', () => closeConfirm(true));
+
+    // Edit host modal
+    const ehCancel = document.getElementById('rktEhCancel');
+    if (ehCancel) ehCancel.addEventListener('click', closeEditHost);
+    const ehDelete = document.getElementById('rktEhDelete');
+    if (ehDelete) ehDelete.addEventListener('click', askDeleteHostFromModal);
+    const ehSave = document.getElementById('rktEhSave');
+    if (ehSave) ehSave.addEventListener('click', saveEditHost);
+
+    // Edit division modal
+    const edCancel = document.getElementById('rktEdCancel');
+    if (edCancel) edCancel.addEventListener('click', closeEditDiv);
+    const edDelete = document.getElementById('rktEdDelete');
+    if (edDelete) edDelete.addEventListener('click', askDeleteDivFromModal);
+    const edSave = document.getElementById('rktEdSave');
+    if (edSave) edSave.addEventListener('click', saveEditDiv);
+  }
+
+  /* ── Entry point (called by switchTab on tab activation) ──────────────── */
+  async function rktInit() {
+    const note = document.getElementById('rktKeyNote');
+    const main = document.getElementById('rktMain');
+    if (!SB_KEY) {
+      if (note) note.style.display = 'block';
+      if (main) main.style.display = 'none';
+      return;
+    }
+    if (note) note.style.display = 'none';
+    if (main) main.style.display = '';
+    rktWireOnce();
+    try { await loadAll(); }
+    catch (e) {
+      setStatus('rktUploadStatus', 'Load failed: ' + e.message, 'err');
+      return;
+    }
+    renderDivisions();
+    renderHostsList();
+  }
+
+  window.rktInit = rktInit;   // the single global entry point
+})();
 </script>
 <!-- House modal wrap — page level ON PURPOSE (3.259): modals open from
      any tab; inside a tab panel they inherit display:none when that tab
