@@ -4952,7 +4952,9 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             <label for="rktSessionSel">Session</label>
             <select id="rktSessionSel"><option value="">Loading…</option></select>
           </div>
-          <div class="hint" style="flex:1; min-width:180px; align-self:flex-end; padding-bottom:8px">Uploads and the lists below apply to the selected session. Defaults to the current session.</div>
+          <div class="hint" style="flex:1; min-width:160px; align-self:flex-end; padding-bottom:8px">Uploads and the lists below apply to the selected session. Defaults to the current session.</div>
+          <a class="btn btn-outline" href="https://southportlandmetroapa.github.io/racktime/" target="_blank" rel="noopener"
+             style="flex:0 0 auto; align-self:flex-end; text-decoration:none">Open user site &#8599;</a>
         </div>
         <div class="rkt-subtabs">
           <button class="rkt-tab active" data-subtab="upload">Upload</button>
@@ -5092,7 +5094,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.335';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.336';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
