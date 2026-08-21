@@ -4027,6 +4027,25 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <a class="btn btn-outline btn-sm" style="margin-left:auto; text-decoration:none"
              href="https://southportlandmetroapa.github.io/chalktalk/" target="_blank" rel="noopener">View public form &#8599;</a>
         </div>
+        <details style="margin:2px 0 14px">
+          <summary style="cursor:pointer;font-weight:600;color:var(--spm-accent);font-size:.9rem">+ Add a question (someone emailed / texted / DM&rsquo;d it)</summary>
+          <div style="display:grid;gap:8px;margin-top:10px;max-width:580px">
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <input id="ctAddFrom" placeholder="Their email or APA #" style="flex:1;min-width:200px;padding:7px 9px;border:1px solid var(--border);border-radius:8px;font:inherit;background:var(--card);color:var(--text)">
+              <select id="ctAddChannel" style="padding:7px 9px;border:1px solid var(--border);border-radius:8px;font:inherit;background:var(--card);color:var(--text)">
+                <option value="email">Email</option><option value="text">Text</option>
+                <option value="dm">DM</option><option value="phone">Phone</option>
+                <option value="in person">In person</option><option value="other">Other</option>
+              </select>
+            </div>
+            <textarea id="ctAddQuestion" rows="3" placeholder="The question, in their words&hellip;" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font:inherit;resize:vertical;background:var(--card);color:var(--text)"></textarea>
+            <div style="display:flex;gap:10px;align-items:center">
+              <button class="btn btn-sm" onclick="ctAddQuestion()">Add to ChalkTalk</button>
+              <span class="ct-sub" id="ctAddStatus" style="font-size:.85rem"></span>
+            </div>
+            <div class="hint" style="font-size:.8rem;color:var(--muted)">No auto-acknowledgment is sent (they didn&rsquo;t submit the form). Reply from the card once it lands in the list.</div>
+          </div>
+        </details>
         <div class="ct-list" id="ctList"><div class="ct-empty">Loading&hellip;</div></div>
       </div>
     </div>
@@ -4790,7 +4809,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.327';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.328';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10151,6 +10170,45 @@ async function ctPaint() {
   list.scrollTop = scroll;
 }
 function ctToggleDeleted() { _ctShowDeleted = !_ctShowDeleted; ctPaint(); }
+
+/* 3.328 — admin adds a question on behalf of someone who emailed / texted /
+   DM'd it. Writes a chalktalk.questions row directly (service-role); no
+   auto-ack (they didn't submit the form). Then it flows through the normal
+   answer/reply UI. The schema requires an email, so an APA# is resolved to
+   the player's on-file email. */
+async function ctAddQuestion() {
+  const from = (document.getElementById('ctAddFrom').value || '').trim();
+  const q    = (document.getElementById('ctAddQuestion').value || '').trim();
+  const ch   = document.getElementById('ctAddChannel').value || 'other';
+  const st   = document.getElementById('ctAddStatus');
+  const setSt = (m, k) => { st.textContent = m; st.style.color = k === 'err' ? 'var(--spm-primary)' : (k === 'ok' ? '#1a6a30' : 'var(--muted)'); };
+  if (!q)    { setSt('Enter the question.', 'err'); return; }
+  if (!from) { setSt('Enter their email or APA #.', 'err'); return; }
+  let email = '';
+  if (from.indexOf('@') >= 0) {
+    email = from.toLowerCase();
+  } else {
+    const digits = from.replace(/\D/g, '');
+    const apa = digits.length === 5 ? '972' + digits : digits;
+    if (!/^\d{8}$/.test(apa)) { setSt('APA # should be 5 or 8 digits, or enter an email.', 'err'); return; }
+    setSt('Looking up email…', '');
+    try {
+      const p = await sb('GET', 'players?select=email&member_number=eq.' + apa + '&limit=1');
+      email = (p && p[0] && p[0].email) ? String(p[0].email).trim() : '';
+    } catch (e) { setSt('Lookup failed: ' + (e.message || e), 'err'); return; }
+    if (!email) { setSt('No email on file for that APA # — enter their email instead.', 'err'); return; }
+  }
+  setSt('Adding…', '');
+  try {
+    await sb('POST', 'questions',
+      { email: email, question: q, status: 'new', source: 'admin: ' + ch, ack_status: 'skipped' },
+      { 'Content-Profile': 'chalktalk' });
+    document.getElementById('ctAddQuestion').value = '';
+    document.getElementById('ctAddFrom').value = '';
+    setSt('✓ Added — it’s in the list below.', 'ok');
+    await ctReload();
+  } catch (e) { setSt('Add failed: ' + (e.message || e), 'err'); }
+}
 
 function ctStartPoll() {
   if (_ctPoll) clearInterval(_ctPoll);
