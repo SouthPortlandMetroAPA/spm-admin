@@ -1935,8 +1935,8 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
          TAB: COMMON PLAYERS — find players on multiple teams within a
          Roster & Handicap Report PDF. Produces conflict table, transitive
          cluster groups (union-find from TeamGrouper), and a flat APA-number
-         list ready to paste into Email HQ. Hardcoded special case:
-         Irwin, Craig's team is flagged as needing to host at Wichita.
+         list ready to paste into Email HQ. Host-location rules (player →
+         required host) are UI-configurable in the "Location rules" panel.
          ══════════════════════════════════════════════════════════════ -->
     <div id="tab-commonplayers" class="tab-panel">
       <div class="card">
@@ -1957,6 +1957,22 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         </div>
 
         <div id="cpStatus" class="status-line" style="margin-top:10px"></div>
+
+        <!-- Host-location rules — configurable "this player's team must host at X" list.
+             Loaded from slate.roster_host_rules; drives the amber banner below. -->
+        <details style="margin-top:12px; border:1px solid var(--border); border-radius:8px; padding:8px 12px; background:var(--card-bg,#fafafa)">
+          <summary style="cursor:pointer; font-weight:700; font-size:.9rem">🏆 Location rules <span class="hint" style="font-weight:400">— force any team a given player is on to host at a specific spot</span></summary>
+          <div style="margin-top:10px">
+            <div id="cpRulesList" style="margin-bottom:10px"></div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center">
+              <input id="cpRuleName" type="text" placeholder="Player name (e.g. Jeff Savage)" style="flex:1 1 200px; padding:6px 9px; border:1px solid var(--border-strong); border-radius:6px; font-size:.88rem">
+              <input id="cpRuleHost" type="text" placeholder="Host location (e.g. Wichita)" style="flex:1 1 160px; padding:6px 9px; border:1px solid var(--border-strong); border-radius:6px; font-size:.88rem">
+              <button class="btn btn-primary btn-sm" onclick="cpSaveHostRule()">Add rule</button>
+            </div>
+            <div id="cpRuleStatus" style="margin-top:6px; font-size:.82rem; min-height:1em"></div>
+            <p class="hint" style="margin:6px 0 0; font-size:.78rem">Name matching is order-independent — "Jeff Savage" matches both "Savage, Jeff" and "Jeff Savage".</p>
+          </div>
+        </details>
 
         <div id="cpResults" style="display:none; margin-top:18px;">
           <!-- Summary chips -->
@@ -5050,7 +5066,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.330';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.331';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -23215,15 +23231,76 @@ window.dpCopyFormLink     = dpCopyFormLink;
    teams transitively via union-find (ported from Apps/TeamGrouper);
    produces a flat APA-number list for Email HQ paste-in.
 
-   Hardcoded special-case: when "Irwin, Craig" is in the roster, his
-   team is flagged with a banner stating the team needs to host at
-   Wichita. Add additional rules in CP_HOST_RULES below.
+   Host-location rules (e.g. "Craig Irwin's team must host at Wichita")
+   are UI-configurable — stored in slate.roster_host_rules, edited in the
+   "Location rules" panel, and loaded into _cpHostRules at cpInit. The last
+   uploaded roster persists to slate.roster_report_state (single row).
    ════════════════════════════════════════════════════════════════════════ */
 
-const CP_HOST_RULES = [
-  // { matchName: <case-insensitive substring>, requiredHost: <string> }
-  { matchName: 'Irwin, Craig', requiredHost: 'Wichita' }
-];
+/* Host-location rules (player → required host). Loaded from
+   slate.roster_host_rules (UI-editable) — was a hardcoded const through 3.330.
+   Module-level so the banner render + rules UI share one source of truth. */
+let _cpHostRules = [];   // [{ id, match_name, required_host }]
+async function cpLoadHostRules() {
+  try { _cpHostRules = await sb('GET', 'roster_host_rules?select=id,match_name,required_host&order=match_name', null, { 'Accept-Profile': 'slate' }) || []; }
+  catch (e) { console.error('host rules load failed', e); _cpHostRules = []; }
+}
+/* Order-independent name match: every alphabetic token of the rule name must
+   appear in the player name — so "Jeff Savage" matches "Savage, Jeff" OR
+   "Jeff Savage" regardless of the roster's name order (NTM prints First Last,
+   old TMS printed Last, First). */
+function cpNameMatchesRule(playerName, matchName) {
+  const toks = s => String(s || '').toLowerCase().split(/[^a-z]+/).filter(Boolean);
+  const pl = new Set(toks(playerName)), want = toks(matchName);
+  return want.length > 0 && want.every(t => pl.has(t));
+}
+async function cpSaveHostRule() {
+  const nm = (document.getElementById('cpRuleName').value || '').trim();
+  const host = (document.getElementById('cpRuleHost').value || '').trim();
+  const st = document.getElementById('cpRuleStatus');
+  const setSt = (m, k) => { if (st) { st.textContent = m; st.style.color = k === 'err' ? 'var(--spm-primary)' : (k === 'ok' ? '#1a6a30' : 'var(--muted)'); } };
+  if (!nm || !host) { setSt('Enter a player name and a location.', 'err'); return; }
+  try {
+    await sb('POST', 'roster_host_rules', { match_name: nm, required_host: host }, { 'Content-Profile': 'slate' });
+    document.getElementById('cpRuleName').value = ''; document.getElementById('cpRuleHost').value = '';
+    setSt('✓ Added.', 'ok');
+    await cpLoadHostRules(); cpRenderHostRules(); if (_cpLastParse) cpRenderResults();
+  } catch (e) { setSt('Add failed: ' + (e.message || e), 'err'); }
+}
+async function cpDeleteHostRule(id) {
+  try { await sb('DELETE', 'roster_host_rules?id=eq.' + id, null, { 'Content-Profile': 'slate' }); await cpLoadHostRules(); cpRenderHostRules(); if (_cpLastParse) cpRenderResults(); }
+  catch (e) { console.error('rule delete failed', e); }
+}
+function cpRenderHostRules() {
+  const el = document.getElementById('cpRulesList'); if (!el) return;
+  if (!_cpHostRules.length) { el.innerHTML = '<span class="hint" style="font-style:italic">No location rules yet.</span>'; return; }
+  el.innerHTML = _cpHostRules.map(r => '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:.88rem">'
+    + '<span>🏆 <b>' + esc(r.match_name) + '</b> → any team must host at <b>' + esc(r.required_host) + '</b></span>'
+    + '<button class="btn btn-outline btn-sm" style="padding:1px 9px" onclick="cpDeleteHostRule(' + r.id + ')">Remove</button></div>').join('');
+}
+/* Persist the last uploaded/parsed roster (single row id=1) so reopening the
+   tab shows it without re-uploading. */
+async function cpSaveRosterState() {
+  if (!_cpLastParse) return;
+  try {
+    await sb('POST', 'roster_report_state?on_conflict=id',
+      [{ id: 1, roster_json: { teams: _cpLastParse.teams, sourceName: _cpLastParse.sourceName }, filename: _cpLastParse.sourceName, uploaded_at: new Date().toISOString() }],
+      { 'Content-Profile': 'slate', Prefer: 'resolution=merge-duplicates,return=minimal' });
+  } catch (e) { console.error('roster persist failed', e); }
+}
+async function cpLoadRosterState() {
+  try {
+    const rows = await sb('GET', 'roster_report_state?select=roster_json,filename,uploaded_at&id=eq.1', null, { 'Accept-Profile': 'slate' });
+    const row = rows && rows[0];
+    if (row && row.roster_json && row.roster_json.teams) {
+      _cpLastParse = { teams: row.roster_json.teams, sourceName: row.filename || 'saved roster' };
+      cpRenderResults();
+      const status = document.getElementById('cpStatus');
+      if (status) { status.className = 'status-line ok'; status.textContent = '✓ Showing last uploaded: ' + (row.filename || 'saved roster') + (row.uploaded_at ? ' (' + String(row.uploaded_at).slice(0, 10) + ')' : '') + ' — drop a new PDF to replace it.'; }
+      cpFetchEmails().catch(() => {});
+    }
+  } catch (e) { console.error('roster state load failed', e); }
+}
 
 /* Normalize an APA number to the 8-digit full form Email HQ expects.
    Roster PDFs print the 5-digit league-local form; Email HQ's Look-Up-
@@ -23276,6 +23353,8 @@ function cpInit() {
   // Idempotent — wire dropzone listeners once
   if (cpInit._wired) return;
   cpInit._wired = true;
+  // Load UI-editable host rules, then the last saved roster (if any).
+  cpLoadHostRules().then(() => { cpRenderHostRules(); if (!_cpLastParse) cpLoadRosterState(); else cpRenderResults(); });
   const dz = document.getElementById('cpDropzone');
   const fi = document.getElementById('cpFileInput');
   dz.addEventListener('click', () => fi.click());
@@ -23352,6 +23431,7 @@ async function cpHandleFile(file) {
     if (!teams.length) throw new Error('No teams parsed from PDF — is this a Roster & Handicap Report?');
     _cpLastParse = { teams, sourceName: file.name };
     cpRenderResults();
+    cpSaveRosterState();   // persist so reopening the tab shows this roster
     status.className = 'status-line ok';
     const players = teams.reduce((n, t) => n + t.players.length, 0);
     status.textContent = `✓ Parsed ${teams.length} teams, ${players} players from ${file.name}`;
@@ -23657,11 +23737,11 @@ function cpRenderResults() {
   // Irwin banner (or any hardcoded host rule)
   const banner = document.getElementById('cpIrwinBanner');
   const hostMessages = [];
-  for (const rule of CP_HOST_RULES) {
+  for (const rule of _cpHostRules) {
     for (const t of teams) {
-      const hit = t.players.find(p => p.name.toLowerCase().includes(rule.matchName.toLowerCase()));
+      const hit = t.players.find(p => cpNameMatchesRule(p.name, rule.match_name));
       if (hit) {
-        hostMessages.push(`⚠️ <strong>${esc(hit.name)}</strong> is on team <strong>${esc(t.team_number)} ${esc(t.team_name)}</strong> — this team needs to host at <strong>${esc(rule.requiredHost)}</strong>.`);
+        hostMessages.push(`⚠️ <strong>${esc(hit.name)}</strong> is on team <strong>${esc(t.team_number)} ${esc(t.team_name)}</strong> — this team needs to host at <strong>${esc(rule.required_host)}</strong>.`);
       }
     }
   }
@@ -23702,10 +23782,11 @@ function cpRenderResults() {
   // we can flag the *specific* team within a group AND flag the group
   // as a whole. Used by both the on-page render and cpPrintReport().
   const hostByTeam = new Map();
-  for (const rule of CP_HOST_RULES) {
+  for (const rule of _cpHostRules) {
     for (const t of teams) {
-      if (t.players.some(p => p.name.toLowerCase().includes(rule.matchName.toLowerCase()))) {
-        hostByTeam.set(t.team_number, { host: rule.requiredHost, playerName: t.players.find(p => p.name.toLowerCase().includes(rule.matchName.toLowerCase())).name });
+      const hit = t.players.find(p => cpNameMatchesRule(p.name, rule.match_name));
+      if (hit) {
+        hostByTeam.set(t.team_number, { host: rule.required_host, playerName: hit.name });
       }
     }
   }
