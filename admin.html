@@ -1939,6 +1939,21 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
          required host) are UI-configurable in the "Location rules" panel.
          ══════════════════════════════════════════════════════════════ -->
     <div id="tab-commonplayers" class="tab-panel">
+      <style>
+        /* CueDrop find-player widget — canonical player-selection UI (mirrors
+           #tab-cuedrop / #tab-chalktalk). Used by the Location rules panel. */
+        #tab-commonplayers .cd-search{position:relative}
+        #tab-commonplayers .cd-ac{position:absolute;top:100%;left:0;right:0;background:var(--card);border:1px solid var(--border);border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,.14);z-index:50;max-height:260px;overflow:auto;display:none;margin-top:2px}
+        #tab-commonplayers .cd-ac.show{display:block}
+        #tab-commonplayers .cd-ac-item{padding:8px 11px;cursor:pointer;border-bottom:1px solid var(--border)}
+        #tab-commonplayers .cd-ac-item:last-child{border-bottom:none}
+        #tab-commonplayers .cd-ac-item:hover,#tab-commonplayers .cd-ac-item.on{background:var(--spm-accent);color:#fff}
+        #tab-commonplayers .cd-ac-name{font-weight:600}
+        #tab-commonplayers .cd-ac-sub{font-size:.8rem;opacity:.85}
+        #tab-commonplayers .cd-picked{background:#e8f0fe;color:#1a3b6b;border-radius:8px;padding:8px 11px;font-size:.85rem;display:flex;gap:8px;align-items:center}
+        #tab-commonplayers .cd-picked b{color:#12305e}
+        #tab-commonplayers .cd-picked .cd-x{cursor:pointer;font-weight:700}
+      </style>
       <div class="card">
         <h2>Roster Report — Roster check</h2>
         <p class="hint" style="margin-bottom:10px">
@@ -1964,13 +1979,17 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <summary style="cursor:pointer; font-weight:700; font-size:.9rem">🏆 Location rules <span class="hint" style="font-weight:400">— force any team a given player is on to host at a specific spot</span></summary>
           <div style="margin-top:10px">
             <div id="cpRulesList" style="margin-bottom:10px"></div>
-            <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center">
-              <input id="cpRuleName" type="text" placeholder="Player name (e.g. Jeff Savage)" style="flex:1 1 200px; padding:6px 9px; border:1px solid var(--border-strong); border-radius:6px; font-size:.88rem">
+            <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-start">
+              <div class="cd-search" style="flex:1 1 220px; min-width:200px">
+                <input id="cpRuleSearch" autocomplete="off" placeholder="Search player by name or APA #" style="width:100%; padding:6px 9px; border:1px solid var(--border-strong); border-radius:6px; font-size:.88rem; box-sizing:border-box">
+                <div class="cd-ac" id="cpRuleAc"></div>
+              </div>
               <input id="cpRuleHost" type="text" placeholder="Host location (e.g. Wichita)" style="flex:1 1 160px; padding:6px 9px; border:1px solid var(--border-strong); border-radius:6px; font-size:.88rem">
               <button class="btn btn-primary btn-sm" onclick="cpSaveHostRule()">Add rule</button>
             </div>
+            <div class="cd-picked" id="cpRulePicked" style="display:none; margin-top:8px"></div>
             <div id="cpRuleStatus" style="margin-top:6px; font-size:.82rem; min-height:1em"></div>
-            <p class="hint" style="margin:6px 0 0; font-size:.78rem">Name matching is order-independent — "Jeff Savage" matches both "Savage, Jeff" and "Jeff Savage".</p>
+            <p class="hint" style="margin:6px 0 0; font-size:.78rem">Pick the player from the lookup — the rule is keyed to their APA number, so it matches even if the roster prints their name differently.</p>
           </div>
         </details>
 
@@ -5066,7 +5085,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.331';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.332';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -23254,15 +23273,64 @@ function cpNameMatchesRule(playerName, matchName) {
   const pl = new Set(toks(playerName)), want = toks(matchName);
   return want.length > 0 && want.every(t => pl.has(t));
 }
+/* Does a parsed roster player satisfy a host rule? Prefer the stable APA
+   number (rule.member_number === player's canonical 8-digit apa_full) — exact,
+   spelling-proof. Fall back to order-independent name match for legacy rows
+   seeded before the CueDrop-lookup migration — no member_number stored. */
+function cpPlayerMatchesRule(player, rule) {
+  if (rule.member_number) {
+    const pn = String(player.apa_full || player.apa_number || '').trim();
+    return pn !== '' && pn === String(rule.member_number).trim();
+  }
+  return cpNameMatchesRule(player.name, rule.match_name);
+}
+/* ── Location-rule player lookup — CueDrop find-player widget. House standard:
+   any UI that singles out ONE specific player uses this, never a free-text
+   name box. Reuses the pure helpers cdSearch()/cdPlayerName(). ───────────── */
+let _cpRuleAc = [], _cpRulePicked = null, _cpRuleFocus = -1, _cpRuleTimer = null;
+function cpRuleWireSearch() {
+  const input = document.getElementById('cpRuleSearch'); if (!input || input._wired) return; input._wired = true;
+  input.addEventListener('input', () => {
+    clearTimeout(_cpRuleTimer); const v = input.value.trim();
+    if (v.length < 2) { cpRuleCloseAc(); return; }
+    _cpRuleTimer = setTimeout(async () => { try { _cpRuleAc = await cdSearch(v); _cpRuleFocus = -1; cpRuleRenderAc(); } catch (e) { cpRuleCloseAc(); } }, 250);
+  });
+  input.addEventListener('keydown', e => {
+    const ac = document.getElementById('cpRuleAc'); if (!ac || !ac.classList.contains('show')) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); _cpRuleFocus = Math.min(_cpRuleAc.length - 1, _cpRuleFocus + 1); cpRuleRenderAc(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); _cpRuleFocus = Math.max(0, _cpRuleFocus - 1); cpRuleRenderAc(); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (_cpRuleFocus >= 0) cpRulePick(_cpRuleFocus); }
+    else if (e.key === 'Escape') cpRuleCloseAc();
+  });
+  document.addEventListener('click', e => { if (!e.target.closest('#tab-commonplayers .cd-search')) cpRuleCloseAc(); });
+}
+function cpRuleRenderAc() {
+  const box = document.getElementById('cpRuleAc'); if (!box) return;
+  if (!_cpRuleAc.length) { box.innerHTML = '<div class="cd-ac-item" style="cursor:default;color:var(--muted)">No matches</div>'; box.classList.add('show'); return; }
+  box.innerHTML = _cpRuleAc.map((p, i) => '<div class="cd-ac-item' + (i === _cpRuleFocus ? ' on' : '') + '" onmousedown="cpRulePick(' + i + ')"><div class="cd-ac-name">' + esc(cdPlayerName(p)) + '</div><div class="cd-ac-sub">APA #' + esc(p.member_number) + '</div></div>').join('');
+  box.classList.add('show');
+}
+function cpRuleCloseAc() { const b = document.getElementById('cpRuleAc'); if (b) b.classList.remove('show'); }
+function cpRulePick(i) {
+  const p = _cpRuleAc[i]; if (!p) return;
+  _cpRulePicked = { member_number: p.member_number, name: cdPlayerName(p) };
+  const inp = document.getElementById('cpRuleSearch'); if (inp) inp.value = '';
+  cpRuleCloseAc();
+  const pk = document.getElementById('cpRulePicked');
+  pk.style.display = 'flex';
+  pk.innerHTML = 'Player: <b>' + esc(_cpRulePicked.name) + '</b> &middot; APA #' + esc(_cpRulePicked.member_number)
+    + ' <span class="cd-x" onclick="cpRuleClearPick()">&#10005;</span>';
+}
+function cpRuleClearPick() { _cpRulePicked = null; const pk = document.getElementById('cpRulePicked'); if (pk) { pk.style.display = 'none'; pk.innerHTML = ''; } }
 async function cpSaveHostRule() {
-  const nm = (document.getElementById('cpRuleName').value || '').trim();
   const host = (document.getElementById('cpRuleHost').value || '').trim();
   const st = document.getElementById('cpRuleStatus');
   const setSt = (m, k) => { if (st) { st.textContent = m; st.style.color = k === 'err' ? 'var(--spm-primary)' : (k === 'ok' ? '#1a6a30' : 'var(--muted)'); } };
-  if (!nm || !host) { setSt('Enter a player name and a location.', 'err'); return; }
+  if (!_cpRulePicked) { setSt('Search and pick the player first.', 'err'); return; }
+  if (!host) { setSt('Enter a host location.', 'err'); return; }
   try {
-    await sb('POST', 'roster_host_rules', { match_name: nm, required_host: host }, { 'Content-Profile': 'slate' });
-    document.getElementById('cpRuleName').value = ''; document.getElementById('cpRuleHost').value = '';
+    await sb('POST', 'roster_host_rules', { member_number: _cpRulePicked.member_number, match_name: _cpRulePicked.name, required_host: host }, { 'Content-Profile': 'slate' });
+    cpRuleClearPick(); document.getElementById('cpRuleHost').value = '';
     setSt('✓ Added.', 'ok');
     await cpLoadHostRules(); cpRenderHostRules(); if (_cpLastParse) cpRenderResults();
   } catch (e) { setSt('Add failed: ' + (e.message || e), 'err'); }
@@ -23275,7 +23343,9 @@ function cpRenderHostRules() {
   const el = document.getElementById('cpRulesList'); if (!el) return;
   if (!_cpHostRules.length) { el.innerHTML = '<span class="hint" style="font-style:italic">No location rules yet.</span>'; return; }
   el.innerHTML = _cpHostRules.map(r => '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:.88rem">'
-    + '<span>🏆 <b>' + esc(r.match_name) + '</b> → any team must host at <b>' + esc(r.required_host) + '</b></span>'
+    + '<span>🏆 <b>' + esc(r.match_name) + '</b>'
+    + (r.member_number ? ' <span class="hint" style="font-family:ui-monospace,monospace">#' + esc(r.member_number) + '</span>' : ' <span class="hint" style="font-style:italic">(name-match — re-add via lookup for exact match)</span>')
+    + ' → any team must host at <b>' + esc(r.required_host) + '</b></span>'
     + '<button class="btn btn-outline btn-sm" style="padding:1px 9px" onclick="cpDeleteHostRule(' + r.id + ')">Remove</button></div>').join('');
 }
 /* Persist the last uploaded/parsed roster (single row id=1) so reopening the
@@ -23354,6 +23424,7 @@ function cpInit() {
   if (cpInit._wired) return;
   cpInit._wired = true;
   // Load UI-editable host rules, then the last saved roster (if any).
+  cpRuleWireSearch();   // CueDrop find-player lookup for the Location rules panel
   cpLoadHostRules().then(() => { cpRenderHostRules(); if (!_cpLastParse) cpLoadRosterState(); else cpRenderResults(); });
   const dz = document.getElementById('cpDropzone');
   const fi = document.getElementById('cpFileInput');
@@ -23739,7 +23810,7 @@ function cpRenderResults() {
   const hostMessages = [];
   for (const rule of _cpHostRules) {
     for (const t of teams) {
-      const hit = t.players.find(p => cpNameMatchesRule(p.name, rule.match_name));
+      const hit = t.players.find(p => cpPlayerMatchesRule(p, rule));
       if (hit) {
         hostMessages.push(`⚠️ <strong>${esc(hit.name)}</strong> is on team <strong>${esc(t.team_number)} ${esc(t.team_name)}</strong> — this team needs to host at <strong>${esc(rule.required_host)}</strong>.`);
       }
@@ -23784,7 +23855,7 @@ function cpRenderResults() {
   const hostByTeam = new Map();
   for (const rule of _cpHostRules) {
     for (const t of teams) {
-      const hit = t.players.find(p => cpNameMatchesRule(p.name, rule.match_name));
+      const hit = t.players.find(p => cpPlayerMatchesRule(p, rule));
       if (hit) {
         hostByTeam.set(t.team_number, { host: rule.required_host, playerName: hit.name });
       }
