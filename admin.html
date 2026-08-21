@@ -4774,7 +4774,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.325';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.326';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -17208,20 +17208,37 @@ async function gcSync(dryRun) {
   const _timer = setInterval(() => { document.getElementById('gcProgTime').textContent = _fmt(Date.now() - _started); }, 1000);
   const _finish = () => { clearInterval(_timer); prog.style.display = 'none'; if (dryBtn) dryBtn.disabled = false; if (syncBtn) syncBtn.disabled = false; };
   try {
-    const r = await fetch(OPTOUT_CONFIRM_MAILER_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action: 'contacts_sync', admin_key: SB_KEY, dry_run: !!dryRun }),
-      redirect: 'follow'
-    });
-    const txt = await r.text();
+    const post = (b) => fetch(OPTOUT_CONFIRM_MAILER_URL, {
+      method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(b), redirect: 'follow'
+    }).then(x => x.text());
+    const jobId = 'sync_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+    const phaseText = { queued: 'Queued…', roster: 'Loading roster…',
+      listing: 'Reading your Google Contacts (the slow part)…', diff: 'Comparing roster to contacts…',
+      writing: (dryRun ? 'Finalizing…' : 'Writing to Google Contacts…') };
+    /* Async job (2026-08-20): kick off on the GAS side (returns at once), then
+       poll contacts_progress. The list+diff+write runs on a background trigger
+       with the full 6-min budget, so the old client-facing timeout — Google's
+       HTML holding page, seen in Slate as "no output" — can't happen. */
+    const startTxt = await post({ action: 'contacts_sync', admin_key: SB_KEY, dry_run: !!dryRun, start: true, job_id: jobId });
+    let sres = null; try { sres = JSON.parse(startTxt); } catch (_) { sres = { ok: false, error: 'bad gateway: ' + startTxt.slice(0, 160) }; }
+    if (!sres.ok || !sres.job_id) { stat.textContent = '✗ ' + (sres.error || 'could not start sync'); stat.className = 'status-line err'; return; }
+    const jid = sres.job_id;
     let res = null;
-    try { res = JSON.parse(txt); } catch (_) { res = { ok: false, error: 'bad gateway: ' + txt.slice(0, 160) }; }
-    if (!res.ok && res.error) {
-      stat.textContent = '✗ ' + res.error;
-      stat.className = 'status-line err';
-      return;
+    for (let tries = 0; tries < 260 && !res; tries++) {   // ~13 min ceiling @ 3s
+      await new Promise(r => setTimeout(r, 3000));
+      let p = null;
+      try { p = JSON.parse(await post({ action: 'contacts_progress', admin_key: SB_KEY, job_id: jid })); }
+      catch (_) { continue; }   // a transient non-JSON poll — keep waiting
+      if (p && p.phase && phaseText[p.phase]) {
+        document.getElementById('gcProgLabel').textContent = phaseText[p.phase]
+          + (p.phase === 'diff' && p.total ? ' (' + p.total + ')' : '');
+      }
+      if (p && p.phase === 'done')  { res = p.result || {}; break; }
+      if (p && p.phase === 'error') { stat.textContent = '✗ ' + (p.error || 'sync failed'); stat.className = 'status-line err'; return; }
     }
+    if (!res) { stat.textContent = '⚠ Still working after several minutes — reopen the tab to check results.'; stat.className = 'status-line err'; return; }
+    if (!res.ok && res.error) { stat.textContent = '✗ ' + res.error; stat.className = 'status-line err'; return; }
     stat.textContent = dryRun ? '✓ Dry run complete — nothing was written.' : (res.ok ? '✓ Sync complete.' : '⚠ Sync finished with errors.');
     stat.className = res.ok ? 'status-line ok' : 'status-line err';
     const row = (label, val, color) =>
