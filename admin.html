@@ -5092,7 +5092,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.334';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.335';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -35724,7 +35724,10 @@ async function ehDeleteForeign() {
   async function sb(method, path, body, extra) {
     const opts = { method, headers: method === 'GET' ? { ...HEADERS_READ } : { ...HEADERS_WRITE } };
     if (extra) opts.headers = { ...opts.headers, ...extra };
-    if (body !== undefined) opts.body = JSON.stringify(body);
+    // GET/HEAD/DELETE must never carry a body — fetch() throws "Request with
+    // GET/HEAD method cannot have body" (this silently emptied the session
+    // dropdown when loadSessions passed an explicit null body on a GET).
+    if (body !== undefined && body !== null && method !== 'GET' && method !== 'HEAD' && method !== 'DELETE') opts.body = JSON.stringify(body);
     const r = await fetch(SB_URL + '/rest/v1/' + path, opts);
     if (!r.ok) throw new Error('Supabase ' + r.status + ': ' + (await r.text()).substring(0, 300));
     if (r.status === 204) return null;
