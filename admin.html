@@ -4947,6 +4947,13 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       </div>
 
       <div id="rktMain">
+        <div class="row" style="margin-bottom:12px; align-items:center">
+          <div style="flex:0 0 auto; min-width:220px; max-width:280px">
+            <label for="rktSessionSel">Session</label>
+            <select id="rktSessionSel"><option value="">Loading…</option></select>
+          </div>
+          <div class="hint" style="flex:1; min-width:180px; align-self:flex-end; padding-bottom:8px">Uploads and the lists below apply to the selected session. Defaults to the current session.</div>
+        </div>
         <div class="rkt-subtabs">
           <button class="rkt-tab active" data-subtab="upload">Upload</button>
           <button class="rkt-tab" data-subtab="divisions">Divisions</button>
@@ -5085,7 +5092,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.332';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.333';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -35689,6 +35696,8 @@ async function ehDeleteForeign() {
   let _hosts = [];
   let _divisions = [];
   let _hostDivisions = [];        // [{ host_id, division_id }]
+  let _sessions = [];             // slate.sessions [{id,name,is_current,start_date}]
+  let _sessionId = null;          // currently-selected session (divisions are scoped to it)
 
   let _previews = [];             // { id, file, status, division?, hosts?, error? }
   let _newHostSlugAutoFollow = true;
@@ -35726,9 +35735,21 @@ async function ehDeleteForeign() {
     const text = await r.text();
     return text ? JSON.parse(text) : null;
   }
+  /* Sessions live in the slate schema, not racktime — one-off cross-profile
+     read. Default the selector to the current session (is_current), falling
+     back to the latest by start_date. sessions.id is NON-chronological, so we
+     never pick by max(id). */
+  async function loadSessions() {
+    _sessions = await sb('GET', 'sessions?select=id,name,is_current,start_date&order=start_date.desc.nullslast', null, { 'Accept-Profile': 'slate' }) || [];
+    if (_sessionId == null) {
+      const cur = _sessions.find(s => s.is_current);
+      _sessionId = cur ? cur.id : (_sessions[0] ? _sessions[0].id : null);
+    }
+  }
   async function loadAll() {
     _hosts          = await sb('GET', 'hosts?order=name.asc') || [];
-    _divisions      = await sb('GET', 'divisions?order=number.asc') || [];
+    _divisions      = _sessionId == null ? []
+      : (await sb('GET', 'divisions?session_id=eq.' + _sessionId + '&order=number.asc') || []);
     _hostDivisions  = await sb('GET', 'host_divisions?select=host_id,division_id') || [];
   }
 
@@ -36137,9 +36158,12 @@ async function ehDeleteForeign() {
     const number = String(d.number || '').trim();
     const name   = String(d.name   || '').trim();
     if (!number || !name) throw new Error('Division number + name required.');
+    if (_sessionId == null) throw new Error('Pick a session before saving.');
 
-    // 1. Upsert the division (match on number; insert if missing, update otherwise)
-    let division = _divisions.find(x => x.number === number);
+    // 1. Upsert the division within the SELECTED session (match on
+    //    session_id + number; insert if missing, update otherwise). _divisions
+    //    is already scoped to _sessionId, but we assert it explicitly.
+    let division = _divisions.find(x => x.number === number && x.session_id === _sessionId);
     const dayOfPlay = (d.day_of_play || '').trim() || null;
     const startTime = (d.start_time  || '').trim() || null;
 
@@ -36172,7 +36196,7 @@ async function ehDeleteForeign() {
       if (oldPath && oldPath !== pdfPath) { try { await storageDelete(oldPath); } catch (_) {} }
     } else {
       const created = await sb('POST', 'divisions', {
-        number, name, day_of_play: dayOfPlay, start_time: startTime, pdf_path: pdfPath
+        number, name, day_of_play: dayOfPlay, start_time: startTime, pdf_path: pdfPath, session_id: _sessionId
       });
       division = Array.isArray(created) ? created[0] : created;
       _divisions.push(division);
@@ -36546,13 +36570,39 @@ async function ehDeleteForeign() {
     if (note) note.style.display = 'none';
     if (main) main.style.display = '';
     rktWireOnce();
-    try { await loadAll(); }
+    try {
+      await loadSessions();
+      renderSessionSelector();
+      await loadAll();
+    }
     catch (e) {
       setStatus('rktUploadStatus', 'Load failed: ' + e.message, 'err');
       return;
     }
     renderDivisions();
     renderHostsList();
+  }
+
+  /* Populate the session <select> and reflect the current selection. Changing
+     it reloads divisions/hosts scoped to that session. */
+  function renderSessionSelector() {
+    const sel = document.getElementById('rktSessionSel');
+    if (!sel) return;
+    if (!_sessions.length) { sel.innerHTML = '<option value="">No sessions</option>'; return; }
+    sel.innerHTML = _sessions.map(s =>
+      '<option value="' + s.id + '"' + (s.id === _sessionId ? ' selected' : '') + '>'
+      + esc(s.name) + (s.is_current ? ' (current)' : '') + '</option>').join('');
+    if (!sel._wired) {
+      sel._wired = true;
+      sel.addEventListener('change', async () => {
+        _sessionId = parseInt(sel.value, 10);
+        setStatus('rktUploadStatus', 'Loading ' + (_sessions.find(s => s.id === _sessionId) || {}).name + '…', 'progress');
+        try { await loadAll(); hideStatus('rktUploadStatus'); }
+        catch (e) { setStatus('rktUploadStatus', 'Load failed: ' + e.message, 'err'); return; }
+        renderDivisions();
+        renderHostsList();
+      });
+    }
   }
 
   window.rktInit = rktInit;   // the single global entry point
