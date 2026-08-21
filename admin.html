@@ -5094,7 +5094,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.337';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.338';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -35700,6 +35700,7 @@ async function ehDeleteForeign() {
   let _hostDivisions = [];        // [{ host_id, division_id }]
   let _sessions = [];             // slate.sessions [{id,name,is_current,start_date}]
   let _sessionId = null;          // currently-selected session (divisions are scoped to it)
+  let _slateDivByNum = {};        // slate.divisions number → id for the session (feeds slate.matches)
 
   let _previews = [];             // { id, file, status, division?, hosts?, error? }
   let _newHostSlugAutoFollow = true;
@@ -35767,6 +35768,13 @@ async function ehDeleteForeign() {
     _divisions      = _sessionId == null ? []
       : (await sb('GET', 'divisions?session_id=eq.' + _sessionId + '&order=number.asc') || []);
     _hostDivisions  = await sb('GET', 'host_divisions?select=host_id,division_id') || [];
+    // Map this session's SLATE divisions (number → id) so a save can also feed
+    // slate.matches (the PaperTrail schedule). slate.divisions ≠ racktime.divisions.
+    _slateDivByNum = {};
+    if (_sessionId != null) {
+      const sd = await sb('GET', 'divisions?select=id,division_number&session_id=eq.' + _sessionId + '&operator_id=eq.1', undefined, { 'Accept-Profile': 'slate' }) || [];
+      for (const d of sd) _slateDivByNum[String(d.division_number)] = d.id;
+    }
   }
 
   /* ── Storage helpers ──────────────────────── */
@@ -35886,6 +35894,57 @@ async function ehDeleteForeign() {
     return _PLACEHOLDER_VENUES.has(norm);
   }
 
+  /* ── Schedule parser — ported 1:1 from tools/claude/papertrail/parse.mjs so
+     one RackTime upload also feeds slate.matches (the PaperTrail schedule).
+     Same row-grouping (Y_TOL=5), same regexes, same match-index logic. Returns
+     [{week, date, is_playoff, is_no_play, match_index, home_pos, away_pos, label}]. */
+  const RKT_RE_SCHEDULE_ROW  = /^\s*(\d{1,2})\s+(\d{2}\/\d{2}\/\d{4})\s+(.+)$/;
+  const RKT_RE_BREAK_DAY_ROW = /^\s*(\d{2}\/\d{2}\/\d{4})\s+(.+)$/;
+  const RKT_RE_MATCHUP       = /^(\d{1,2})-(\d{1,2})$/;
+  const RKT_RE_BREAK_LABEL   = /^(No Play|Holiday|Off Week|Bye Week)\b/i;
+  function rktParseSchedule(items) {
+    // group into rows by Y (top-to-bottom), items L→R; then line strings
+    const src = items.filter(it => it.str && it.str.trim() !== '');
+    const sorted = src.slice().sort((a, b) => b.y - a.y);
+    const rows = [];
+    for (const it of sorted) {
+      const row = rows.find(r => Math.abs(r.y - it.y) <= 5);
+      if (row) row.items.push(it); else rows.push({ y: it.y, items: [it] });
+    }
+    for (const r of rows) r.items.sort((a, b) => a.x - b.x);
+    const lines = rows.map(r => r.items.map(i => i.str).join(' ').replace(/\s+/g, ' ').trim());
+    const out = [];
+    for (const ln of lines) {
+      const wm = ln.match(RKT_RE_SCHEDULE_ROW);
+      if (wm) {
+        const week = parseInt(wm[1], 10), date = wm[2], rest = wm[3].trim();
+        if (/^Playoff Week\b/i.test(rest)) { out.push({ week, date, is_playoff: true, is_no_play: false, match_index: 1 }); continue; }
+        let idx = 0;
+        for (const tok of rest.split(/\s+/)) {
+          const mm = tok.match(RKT_RE_MATCHUP);
+          if (!mm) continue;
+          idx++;
+          out.push({ week, date, is_playoff: false, is_no_play: false, match_index: idx, home_pos: parseInt(mm[1], 10), away_pos: parseInt(mm[2], 10) });
+        }
+        continue;
+      }
+      const bm = ln.match(RKT_RE_BREAK_DAY_ROW);
+      if (bm && RKT_RE_BREAK_LABEL.test(bm[2].trim())) {
+        out.push({ week: null, date: bm[1], is_playoff: false, is_no_play: true, match_index: 1, label: bm[2].trim() });
+      }
+    }
+    return out;
+  }
+  /* Map parsed schedule rows to the shape slate.upsert_division_matches expects. */
+  function rktScheduleToRows(schedule) {
+    return (schedule || []).map(m => {
+      const p = String(m.date).split('/'); const iso = p[2] + '-' + p[0] + '-' + p[1];
+      if (m.is_no_play) return { week_number: null, match_index: 1, scheduled_date: iso, row_type: 'no_play', label: m.label || 'No Play' };
+      if (m.is_playoff) return { week_number: m.week, match_index: 1, scheduled_date: iso, row_type: 'playoff', label: 'Playoff Week' };
+      return { week_number: m.week, match_index: m.match_index, scheduled_date: iso, row_type: 'regular', home_position: m.home_pos, away_position: m.away_pos };
+    });
+  }
+
   async function parsePdfPages(file) {
     const lib = await window.ensurePdfJs();
     const data = await file.arrayBuffer();
@@ -35913,7 +35972,8 @@ async function ehDeleteForeign() {
         const pageText = items.slice()
           .sort((a, b) => b.y - a.y || a.x - b.x)
           .map(it => it.str).join(' ').replace(/\s+/g, ' ').trim();
-        results.push({ ...r, pageIndex: i, totalPages: total, pageText });
+        const schedule = rktParseSchedule(items);
+        results.push({ ...r, pageIndex: i, totalPages: total, pageText, schedule });
       }
       /* Pages with no division header are silently skipped (cover sheets,
          blank trailing pages). The completion report tells the operator
@@ -36012,6 +36072,7 @@ async function ehDeleteForeign() {
       entry.pageIndex  = first.pageIndex;
       entry.totalPages = first.totalPages;
       entry.pageText   = first.pageText;
+      entry.schedule   = first.schedule;
       entry.hosts      = mapHosts(first.venues);
       entry.status     = 'ready';
       renderPreview(entry, /*append=*/false);
@@ -36028,6 +36089,7 @@ async function ehDeleteForeign() {
           pageIndex: p.pageIndex,
           totalPages: p.totalPages,
           pageText: p.pageText,
+          schedule: p.schedule,
           hosts: mapHosts(p.venues),
           error: null
         };
@@ -36174,10 +36236,14 @@ async function ehDeleteForeign() {
     renderDivisions(); renderHostsList();
     const unchangedN = items.filter(e => e._unchanged).length;
     const unchTail = unchangedN ? ' (' + unchangedN + ' unchanged — not re-marked updated)' : '';
+    const schedRows = items.reduce((s, e) => s + (e._matchesUpserted || 0), 0);
+    const schedErrs = items.filter(e => e._matchesError).length;
+    const schedTail = (schedRows ? ' · ' + schedRows + ' schedule rows → PaperTrail' : '')
+      + (schedErrs ? ' · ' + schedErrs + ' division(s) not in slate (schedule skipped)' : '');
     setStatus('rktUploadStatus',
       fail === 0
-        ? ('Saved ' + ok + ' PDF' + (ok === 1 ? '' : 's') + '.' + unchTail)
-        : (ok + ' saved, ' + fail + ' failed — see error tiles above.' + unchTail),
+        ? ('Saved ' + ok + ' PDF' + (ok === 1 ? '' : 's') + '.' + unchTail + schedTail)
+        : (ok + ' saved, ' + fail + ' failed — see error tiles above.' + unchTail + schedTail),
       fail === 0 ? 'ok' : 'err');
     btn.disabled = !_previews.some(p => p.status === 'ready');
   }
@@ -36283,6 +36349,25 @@ async function ehDeleteForeign() {
       await sb('POST', 'host_divisions', { host_id: hid, division_id: division.id },
         { Prefer: 'resolution=merge-duplicates,return=minimal' });
       _hostDivisions.push({ host_id: hid, division_id: division.id });
+    }
+
+    // 4. Feed the PaperTrail schedule (slate.matches) — ONE upload updates
+    //    everything. Only when the schedule content actually changed, and only
+    //    if a matching slate.divisions row exists for this session. Non-fatal:
+    //    a failure here must NOT undo the racktime save above.
+    entry._matchesUpserted = null; entry._matchesError = null;
+    if (!unchanged) {
+      const slateDivId = _slateDivByNum[number];
+      if (slateDivId && entry.schedule && entry.schedule.length) {
+        try {
+          const n = await sb('POST', 'rpc/upsert_division_matches',
+            { p_division_id: slateDivId, p_rows: rktScheduleToRows(entry.schedule), p_source_pdf_path: division.pdf_path || null },
+            { 'Accept-Profile': 'slate', 'Content-Profile': 'slate' });
+          entry._matchesUpserted = Array.isArray(n) ? n[0] : n;
+        } catch (e) { entry._matchesError = e.message || String(e); }
+      } else if (!slateDivId) {
+        entry._matchesError = 'division ' + number + ' not in slate this session — schedule not fed to PaperTrail';
+      }
     }
   }
 
