@@ -669,7 +669,7 @@ input:focus, select:focus, textarea:focus {
 .ehq-btn.active[data-facet="format"]{ background: #f0fdf4; border-color: #16a34a; color: #15803d; }
 .ehq-btn.active[data-facet="night"] { background: #fffbeb; border-color: #f59e0b; color: #b45309; }
 
-/* TMS Roster Report — role toggle buttons. Same shape as ehq-btn, purple
+/* Roster Report — role toggle buttons. Same shape as ehq-btn, purple
    active state matching Email HQ's role facet color (#fdf4ff bg / #a855f7
    border / #7e22ce text). */
 .cp-role-btn {
@@ -1051,7 +1051,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab active" data-tab="emailhq">Email HQ</button>
       <button class="tab" data-tab="spreports">SP Reports</button>
       <button class="tab" data-tab="scoresheets">PaperTrail</button>
-      <button class="tab" data-tab="commonplayers">TMS Roster Report</button>
+      <button class="tab" data-tab="commonplayers">Roster Report</button>
       <button class="tab" data-tab="reports">Reports</button>
       <button class="tab" data-tab="outreach">Outreach</button>
       <button class="tab" data-tab="switchboard">Switchboard</button>
@@ -1940,7 +1940,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
          ══════════════════════════════════════════════════════════════ -->
     <div id="tab-commonplayers" class="tab-panel">
       <div class="card">
-        <h2>TMS Roster Report — Roster check</h2>
+        <h2>Roster Report — Roster check</h2>
         <p class="hint" style="margin-bottom:10px">
           Drop an APA <strong>Roster &amp; Handicap Report</strong> PDF. Finds
           players who appear on more than one team (a typical World-Qualifier
@@ -5050,7 +5050,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.329';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.330';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10125,7 +10125,7 @@ const TAB_LABEL = {
   emailhq:       'Email HQ',
   spreports:     'SP Reports',
   scoresheets:   'Scoresheets',
-  commonplayers: 'TMS Roster Report',
+  commonplayers: 'Roster Report',
   reports:       'Reports',
   outreach:      'Outreach',
   switchboard:   'Switchboard',
@@ -11371,9 +11371,24 @@ async function cdEmail(id) {
     else { cdSetStatus('Email failed: ' + (j.error || j.email_status || 'unknown'), true); }
   } catch (e) { cdSetStatus('Email failed: ' + (e.message || e), true); }
 }
+/* On-brand delivery hollers (SPM APA — pool-league playful). Rotates so it
+   doesn't get stale. */
+const CD_DELIVERED_MSGS = [
+  '🎱 Cue delivered — go run the table!',
+  '🎱 Delivered! Rack ’em up.',
+  '🎉 In their hands — may the break be mighty.',
+  '🎱 Delivered. Chalk up and fire away!',
+  '🎱 Cue’s home. Sink ’em all.',
+  '🎱 Handed off — sharp shooting, South Port Metro!'
+];
 async function cdDeliver(id) {
   if (!confirm('Mark this cue + case as delivered to the player?')) return;
-  try { await sb('PATCH', 'requests?id=eq.' + id, { status: 'delivered', delivered_at: new Date().toISOString() }, CD_WP); const r = _cdReqs.find(x => x.id === id); if (r) { r.status = 'delivered'; } cdRender(); cdSetStatus('Marked delivered.'); } catch (e) { cdSetStatus('Update failed: ' + (e.message || e), true); }
+  try {
+    await sb('PATCH', 'requests?id=eq.' + id, { status: 'delivered', delivered_at: new Date().toISOString() }, CD_WP);
+    const r = _cdReqs.find(x => x.id === id); if (r) { r.status = 'delivered'; }
+    cdRender();
+    cdSetStatus(CD_DELIVERED_MSGS[Math.floor(Math.random() * CD_DELIVERED_MSGS.length)]);
+  } catch (e) { cdSetStatus('Update failed: ' + (e.message || e), true); }
 }
 /* Delete a giveaway via GAS (recipient derived server-side). The player is emailed
    that their reserved cue is gone ONLY if they were already told it was reserved. */
@@ -23227,7 +23242,7 @@ function cpToFullApa(num) {
 
 let _cpLastParse = null; // { teams: [{number, name, city, players}], allPlayers: [], ... }
 
-/* ── TMS Roster Report state (3.71+) ──────────────────────────────────
+/* ── Roster Report state (3.71+) ──────────────────────────────────
    _cpFilter holds the live filter selection so changes don't reset on
    parse (sticky between PDFs in a session). Defaults: Captain + Co-Captain,
    all teams, include-ineligibles ON — reproduces the pre-filter
@@ -23476,6 +23491,7 @@ async function cpParseRosterPdf(file) {
         const teamName = nameItems.join(' ')
           .replace(/\s+/g, ' ')
           .replace(/\s+[NIHO*]\s+\d{4,}.*$/i, '')
+          .replace(/\s+\d+\s*-?\s*Ball\b.*$/i, '')   // NTM: strip trailing "8-Ball Open" team-format column
           .trim();
 
         // Walk band rows in this column for FROM line and player rows.
@@ -23490,33 +23506,33 @@ async function cpParseRosterPdf(file) {
           // City line — APA reports always say "FROM : <city, ST>"
           const fromM = text.match(/FROM\s*:\s*(.+)/);
           if (fromM) { city = fromM[1].trim(); continue; }
-          // Skip column header row
+          // Skip column-header rows: old TMS "Skl Number Name", new NTM
+          // "TMP MP SL Team Roster".
           if (/^Skl\s+Number\s+Name/i.test(text)) continue;
+          if (/Team\s+Roster/i.test(text)) continue;
           // Skip standalone status indicators ("N 0000", "O 0000" etc.).
-          // [NIHO*] — 'O' added 3.72+ to catch team-level open status.
           if (/^[NIHO*]\s+\d{4,}$/.test(text)) continue;
-          // Player row: optional leading "I" (ineligible), then skill, apa#, name
-          // Player rows in this format have items: [skill] [apa#] [name-parts...]
-          // Sometimes prefixed with "I" indicator (ineligible).
-          let ineligible = false;
-          let parts = [...cells];
-          if (parts[0] && /^[IN*]$/.test(parts[0].str)) {
-            ineligible = parts[0].str === 'I';
-            parts = parts.slice(1);
+          /* Robust player-row parse — format-agnostic across TMS and NTM (2026-08-21).
+             TMS rows are [I?] skill apa# name; NTM rows are TMP MP SL apa# name
+             (two extra leading numbers, e.g. "706 9 6 15107 Richard Hoyle").
+             Rather than assume skill/apa are parts[0]/[1] (which silently dropped
+             EVERY NTM player row — 706 is not a 1-9 skill), locate the pair
+             directly: the first 1-digit skill (1-9) IMMEDIATELY followed by a
+             5- or 8-digit APA number. Name = everything after; an "I" right
+             before the skill marks ineligible. Verified on the 30-team Summer
+             8-Ball Tri NTM roster (237 players, 0 dropped). */
+          let si = -1;
+          for (let k = 0; k < cells.length - 1; k++) {
+            if (/^[1-9]$/.test(cells[k].str) && /^\d{5}$|^\d{8}$/.test(cells[k + 1].str)) { si = k; break; }
           }
-          // Look for: 1-digit skill (1-9), 5-digit OR 8-digit APA#, then name.
-          // 5-digit is the league-local form rosters typically print; 8-digit
-          // is the full APA number. Both get normalized to apa_full (8-digit)
-          // for dedup + Email HQ output.
-          if (parts.length < 3) continue;
-          const skillStr = parts[0].str;
-          const apaStr = parts[1].str;
-          if (!/^[1-9]$/.test(skillStr)) continue;
-          if (!/^\d{5}$|^\d{8}$/.test(apaStr)) continue;
+          if (si < 0) continue;
+          const skillStr = cells[si].str;
+          const apaStr = cells[si + 1].str;
+          const ineligible = si > 0 && cells[si - 1].str === 'I';
           const apaFull = cpToFullApa(apaStr);
           if (seenApa.has(apaFull)) continue;
           seenApa.add(apaFull);
-          const name = parts.slice(2).map(p => p.str).join(' ').replace(/\s+/g, ' ').trim();
+          const name = cells.slice(si + 2).map(p => p.str).join(' ').replace(/\s+/g, ' ').trim();
           players.push({
             skill: parseInt(skillStr, 10),
             apa_number: apaStr,     // as-printed on the roster (5- or 8-digit)
@@ -29921,7 +29937,7 @@ async function tcqLoadEligibility() {
 let _tcqSu26Roster = new Set();
 async function tcqLoadSu26Roster() {
   try {
-    /* Service-role read against slate. The TMS Roster Report upload
+    /* Service-role read against slate. The Roster Report upload
        writes here; this query is paged so any session size is fine. */
     const all = [];
     let offset = 0, page = 1000;
