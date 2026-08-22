@@ -5144,7 +5144,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.341';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.342';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10435,7 +10435,8 @@ function fsPick(i, pid) { _fsRows[i].picked = pid; fsRenderWork(); }
 
 /* ── Grouped, collapsible work results ────────────────────────────── */
 function fsCandLine(row, i) {
-  return row.candidates.map(c => {
+  const ord = row.candidates.slice().sort((a, b) => (a.player_id === row.picked ? -1 : b.player_id === row.picked ? 1 : (b.robustness || 0) - (a.robustness || 0)));
+  return ord.map(c => {
     const on = c.player_id === row.picked;
     return '<label class="fs-cand' + (on ? ' on' : '') + '">'
       + '<input type="radio" name="fsr' + i + '" ' + (on ? 'checked' : '') + ' onchange="fsPick(' + i + ',\'' + c.player_id + '\')">'
