@@ -1052,6 +1052,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="spreports">SP Reports</button>
       <button class="tab" data-tab="scoresheets">PaperTrail</button>
       <button class="tab" data-tab="commonplayers">Roster Report</button>
+      <button class="tab" data-tab="fargoscout">FargoScout</button>
       <button class="tab" data-tab="reports">Reports</button>
       <button class="tab" data-tab="outreach">Outreach</button>
       <button class="tab" data-tab="switchboard">Switchboard</button>
@@ -4846,6 +4847,46 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
     </div>
     <!-- ════════════════ /Contacts ════════════════ -->
 
+    <!-- ══════════════════════════════════════════════════════════════
+         TAB: FARGOSCOUT — bulk FargoRate lookup so a genuinely-skilled
+         newcomer's starting APA skill level can be set correctly. Reads
+         FargoRate's public search API (CORS *) directly from the browser;
+         operator confirms each match + approves an SL. slate.fargo_lookups.
+         All JS is global (fs*), near switchTab. Brief: 2026-08-22-fargoscout.md
+         ══════════════════════════════════════════════════════════════ -->
+    <div id="tab-fargoscout" class="tab-panel">
+      <style>
+        #tab-fargoscout .fs-row { border: 1px solid var(--border); border-left: 3px solid var(--border-strong); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
+        #tab-fargoscout .fs-cand { display: block; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-size: 0.88rem; }
+        #tab-fargoscout .fs-cand.on { background: #eef9f1; border-color: var(--success, #16a34a); }
+        #tab-fargoscout .fs-cand:hover { border-color: var(--spm-accent); }
+      </style>
+      <div class="card">
+        <h2>FargoScout — starting skill-level check</h2>
+        <p class="hint" style="margin-bottom:8px">
+          For new APA players who may have played elsewhere and earned a
+          <strong>FargoRate</strong>. Paste names (one per line); add a location after a
+          comma to pin down the right person — <code>Chad James, OR</code>. FargoScout
+          looks each up, you confirm the match, and it suggests a starting skill level.
+        </p>
+        <textarea id="fsInput" rows="6" placeholder="Chad James, OR&#10;Jane Doe, Portland&#10;John Smith" style="width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid var(--border-strong);border-radius:8px;font:inherit;resize:vertical"></textarea>
+        <div style="display:flex;gap:10px;align-items:center;margin-top:8px;flex-wrap:wrap">
+          <button class="btn btn-primary" id="fsRunBtn" onclick="fsRunLookup()">Look up in FargoRate</button>
+          <span id="fsStatus" style="font-size:.85rem"></span>
+        </div>
+        <p class="hint" style="margin:8px 0 0;font-size:.78rem">
+          Suggested SL is an <b>approximate</b> Fargo→APA 8-ball guide — your call, and APA rules let you set a higher starting SL.
+          <b>Robustness</b> = games behind the rating (≥200 established/reliable; low = provisional, treat with caution).
+          Reads FargoRate's public search data; nothing is sent to APA.
+        </p>
+      </div>
+      <div id="fsWork"></div>
+      <div class="card">
+        <h2>Saved assessments</h2>
+        <div id="fsSaved"><span class="hint">Loading…</span></div>
+      </div>
+    </div>
+
     <!-- ════════════════ RackTime ════════════════
          Faithful port of the standalone RackTime admin (Apps/RackTime/site/
          admin.html). All CSS is scoped under #tab-racktime; all JS lives in a
@@ -5094,7 +5135,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.338';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.339';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10170,6 +10211,7 @@ const TAB_LABEL = {
   spreports:     'SP Reports',
   scoresheets:   'Scoresheets',
   commonplayers: 'Roster Report',
+  fargoscout: 'FargoScout',
   reports:       'Reports',
   outreach:      'Outreach',
   switchboard:   'Switchboard',
@@ -10232,6 +10274,159 @@ function switchTab(name) {
   if (name === 'cuedrop') cdInit();
   if (name === 'countmein') cmInit();
   if (name === 'racktime') rktInit();
+  if (name === 'fargoscout') fsInit();
+}
+
+/* ═══════════════ FargoScout — bulk FargoRate lookup for starting-SL check ═══════
+   Reads FargoRate's PUBLIC search API (CORS `*`) directly from the browser,
+   throttled. The operator confirms each match (names are ambiguous — 4 "Chad
+   James") and approves a starting APA skill level. Suggested SL is an APPROXIMATE
+   Fargo→APA 8-ball guide; the operator decides. Persists to slate.fargo_lookups.
+   Research + endpoint verified 2026-08-22 (brief 2026-08-22-fargoscout.md). */
+const FS_API = 'https://dashboard.fargorate.com/api/indexsearch?q=';
+const FS_THROTTLE_MS = 300;
+const FS_SLATE = { 'Accept-Profile': 'slate' }, FS_SLATE_W = { 'Content-Profile': 'slate' };
+/* Approximate Fargo → APA 8-ball SL — anchored on the cited SL5 ≈ 410–470. */
+function fsSuggestSL(eff) {
+  const r = parseInt(eff, 10);
+  if (!isFinite(r)) return null;
+  if (r <= 289) return 2; if (r <= 349) return 3; if (r <= 409) return 4;
+  if (r <= 470) return 5; if (r <= 530) return 6; return 7;
+}
+let _fsRows = [];   // working set
+
+function fsInit() { fsLoadSaved(); }
+function fsStatus(m, k) { const el = document.getElementById('fsStatus'); if (!el) return; el.textContent = m || ''; el.style.color = k === 'err' ? 'var(--spm-primary)' : (k === 'ok' ? '#1a6a30' : 'var(--muted)'); }
+
+async function fsRunLookup() {
+  const ta = document.getElementById('fsInput');
+  const lines = (ta.value || '').split('\n').map(s => s.trim()).filter(Boolean);
+  if (!lines.length) { fsStatus('Enter at least one name (one per line).', 'err'); return; }
+  const btn = document.getElementById('fsRunBtn'); btn.disabled = true;
+  _fsRows = lines.map(line => {
+    const m = line.match(/^(.*?)\s*[|,]\s*(.+)$/);   // "Name, ST" / "Name | City ST"
+    return { input_name: m ? m[1].trim() : line, input_location: m ? m[2].trim() : '', candidates: [], picked: null, approved_sl: null, status: 'pending', error: null };
+  });
+  fsRenderWork();
+  for (let i = 0; i < _fsRows.length; i++) {
+    const row = _fsRows[i];
+    fsStatus('Looking up ' + (i + 1) + '/' + _fsRows.length + '…', 'progress');
+    try {
+      const r = await fetch(FS_API + encodeURIComponent(row.input_name));
+      if (!r.ok) {
+        row.status = 'search_failed';
+        row.error = 'FargoRate ' + r.status + (r.status === 500 ? ' — this name crashes their search; add a first name or look up by hand' : '');
+      } else {
+        const j = await r.json();
+        row.candidates = (j.value || []).map(p => ({
+          player_id: String(p.readableId || ''),
+          fargo_name: ((p.firstName || '') + ' ' + (p.lastName || '')).trim(),
+          effective_rating: parseInt(p.effectiveRating || p.rating, 10) || null,
+          raw_rating: parseInt(p.rating, 10) || null,
+          robustness: parseInt(p.robustness, 10) || null,
+          location: p.location || ''
+        }));
+        if (row.candidates.length) {
+          row.status = 'review';
+          const hint = row.input_location.toLowerCase();
+          let best = hint ? row.candidates.find(c => (c.location || '').toLowerCase().includes(hint)) : null;
+          if (!best) best = row.candidates.slice().sort((a, b) => (b.robustness || 0) - (a.robustness || 0))[0];
+          fsSetPick(row, best.player_id);
+        } else { row.status = 'no_match'; }
+      }
+    } catch (e) { row.status = 'search_failed'; row.error = e.message || String(e); }
+    fsRenderWork();
+    if (i < _fsRows.length - 1) await new Promise(res => setTimeout(res, FS_THROTTLE_MS));
+  }
+  fsStatus('Done — review the matches, adjust SLs, then Save.', 'ok');
+  btn.disabled = false;
+}
+function fsSetPick(row, pid) {
+  row.picked = pid;
+  const c = row.candidates.find(x => x.player_id === pid);
+  row.approved_sl = c ? fsSuggestSL(c.effective_rating) : null;
+}
+function fsPick(i, pid) { fsSetPick(_fsRows[i], pid); fsRenderWork(); }
+function fsSetSL(i, v) { const n = parseInt(v, 10); _fsRows[i].approved_sl = isFinite(n) ? n : null; }
+function fsRobLabel(rob) { return (rob || 0) >= 200 ? 'established' : ((rob || 0) >= 50 ? 'firming up' : 'provisional'); }
+
+function fsRenderWork() {
+  const wrap = document.getElementById('fsWork'); if (!wrap) return;
+  if (!_fsRows.length) { wrap.innerHTML = ''; return; }
+  let any = false;
+  wrap.innerHTML = '<div class="card"><div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><h2 style="margin:0">Results</h2>'
+    + '<button class="btn btn-primary btn-sm" onclick="fsSave()">Save reviewed</button>'
+    + '<button class="btn btn-outline btn-sm" onclick="_fsRows=[];fsRenderWork();">Clear</button></div>'
+    + _fsRows.map((row, i) => {
+        const head = '<div style="font-weight:700">' + esc(row.input_name) + (row.input_location ? ' <span class="hint" style="font-weight:400">· ' + esc(row.input_location) + '</span>' : '') + '</div>';
+        if (row.status === 'pending') return '<div class="fs-row">' + head + '<span class="hint">…</span></div>';
+        if (row.status === 'search_failed') return '<div class="fs-row" style="border-left:3px solid var(--warn,#f59e0b)">' + head + '<div class="hint" style="color:var(--spm-primary)">' + esc(row.error || 'search failed') + '</div></div>';
+        if (row.status === 'no_match') return '<div class="fs-row" style="border-left:3px solid var(--border-strong)">' + head + '<div class="hint">No FargoRate match. New to organized pool (or a name variation).</div></div>';
+        any = true;
+        const cands = row.candidates.map(c => {
+          const on = c.player_id === row.picked;
+          return '<label class="fs-cand' + (on ? ' on' : '') + '">'
+            + '<input type="radio" name="fsr' + i + '" ' + (on ? 'checked' : '') + ' onchange="fsPick(' + i + ',\'' + c.player_id + '\')" style="margin-right:8px">'
+            + '<b>' + String(c.effective_rating == null ? '?' : c.effective_rating) + '</b> Fargo'
+            + ' <span class="hint">(raw ' + (c.raw_rating == null ? '?' : c.raw_rating) + ' · robust ' + (c.robustness == null ? '?' : c.robustness) + ' — ' + fsRobLabel(c.robustness) + ')</span>'
+            + ' · ' + esc(c.location || '—') + ' <span class="hint">· ' + esc(c.fargo_name) + ' · id ' + esc(c.player_id) + '</span></label>';
+        }).join('');
+        const pc = row.candidates.find(x => x.player_id === row.picked);
+        const sug = pc ? fsSuggestSL(pc.effective_rating) : null;
+        const slCtl = '<div style="margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+          + '<span class="hint">Suggested starting SL, 8-ball approx: <b>' + (sug == null ? '—' : sug) + '</b></span>'
+          + '<label style="font-size:.8rem">Approve SL <input type="number" min="1" max="9" value="' + (row.approved_sl == null ? '' : row.approved_sl) + '" oninput="fsSetSL(' + i + ',this.value)" style="width:3.5em;padding:3px 5px;border:1px solid var(--border-strong);border-radius:6px"></label></div>';
+        return '<div class="fs-row" style="border-left:3px solid var(--success,#16a34a)">' + head
+          + '<div style="margin-top:6px;display:grid;gap:4px">' + cands + '</div>' + slCtl
+          + (row.candidates.length > 1 ? '<div class="hint" style="margin-top:4px;font-size:.75rem">' + row.candidates.length + ' people named that — pick by location.</div>' : '')
+          + '</div>';
+      }).join('')
+    + '</div>';
+  if (!any) fsStatus('No matches to save — nothing to review.', '');
+}
+
+async function fsSave() {
+  const recs = _fsRows.filter(r => r.status === 'review' || r.status === 'no_match' || r.status === 'search_failed').map(r => {
+    const c = r.candidates.find(x => x.player_id === r.picked) || null;
+    return {
+      input_name: r.input_name, input_location: r.input_location || null,
+      status: c ? 'matched' : r.status,
+      player_id: c ? c.player_id : null, fargo_name: c ? c.fargo_name : null,
+      effective_rating: c ? c.effective_rating : null, raw_rating: c ? c.raw_rating : null,
+      robustness: c ? c.robustness : null, location: c ? c.location : null,
+      suggested_sl: c ? fsSuggestSL(c.effective_rating) : null,
+      approved_sl: c ? r.approved_sl : null
+    };
+  });
+  if (!recs.length) { fsStatus('Nothing to save yet — run a lookup first.', 'err'); return; }
+  try {
+    await sb('POST', 'fargo_lookups', recs, { ...FS_SLATE_W, Prefer: 'return=minimal' });
+    fsStatus('✓ Saved ' + recs.length + '.', 'ok');
+    _fsRows = []; fsRenderWork(); fsLoadSaved();
+  } catch (e) { fsStatus('Save failed: ' + (e.message || e), 'err'); }
+}
+
+async function fsLoadSaved() {
+  const el = document.getElementById('fsSaved'); if (!el) return;
+  let rows = [];
+  try { rows = await sb('GET', 'fargo_lookups?select=*&order=created_at.desc&limit=200', null, FS_SLATE) || []; }
+  catch (e) { el.innerHTML = '<span class="hint">Could not load: ' + esc(e.message || e) + '</span>'; return; }
+  if (!rows.length) { el.innerHTML = '<span class="hint" style="font-style:italic">No saved assessments yet.</span>'; return; }
+  el.innerHTML = '<div style="overflow-x:auto"><table class="table" style="font-size:.86rem"><thead><tr>'
+    + '<th>Name</th><th>Fargo</th><th>Robust</th><th>Where</th><th>Sugg.</th><th>Approved</th><th></th></tr></thead><tbody>'
+    + rows.map(r => '<tr>'
+      + '<td><b>' + esc(r.input_name) + '</b>' + (r.fargo_name && r.fargo_name !== r.input_name ? ' <span class="hint">→ ' + esc(r.fargo_name) + '</span>' : '') + '</td>'
+      + '<td>' + (r.effective_rating == null ? (r.status === 'matched' ? '?' : '<span class="hint">' + esc(r.status) + '</span>') : ('<b>' + r.effective_rating + '</b>')) + '</td>'
+      + '<td>' + (r.robustness == null ? '—' : (r.robustness + ' <span class="hint">' + fsRobLabel(r.robustness) + '</span>')) + '</td>'
+      + '<td>' + esc(r.location || '—') + '</td>'
+      + '<td>' + (r.suggested_sl == null ? '—' : ('SL' + r.suggested_sl)) + '</td>'
+      + '<td>' + (r.approved_sl == null ? '—' : ('<b>SL' + r.approved_sl + '</b>')) + '</td>'
+      + '<td><button class="btn btn-outline btn-sm" style="padding:1px 8px" onclick="fsDelete(' + r.id + ')">✕</button></td>'
+      + '</tr>').join('') + '</tbody></table></div>';
+}
+async function fsDelete(id) {
+  try { await sb('DELETE', 'fargo_lookups?id=eq.' + id, null, FS_SLATE_W); fsLoadSaved(); }
+  catch (e) { fsStatus('Delete failed: ' + (e.message || e), 'err'); }
 }
 
 /* ═══════════════ ChalkTalk tab (v0.1) — player question submissions ═══════════════
