@@ -1053,6 +1053,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="scoresheets">PaperTrail</button>
       <button class="tab" data-tab="commonplayers">Roster Report</button>
       <button class="tab" data-tab="fargoscout">FargoScout</button>
+      <button class="tab" data-tab="matchfees">Match Fees</button>
       <button class="tab" data-tab="reports">Reports</button>
       <button class="tab" data-tab="outreach">Outreach</button>
       <button class="tab" data-tab="switchboard">Switchboard</button>
@@ -4854,6 +4855,71 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
          operator confirms each match + approves an SL. slate.fargo_lookups.
          All JS is global (fs*), near switchTab. Brief: 2026-08-22-fargoscout.md
          ══════════════════════════════════════════════════════════════ -->
+    <!-- ══════════════════════════════════════════════════════════════
+         MATCH FEES — team payment tracker from the APA "Matches Paid By
+         Division" (Stripe) report. Per team per week: on-time / late /
+         unpaid / bye / upcoming. Replaces the retired hand-tracked finance
+         sheet. All JS is global (mf*), near switchTab. RLS-locked tables
+         (service_role only). Brief: 2026-08-22-match-fees-tracker.md
+         ══════════════════════════════════════════════════════════════ -->
+    <div id="tab-matchfees" class="tab-panel">
+      <style>
+        #tab-matchfees .mf-controls{display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin:10px 0}
+        #tab-matchfees .mf-drop{flex:1;min-width:260px;border:2px dashed var(--border-strong,#cbd0d8);border-radius:10px;padding:14px 16px;text-align:center;color:#6b7280;cursor:pointer;background:#fafbfc}
+        #tab-matchfees .mf-drop:hover,#tab-matchfees .mf-drag{border-color:var(--spm-primary,#ea002a);color:#1a1a1a;background:#fff}
+        #tab-matchfees .mf-filters{display:flex;flex-wrap:wrap;gap:16px;align-items:center;margin:6px 0 12px}
+        #tab-matchfees .mf-legend{display:flex;gap:12px;flex-wrap:wrap;font-size:.82rem;color:#4b5563;margin-left:auto}
+        #tab-matchfees .mf-key{display:inline-flex;align-items:center;gap:5px}
+        #tab-matchfees .mf-sw{width:14px;height:14px;border-radius:3px;display:inline-block;border:1px solid rgba(0,0,0,.15)}
+        #tab-matchfees .mf-stats{display:flex;gap:22px;flex-wrap:wrap;font-size:.95rem;margin:4px 0 14px}
+        #tab-matchfees .mf-stats .mf-s-owe b{color:#b91c1c}
+        #tab-matchfees .mf-div{margin:0 0 18px;border:1px solid var(--border,#e5e7eb);border-radius:10px;overflow:hidden}
+        #tab-matchfees .mf-divhdr{background:#f3f4f6;padding:8px 12px;font-weight:700;display:flex;align-items:center;gap:10px}
+        #tab-matchfees .mf-badge{font-size:.74rem;font-weight:700;padding:2px 8px;border-radius:999px;margin-left:auto}
+        #tab-matchfees .mf-b-owe{background:#fde8ec;color:#b91c1c}
+        #tab-matchfees .mf-b-ok{background:#e7f6ec;color:#137a3a}
+        #tab-matchfees .mf-scroll{overflow-x:auto}
+        #tab-matchfees table.mf-tbl{border-collapse:collapse;font-size:.8rem;width:100%}
+        #tab-matchfees .mf-tbl th,#tab-matchfees .mf-tbl td{border:1px solid #eef0f2;padding:2px 4px;text-align:center;white-space:nowrap}
+        #tab-matchfees .mf-tbl .mf-tn{font-weight:600;text-align:left;position:sticky;left:0;background:#fff;z-index:1}
+        #tab-matchfees .mf-tbl .mf-tname{text-align:left;max-width:150px;overflow:hidden;text-overflow:ellipsis}
+        #tab-matchfees .mf-wh{color:#6b7280;font-weight:600;min-width:22px}
+        #tab-matchfees .mf-c{font-weight:700;min-width:22px}
+        #tab-matchfees .mf-ontime{background:#e7f6ec;color:#137a3a}
+        #tab-matchfees .mf-late{background:#fef3c7;color:#92400e}
+        #tab-matchfees .mf-unpaid{background:#fde8ec;color:#b91c1c}
+        #tab-matchfees .mf-bye{background:#f1f3f5;color:#9aa1a9}
+        #tab-matchfees .mf-future,#tab-matchfees .mf-none{background:#fff;color:#d1d5db}
+        #tab-matchfees .mf-owe{font-weight:700;color:#b91c1c}
+      </style>
+      <div class="card">
+        <h2 style="margin-top:0">Match Fees</h2>
+        <p class="muted" style="margin:.2rem 0 0">Upload the APA <b>"Matches Paid By Division"</b> report (from Stripe) to see which teams paid which weeks — on time, late, or not at all. Replaces the old hand-tracked finance sheet.</p>
+        <div class="mf-controls">
+          <label>Session <select id="mfSession"></select></label>
+          <div id="mfDrop" class="mf-drop">Drop the "Matches Paid By Division" PDF here, or click to choose</div>
+          <input type="file" id="mfFile" accept="application/pdf" style="display:none">
+          <span id="mfStatus" class="muted"></span>
+        </div>
+        <div id="mfMeta" class="muted" style="font-size:.85rem"></div>
+      </div>
+      <div class="card">
+        <div class="mf-filters">
+          <label>Division <select id="mfDivFilter"><option value="">All divisions</option></select></label>
+          <label><input type="checkbox" id="mfOnlyOwing"> Only teams with unpaid or late weeks</label>
+          <span class="mf-legend">
+            <span class="mf-key"><span class="mf-sw mf-ontime"></span>on time</span>
+            <span class="mf-key"><span class="mf-sw mf-late"></span>late</span>
+            <span class="mf-key"><span class="mf-sw mf-unpaid"></span>not paid</span>
+            <span class="mf-key"><span class="mf-sw mf-bye"></span>bye</span>
+            <span class="mf-key"><span class="mf-sw mf-future" style="border-color:#d1d5db"></span>upcoming</span>
+          </span>
+        </div>
+        <div id="mfSummary"></div>
+        <div id="mfGrid"></div>
+      </div>
+    </div>
+
     <div id="tab-fargoscout" class="tab-panel">
       <style>
         #tab-fargoscout .card { padding: 12px 16px; margin-bottom: 10px; }
@@ -5144,7 +5210,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.342';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.343';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10243,7 +10309,8 @@ const TAB_LABEL = {
   preshot:       'PreShot',
   cuedrop:       'CueDrop',
   countmein:     'CountMeIn',
-  racktime:      'RackTime'
+  racktime:      'RackTime',
+  matchfees:     'Match Fees'
 };
 
 function switchTab(name) {
@@ -10284,7 +10351,308 @@ function switchTab(name) {
   if (name === 'countmein') cmInit();
   if (name === 'racktime') rktInit();
   if (name === 'fargoscout') fsInit();
+  if (name === 'matchfees') mfInit();
 }
+
+/* ═══════════════ Match Fees — team payment tracker (Stripe report) ═══════════════
+   Upload the APA "Matches Paid By Division" report; show per team per week:
+   on-time / late / unpaid / bye / upcoming. Source of truth = the Stripe PDF;
+   "owed weeks" + dates come from slate.matches, team roster from slate.teams.
+   Payment classification (user-locked 2026-08-22): on-time = paid on/before that
+   week's scheduled play date; late = paid after; unpaid = a past-due week with no
+   Success payment. Reuses sb(), spLoadPdfjs(), esc(). Data is sensitive — the
+   tables are RLS-locked to service_role (admin key). ── */
+let _mfSessions = [];
+let _mfSession = null;
+let _mf = { divisions: [], payments: [], weekDate: {}, byeWeeks: null, upload: null };
+let _mfFilter = { division: '', onlyOwing: false };
+
+function mfSetStatus(msg) { const el = document.getElementById('mfStatus'); if (el) el.textContent = msg || ''; }
+
+async function mfFetchAll(path) {
+  // page through PostgREST 1000-row cap
+  const out = [];
+  let from = 0;
+  for (;;) {
+    const page = await sb('GET', path + (path.includes('?') ? '&' : '?') + 'limit=1000&offset=' + from);
+    if (!page || !page.length) break;
+    out.push(...page);
+    if (page.length < 1000) break;
+    from += 1000;
+  }
+  return out;
+}
+
+async function mfInit() {
+  await mfLoadSessions();
+  const sel = document.getElementById('mfSession');
+  if (sel && !sel.dataset.wired) {
+    sel.dataset.wired = '1';
+    sel.addEventListener('change', () => { _mfSession = +sel.value; mfLoadData(); });
+  }
+  const drop = document.getElementById('mfDrop');
+  const file = document.getElementById('mfFile');
+  if (drop && !drop.dataset.wired) {
+    drop.dataset.wired = '1';
+    drop.addEventListener('click', () => file.click());
+    drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('mf-drag'); });
+    drop.addEventListener('dragleave', () => drop.classList.remove('mf-drag'));
+    drop.addEventListener('drop', e => {
+      e.preventDefault(); drop.classList.remove('mf-drag');
+      if (e.dataTransfer.files[0]) mfHandleFile(e.dataTransfer.files[0]);
+    });
+    file.addEventListener('change', () => { if (file.files[0]) mfHandleFile(file.files[0]); file.value = ''; });
+  }
+  const df = document.getElementById('mfDivFilter');
+  if (df && !df.dataset.wired) { df.dataset.wired = '1'; df.addEventListener('change', () => { _mfFilter.division = df.value; mfRender(); }); }
+  const ou = document.getElementById('mfOnlyOwing');
+  if (ou && !ou.dataset.wired) { ou.dataset.wired = '1'; ou.addEventListener('change', () => { _mfFilter.onlyOwing = ou.checked; mfRender(); }); }
+  await mfLoadData();
+}
+
+async function mfLoadSessions() {
+  _mfSessions = await sb('GET', 'sessions?select=id,name,is_current&order=id.desc');
+  if (!_mfSession) { const cur = _mfSessions.find(s => s.is_current); _mfSession = cur ? cur.id : (_mfSessions[0] && _mfSessions[0].id); }
+  const sel = document.getElementById('mfSession');
+  if (sel) sel.innerHTML = _mfSessions.map(s => '<option value="' + s.id + '"' + (s.id === _mfSession ? ' selected' : '') + '>' + esc(s.name) + (s.is_current ? ' (current)' : '') + '</option>').join('');
+}
+
+async function mfLoadData() {
+  if (!_mfSession) return;
+  mfSetStatus('Loading…');
+  const divs = await sb('GET', 'divisions?select=id,division_number,name,num_weeks,night_of_play,format,teams(id,team_number,team_name)&session_id=eq.' + _mfSession + '&order=division_number');
+  const divIds = divs.map(d => d.id);
+  let matches = [];
+  if (divIds.length) matches = await mfFetchAll('matches?select=division_id,week_number,scheduled_date,row_type,home_team_id,away_team_id&division_id=in.(' + divIds.join(',') + ')');
+  const payments = await mfFetchAll('match_fee_payments?select=*&session_id=eq.' + _mfSession);
+  const ups = await sb('GET', 'match_fee_uploads?select=*&session_id=eq.' + _mfSession + '&order=uploaded_at.desc&limit=1');
+  _mf = mfBuildModel(divs, matches, payments, ups && ups[0]);
+  mfSetStatus('');
+  // division filter options
+  const df = document.getElementById('mfDivFilter');
+  if (df) df.innerHTML = '<option value="">All divisions</option>' + divs.map(d => '<option value="' + esc(d.division_number) + '">' + esc(d.division_number + ' · ' + d.name) + '</option>').join('');
+  mfRender();
+}
+
+function mfBuildModel(divs, matches, payments, upload) {
+  const idToNum = {};
+  divs.forEach(d => { idToNum[d.id] = d.division_number; });
+  // week -> date per division_number (authoritative from matches, earliest non-bye)
+  const weekDate = {};
+  const divWeeks = {};            // division_number -> Set(week)
+  const teamWeeks = {};           // team_id -> Set(week) actually played
+  for (const m of matches) {
+    const dn = idToNum[m.division_id]; if (!dn) continue;
+    const wk = m.week_number;
+    (divWeeks[dn] = divWeeks[dn] || new Set()).add(wk);
+    const isBye = (m.row_type || '').toLowerCase().includes('bye') || !m.home_team_id || !m.away_team_id;
+    if (m.scheduled_date && !isBye) {
+      weekDate[dn] = weekDate[dn] || {};
+      if (!weekDate[dn][wk] || m.scheduled_date < weekDate[dn][wk]) weekDate[dn][wk] = m.scheduled_date;
+    }
+    if (!isBye) {
+      if (m.home_team_id) (teamWeeks[m.home_team_id] = teamWeeks[m.home_team_id] || new Set()).add(wk);
+      if (m.away_team_id) (teamWeeks[m.away_team_id] = teamWeeks[m.away_team_id] || new Set()).add(wk);
+    }
+  }
+  // supplement week dates from payments (special divisions with no matches)
+  for (const p of payments) {
+    if (!p.schedule_date) continue;
+    weekDate[p.division_number] = weekDate[p.division_number] || {};
+    const cur = weekDate[p.division_number][p.wop];
+    if (!cur || p.schedule_date < cur) weekDate[p.division_number][p.wop] = p.schedule_date;
+  }
+  // Success payment index: division|teamnorm|wop -> earliest-paid payment
+  const payIndex = {};
+  for (const p of payments) {
+    if ((p.status || '') !== 'Success') continue;
+    const k = p.division_number + '|' + p.team_number_norm + '|' + p.wop;
+    const ex = payIndex[k];
+    if (!ex || (p.payment_date && (!ex.payment_date || p.payment_date < ex.payment_date))) payIndex[k] = p;
+  }
+  return { divisions: divs, payments, weekDate, divWeeks, teamWeeks, payIndex, upload };
+}
+
+// classification for one (division, team, week) -> {k, pay, sched}
+function mfCell(div, team, wk, today) {
+  const dn = div.division_number;
+  const teamNorm = String(parseInt(team.team_number, 10));
+  const sched = (_mf.weekDate[dn] || {})[wk] || null;
+  const pay = _mf.payIndex[dn + '|' + teamNorm + '|' + wk];
+  if (pay) {
+    const late = sched && pay.payment_date && pay.payment_date > sched;
+    return { k: late ? 'late' : 'ontime', pay, sched };
+  }
+  // no successful payment yet
+  const divWks = _mf.divWeeks[dn];
+  const teamWks = _mf.teamWeeks[team.id];
+  const isBye = divWks && divWks.has(wk) && teamWks && !teamWks.has(wk);
+  if (isBye) return { k: 'bye', sched };
+  if (!sched) return { k: 'none', sched };
+  if (sched > today) return { k: 'future', sched };
+  return { k: 'unpaid', sched };
+}
+
+function mfTeamRow(div, team, weeks, today) {
+  const teamNorm = String(parseInt(team.team_number, 10));
+  let owing = 0;
+  const cells = weeks.map(wk => {
+    const c = mfCell(div, team, wk, today);
+    if (c.k === 'unpaid' || c.k === 'late') owing++;
+    const label = { ontime: '✓', late: 'L', unpaid: '✗', bye: 'B', future: '', none: '' }[c.k];
+    const amt = c.pay ? '$' + (+c.pay.amount).toFixed(0) : '';
+    const tip = 'Wk ' + wk + (c.sched ? ' · plays ' + c.sched : '') +
+      (c.k === 'ontime' ? ' · paid ' + (c.pay.payment_date || '?') + ' ' + amt + ' — on time' :
+       c.k === 'late' ? ' · paid ' + (c.pay.payment_date || '?') + ' ' + amt + ' — LATE' :
+       c.k === 'unpaid' ? ' · NOT PAID' :
+       c.k === 'bye' ? ' · bye' :
+       c.k === 'future' ? ' · upcoming' : '');
+    return '<td class="mf-c mf-' + c.k + '" title="' + esc(tip) + '">' + label + '</td>';
+  }).join('');
+  return { html: '<tr' + (owing ? ' data-owing="1"' : '') + '><td class="mf-tn">' + esc(team.team_number) + '</td><td class="mf-tname">' + esc(team.team_name || '') + '</td>' + cells + '<td class="mf-owe">' + (owing ? owing : '') + '</td></tr>', owing };
+}
+
+function mfRender() {
+  const wrap = document.getElementById('mfGrid');
+  const sum = document.getElementById('mfSummary');
+  const meta = document.getElementById('mfMeta');
+  if (!wrap) return;
+  const up = _mf.upload;
+  if (meta) meta.innerHTML = up
+    ? 'Last upload: <b>' + esc(up.source_filename || '?') + '</b> · ' + (up.success_count || 0) + ' payments · $' + (+up.total_amount || 0).toFixed(2) + ' · covering ' + esc((up.date_from || '?') + ' → ' + (up.date_to || '?')) + ' · uploaded ' + esc((up.uploaded_at || '').replace('T', ' ').slice(0, 16))
+    : '<span class="muted">No report uploaded for this session yet — drop the "Matches Paid By Division" PDF above.</span>';
+  const today = mfToday();
+  let divs = _mf.divisions;
+  if (_mfFilter.division) divs = divs.filter(d => d.division_number === _mfFilter.division);
+  let totTeams = 0;
+  let totOwing = 0;
+  let totCollected = 0;
+  _mf.payments.forEach(p => { if ((p.status || '') === 'Success') totCollected += +p.amount || 0; });
+  const blocks = divs.map(d => {
+    const teams = (d.teams || []).slice().sort((a, b) => String(a.team_number).localeCompare(String(b.team_number)));
+    const nWeeks = d.num_weeks || Math.max(0, ...Object.keys(_mf.weekDate[d.division_number] || {}).map(Number));
+    const weeks = [];
+    for (let w = 1; w <= nWeeks; w++) weeks.push(w);
+    let divOwing = 0;
+    const rows = teams.map(t => {
+      const r = mfTeamRow(d, t, weeks, today);
+      if (r.owing) divOwing++;
+      return r;
+    });
+    totTeams += teams.length;
+    totOwing += divOwing;
+    const shown = _mfFilter.onlyOwing ? rows.filter(r => r.owing) : rows;
+    if (_mfFilter.onlyOwing && !shown.length) return '';
+    const head = '<th class="mf-tn">Team</th><th class="mf-tname"></th>' + weeks.map(w => '<th class="mf-wh">' + w + '</th>').join('') + '<th class="mf-owe">Owe</th>';
+    return '<div class="mf-div"><div class="mf-divhdr">' + esc(d.division_number + ' · ' + d.name) +
+      ' <span class="muted">' + esc(d.format || '') + (d.night_of_play ? ' · ' + esc(d.night_of_play) : '') + '</span>' +
+      (divOwing ? '<span class="mf-badge mf-b-owe">' + divOwing + ' owing</span>' : '<span class="mf-badge mf-b-ok">all current</span>') + '</div>' +
+      '<div class="mf-scroll"><table class="mf-tbl"><thead><tr>' + head + '</tr></thead><tbody>' + shown.map(r => r.html).join('') + '</tbody></table></div></div>';
+  }).join('');
+  if (sum) sum.innerHTML = '<div class="mf-stats"><span><b>' + totTeams + '</b> teams</span><span class="mf-s-owe"><b>' + totOwing + '</b> with unpaid/late weeks</span><span><b>$' + totCollected.toFixed(2) + '</b> collected</span></div>';
+  wrap.innerHTML = blocks || '<p class="muted">No divisions for this session.</p>';
+}
+
+function mfToday() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+async function mfHandleFile(file) {
+  try {
+    mfSetStatus('Reading ' + file.name + '…');
+    const parsed = await mfParsePdf(file);
+    if (!parsed.rows.length) { mfSetStatus('That PDF is not a "Matches Paid By Division" report — no payment rows found.'); return; }
+    // guard: match the report's session label to a Slate session (avoids mis-filing)
+    const label = (parsed.rows.find(r => r.session_label) || {}).session_label || '';
+    const match = _mfSessions.find(s => label && s.name.toLowerCase() === label.trim().toLowerCase());
+    let targetSid = _mfSession;
+    if (match && match.id !== _mfSession) {
+      const okSwitch = confirm('This report is labeled "' + label + '" but the selected session is "' +
+        (_mfSessions.find(s => s.id === _mfSession) || {}).name + '".\n\nUpload into "' + match.name + '" instead? (Recommended.)');
+      if (okSwitch) { targetSid = match.id; _mfSession = match.id; const sel = document.getElementById('mfSession'); if (sel) sel.value = String(match.id); }
+    }
+    const ok = parsed.rows.filter(r => r.status === 'Success');
+    const sumSuccess = ok.reduce((s, r) => s + (+r.amount || 0), 0);
+    if (!confirm('Import ' + parsed.rows.length + ' payment rows (' + ok.length + ' successful, $' + sumSuccess.toFixed(2) + ') into "' +
+      (_mfSessions.find(s => s.id === targetSid) || {}).name + '"?\n\nThis replaces any prior report for that session.')) { mfSetStatus('Cancelled.'); return; }
+    await mfSave(parsed, file, targetSid);
+    mfSetStatus('Imported ' + parsed.rows.length + ' rows.');
+    await mfLoadData();
+  } catch (e) {
+    mfSetStatus('Error: ' + e.message);
+  }
+}
+
+async function mfSave(parsed, file, sid) {
+  mfSetStatus('Saving…');
+  // replace-by-session: cascade delete old upload(s) + their payments, then insert fresh
+  await sb('DELETE', 'match_fee_uploads?session_id=eq.' + sid);
+  const ok = parsed.rows.filter(r => r.status === 'Success');
+  const up = await sb('POST', 'match_fee_uploads', {
+    session_id: sid, source_filename: file.name, date_from: parsed.meta.date_from, date_to: parsed.meta.date_to,
+    row_count: parsed.rows.length, success_count: ok.length, total_amount: ok.reduce((s, r) => s + (+r.amount || 0), 0),
+    uploaded_by_device: (navigator.userAgent || '').slice(0, 120)
+  });
+  const uploadId = up[0].id;
+  const recs = parsed.rows.map(r => ({
+    upload_id: uploadId, session_id: sid, division_number: r.division_number, team_number_norm: r.team_number_norm,
+    team_number_raw: r.team_number_raw, team_name: r.team_name, payer_name: r.payer_name, card_holder: r.card_holder,
+    wop: r.wop, schedule_date: r.schedule_date, payment_date: r.payment_date, amount: r.amount,
+    confirmation: r.confirmation, status: r.status
+  }));
+  for (let i = 0; i < recs.length; i += 500) await sb('POST', 'match_fee_payments', recs.slice(i, i + 500));
+}
+
+// Parse the APA "Matches Paid By Division" PDF — bucket text items by x-column.
+async function mfParsePdf(file) {
+  const pdfjs = await spLoadPdfjs();
+  const buf = new Uint8Array(await file.arrayBuffer());
+  const pdf = await pdfjs.getDocument({ data: buf }).promise;
+  const COLS = [['div', 0, 40], ['name', 40, 140], ['amount', 140, 175], ['team', 175, 210], ['teamname', 210, 320], ['wop', 320, 348], ['sched', 348, 415], ['paydate', 415, 452], ['paytime', 452, 505], ['conf', 505, 565], ['holder', 565, 655], ['session', 655, 720], ['txn', 720, 100000]];
+  const colOf = x => { for (const c of COLS) if (x >= c[1] && x < c[2]) return c[0]; return null; };
+  const YTOL = 3;
+  const reDiv = /^\d{2,3}$/;
+  const reAmt = /^-?[\d,]+\.\d{2}$/;
+  const reTeam = /^\d{4,6}$/;
+  const reWop = /^\d{1,2}$/;
+  const reSched = /^\d{1,2}\/\d{1,2}\/\d{4}$/;
+  const rePay = /^\d{1,2}\/\d{1,2}\/\d{2,4}$/;
+  const iso = d => { const m = (d || '').match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/); if (!m) return null; const yr = m[3].length === 2 ? '20' + m[3] : m[3]; return yr + '-' + String(m[1]).padStart(2, '0') + '-' + String(m[2]).padStart(2, '0'); };
+  const rows = [];
+  const meta = { date_from: null, date_to: null, footer_teams: null, footer_total: null };
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
+    const tc = await page.getTextContent();
+    const items = tc.items.filter(i => i.str.trim() !== '').map(i => ({ s: i.str.trim(), x: i.transform[4], y: i.transform[5] }));
+    items.sort((a, b) => b.y - a.y || a.x - b.x);
+    const vis = [];
+    for (const it of items) {
+      let r = vis.find(rr => Math.abs(rr.y - it.y) <= YTOL);
+      if (!r) { r = { y: it.y, cells: {} }; vis.push(r); }
+      const cc = colOf(it.x); if (!cc) continue;
+      r.cells[cc] = (r.cells[cc] ? r.cells[cc] + ' ' : '') + it.s;
+    }
+    for (const r of vis) {
+      const c = r.cells;
+      const joined = Object.values(c).join(' ');
+      const dr = joined.match(/From\s+(\d{1,2}\/\d{1,2}\/\d{4}).*To\s+(\d{1,2}\/\d{1,2}\/\d{4})/);
+      if (dr) { meta.date_from = iso(dr[1]); meta.date_to = iso(dr[2]); }
+      const ft = joined.match(/Teams:\s*(\d+).*Total Amount:\s*([\d,]+\.\d{2})/);
+      if (ft) { meta.footer_teams = +ft[1]; meta.footer_total = +ft[2].replace(/,/g, ''); }
+      if (!(reDiv.test(c.div || '') && reAmt.test(c.amount || '') && reTeam.test(c.team || '') && reWop.test(c.wop || '') && reSched.test(c.sched || ''))) continue;
+      rows.push({
+        division_number: c.div, payer_name: c.name || '', amount: Math.abs(+(c.amount || '').replace(/,/g, '')),
+        team_number_raw: c.team, team_number_norm: String(parseInt(c.team, 10)), team_name: c.teamname || '',
+        wop: +c.wop, schedule_date: iso(c.sched), payment_date: rePay.test(c.paydate || '') ? iso(c.paydate) : null,
+        confirmation: c.conf || null, card_holder: c.holder || '', session_label: c.session || '', status: (c.txn || '').trim()
+      });
+    }
+  }
+  return { meta, rows };
+}
+
+
 
 /* ═══════════════ FargoScout — bulk FargoRate lookup + SL↔Fargo viz ═══════════════
    Reads FargoRate's PUBLIC search API (CORS `*`) — CACHED in slate.fargo_cache
