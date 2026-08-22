@@ -4859,33 +4859,40 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         #tab-fargoscout .card { padding: 12px 16px; margin-bottom: 10px; }
         #tab-fargoscout h2 { margin: 0; }
         #tab-fargoscout .fs-row { border: 1px solid var(--border); border-left: 3px solid var(--border-strong); border-radius: 7px; padding: 5px 9px; margin-bottom: 5px; }
+        #tab-fargoscout .fs-row.fs-est { border-left-color: #b91c1c; background: #fef6f7; }
         #tab-fargoscout .fs-cand { display: flex; align-items: center; gap: 7px; padding: 3px 7px; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-size: 0.84rem; }
         #tab-fargoscout .fs-cand.on { background: #eef9f1; border-color: var(--success, #16a34a); }
         #tab-fargoscout .fs-cand:hover { border-color: var(--spm-accent); }
         #tab-fargoscout .fs-rob { padding: 0 5px; border-radius: 5px; font-weight: 700; font-size: .76rem; white-space: nowrap; }
-        #tab-fargoscout .fs-rob-yel { background: #fef3c7; color: #92400e; }   /* <200 provisional */
-        #tab-fargoscout .fs-rob-red { background: #fde8ec; color: #b91c1c; }   /* ≥200 established */
+        #tab-fargoscout .fs-rob-yel { background: #fef3c7; color: #92400e; }   /* < threshold, provisional */
+        #tab-fargoscout .fs-rob-red { background: #fde8ec; color: #b91c1c; }   /* ≥ threshold, established */
         #tab-fargoscout .fs-rob-non { background: #eef0f3; color: #6b7280; }
-        #tab-fargoscout .fs-fbtn { padding: 2px 10px; border-radius: 999px; border: 1px solid var(--border-strong); background: #fff; cursor: pointer; font-size: .76rem; font-weight: 700; }
-        #tab-fargoscout .fs-fbtn.on { background: var(--spm-accent); color: #fff; border-color: var(--spm-accent); }
+        #tab-fargoscout .fs-ghdr { font-weight: 800; font-size: .8rem; padding: 4px 8px; border-radius: 6px; margin-bottom: 5px; text-transform: uppercase; letter-spacing: .03em; }
+        #tab-fargoscout .fs-ghdr.fs-gred { background: #fde8ec; color: #b91c1c; }
+        #tab-fargoscout .fs-ghdr.fs-gyel { background: #fef3c7; color: #92400e; }
+        #tab-fargoscout .fs-ghdr.fs-gnon { background: #eef0f3; color: #4b5563; }
+        #tab-fargoscout .fs-count { float: right; opacity: .8; }
         #tab-fargoscout table.table td, #tab-fargoscout table.table th { padding: 4px 7px; }
       </style>
       <div class="card">
         <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:6px">
           <h2>FargoScout</h2>
-          <span class="hint" style="font-size:.8rem">New players → find their FargoRate → set a fair starting SL. One name per line; add <code>, ST</code> to pin the right person: <code>Chad James, OR</code>.</span>
+          <span class="hint" style="font-size:.8rem">Find new players in FargoRate. Paste your list — <b>columns are auto-detected</b> (Member #, First, Last, 8-Ball SL, 9-Ball SL, State, Date Started, header optional; or just First Last State). Cached weekly so it never re-hammers FargoRate.</span>
         </div>
-        <textarea id="fsInput" rows="5" placeholder="Chad James, OR&#10;Jane Doe, Portland&#10;John Smith" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--border-strong);border-radius:8px;font:inherit;resize:vertical"></textarea>
+        <textarea id="fsInput" rows="5" placeholder="Member Number&#9;First Name&#9;Last Name&#9;8-Ball Skill Level&#9;9-Ball Skill Level&#9;Date Started&#10;…paste rows here (or just: Chad James, OR)" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--border-strong);border-radius:8px;font:ui-monospace,Menlo,Consolas,monospace;font-size:.82rem;resize:vertical"></textarea>
         <div style="display:flex;gap:10px;align-items:center;margin-top:6px;flex-wrap:wrap">
           <button class="btn btn-primary btn-sm" id="fsRunBtn" onclick="fsRunLookup()">Look up in FargoRate</button>
           <span id="fsStatus" style="font-size:.82rem"></span>
-          <span class="hint" style="font-size:.72rem;margin-left:auto">Robustness = games behind the rating: <span class="fs-rob fs-rob-red">≥200 established</span> <span class="fs-rob fs-rob-yel">&lt;200 provisional</span> · SL is approximate — your call.</span>
+          <span class="hint" style="font-size:.72rem;margin-left:auto">Robustness = games behind the rating: <span class="fs-rob fs-rob-red">≥ threshold established</span> <span class="fs-rob fs-rob-yel">&lt; threshold provisional</span></span>
         </div>
       </div>
       <div id="fsWork"></div>
       <div class="card">
-        <h2>Saved assessments</h2>
+        <h2 style="margin-bottom:8px">Saved assessments</h2>
         <div id="fsSaved"><span class="hint">Loading…</span></div>
+      </div>
+      <div class="card">
+        <div id="fsViz"><span class="hint">Loading…</span></div>
       </div>
     </div>
 
@@ -5137,7 +5144,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.340';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.341';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10279,174 +10286,286 @@ function switchTab(name) {
   if (name === 'fargoscout') fsInit();
 }
 
-/* ═══════════════ FargoScout — bulk FargoRate lookup for starting-SL check ═══════
-   Reads FargoRate's PUBLIC search API (CORS `*`) directly from the browser,
-   throttled. The operator confirms each match (names are ambiguous — 4 "Chad
-   James") and approves a starting APA skill level. Suggested SL is an APPROXIMATE
-   Fargo→APA 8-ball guide; the operator decides. Persists to slate.fargo_lookups.
-   Research + endpoint verified 2026-08-22 (brief 2026-08-22-fargoscout.md). */
+/* ═══════════════ FargoScout — bulk FargoRate lookup + SL↔Fargo viz ═══════════════
+   Reads FargoRate's PUBLIC search API (CORS `*`) — CACHED in slate.fargo_cache
+   (weekly TTL) so we don't hammer it. Dynamic-column paste (member/first/last/
+   8-ball SL/9-ball SL/state/date, or just first/last/state). Groups results by
+   robustness (established ≥ threshold / provisional / not found). NO skill-level
+   recommendations — it surfaces the rating; the operator decides. Builds an
+   8-ball and 9-ball scatter of APA SL vs Fargo from what's been processed.
+   All fns global (fs*), near switchTab. Brief: 2026-08-22-fargoscout-v2.md */
 const FS_API = 'https://dashboard.fargorate.com/api/indexsearch?q=';
-const FS_THROTTLE_MS = 300;
+const FS_THROTTLE_MS = 250;
+const FS_CACHE_DAYS = 7;
 const FS_SLATE = { 'Accept-Profile': 'slate' }, FS_SLATE_W = { 'Content-Profile': 'slate' };
-/* Approximate Fargo → APA 8-ball SL — anchored on the cited SL5 ≈ 410–470. */
-function fsSuggestSL(eff) {
-  const r = parseInt(eff, 10);
-  if (!isFinite(r)) return null;
-  if (r <= 289) return 2; if (r <= 349) return 3; if (r <= 409) return 4;
-  if (r <= 470) return 5; if (r <= 530) return 6; return 7;
-}
-let _fsRows = [];   // working set
+const fsSleep = ms => new Promise(r => setTimeout(r, ms));
+const fsNorm = s => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+let _fsRows = [];      // work set
+let _fsSaved = [];     // saved rows cache (for table + viz)
+let _fsThresh = 200;   // robustness threshold — drives grouping + the viz
+let _fsCollapse = { work_notfound: true, saved_notfound: true };
 
 function fsInit() { fsLoadSaved(); }
 function fsStatus(m, k) { const el = document.getElementById('fsStatus'); if (!el) return; el.textContent = m || ''; el.style.color = k === 'err' ? 'var(--spm-primary)' : (k === 'ok' ? '#1a6a30' : 'var(--muted)'); }
+function fsRobBadge(rob) { if (rob == null) return '<span class="fs-rob fs-rob-non">—</span>'; return '<span class="fs-rob ' + (rob >= _fsThresh ? 'fs-rob-red' : 'fs-rob-yel') + '">' + rob + '</span>'; }
+function fsInState(loc, st) { return String(loc || '').toUpperCase().split(/[^A-Z]+/).includes(String(st || '').toUpperCase()); }
+function fsMapCand(p) {
+  return { player_id: String(p.readableId || ''), fargo_name: ((p.firstName || '') + ' ' + (p.lastName || '')).trim(),
+    effective_rating: parseInt(p.effectiveRating || p.rating, 10) || null, raw_rating: parseInt(p.rating, 10) || null,
+    robustness: parseInt(p.robustness, 10) || null, location: p.location || '' };
+}
+function fsThreshChange(v) { const n = parseInt(v, 10); _fsThresh = isFinite(n) ? n : 200; fsRenderWork(); fsRenderSavedTable(); fsRenderViz(); }
+function fsToggle(k) { _fsCollapse[k] = !_fsCollapse[k]; fsRenderWork(); fsRenderSavedTable(); }
 
-async function fsRunLookup() {
-  const ta = document.getElementById('fsInput');
-  const lines = (ta.value || '').split('\n').map(s => s.trim()).filter(Boolean);
-  if (!lines.length) { fsStatus('Enter at least one name (one per line).', 'err'); return; }
-  const btn = document.getElementById('fsRunBtn'); btn.disabled = true;
-  _fsRows = lines.map(line => {
-    const m = line.match(/^(.*?)\s*[|,]\s*(.+)$/);   // "Name, ST" / "Name | City ST"
-    return { input_name: m ? m[1].trim() : line, input_location: m ? m[2].trim() : '', candidates: [], picked: null, approved_sl: null, status: 'pending', error: null };
-  });
-  fsRenderWork();
-  for (let i = 0; i < _fsRows.length; i++) {
-    const row = _fsRows[i];
-    fsStatus('Looking up ' + (i + 1) + '/' + _fsRows.length + '…', 'progress');
-    try {
-      const r = await fetch(FS_API + encodeURIComponent(row.input_name));
-      if (!r.ok) {
-        row.status = 'search_failed';
-        row.error = 'FargoRate ' + r.status + (r.status === 500 ? ' — this name crashes their search; add a first name or look up by hand' : '');
-      } else {
-        const j = await r.json();
-        row.candidates = (j.value || []).map(p => ({
-          player_id: String(p.readableId || ''),
-          fargo_name: ((p.firstName || '') + ' ' + (p.lastName || '')).trim(),
-          effective_rating: parseInt(p.effectiveRating || p.rating, 10) || null,
-          raw_rating: parseInt(p.rating, 10) || null,
-          robustness: parseInt(p.robustness, 10) || null,
-          location: p.location || ''
-        }));
-        if (row.candidates.length) {
-          row.status = 'review';
-          const hint = row.input_location.toLowerCase();
-          let best = hint ? row.candidates.find(c => (c.location || '').toLowerCase().includes(hint)) : null;
-          if (!best) best = row.candidates.slice().sort((a, b) => (b.robustness || 0) - (a.robustness || 0))[0];
-          fsSetPick(row, best.player_id);
-        } else { row.status = 'no_match'; }
-      }
-    } catch (e) { row.status = 'search_failed'; row.error = e.message || String(e); }
-    fsRenderWork();
-    if (i < _fsRows.length - 1) await new Promise(res => setTimeout(res, FS_THROTTLE_MS));
+/* ── Dynamic-column paste ─────────────────────────────────────────── */
+function fsParseInput(text) {
+  const lines = (text || '').split('\n').map(l => l.replace(/\r$/, '')).filter(l => l.trim());
+  if (!lines.length) return [];
+  const useTab = /\t/.test(text);
+  const useComma = !useTab && lines[0].includes(',');
+  const splitRow = l => useTab ? l.split('\t') : (useComma ? l.split(',') : l.trim().split(/\s{2,}/).length > 1 ? l.trim().split(/\s{2,}/) : l.trim().split(/\s+/));
+  const clean = a => a.map(x => (x || '').trim());
+  const hdr = lines[0].toLowerCase();
+  const hasHeader = /first|last name|member|skill|8.?ball|9.?ball|\bstate\b|date start/.test(hdr);
+  let idx = {}, dataLines = lines;
+  if (hasHeader) {
+    clean(splitRow(lines[0])).forEach((c, i) => {
+      const s = c.toLowerCase();
+      if (/first/.test(s)) idx.first = i;
+      else if (/last/.test(s)) idx.last = i;
+      else if (/8.?ball/.test(s)) idx.sl8 = i;
+      else if (/9.?ball/.test(s)) idx.sl9 = i;
+      else if (/member|apa|number|#/.test(s)) idx.member = i;
+      else if (/\bstate\b|^st$/.test(s)) idx.state = i;
+      else if (/date/.test(s)) idx.date = i;
+    });
+    dataLines = lines.slice(1);
+  } else {
+    const rows0 = dataLines.map(l => clean(splitRow(l)));
+    const ncol = Math.max(0, ...rows0.map(r => r.length));
+    const cls = i => {
+      let member = 0, state = 0, alpha = 0, sl = 0, date = 0;
+      for (const r of rows0) { const t = (r[i] || '').trim(); if (!t) continue;
+        if (/^\d{7,9}$/.test(t)) member++; else if (/^[A-Za-z]{2}$/.test(t)) state++;
+        else if (/\//.test(t) && /\d/.test(t)) date++; else if (/^[1-9]$/.test(t)) sl++;
+        else if (/[A-Za-z]/.test(t)) alpha++; }
+      const m = Math.max(member, state, alpha, sl, date);
+      return m === 0 ? 'skip' : (m === member ? 'member' : m === state ? 'state' : m === date ? 'date' : m === alpha ? 'alpha' : 'sl');
+    };
+    const alphas = [], sls = [];
+    for (let i = 0; i < ncol; i++) { const c = cls(i);
+      if (c === 'alpha') alphas.push(i); else if (c === 'sl') sls.push(i);
+      else if (c === 'member' && idx.member == null) idx.member = i;
+      else if (c === 'state' && idx.state == null) idx.state = i;
+      else if (c === 'date' && idx.date == null) idx.date = i; }
+    if (alphas.length >= 2) { idx.first = alphas[0]; idx.last = alphas[1]; }
+    else if (alphas.length === 1) idx.name = alphas[0];
+    if (sls.length >= 1) idx.sl8 = sls[0]; if (sls.length >= 2) idx.sl9 = sls[1];
   }
-  fsStatus('Done — review the matches, adjust SLs, then Save.', 'ok');
+  // Space-delimited (no tabs/commas) is ambiguous — parse each line as
+  // "First [Middle] Last [ST]": a trailing 2-letter token is the state ONLY when
+  // there are ≥3 tokens (so "Mai Ly" stays a 2-word name, not name+state).
+  if (!useTab && !useComma) {
+    return dataLines.map(l => {
+      const toks = l.trim().split(/\s+/);
+      let state = '';
+      if (toks.length >= 3 && /^[A-Za-z]{2}$/.test(toks[toks.length - 1])) state = toks.pop().toUpperCase();
+      const first = toks.shift() || '';
+      const last = toks.join(' ');
+      return { first: first, last: last, state: state, member: '', sl8: null, sl9: null, date: '' };
+    }).filter(r => (r.first + r.last).trim());
+  }
+  const gi = (cells, i) => (i == null ? '' : (cells[i] || '').trim());
+  const gn = (cells, i) => { const v = gi(cells, i); const n = parseInt(v, 10); return isFinite(n) ? n : null; };
+  return dataLines.map(l => {
+    const c = clean(splitRow(l));
+    let first = gi(c, idx.first), last = gi(c, idx.last);
+    if (idx.name != null && !first) { const parts = gi(c, idx.name).split(/\s+/); first = parts.shift() || ''; last = parts.join(' '); }
+    return { first, last, state: gi(c, idx.state), member: gi(c, idx.member), sl8: gn(c, idx.sl8), sl9: gn(c, idx.sl9), date: gi(c, idx.date) };
+  }).filter(r => (r.first + r.last).trim());
+}
+
+/* ── Cache (slate.fargo_cache; weekly TTL) ────────────────────────── */
+async function fsCacheGet(q) {
+  try {
+    const rows = await sb('GET', 'fargo_cache?q=eq.' + encodeURIComponent(q) + '&select=candidates,fetched_at', null, FS_SLATE);
+    const r = rows && rows[0];
+    if (r && (Date.now() - new Date(r.fetched_at).getTime()) < FS_CACHE_DAYS * 864e5) return r.candidates || [];
+  } catch (e) {}
+  return null;
+}
+async function fsCachePut(q, cands) {
+  try { await sb('POST', 'fargo_cache?on_conflict=q', [{ q: q, candidates: cands, fetched_at: new Date().toISOString() }], { ...FS_SLATE_W, Prefer: 'resolution=merge-duplicates,return=minimal' }); } catch (e) {}
+}
+
+/* ── Lookup (cache-first, throttled) ──────────────────────────────── */
+async function fsRunLookup() {
+  const parsed = fsParseInput(document.getElementById('fsInput').value);
+  if (!parsed.length) { fsStatus('No rows detected — paste your list (with or without a header row).', 'err'); return; }
+  const btn = document.getElementById('fsRunBtn'); btn.disabled = true;
+  _fsRows = parsed.map(p => ({ ...p, name: (p.first + ' ' + p.last).trim(), candidates: [], picked: null, status: 'pending', error: null }));
+  fsRenderWork();
+  let api = 0, cached = 0;
+  for (let i = 0; i < _fsRows.length; i++) {
+    const row = _fsRows[i], q = fsNorm(row.name);
+    fsStatus('Looking up ' + (i + 1) + '/' + _fsRows.length + '… (' + api + ' live, ' + cached + ' cached)', 'progress');
+    let cands = await fsCacheGet(q), hit = cands != null;
+    if (!hit) {
+      try {
+        const r = await fetch(FS_API + encodeURIComponent(row.name));
+        if (!r.ok) { row.status = 'search_failed'; row.error = 'FargoRate ' + r.status + (r.status === 500 ? ' — this name crashes their search; add a first name' : ''); api++; fsRenderWork(); await fsSleep(FS_THROTTLE_MS); continue; }
+        cands = ((await r.json()).value || []).map(fsMapCand);
+        await fsCachePut(q, cands); api++;
+      } catch (e) { row.status = 'search_failed'; row.error = e.message || String(e); fsRenderWork(); await fsSleep(FS_THROTTLE_MS); continue; }
+    } else cached++;
+    row.candidates = cands;
+    if (cands.length) {
+      const st = row.state || '';
+      let best = st ? cands.find(c => fsInState(c.location, st)) : null;
+      if (!best) best = cands.slice().sort((a, b) => (b.robustness || 0) - (a.robustness || 0))[0];
+      row.picked = best.player_id; row.status = 'matched';
+    } else row.status = 'no_match';
+    fsRenderWork();
+    if (!hit) await fsSleep(FS_THROTTLE_MS);
+  }
+  fsStatus('Done — ' + api + ' live lookups, ' + cached + ' from cache. Review, then Save.', 'ok');
   btn.disabled = false;
 }
-function fsSetPick(row, pid) {
-  row.picked = pid;
-  const c = row.candidates.find(x => x.player_id === pid);
-  row.approved_sl = c ? fsSuggestSL(c.effective_rating) : null;
-}
-function fsPick(i, pid) { fsSetPick(_fsRows[i], pid); fsRenderWork(); }
-function fsSetSL(i, v) { const n = parseInt(v, 10); _fsRows[i].approved_sl = isFinite(n) ? n : null; }
-function fsRobLabel(rob) { return (rob || 0) >= 200 ? 'established' : ((rob || 0) >= 50 ? 'firming up' : 'provisional'); }
-/* Robustness badge: red ≥200 (established — confirmed strong, act on it), yellow <200 (provisional). */
-function fsRobBadge(rob) { if (rob == null) return '<span class="fs-rob fs-rob-non">—</span>'; return '<span class="fs-rob ' + (rob >= 200 ? 'fs-rob-red' : 'fs-rob-yel') + '" title="' + fsRobLabel(rob) + '">' + rob + '</span>'; }
-let _fsFilter = 'all';
-function fsSetFilter(f) { _fsFilter = f; fsLoadSaved(); }
+function fsPick(i, pid) { _fsRows[i].picked = pid; fsRenderWork(); }
 
+/* ── Grouped, collapsible work results ────────────────────────────── */
+function fsCandLine(row, i) {
+  return row.candidates.map(c => {
+    const on = c.player_id === row.picked;
+    return '<label class="fs-cand' + (on ? ' on' : '') + '">'
+      + '<input type="radio" name="fsr' + i + '" ' + (on ? 'checked' : '') + ' onchange="fsPick(' + i + ',\'' + c.player_id + '\')">'
+      + '<b>' + (c.effective_rating == null ? '?' : c.effective_rating) + '</b>'
+      + '<span class="hint">raw ' + (c.raw_rating == null ? '?' : c.raw_rating) + '</span>' + fsRobBadge(c.robustness)
+      + '<span>' + esc(c.location || '—') + '</span>'
+      + '<span class="hint" style="margin-left:auto">' + esc(c.fargo_name) + ' · #' + esc(c.player_id) + '</span></label>';
+  }).join('');
+}
+function fsRowHead(row) {
+  const sl = [row.sl8 != null ? '8:SL' + row.sl8 : '', row.sl9 != null ? '9:SL' + row.sl9 : ''].filter(Boolean).join(' ');
+  return '<div style="font-weight:700">' + esc(row.name) + (row.state ? ' <span class="hint" style="font-weight:400">· ' + esc(row.state) + '</span>' : '') + (sl ? ' <span class="hint" style="font-weight:400">· ' + sl + '</span>' : '') + '</div>';
+}
 function fsRenderWork() {
   const wrap = document.getElementById('fsWork'); if (!wrap) return;
   if (!_fsRows.length) { wrap.innerHTML = ''; return; }
-  let any = false;
-  wrap.innerHTML = '<div class="card"><div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><h2 style="margin:0">Results</h2>'
-    + '<button class="btn btn-primary btn-sm" onclick="fsSave()">Save reviewed</button>'
-    + '<button class="btn btn-outline btn-sm" onclick="_fsRows=[];fsRenderWork();">Clear</button></div>'
-    + _fsRows.map((row, i) => {
-        const head = '<div style="font-weight:700">' + esc(row.input_name) + (row.input_location ? ' <span class="hint" style="font-weight:400">· ' + esc(row.input_location) + '</span>' : '') + '</div>';
-        if (row.status === 'pending') return '<div class="fs-row">' + head + '<span class="hint">…</span></div>';
-        if (row.status === 'search_failed') return '<div class="fs-row" style="border-left:3px solid var(--warn,#f59e0b)">' + head + '<div class="hint" style="color:var(--spm-primary)">' + esc(row.error || 'search failed') + '</div></div>';
-        if (row.status === 'no_match') return '<div class="fs-row" style="border-left:3px solid var(--border-strong)">' + head + '<div class="hint">No FargoRate match. New to organized pool (or a name variation).</div></div>';
-        any = true;
-        const cands = row.candidates.map(c => {
-          const on = c.player_id === row.picked;
-          return '<label class="fs-cand' + (on ? ' on' : '') + '">'
-            + '<input type="radio" name="fsr' + i + '" ' + (on ? 'checked' : '') + ' onchange="fsPick(' + i + ',\'' + c.player_id + '\')">'
-            + '<b>' + (c.effective_rating == null ? '?' : c.effective_rating) + '</b>'
-            + '<span class="hint">raw ' + (c.raw_rating == null ? '?' : c.raw_rating) + '</span>'
-            + fsRobBadge(c.robustness)
-            + '<span>' + esc(c.location || '—') + '</span>'
-            + '<span class="hint" style="margin-left:auto">' + esc(c.fargo_name) + ' · #' + esc(c.player_id) + '</span></label>';
-        }).join('');
-        const pc = row.candidates.find(x => x.player_id === row.picked);
-        const sug = pc ? fsSuggestSL(pc.effective_rating) : null;
-        const slCtl = '<div style="margin-top:4px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:.82rem">'
-          + '<span class="hint">Sugg <b>SL' + (sug == null ? '—' : sug) + '</b> · 8-ball approx</span>'
-          + '<label>Approve SL <input type="number" min="1" max="9" value="' + (row.approved_sl == null ? '' : row.approved_sl) + '" oninput="fsSetSL(' + i + ',this.value)" style="width:3.2em;padding:2px 4px;border:1px solid var(--border-strong);border-radius:6px"></label>'
-          + (row.candidates.length > 1 ? '<span class="hint" style="font-size:.75rem">' + row.candidates.length + ' named that — pick by location</span>' : '')
-          + '</div>';
-        return '<div class="fs-row" style="border-left-color:var(--success,#16a34a)">' + head
-          + '<div style="margin-top:4px;display:grid;gap:3px">' + cands + '</div>' + slCtl
-          + '</div>';
-      }).join('')
+  const pick = r => r.candidates.find(x => x.player_id === r.picked);
+  const est = [], prov = [], nf = [];
+  _fsRows.forEach((r, i) => { r._i = i; const p = pick(r);
+    if (r.status === 'matched' && p && (p.robustness || 0) >= _fsThresh) est.push(r);
+    else if (r.status === 'matched') prov.push(r); else nf.push(r); });
+  const sortR = a => a.sort((x, y) => ((pick(y) || {}).effective_rating || 0) - ((pick(x) || {}).effective_rating || 0));
+  sortR(est); sortR(prov);
+  const rowHtml = (r) => '<div class="fs-row' + (est.includes(r) ? ' fs-est' : '') + '">' + fsRowHead(r)
+    + (r.candidates.length ? '<div style="margin-top:4px;display:grid;gap:3px">' + fsCandLine(r, r._i) + '</div>'
+        + (r.candidates.length > 1 ? '<div class="hint" style="font-size:.74rem;margin-top:2px">' + r.candidates.length + ' named that — pick by location</div>' : '')
+      : '<div class="hint" style="color:' + (r.status === 'search_failed' ? 'var(--spm-primary)' : 'var(--muted)') + '">' + esc(r.error || 'No FargoRate match — new to rated pool') + '</div>')
     + '</div>';
-  if (!any) fsStatus('No matches to save — nothing to review.', '');
+  const sect = (title, arr, cls, key, collapsed) => {
+    if (!arr.length) return '';
+    const body = collapsed ? '' : arr.map(rowHtml).join('');
+    return '<div style="margin-bottom:10px"><div class="fs-ghdr ' + cls + '"' + (key ? ' onclick="fsToggle(\'' + key + '\')" style="cursor:pointer"' : '') + '>'
+      + (key ? '<span style="font-family:monospace">' + (collapsed ? '▸' : '▾') + '</span> ' : '') + title + ' <span class="fs-count">' + arr.length + '</span></div>' + body + '</div>';
+  };
+  wrap.innerHTML = '<div class="card"><div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">'
+    + '<h2 style="margin:0">Results</h2><button class="btn btn-primary btn-sm" onclick="fsSave()">Save all</button>'
+    + '<button class="btn btn-outline btn-sm" onclick="_fsRows=[];fsRenderWork();">Clear</button>'
+    + '<span class="hint" style="font-size:.75rem;margin-left:auto">grouped at robustness ' + _fsThresh + ' — change it in the chart below</span></div>'
+    + sect('⭐ Established · robustness ≥ ' + _fsThresh, est, 'fs-gred', '', false)
+    + sect('Provisional · robustness < ' + _fsThresh, prov, 'fs-gyel', '', false)
+    + sect('Not found', nf, 'fs-gnon', 'work_notfound', _fsCollapse.work_notfound)
+    + '</div>';
 }
 
+/* ── Save → slate.fargo_lookups (with pasted SLs; no SL recommendation) ── */
 async function fsSave() {
-  const recs = _fsRows.filter(r => r.status === 'review' || r.status === 'no_match' || r.status === 'search_failed').map(r => {
+  const recs = _fsRows.map(r => {
     const c = r.candidates.find(x => x.player_id === r.picked) || null;
-    return {
-      input_name: r.input_name, input_location: r.input_location || null,
-      status: c ? 'matched' : r.status,
-      player_id: c ? c.player_id : null, fargo_name: c ? c.fargo_name : null,
+    return { input_name: r.name, input_location: r.state || null, member_number: r.member || null,
+      sl_8ball: r.sl8, sl_9ball: r.sl9, date_started: r.date && /\d/.test(r.date) ? fsIsoDate(r.date) : null,
+      status: c ? 'matched' : r.status, player_id: c ? c.player_id : null, fargo_name: c ? c.fargo_name : null,
       effective_rating: c ? c.effective_rating : null, raw_rating: c ? c.raw_rating : null,
-      robustness: c ? c.robustness : null, location: c ? c.location : null,
-      suggested_sl: c ? fsSuggestSL(c.effective_rating) : null,
-      approved_sl: c ? r.approved_sl : null
-    };
+      robustness: c ? c.robustness : null, location: c ? c.location : null };
   });
-  if (!recs.length) { fsStatus('Nothing to save yet — run a lookup first.', 'err'); return; }
-  try {
-    await sb('POST', 'fargo_lookups', recs, { ...FS_SLATE_W, Prefer: 'return=minimal' });
-    fsStatus('✓ Saved ' + recs.length + '.', 'ok');
-    _fsRows = []; fsRenderWork(); fsLoadSaved();
+  if (!recs.length) { fsStatus('Nothing to save — run a lookup first.', 'err'); return; }
+  try { await sb('POST', 'fargo_lookups', recs, { ...FS_SLATE_W, Prefer: 'return=minimal' });
+    fsStatus('✓ Saved ' + recs.length + '.', 'ok'); _fsRows = []; fsRenderWork(); fsLoadSaved();
   } catch (e) { fsStatus('Save failed: ' + (e.message || e), 'err'); }
 }
+function fsIsoDate(s) { const m = String(s).match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/); if (!m) return null; let y = m[3]; if (y.length === 2) y = '20' + y; return y + '-' + m[1].padStart(2, '0') + '-' + m[2].padStart(2, '0'); }
 
+/* ── Saved worklist + viz ─────────────────────────────────────────── */
 async function fsLoadSaved() {
+  try { _fsSaved = await sb('GET', 'fargo_lookups?select=*&order=created_at.desc&limit=2000', null, FS_SLATE) || []; }
+  catch (e) { const el = document.getElementById('fsSaved'); if (el) el.innerHTML = '<span class="hint">Could not load: ' + esc(e.message || e) + '</span>'; return; }
+  fsRenderSavedTable(); fsRenderViz();
+}
+function fsRenderSavedTable() {
   const el = document.getElementById('fsSaved'); if (!el) return;
-  let rows = [];
-  try { rows = await sb('GET', 'fargo_lookups?select=*&order=created_at.desc&limit=500', null, FS_SLATE) || []; }
-  catch (e) { el.innerHTML = '<span class="hint">Could not load: ' + esc(e.message || e) + '</span>'; return; }
+  const rows = _fsSaved;
   if (!rows.length) { el.innerHTML = '<span class="hint" style="font-style:italic">No saved assessments yet.</span>'; return; }
-  const isRed = r => (r.robustness || 0) >= 200;
-  const isYel = r => r.robustness != null && r.robustness < 200;
-  const isNon = r => r.robustness == null;
-  const nRed = rows.filter(isRed).length, nYel = rows.filter(isYel).length, nNon = rows.filter(isNon).length;
-  const f = _fsFilter;
-  const shown = rows.filter(r => f === 'all' || (f === 'red' && isRed(r)) || (f === 'yel' && isYel(r)) || (f === 'non' && isNon(r)));
-  const fb = (k, label, n) => '<button class="fs-fbtn' + (f === k ? ' on' : '') + '" onclick="fsSetFilter(\'' + k + '\')">' + label + ' ' + n + '</button>';
-  el.innerHTML = '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;align-items:center">'
-      + fb('all', 'All', rows.length)
-      + fb('red', '<span class="fs-rob fs-rob-red">●</span> established', nRed)
-      + fb('yel', '<span class="fs-rob fs-rob-yel">●</span> provisional', nYel)
-      + fb('non', 'no rating', nNon) + '</div>'
-    + '<div style="overflow-x:auto"><table class="table" style="font-size:.84rem"><thead><tr>'
-    + '<th>Name</th><th>Fargo</th><th>Rob</th><th>Where</th><th>SL sug→app</th><th></th></tr></thead><tbody>'
-    + shown.map(r => '<tr>'
-      + '<td><b>' + esc(r.input_name) + '</b>' + (r.fargo_name && r.fargo_name.toLowerCase() !== r.input_name.toLowerCase() ? ' <span class="hint">→ ' + esc(r.fargo_name) + '</span>' : '') + '</td>'
-      + '<td>' + (r.effective_rating == null ? ('<span class="hint">' + esc(r.status) + '</span>') : ('<b>' + r.effective_rating + '</b>')) + '</td>'
-      + '<td>' + fsRobBadge(r.robustness) + '</td>'
-      + '<td>' + esc(r.location || '—') + '</td>'
-      + '<td>' + (r.suggested_sl == null ? '—' : ('SL' + r.suggested_sl)) + (r.approved_sl == null ? '' : (' → <b>SL' + r.approved_sl + '</b>')) + '</td>'
-      + '<td><button class="btn btn-outline btn-sm" style="padding:0 7px" onclick="fsDelete(' + r.id + ')">✕</button></td>'
-      + '</tr>').join('') + (shown.length ? '' : '<tr><td colspan="6" class="hint">None in this filter.</td></tr>') + '</tbody></table></div>';
+  const est = rows.filter(r => (r.robustness || 0) >= _fsThresh);
+  const prov = rows.filter(r => r.robustness != null && r.robustness < _fsThresh);
+  const nf = rows.filter(r => r.robustness == null);
+  const rowTr = r => '<tr>'
+    + '<td><b>' + esc(r.input_name) + '</b>' + (r.fargo_name && fsNorm(r.fargo_name) !== fsNorm(r.input_name) ? ' <span class="hint">→ ' + esc(r.fargo_name) + '</span>' : '') + '</td>'
+    + '<td>' + (r.effective_rating == null ? '<span class="hint">' + esc(r.status) + '</span>' : '<b>' + r.effective_rating + '</b>') + '</td>'
+    + '<td>' + fsRobBadge(r.robustness) + '</td>'
+    + '<td>' + esc(r.location || r.input_location || '—') + '</td>'
+    + '<td>' + (r.sl_8ball == null ? '—' : 'SL' + r.sl_8ball) + ' / ' + (r.sl_9ball == null ? '—' : 'SL' + r.sl_9ball) + '</td>'
+    + '<td><button class="btn btn-outline btn-sm" style="padding:0 7px" onclick="fsDelete(' + r.id + ')">✕</button></td></tr>';
+  const tbl = arr => '<div style="overflow-x:auto"><table class="table" style="font-size:.84rem"><thead><tr><th>Name</th><th>Fargo</th><th>Rob</th><th>Where</th><th>8/9 SL</th><th></th></tr></thead><tbody>' + arr.map(rowTr).join('') + '</tbody></table></div>';
+  const sect = (title, arr, cls, key, collapsed) => arr.length ? ('<div style="margin-bottom:10px"><div class="fs-ghdr ' + cls + '"' + (key ? ' onclick="fsToggle(\'' + key + '\')" style="cursor:pointer"' : '') + '>' + (key ? '<span style="font-family:monospace">' + (collapsed ? '▸' : '▾') + '</span> ' : '') + title + ' <span class="fs-count">' + arr.length + '</span></div>' + (collapsed ? '' : tbl(arr)) + '</div>') : '';
+  el.innerHTML = sect('⭐ Established ≥ ' + _fsThresh, est, 'fs-gred', '', false)
+    + sect('Provisional < ' + _fsThresh, prov, 'fs-gyel', '', false)
+    + sect('Not found', nf, 'fs-gnon', 'saved_notfound', _fsCollapse.saved_notfound);
 }
 async function fsDelete(id) {
   try { await sb('DELETE', 'fargo_lookups?id=eq.' + id, null, FS_SLATE_W); fsLoadSaved(); }
   catch (e) { fsStatus('Delete failed: ' + (e.message || e), 'err'); }
+}
+
+/* ── 8-ball / 9-ball scatter: APA SL (x) vs Fargo (y), from processed data ── */
+function fsScatter(pts, title) {
+  const W = 420, H = 240, mL = 40, mR = 12, mT = 22, mB = 30, pw = W - mL - mR, ph = H - mT - mB;
+  if (!pts.length) return '<div class="hint" style="padding:24px;text-align:center">No matched players with robustness ≥ ' + _fsThresh + ' and an ' + title.toLowerCase() + ' SL yet.<br>Process a list that includes skill levels.</div>';
+  const ys = pts.map(p => p.y); let y0 = Math.min(...ys), y1 = Math.max(...ys); if (y1 - y0 < 40) { y0 -= 20; y1 += 20; }
+  y0 = Math.floor((y0 - 10) / 50) * 50; y1 = Math.ceil((y1 + 10) / 50) * 50;
+  const xOf = sl => mL + ((sl - 1) / 8) * pw;
+  const yOf = v => mT + ph - ((v - y0) / (y1 - y0)) * ph;
+  let s = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;max-width:' + W + 'px;height:auto;font-size:10px">';
+  s += '<text x="' + (W / 2) + '" y="13" text-anchor="middle" style="font-weight:700;font-size:12px" fill="var(--text)">' + title + '</text>';
+  const step = Math.max(50, Math.ceil((y1 - y0) / 5 / 50) * 50);
+  for (let v = y0; v <= y1; v += step) { const y = yOf(v); s += '<line x1="' + mL + '" y1="' + y + '" x2="' + (W - mR) + '" y2="' + y + '" stroke="var(--border,#e5e7eb)"/><text x="' + (mL - 4) + '" y="' + (y + 3) + '" text-anchor="end" fill="var(--muted,#888)">' + v + '</text>'; }
+  const bySL = {}; pts.forEach(p => { (bySL[p.sl] = bySL[p.sl] || []).push(p.y); });
+  for (let sl = 1; sl <= 9; sl++) {
+    const x = xOf(sl); s += '<text x="' + x + '" y="' + (H - 12) + '" text-anchor="middle" fill="var(--muted,#555)">' + sl + '</text>';
+    const arr = (bySL[sl] || []).slice().sort((a, b) => a - b); if (!arr.length) continue;
+    const q = p => { const idx = (arr.length - 1) * p, lo = Math.floor(idx); return arr[lo] + (arr[Math.ceil(idx)] - arr[lo]) * (idx - lo); };
+    const q1 = q(.25), med = q(.5), q3 = q(.75);
+    s += '<rect x="' + (x - 11) + '" y="' + yOf(q3) + '" width="22" height="' + Math.max(1, yOf(q1) - yOf(q3)) + '" fill="rgba(0,49,161,.09)" stroke="rgba(0,49,161,.35)"/>';
+    s += '<line x1="' + (x - 13) + '" y1="' + yOf(med) + '" x2="' + (x + 13) + '" y2="' + yOf(med) + '" stroke="var(--spm-primary)" stroke-width="2"/>';
+    arr.forEach((v, k) => { const jx = x + (((k % 5) - 2) * 3.2); s += '<circle cx="' + jx + '" cy="' + yOf(v) + '" r="2.6" fill="rgba(0,49,161,.55)"/>'; });
+    s += '<text x="' + x + '" y="' + (yOf(arr[0]) + 12) + '" text-anchor="middle" fill="var(--muted,#999)" style="font-size:8px">n' + arr.length + '</text>';
+  }
+  s += '<text x="' + (mL + pw / 2) + '" y="' + H + '" text-anchor="middle" fill="var(--muted,#555)" style="font-size:9px">APA Skill Level  ·  ● player   ▬ median   ▢ middle 50%</text></svg>';
+  return s;
+}
+function fsRenderViz() {
+  const el = document.getElementById('fsViz'); if (!el) return;
+  const matched = _fsSaved.filter(r => r.status === 'matched' && r.effective_rating != null && (r.robustness || 0) >= _fsThresh);
+  const p8 = matched.filter(r => r.sl_8ball != null).map(r => ({ sl: r.sl_8ball, y: r.effective_rating }));
+  const p9 = matched.filter(r => r.sl_9ball != null).map(r => ({ sl: r.sl_9ball, y: r.effective_rating }));
+  el.innerHTML = '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">'
+    + '<h2 style="margin:0">SL ↔ Fargo — your data</h2>'
+    + '<label style="font-size:.82rem">Robustness ≥ <input type="number" min="0" max="1000" step="10" value="' + _fsThresh + '" oninput="fsThreshChange(this.value)" style="width:4.5em;padding:2px 5px;border:1px solid var(--border-strong);border-radius:6px"></label>'
+    + '<span class="hint" style="font-size:.75rem">' + matched.length + ' matched players at this threshold · lower it to include provisional ratings</span></div>'
+    + '<div style="display:flex;gap:16px;flex-wrap:wrap">'
+    + '<div style="flex:1;min-width:300px">' + fsScatter(p8, '8-Ball') + '</div>'
+    + '<div style="flex:1;min-width:300px">' + fsScatter(p9, '9-Ball') + '</div></div>';
 }
 
 /* ═══════════════ ChalkTalk tab (v0.1) — player question submissions ═══════════════
