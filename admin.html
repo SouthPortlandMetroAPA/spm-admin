@@ -4856,29 +4856,31 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
          ══════════════════════════════════════════════════════════════ -->
     <div id="tab-fargoscout" class="tab-panel">
       <style>
-        #tab-fargoscout .fs-row { border: 1px solid var(--border); border-left: 3px solid var(--border-strong); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
-        #tab-fargoscout .fs-cand { display: block; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-size: 0.88rem; }
+        #tab-fargoscout .card { padding: 12px 16px; margin-bottom: 10px; }
+        #tab-fargoscout h2 { margin: 0; }
+        #tab-fargoscout .fs-row { border: 1px solid var(--border); border-left: 3px solid var(--border-strong); border-radius: 7px; padding: 5px 9px; margin-bottom: 5px; }
+        #tab-fargoscout .fs-cand { display: flex; align-items: center; gap: 7px; padding: 3px 7px; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-size: 0.84rem; }
         #tab-fargoscout .fs-cand.on { background: #eef9f1; border-color: var(--success, #16a34a); }
         #tab-fargoscout .fs-cand:hover { border-color: var(--spm-accent); }
+        #tab-fargoscout .fs-rob { padding: 0 5px; border-radius: 5px; font-weight: 700; font-size: .76rem; white-space: nowrap; }
+        #tab-fargoscout .fs-rob-yel { background: #fef3c7; color: #92400e; }   /* <200 provisional */
+        #tab-fargoscout .fs-rob-red { background: #fde8ec; color: #b91c1c; }   /* ≥200 established */
+        #tab-fargoscout .fs-rob-non { background: #eef0f3; color: #6b7280; }
+        #tab-fargoscout .fs-fbtn { padding: 2px 10px; border-radius: 999px; border: 1px solid var(--border-strong); background: #fff; cursor: pointer; font-size: .76rem; font-weight: 700; }
+        #tab-fargoscout .fs-fbtn.on { background: var(--spm-accent); color: #fff; border-color: var(--spm-accent); }
+        #tab-fargoscout table.table td, #tab-fargoscout table.table th { padding: 4px 7px; }
       </style>
       <div class="card">
-        <h2>FargoScout — starting skill-level check</h2>
-        <p class="hint" style="margin-bottom:8px">
-          For new APA players who may have played elsewhere and earned a
-          <strong>FargoRate</strong>. Paste names (one per line); add a location after a
-          comma to pin down the right person — <code>Chad James, OR</code>. FargoScout
-          looks each up, you confirm the match, and it suggests a starting skill level.
-        </p>
-        <textarea id="fsInput" rows="6" placeholder="Chad James, OR&#10;Jane Doe, Portland&#10;John Smith" style="width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid var(--border-strong);border-radius:8px;font:inherit;resize:vertical"></textarea>
-        <div style="display:flex;gap:10px;align-items:center;margin-top:8px;flex-wrap:wrap">
-          <button class="btn btn-primary" id="fsRunBtn" onclick="fsRunLookup()">Look up in FargoRate</button>
-          <span id="fsStatus" style="font-size:.85rem"></span>
+        <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+          <h2>FargoScout</h2>
+          <span class="hint" style="font-size:.8rem">New players → find their FargoRate → set a fair starting SL. One name per line; add <code>, ST</code> to pin the right person: <code>Chad James, OR</code>.</span>
         </div>
-        <p class="hint" style="margin:8px 0 0;font-size:.78rem">
-          Suggested SL is an <b>approximate</b> Fargo→APA 8-ball guide — your call, and APA rules let you set a higher starting SL.
-          <b>Robustness</b> = games behind the rating (≥200 established/reliable; low = provisional, treat with caution).
-          Reads FargoRate's public search data; nothing is sent to APA.
-        </p>
+        <textarea id="fsInput" rows="5" placeholder="Chad James, OR&#10;Jane Doe, Portland&#10;John Smith" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--border-strong);border-radius:8px;font:inherit;resize:vertical"></textarea>
+        <div style="display:flex;gap:10px;align-items:center;margin-top:6px;flex-wrap:wrap">
+          <button class="btn btn-primary btn-sm" id="fsRunBtn" onclick="fsRunLookup()">Look up in FargoRate</button>
+          <span id="fsStatus" style="font-size:.82rem"></span>
+          <span class="hint" style="font-size:.72rem;margin-left:auto">Robustness = games behind the rating: <span class="fs-rob fs-rob-red">≥200 established</span> <span class="fs-rob fs-rob-yel">&lt;200 provisional</span> · SL is approximate — your call.</span>
+        </div>
       </div>
       <div id="fsWork"></div>
       <div class="card">
@@ -5135,7 +5137,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.339';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.340';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10349,6 +10351,10 @@ function fsSetPick(row, pid) {
 function fsPick(i, pid) { fsSetPick(_fsRows[i], pid); fsRenderWork(); }
 function fsSetSL(i, v) { const n = parseInt(v, 10); _fsRows[i].approved_sl = isFinite(n) ? n : null; }
 function fsRobLabel(rob) { return (rob || 0) >= 200 ? 'established' : ((rob || 0) >= 50 ? 'firming up' : 'provisional'); }
+/* Robustness badge: red ≥200 (established — confirmed strong, act on it), yellow <200 (provisional). */
+function fsRobBadge(rob) { if (rob == null) return '<span class="fs-rob fs-rob-non">—</span>'; return '<span class="fs-rob ' + (rob >= 200 ? 'fs-rob-red' : 'fs-rob-yel') + '" title="' + fsRobLabel(rob) + '">' + rob + '</span>'; }
+let _fsFilter = 'all';
+function fsSetFilter(f) { _fsFilter = f; fsLoadSaved(); }
 
 function fsRenderWork() {
   const wrap = document.getElementById('fsWork'); if (!wrap) return;
@@ -10366,19 +10372,22 @@ function fsRenderWork() {
         const cands = row.candidates.map(c => {
           const on = c.player_id === row.picked;
           return '<label class="fs-cand' + (on ? ' on' : '') + '">'
-            + '<input type="radio" name="fsr' + i + '" ' + (on ? 'checked' : '') + ' onchange="fsPick(' + i + ',\'' + c.player_id + '\')" style="margin-right:8px">'
-            + '<b>' + String(c.effective_rating == null ? '?' : c.effective_rating) + '</b> Fargo'
-            + ' <span class="hint">(raw ' + (c.raw_rating == null ? '?' : c.raw_rating) + ' · robust ' + (c.robustness == null ? '?' : c.robustness) + ' — ' + fsRobLabel(c.robustness) + ')</span>'
-            + ' · ' + esc(c.location || '—') + ' <span class="hint">· ' + esc(c.fargo_name) + ' · id ' + esc(c.player_id) + '</span></label>';
+            + '<input type="radio" name="fsr' + i + '" ' + (on ? 'checked' : '') + ' onchange="fsPick(' + i + ',\'' + c.player_id + '\')">'
+            + '<b>' + (c.effective_rating == null ? '?' : c.effective_rating) + '</b>'
+            + '<span class="hint">raw ' + (c.raw_rating == null ? '?' : c.raw_rating) + '</span>'
+            + fsRobBadge(c.robustness)
+            + '<span>' + esc(c.location || '—') + '</span>'
+            + '<span class="hint" style="margin-left:auto">' + esc(c.fargo_name) + ' · #' + esc(c.player_id) + '</span></label>';
         }).join('');
         const pc = row.candidates.find(x => x.player_id === row.picked);
         const sug = pc ? fsSuggestSL(pc.effective_rating) : null;
-        const slCtl = '<div style="margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
-          + '<span class="hint">Suggested starting SL, 8-ball approx: <b>' + (sug == null ? '—' : sug) + '</b></span>'
-          + '<label style="font-size:.8rem">Approve SL <input type="number" min="1" max="9" value="' + (row.approved_sl == null ? '' : row.approved_sl) + '" oninput="fsSetSL(' + i + ',this.value)" style="width:3.5em;padding:3px 5px;border:1px solid var(--border-strong);border-radius:6px"></label></div>';
-        return '<div class="fs-row" style="border-left:3px solid var(--success,#16a34a)">' + head
-          + '<div style="margin-top:6px;display:grid;gap:4px">' + cands + '</div>' + slCtl
-          + (row.candidates.length > 1 ? '<div class="hint" style="margin-top:4px;font-size:.75rem">' + row.candidates.length + ' people named that — pick by location.</div>' : '')
+        const slCtl = '<div style="margin-top:4px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:.82rem">'
+          + '<span class="hint">Sugg <b>SL' + (sug == null ? '—' : sug) + '</b> · 8-ball approx</span>'
+          + '<label>Approve SL <input type="number" min="1" max="9" value="' + (row.approved_sl == null ? '' : row.approved_sl) + '" oninput="fsSetSL(' + i + ',this.value)" style="width:3.2em;padding:2px 4px;border:1px solid var(--border-strong);border-radius:6px"></label>'
+          + (row.candidates.length > 1 ? '<span class="hint" style="font-size:.75rem">' + row.candidates.length + ' named that — pick by location</span>' : '')
+          + '</div>';
+        return '<div class="fs-row" style="border-left-color:var(--success,#16a34a)">' + head
+          + '<div style="margin-top:4px;display:grid;gap:3px">' + cands + '</div>' + slCtl
           + '</div>';
       }).join('')
     + '</div>';
@@ -10409,20 +10418,31 @@ async function fsSave() {
 async function fsLoadSaved() {
   const el = document.getElementById('fsSaved'); if (!el) return;
   let rows = [];
-  try { rows = await sb('GET', 'fargo_lookups?select=*&order=created_at.desc&limit=200', null, FS_SLATE) || []; }
+  try { rows = await sb('GET', 'fargo_lookups?select=*&order=created_at.desc&limit=500', null, FS_SLATE) || []; }
   catch (e) { el.innerHTML = '<span class="hint">Could not load: ' + esc(e.message || e) + '</span>'; return; }
   if (!rows.length) { el.innerHTML = '<span class="hint" style="font-style:italic">No saved assessments yet.</span>'; return; }
-  el.innerHTML = '<div style="overflow-x:auto"><table class="table" style="font-size:.86rem"><thead><tr>'
-    + '<th>Name</th><th>Fargo</th><th>Robust</th><th>Where</th><th>Sugg.</th><th>Approved</th><th></th></tr></thead><tbody>'
-    + rows.map(r => '<tr>'
-      + '<td><b>' + esc(r.input_name) + '</b>' + (r.fargo_name && r.fargo_name !== r.input_name ? ' <span class="hint">→ ' + esc(r.fargo_name) + '</span>' : '') + '</td>'
-      + '<td>' + (r.effective_rating == null ? (r.status === 'matched' ? '?' : '<span class="hint">' + esc(r.status) + '</span>') : ('<b>' + r.effective_rating + '</b>')) + '</td>'
-      + '<td>' + (r.robustness == null ? '—' : (r.robustness + ' <span class="hint">' + fsRobLabel(r.robustness) + '</span>')) + '</td>'
+  const isRed = r => (r.robustness || 0) >= 200;
+  const isYel = r => r.robustness != null && r.robustness < 200;
+  const isNon = r => r.robustness == null;
+  const nRed = rows.filter(isRed).length, nYel = rows.filter(isYel).length, nNon = rows.filter(isNon).length;
+  const f = _fsFilter;
+  const shown = rows.filter(r => f === 'all' || (f === 'red' && isRed(r)) || (f === 'yel' && isYel(r)) || (f === 'non' && isNon(r)));
+  const fb = (k, label, n) => '<button class="fs-fbtn' + (f === k ? ' on' : '') + '" onclick="fsSetFilter(\'' + k + '\')">' + label + ' ' + n + '</button>';
+  el.innerHTML = '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;align-items:center">'
+      + fb('all', 'All', rows.length)
+      + fb('red', '<span class="fs-rob fs-rob-red">●</span> established', nRed)
+      + fb('yel', '<span class="fs-rob fs-rob-yel">●</span> provisional', nYel)
+      + fb('non', 'no rating', nNon) + '</div>'
+    + '<div style="overflow-x:auto"><table class="table" style="font-size:.84rem"><thead><tr>'
+    + '<th>Name</th><th>Fargo</th><th>Rob</th><th>Where</th><th>SL sug→app</th><th></th></tr></thead><tbody>'
+    + shown.map(r => '<tr>'
+      + '<td><b>' + esc(r.input_name) + '</b>' + (r.fargo_name && r.fargo_name.toLowerCase() !== r.input_name.toLowerCase() ? ' <span class="hint">→ ' + esc(r.fargo_name) + '</span>' : '') + '</td>'
+      + '<td>' + (r.effective_rating == null ? ('<span class="hint">' + esc(r.status) + '</span>') : ('<b>' + r.effective_rating + '</b>')) + '</td>'
+      + '<td>' + fsRobBadge(r.robustness) + '</td>'
       + '<td>' + esc(r.location || '—') + '</td>'
-      + '<td>' + (r.suggested_sl == null ? '—' : ('SL' + r.suggested_sl)) + '</td>'
-      + '<td>' + (r.approved_sl == null ? '—' : ('<b>SL' + r.approved_sl + '</b>')) + '</td>'
-      + '<td><button class="btn btn-outline btn-sm" style="padding:1px 8px" onclick="fsDelete(' + r.id + ')">✕</button></td>'
-      + '</tr>').join('') + '</tbody></table></div>';
+      + '<td>' + (r.suggested_sl == null ? '—' : ('SL' + r.suggested_sl)) + (r.approved_sl == null ? '' : (' → <b>SL' + r.approved_sl + '</b>')) + '</td>'
+      + '<td><button class="btn btn-outline btn-sm" style="padding:0 7px" onclick="fsDelete(' + r.id + ')">✕</button></td>'
+      + '</tr>').join('') + (shown.length ? '' : '<tr><td colspan="6" class="hint">None in this filter.</td></tr>') + '</tbody></table></div>';
 }
 async function fsDelete(id) {
   try { await sb('DELETE', 'fargo_lookups?id=eq.' + id, null, FS_SLATE_W); fsLoadSaved(); }
