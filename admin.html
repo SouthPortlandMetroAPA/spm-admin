@@ -5091,7 +5091,8 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             <input type="file" id="rktPdfPicker" accept="application/pdf" multiple style="display:none">
             <div class="actions" style="margin-top:14px;justify-content:space-between">
               <button class="btn btn-outline" id="rktClearBtn">Clear</button>
-              <button class="btn btn-primary" id="rktSaveAllBtn" disabled>Save all</button>
+              <button class="btn btn-primary" id="rktSaveChangedBtn" disabled title="Only saves divisions whose PDF changed — unchanged ones keep their existing updated date">Save changes</button>
+              <button class="btn btn-outline" id="rktSaveAllBtn" disabled title="Re-saves every division and re-stamps its updated date, even if unchanged">Save all</button>
             </div>
             <div id="rktUploadStatus" class="status-line"></div>
             <div class="preview-list" id="rktPreviewList"></div>
@@ -5210,7 +5211,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.343';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.344';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -24465,14 +24466,29 @@ function cpComputeClusters(teams) {
   }
   const clusters = [...groupMap.values()]
     .filter(g => g.length > 1)
-    .sort((a, b) => a[0].team_number.localeCompare(b[0].team_number));
-  return { clusters, playerToTeams, playerNames };
+    .sort((a, b) => b.length - a.length || a[0].team_number.localeCompare(b[0].team_number));  // biggest group first (3.344)
+  // Solo teams = teams linked to no other team — the "individuals" for tile draws.
+  const clusteredNums = new Set(clusters.flat().map(t => t.team_number));
+  const solos = teams.filter(t => !clusteredNums.has(t.team_number));
+  return { clusters, solos, playerToTeams, playerNames };
+}
+
+/* Fisher-Yates shuffle (in place) — for the random tile-draw order of solo teams. */
+function cpShuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+  }
+  return arr;
 }
 
 /* ── Render results ──────────────────────────────────────────────── */
 function cpRenderResults() {
   const { teams, sourceName } = _cpLastParse;
-  const { clusters, playerToTeams, playerNames } = cpComputeClusters(teams);
+  const { clusters, solos, playerToTeams, playerNames } = cpComputeClusters(teams);
+  // Shuffle the solo teams ONCE per parse (stable across re-renders) — the
+  // random tile-draw order for the printed sheet.
+  if (!_cpLastParse._solosShuffled) _cpLastParse._solosShuffled = cpShuffle(solos.slice());
 
   // Summary chips
   const totalPlayers = teams.reduce((n, t) => n + t.players.length, 0);
@@ -24578,9 +24594,22 @@ function cpRenderResults() {
   _cpLastParse._clusters   = clusters;
   _cpLastParse._playerToTeams = playerToTeams;
 
+  // Individual teams (not linked to any other) in random tile-draw order, with a
+  // blank column to write the drawn tile value on the printed sheet.
+  const solosShuffled = _cpLastParse._solosShuffled || [];
+  const soloHtml = solosShuffled.length ? (
+    '<div style="margin-top:16px;border:1px solid var(--border);border-radius:8px;overflow:hidden">'
+    + '<div style="padding:6px 12px;font-weight:700;font-size:0.88rem;background:#f3f4f6;color:#374151">'
+    + 'Individual teams · ' + solosShuffled.length + ' <span class="hint" style="font-weight:400">(random order for tile draw)</span></div>'
+    + '<table class="table" style="margin:0;font-size:0.84rem"><thead><tr>'
+    + '<th style="width:80px">Team #</th><th>Team Name</th><th style="width:90px">Tile draw</th></tr></thead><tbody>'
+    + solosShuffled.map(t => '<tr><td style="font-family:ui-monospace,monospace">' + esc(t.team_number) + '</td><td>' + esc(t.team_name) + '</td><td></td></tr>').join('')
+    + '</tbody></table></div>'
+  ) : '';
+
   const clustersDiv = document.getElementById('cpClusters');
   if (!clusters.length) {
-    clustersDiv.innerHTML = '<p class="hint" style="font-style:italic">No linked teams. Every team is independent. ✓</p>';
+    clustersDiv.innerHTML = '<p class="hint" style="font-style:italic">No linked teams. Every team is independent. ✓</p>' + soloHtml;
   } else {
     const letters = (i) => {
       let n = i + 1, s = '';
@@ -24632,7 +24661,7 @@ function cpRenderResults() {
         </table>
       </div>`;
     });
-    clustersDiv.innerHTML = html;
+    clustersDiv.innerHTML = html + soloHtml;
   }
 
   // APA numbers panel — render team checkbox list (filter sticks across
@@ -25025,6 +25054,16 @@ function cpPrintReport() {
     </section>`;
   }).join('');
 
+  // Individual teams (not linked) in random tile-draw order, with a blank
+  // "Tile draw" cell to write on.
+  const solosP = _cpLastParse._solosShuffled || [];
+  const soloPrintHtml = solosP.length ? (
+    '<section class="group"><div class="host-banner" style="background:#f3f4f6;color:#374151;border-color:#d1d5db">Individual teams &mdash; random order (' + solosP.length + ')</div>'
+    + '<table><thead><tr><th class="th-team">Team</th><th class="th-shared">Tile draw</th></tr></thead><tbody>'
+    + solosP.map(function (t) { return '<tr><td class="cell-team"><span class="team-num">' + esc2(t.team_number) + '</span> <span class="team-name">' + esc2(t.team_name) + '</span></td><td class="cell-shared"></td></tr>'; }).join('')
+    + '</tbody></table></section>'
+  ) : '';
+
   const html = `<!doctype html><html><head><meta charset="utf-8">
 <title>Common Players</title>
 <style>
@@ -25125,7 +25164,7 @@ function cpPrintReport() {
         ? '<em>No linked teams found. Every team is independent.</em>'
         : `Found <strong>${totalGroups}</strong> set${totalGroups === 1 ? '' : 's'} of teams sharing one or more players${hostGroups ? `, of which <strong>${hostGroups}</strong> must host at the designated venue` : ''}.`}
     </div>
-    ${groupsHtml}
+    ${groupsHtml}${soloPrintHtml}
     <footer>South Portland Metro APA &middot; spmapa.com</footer>
   </div>
   <script>setTimeout(() => window.print(), 400);<\/script>
@@ -36827,6 +36866,14 @@ async function ehDeleteForeign() {
       list.insertAdjacentHTML('beforeend', html);
     }
     wirePreviewHandlers(entry.id);
+    // Resolve the changed/unchanged badge for a freshly-ready entry (async hash
+    // vs the stored division). Sets entry._changed, then re-renders once.
+    if (entry.status === 'ready' && entry._changed === undefined) {
+      rktComputeChange(entry).then(function () {
+        renderPreview(entry, false);
+        updateSaveAllState();
+      }).catch(function () {});
+    }
   }
 
   function previewHtml(e) {
@@ -36859,9 +36906,17 @@ async function ehDeleteForeign() {
     const pageLabel = e.pageIndex && e.pageIndex > 0
       ? ' <span class="hint" style="font-size:0.78rem">· page ' + e.pageIndex + '</span>'
       : '';
-    return '<div class="pv ' + e.status + '" id="' + e.id + '">'
+    const bStyle = 'font-size:.72rem;font-weight:700;padding:1px 8px;border-radius:999px;margin-left:6px;';
+    const changeBadge = e.status === 'ready'
+      ? (e._changed === undefined
+          ? '<span style="' + bStyle + 'background:#f1f3f5;color:#9aa1a9">checking…</span>'
+          : e._changed
+            ? '<span style="' + bStyle + 'background:#e0edff;color:#1d4ed8">' + (e._isNew ? 'New' : 'Updated') + '</span>'
+            : '<span style="' + bStyle + 'background:#f1f3f5;color:#6b7280">No change</span>')
+      : '';
+    return '<div class="pv ' + e.status + (e.status === 'ready' && e._changed === false ? ' pv-nochange' : '') + '" id="' + e.id + '">'
       + '<div class="pv-head">'
-      +   '<div class="pv-filename">' + esc(e.file.name) + pageLabel + '</div>'
+      +   '<div class="pv-filename">' + esc(e.file.name) + pageLabel + changeBadge + '</div>'
       +   '<span class="pv-status ' + e.status + '">' + statusLabel + '</span>'
       +   (e.status !== 'saved' ? '<button class="btn btn-outline btn-sm" data-act="remove">Remove</button>' : '')
       + '</div>'
@@ -36902,9 +36957,14 @@ async function ehDeleteForeign() {
   }
 
   function updateSaveAllState() {
-    const anyReady = _previews.some(p => p.status === 'ready');
-    const btn = document.getElementById('rktSaveAllBtn');
-    if (btn) btn.disabled = !anyReady;
+    const ready = _previews.filter(p => p.status === 'ready');
+    const anyReady = ready.length > 0;
+    // "changed or not-yet-computed" — so the button is live while badges resolve.
+    const anyChanged = ready.some(p => p._changed !== false);
+    const btnA = document.getElementById('rktSaveAllBtn');
+    if (btnA) btnA.disabled = !anyReady;
+    const btnC = document.getElementById('rktSaveChangedBtn');
+    if (btnC) btnC.disabled = !anyChanged;
   }
 
   function clearPreview() {
@@ -36915,16 +36975,47 @@ async function ehDeleteForeign() {
     updateSaveAllState();
   }
 
-  async function saveAllUploads() {
-    const items = _previews.filter(p => p.status === 'ready');
-    if (!items.length) return;
-    const btn = document.getElementById('rktSaveAllBtn');
-    btn.disabled = true;
+  /* Compute (without saving) whether a preview entry differs from what's
+     stored for its division in the selected session — drives the drag-drop
+     "Updated / New / No change" badge and the "Save changes" filter. */
+  async function rktComputeChange(entry) {
+    const d = entry.division || {};
+    const number = String(d.number || '').trim();
+    const name   = String(d.name   || '').trim();
+    if (!number || _sessionId == null) { entry._changed = true; entry._isNew = true; return; }
+    const dayOfPlay = (d.day_of_play || '').trim() || null;
+    const startTime = (d.start_time  || '').trim() || null;
+    const division = _divisions.find(x => x.number === number && x.session_id === _sessionId);
+    const contentHash = await rktSha256Hex(entry.pageText || (number + '|' + name + '|' + dayOfPlay + '|' + startTime));
+    const fieldsSame  = division && division.name === name
+      && (division.day_of_play || null) === dayOfPlay
+      && (division.start_time  || null) === startTime;
+    entry._changed = !(division && division.pdf_sha256 && division.pdf_sha256 === contentHash && fieldsSame);
+    entry._isNew   = !division;
+  }
+
+  /* Save handler. onlyChanged=true skips divisions whose PDF + fields are
+     identical to what's stored (default button — only changed schedules get
+     re-stamped updated_at). force=true re-writes and re-stamps EVERY ready
+     division regardless (the "Save all" override). */
+  async function saveUploads(opts) {
+    opts = opts || {};
+    const force = !!opts.force;
+    let items = _previews.filter(p => p.status === 'ready');
+    for (const e of items) { if (e._changed === undefined) { try { await rktComputeChange(e); } catch (_) { e._changed = true; } } }
+    if (opts.onlyChanged) items = items.filter(p => p._changed !== false);
+    if (!items.length) {
+      setStatus('rktUploadStatus', opts.onlyChanged ? 'No changed schedules — everything is already up to date.' : 'Nothing to save.', 'ok');
+      updateSaveAllState();
+      return;
+    }
+    const btnA = document.getElementById('rktSaveAllBtn');     if (btnA) btnA.disabled = true;
+    const btnC = document.getElementById('rktSaveChangedBtn'); if (btnC) btnC.disabled = true;
     setStatus('rktUploadStatus', 'Saving ' + items.length + ' PDF' + (items.length === 1 ? '' : 's') + '…', 'progress');
     let ok = 0, fail = 0;
     for (const e of items) {
       try {
-        await saveOnePreview(e);
+        await saveOnePreview(e, force);
         e.status = 'saved';
         ok++;
       } catch (err) {
@@ -36948,13 +37039,15 @@ async function ehDeleteForeign() {
         ? ('Saved ' + ok + ' PDF' + (ok === 1 ? '' : 's') + '.' + unchTail + schedTail)
         : (ok + ' saved, ' + fail + ' failed — see error tiles above.' + unchTail + schedTail),
       fail === 0 ? 'ok' : 'err');
-    btn.disabled = !_previews.some(p => p.status === 'ready');
+    updateSaveAllState();
   }
+  async function saveChangedUploads() { return saveUploads({ onlyChanged: true, force: false }); }
+  async function saveAllUploads()     { return saveUploads({ onlyChanged: false, force: true }); }
 
   /* COMMIT LOGIC — ported from the source; the only added semantics is the
      content-hash change detection (skip re-upload + updated_at when a division's
      page text and fields are unchanged). Everything else is as-was. */
-  async function saveOnePreview(entry) {
+  async function saveOnePreview(entry, force) {
     const d = entry.division || {};
     const number = String(d.number || '').trim();
     const name   = String(d.name   || '').trim();
@@ -36977,7 +37070,9 @@ async function ehDeleteForeign() {
     const fieldsSame  = division && division.name === name
       && (division.day_of_play || null) === dayOfPlay
       && (division.start_time  || null) === startTime;
-    const unchanged   = !!(division && division.pdf_sha256 && division.pdf_sha256 === contentHash && fieldsSame);
+    const trulyUnchanged = !!(division && division.pdf_sha256 && division.pdf_sha256 === contentHash && fieldsSame);
+    const unchanged   = trulyUnchanged && !force;   // "Save all (force)" re-writes + re-stamps even unchanged
+    entry._changed    = !trulyUnchanged;            // keep the preview badge state fresh
     entry._unchanged  = unchanged;
 
     if (!unchanged) {
@@ -37345,6 +37440,8 @@ async function ehDeleteForeign() {
     if (clearBtn) clearBtn.addEventListener('click', clearPreview);
     const saveAllBtn = document.getElementById('rktSaveAllBtn');
     if (saveAllBtn) saveAllBtn.addEventListener('click', saveAllUploads);
+    const saveChangedBtn = document.getElementById('rktSaveChangedBtn');
+    if (saveChangedBtn) saveChangedBtn.addEventListener('click', saveChangedUploads);
 
     // Hosts
     wireSlugAutoFollow();
