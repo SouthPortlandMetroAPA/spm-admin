@@ -5220,7 +5220,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.345';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.346';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10673,6 +10673,18 @@ function mfRender() {
   const today = mfToday();
   let divs = _mf.divisions;
   if (_mfFilter.division) divs = divs.filter(d => d.division_number === _mfFilter.division);
+  // Auto-hide divisions with no schedule (no slate.matches weeks) AND no payments —
+  // they render as an empty grid and just clutter the view. Anything with fee data
+  // or a loaded schedule still shows.
+  const _mfPaidDivs = new Set(_mf.payments.map(p => p.division_number));
+  const _mfBefore = divs.length;
+  if (!_mfFilter.division) {   // only auto-hide in the "All divisions" view; an explicit pick always shows
+    divs = divs.filter(d => {
+      const dw = (_mf.divWeeks || {})[d.division_number];
+      return (dw && dw.size > 0) || _mfPaidDivs.has(d.division_number);
+    });
+  }
+  const _mfHidden = _mfBefore - divs.length;
   let totTeams = 0;
   let totOwing = 0;
   let totCollected = 0;
@@ -10698,7 +10710,7 @@ function mfRender() {
       (divOwing ? '<span class="mf-badge mf-b-owe">' + divOwing + ' owing</span>' : '<span class="mf-badge mf-b-ok">all current</span>') + '</div>' +
       '<div class="mf-scroll"><table class="mf-tbl"><thead><tr>' + head + '</tr></thead><tbody>' + shown.map(r => r.html).join('') + '</tbody></table></div></div>';
   }).join('');
-  if (sum) sum.innerHTML = '<div class="mf-stats"><span><b>' + totTeams + '</b> teams</span><span class="mf-s-owe"><b>' + totOwing + '</b> with unpaid/late weeks</span><span><b>$' + totCollected.toFixed(2) + '</b> collected</span></div>';
+  if (sum) sum.innerHTML = '<div class="mf-stats"><span><b>' + totTeams + '</b> teams</span><span class="mf-s-owe"><b>' + totOwing + '</b> with unpaid/late weeks</span><span><b>$' + totCollected.toFixed(2) + '</b> collected</span>' + (_mfHidden ? '<span class="muted">' + _mfHidden + ' division' + (_mfHidden === 1 ? '' : 's') + ' hidden (no schedule)</span>' : '') + '</div>';
   wrap.innerHTML = blocks || '<p class="muted">No divisions for this session.</p>';
 }
 
