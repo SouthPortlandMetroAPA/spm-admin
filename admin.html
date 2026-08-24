@@ -1082,6 +1082,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="poolpics">PoolPics</button>
       <button class="tab" data-tab="chalktalk">ChalkTalk</button>
       <button class="tab" data-tab="nickpick">NickPick</button>
+      <button class="tab" data-tab="crewcall">CrewCall</button>
       <button class="tab" data-tab="ourrack">OurRack</button>
       <button class="tab" data-tab="preshot">PreShot</button>
       <button class="tab" data-tab="cuedrop">CueDrop</button>
@@ -4169,6 +4170,53 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       </div>
     </div>
 
+    <div id="tab-crewcall" class="tab-panel">
+      <style>
+        #tab-crewcall .cc-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+        #tab-crewcall .cc-count{color:var(--muted);font-size:.9rem;font-weight:600}
+        #tab-crewcall .cc-filters{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+        #tab-crewcall .cc-fbtn{padding:6px 12px;border:1px solid var(--border);border-radius:999px;background:var(--card);cursor:pointer;font-size:.9rem;color:var(--text)}
+        #tab-crewcall .cc-fbtn.active{background:var(--spm-accent);color:#fff;border-color:var(--spm-accent)}
+        #tab-crewcall .cc-list{display:flex;flex-direction:column;gap:8px}
+        #tab-crewcall .cc-r{border:1px solid var(--border);border-left:4px solid var(--border);border-radius:10px;background:var(--card);padding:11px 14px}
+        #tab-crewcall .cc-r.cc-team{border-left-color:#0031a1}
+        #tab-crewcall .cc-r.cc-player{border-left-color:#ea002a}
+        #tab-crewcall .cc-r.cc-closed{border-left-color:#9ca3af;opacity:.7}
+        #tab-crewcall .cc-top{display:flex;align-items:flex-start;gap:12px}
+        #tab-crewcall .cc-main{flex:1;min-width:220px}
+        #tab-crewcall .cc-tag{display:inline-block;font-size:.66rem;font-weight:800;letter-spacing:.04em;padding:2px 8px;border-radius:999px;text-transform:uppercase;margin-bottom:6px}
+        #tab-crewcall .cc-tag.cc-team{background:#e7edfb;color:#0031a1}
+        #tab-crewcall .cc-tag.cc-player{background:#fde7ec;color:#b3021f}
+        #tab-crewcall .cc-body{font-size:.95rem;line-height:1.5}
+        #tab-crewcall .cc-kv b{color:var(--muted);font-weight:600}
+        #tab-crewcall .cc-fav{color:#b3021f;font-weight:600;margin-left:4px}
+        #tab-crewcall .cc-metaline{margin-top:5px}
+        #tab-crewcall .cc-who{font-weight:600;color:var(--text)}
+        #tab-crewcall .cc-sub{color:var(--muted);font-size:.85rem}
+        #tab-crewcall a.cc-mail{color:var(--spm-accent);text-decoration:none}
+        #tab-crewcall a.cc-mail:hover{text-decoration:underline}
+        #tab-crewcall .cc-right{margin-left:auto}
+        #tab-crewcall .cc-empty{color:var(--muted);padding:28px;text-align:center}
+      </style>
+      <div class="card">
+        <div class="cc-head">
+          <h2 style="margin:0">CrewCall &mdash; Player &amp; Team Requests</h2>
+          <button class="btn btn-outline btn-sm" onclick="ccInit()">Refresh</button>
+          <span class="cc-count" id="ccCount"></span>
+          <button class="btn btn-outline btn-sm" id="ccShowClosed" onclick="ccToggleClosed()">Show handled</button>
+          <a class="btn btn-outline btn-sm" style="margin-left:auto;text-decoration:none"
+             href="https://southportlandmetroapa.github.io/crewcall/" target="_blank" rel="noopener">View public app &#8599;</a>
+        </div>
+        <p class="cc-sub" style="margin:0 0 12px">Players looking for a team and captains looking for <b>one</b> player land here. Reach out to make the match, then click <b>Mark handled</b>. Supersedes the old CrewFinder.</p>
+        <div class="cc-filters">
+          <button class="cc-fbtn active" data-f="all" onclick="ccSetFilter('all')">All</button>
+          <button class="cc-fbtn" id="ccFilTeam" data-f="team" onclick="ccSetFilter('team')">Wants team</button>
+          <button class="cc-fbtn" id="ccFilPlayer" data-f="player" onclick="ccSetFilter('player')">Wants player</button>
+        </div>
+        <div class="cc-list" id="ccList"><div class="cc-empty">Loading&hellip;</div></div>
+      </div>
+    </div>
+
     <div id="tab-ourrack" class="tab-panel">
       <style>
         #tab-ourrack .or-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
@@ -5220,7 +5268,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.346';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.347';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10317,6 +10365,7 @@ const TAB_LABEL = {
   poolpics:      'PoolPics',
   chalktalk:     'ChalkTalk',
   nickpick:      'NickPick',
+  crewcall:      'CrewCall',
   ourrack:       'OurRack',
   preshot:       'PreShot',
   cuedrop:       'CueDrop',
@@ -10494,6 +10543,7 @@ function switchTab(name) {
   if (name === 'poolpics') ppInit();
   if (name === 'chalktalk') ctInit();
   if (name === 'nickpick') npInit();
+  if (name === 'crewcall') ccInit();
   if (name === 'ourrack') orInit();
   if (name === 'preshot') psInit();
   if (name === 'cuedrop') cdInit();
@@ -11458,6 +11508,110 @@ async function ctRestore(id) {
     ctSetStatus('Restored.', 'ok');
     await ctReload();
   } catch (e) { ctSetStatus('Restore failed: ' + (e.message || e), 'err'); }
+}
+
+/* ═══════════════ CrewCall tab (v0.1) — player <-> team requests ═══════════════
+   Reads crewcall.requests (service-role; Accept-Profile 'crewcall'). Two kinds:
+   seeking_team (a free agent: nights/formats/willing areas/about) and
+   seeking_player (a captain: their team + 8/9-ball skill range + what they want,
+   ONE player per request). SUPERSEDES CrewFinder (Apps/TeamCaptainTinder). "Mark
+   handled" is a plain service-role status PATCH — no email. Live-polls 20s when
+   visible. Public app in Apps/CrewCall/site. Requires ?key=<service-role JWT>. */
+const CC_R = { 'Accept-Profile': 'crewcall' }, CC_W = { 'Content-Profile': 'crewcall' };
+let _ccPoll = null, _ccSig = '', _ccRows = [], _ccShowClosed = false, _ccFilter = 'all';
+
+async function ccInit() {
+  const list = document.getElementById('ccList'), count = document.getElementById('ccCount');
+  if (!SB_KEY) {
+    if (count) count.textContent = '';
+    if (list) list.innerHTML = '<div class="cc-empty">Add <code>?key=&lt;service-role JWT&gt;</code> to the URL to view requests.</div>';
+    return;
+  }
+  try { const rows = await ccFetch(); _ccSig = ccSig(rows); await ccRender(rows); ccStartPoll(); }
+  catch (e) { if (list) list.innerHTML = '<div class="cc-empty">Couldn\'t load requests: ' + esc(e.message || String(e)) + '</div>'; }
+}
+async function ccFetch() {
+  return await sb('GET',
+    'requests?select=id,kind,member_number,email,requester_name,status,days,formats,areas,preferred_area,about,team_name,team_number,sl8_min,sl8_max,sl9_min,sl9_max,looking_for,created_at&order=created_at.desc&limit=500',
+    null, CC_R) || [];
+}
+function ccSig(rows) { return rows.length + ':' + rows.map(r => r.id + (r.status || '')).join(','); }
+function ccRel(ts) {
+  if (!ts) return '';
+  const s = (Date.now() - new Date(ts).getTime()) / 1000;
+  if (s < 60) return 'just now';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+  if (s < 604800) return Math.floor(s / 86400) + 'd ago';
+  try { return new Date(ts).toLocaleDateString(undefined, { dateStyle: 'medium' }); } catch { return ''; }
+}
+function ccRange(lo, hi) { if (lo == null && hi == null) return 'Any'; return 'SL ' + (lo == null ? '?' : lo) + '–' + (hi == null ? '?' : hi); }
+function ccArr(a) { return Array.isArray(a) && a.length ? a.join(', ') : ''; }
+async function ccResolveMembers(mns) {
+  const uniq = [...new Set(mns.map(m => String(m || '').trim()).filter(Boolean))];
+  if (!uniq.length) return {};
+  const map = {};
+  try {
+    const ps = await sb('GET', 'players?member_number=in.(' + uniq.map(encodeURIComponent).join(',') + ')&select=member_number,first_name,last_name') || [];
+    ps.forEach(p => { map[String(p.member_number)] = p; });
+  } catch { /* names best-effort */ }
+  return map;
+}
+function ccCard(r, mmap) {
+  const p = mmap[String(r.member_number)] || null;
+  const nm = r.requester_name || (p ? [p.first_name, p.last_name].filter(Boolean).join(' ').trim() : '') || '(no name on file)';
+  const closed = r.status === 'closed';
+  const isTeam = r.kind === 'seeking_team';
+  const tag = isTeam ? '<span class="cc-tag cc-team">Wants a TEAM</span>' : '<span class="cc-tag cc-player">Wants a PLAYER</span>';
+  let body;
+  if (isTeam) {
+    body = '<div class="cc-kv"><b>Nights:</b> ' + esc(ccArr(r.days) || 'Flexible') + '</div>'
+      + '<div class="cc-kv"><b>Formats:</b> ' + esc(ccArr(r.formats) || 'Any') + '</div>'
+      + '<div class="cc-kv"><b>Areas:</b> ' + esc(ccArr(r.areas) || '—') + (r.preferred_area ? '<span class="cc-fav">★ ' + esc(r.preferred_area) + '</span>' : '') + '</div>'
+      + (r.about ? '<div class="cc-kv"><b>About:</b> ' + esc(r.about) + '</div>' : '');
+  } else {
+    body = '<div class="cc-kv"><b>Team:</b> ' + esc(r.team_name || ('Team ' + (r.team_number || '?'))) + '</div>'
+      + '<div class="cc-kv"><b>8-Ball:</b> ' + esc(ccRange(r.sl8_min, r.sl8_max)) + ' &middot; <b>9-Ball:</b> ' + esc(ccRange(r.sl9_min, r.sl9_max)) + '</div>'
+      + (r.looking_for ? '<div class="cc-kv"><b>Looking for:</b> ' + esc(r.looking_for) + '</div>' : '');
+  }
+  const meta = '<span class="cc-who">' + esc(nm) + '</span> <span class="cc-sub">&middot; APA #' + esc(r.member_number || '?')
+    + ' &middot; <a class="cc-mail" href="mailto:' + esc(r.email) + '">' + esc(r.email) + '</a> &middot; ' + esc(ccRel(r.created_at)) + '</span>';
+  const act = closed
+    ? '<button class="btn btn-outline btn-sm" onclick="ccSetStatus(' + r.id + ',\'open\')">Reopen</button>'
+    : '<button class="btn btn-sm" onclick="ccSetStatus(' + r.id + ',\'closed\')">Mark handled</button>';
+  return '<div class="cc-r cc-' + (closed ? 'closed' : (isTeam ? 'team' : 'player')) + '">'
+    + '<div class="cc-top"><div class="cc-main">' + tag + '<div class="cc-body">' + body + '</div><div class="cc-metaline">' + meta + '</div></div>'
+    + '<div class="cc-right">' + act + '</div></div></div>';
+}
+async function ccRender(rows) { _ccRows = rows || []; await ccPaint(); }
+async function ccPaint() {
+  const list = document.getElementById('ccList'), count = document.getElementById('ccCount'), doneBtn = document.getElementById('ccShowClosed');
+  const all = _ccRows;
+  let vis = all.filter(r => _ccShowClosed ? true : r.status !== 'closed');
+  if (_ccFilter === 'team') vis = vis.filter(r => r.kind === 'seeking_team');
+  if (_ccFilter === 'player') vis = vis.filter(r => r.kind === 'seeking_player');
+  const openCt = all.filter(r => r.status !== 'closed').length, closedCt = all.length - openCt;
+  if (count) count.textContent = openCt ? (openCt + ' open') : 'No open requests';
+  if (doneBtn) doneBtn.textContent = (_ccShowClosed ? 'Hide handled' : 'Show handled') + (closedCt ? ' (' + closedCt + ')' : '');
+  if (!list) return;
+  if (!vis.length) { list.innerHTML = '<div class="cc-empty">' + (_ccShowClosed ? 'Nothing here yet.' : 'All caught up &mdash; no open requests. &#127881;') + '</div>'; return; }
+  const mmap = await ccResolveMembers(vis.map(r => r.member_number));
+  const sc = list.scrollTop; list.innerHTML = vis.map(r => ccCard(r, mmap)).join(''); list.scrollTop = sc;
+}
+function ccToggleClosed() { _ccShowClosed = !_ccShowClosed; ccPaint(); }
+function ccSetFilter(f) { _ccFilter = f; document.querySelectorAll('#tab-crewcall .cc-fbtn').forEach(b => b.classList.toggle('active', b.dataset.f === f)); ccPaint(); }
+async function ccSetStatus(id, status) {
+  try { await sb('PATCH', 'requests?id=eq.' + id, { status }, CC_W); await ccReload(); }
+  catch (e) { alert('Could not update: ' + (e.message || e)); }
+}
+async function ccReload() { const rows = await ccFetch(); _ccSig = ccSig(rows); await ccRender(rows); }
+function ccStartPoll() {
+  if (_ccPoll) clearInterval(_ccPoll);
+  _ccPoll = setInterval(async () => {
+    const panel = document.getElementById('tab-crewcall');
+    if (!panel || !panel.classList.contains('active')) return;
+    try { const rows = await ccFetch(); const sig = ccSig(rows); if (sig !== _ccSig) { _ccSig = sig; await ccRender(rows); } } catch { /* transient */ }
+  }, 20000);
 }
 
 /* ═══════════════ NickPick tab (v0.1) — nickname change requests ═══════════════
