@@ -4483,9 +4483,10 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             <div class="cm-fld"><label>Start time</label><input id="cmStart" type="time"></div>
             <div class="cm-fld"><label>End time</label><input id="cmEnd" type="time"></div>
             <div class="cm-fld"><label>Venue</label><input id="cmVenue" placeholder="The venue name"></div>
-            <div class="cm-fld"><label>RSVP by</label><input id="cmRsvpBy" type="date"></div>
+            <div class="cm-fld"><label>RSVP by <span style="font-weight:400;color:var(--muted)">(optional)</span></label><input id="cmRsvpBy" type="date"></div>
             <div class="cm-fld full"><label>Address</label><input id="cmAddress" placeholder="123 Main St, South Portland ME"></div>
             <div class="cm-fld full"><label>Description</label><textarea id="cmDesc"></textarea></div>
+            <div class="cm-fld full"><label>Note field hint <span style="font-weight:400;color:var(--muted)">(optional — the grey example text in the guest's note box)</span></label><input id="cmNoteHint" placeholder="Dietary needs, a note, a shout — totally optional"></div>
           </div>
           <div class="ps-row"><button class="btn" onclick="cmSaveEvent()">Save event</button>
             <span class="cm-link">Public link: <a id="cmPublicLink" href="#" target="_blank" rel="noopener"></a></span></div>
@@ -5268,7 +5269,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.348';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.349';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -12543,7 +12544,7 @@ async function cmLoadEvent() {
     const g = (id, v) => { const e = document.getElementById(id); if (e) e.value = v == null ? '' : v; };
     g('cmName', _cmEvent.name); g('cmSubtitle', _cmEvent.subtitle); g('cmDate', _cmEvent.event_date);
     g('cmStart', _cmEvent.start_time); g('cmEnd', _cmEvent.end_time); g('cmVenue', _cmEvent.venue);
-    g('cmAddress', _cmEvent.address); g('cmDesc', _cmEvent.description); g('cmRsvpBy', _cmEvent.rsvp_by);
+    g('cmAddress', _cmEvent.address); g('cmDesc', _cmEvent.description); g('cmRsvpBy', _cmEvent.rsvp_by); g('cmNoteHint', _cmEvent.note_hint);
     document.getElementById('cmActive').checked = !!_cmEvent.active;
     const a = document.getElementById('cmPublicLink'); a.href = COUNTMEIN_URL; a.textContent = COUNTMEIN_URL;
   } catch (e) { cmSetStatus('Event load failed: ' + (e.message || e), true); }
@@ -12555,6 +12556,7 @@ async function cmSaveEvent() {
     name: v('cmName') || 'SPM APA Party', subtitle: v('cmSubtitle') || null, event_date: v('cmDate') || null,
     start_time: v('cmStart') || null, end_time: v('cmEnd') || null, venue: v('cmVenue') || null,
     address: v('cmAddress') || null, description: v('cmDesc') || null, rsvp_by: v('cmRsvpBy') || null,
+    note_hint: v('cmNoteHint') || null,
     active: document.getElementById('cmActive').checked, updated_at: new Date().toISOString()
   };
   try { await sb('PATCH', 'events?slug=eq.' + encodeURIComponent(_cmEvent.slug), body, CM_WP); cmSetStatus('Event saved — the RSVP page is updated.'); await cmLoadEvent(); }
