@@ -5323,7 +5323,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.352';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.353';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -6779,6 +6779,24 @@ async function sb(method, path, body, extraHeaders) {
   const ct = res.headers.get('content-type') || '';
   if (ct.includes('json') && res.status !== 204) return res.json();
   return null;
+}
+
+/**
+ * Page a SETOF-returning RPC past PostgREST's 1000-row max-rows cap.
+ * A single POST rpc/… only ever returns the first 1000 rows — for the Outreach
+ * source RPCs (recruit_lapsed_players 1599, outreach_new_members 1713) that
+ * silently dropped hundreds of people. limit/offset paging is deterministic
+ * because those RPCs carry a unique member_number ORDER BY tiebreaker
+ * (2026-08-25 migration) — no boundary skip/dup. Returns the full array.
+ */
+async function sbRpcAll(fn, body, extraHeaders) {
+  const page = 1000, out = [];
+  for (let offset = 0; ; offset += page) {
+    const batch = (await sb('POST', 'rpc/' + fn + '?limit=' + page + '&offset=' + offset, body, extraHeaders)) || [];
+    out.push(...batch);
+    if (batch.length < page) break;
+  }
+  return out;
 }
 
 /**
@@ -26864,7 +26882,7 @@ async function otRun() {
        PostgREST cap means lapsed candidates never reach the client. */
     let lapsedCappedAt1000 = false;
     if (source === 'lapsed' || source === 'both') {
-      const lapsed = await sb('POST', 'rpc/recruit_lapsed_players', {
+      const lapsed = await sbRpcAll('recruit_lapsed_players', {
         p_sl9_max: 9,
         p_counties: pCounties,
         p_cities: cities.length ? cities : null,
@@ -26875,7 +26893,8 @@ async function otRun() {
         p_sl_8ball_in: sl8Arr,
         p_sl_9ball_in: sl9Arr
       });
-      if ((lapsed || []).length >= 1000) lapsedCappedAt1000 = true;
+      /* sbRpcAll pages past the 1000-row cap, so the list is complete (was
+         silently truncated at 1000 — 599 of 1599 lapsed dropped). No cap warning. */
       let rows = (lapsed || []);   /* already filtered to not-playing server-side */
       if (fmt === '8')    rows = rows.filter(r => r.last_played_8);
       if (fmt === '9')    rows = rows.filter(r => r.last_played_9);
@@ -26884,25 +26903,24 @@ async function otRun() {
     }
 
     if (source === 'new' || source === 'both') {
-      const fresh = await sb('POST', 'rpc/outreach_new_members', {
+      const fresh = await sbRpcAll('outreach_new_members', {
         p_counties: pCounties,
         p_cities: cities.length ? cities : null,
         p_sl_8ball_in: sl8Arr,
         p_sl_9ball_in: sl9Arr
-      });
+      });   /* paged: never-played pool is the largest (1713) — was capped at 1000 with NO warning */
       for (const r of (fresh || [])) tagged.push({ ...r, _source: 'new' });
     }
 
     if (source === 'playing') {
-      const playing = await sb('POST', 'rpc/outreach_currently_playing', {
+      const playing = await sbRpcAll('outreach_currently_playing', {
         p_counties: pCounties,
         p_cities: cities.length ? cities : null,
         p_min_teams: minTeams,
         p_max_teams: maxTeams,
         p_sl_8ball_in: sl8Arr,
         p_sl_9ball_in: sl9Arr
-      });
-      if ((playing || []).length >= 1000) lapsedCappedAt1000 = true;
+      });   /* paged past the 1000-row cap */
       for (const r of (playing || [])) tagged.push({ ...r, _source: 'playing' });
     }
 
