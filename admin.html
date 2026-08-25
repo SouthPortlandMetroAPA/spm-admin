@@ -5268,7 +5268,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.347';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.348';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11532,7 +11532,7 @@ async function ccInit() {
 }
 async function ccFetch() {
   return await sb('GET',
-    'requests?select=id,kind,member_number,email,requester_name,status,days,formats,areas,preferred_area,about,team_name,team_number,sl8_min,sl8_max,sl9_min,sl9_max,looking_for,created_at&order=created_at.desc&limit=500',
+    'requests?select=id,kind,member_number,email,requester_name,status,days,max_teams,formats,areas,preferred_area,about,team_name,team_number,sl8_min,sl8_max,sl9_min,sl9_max,looking_for,cancel_reason,created_at&order=created_at.desc&limit=500',
     null, CC_R) || [];
 }
 function ccSig(rows) { return rows.length + ':' + rows.map(r => r.id + (r.status || '')).join(','); }
@@ -11560,12 +11560,14 @@ async function ccResolveMembers(mns) {
 function ccCard(r, mmap) {
   const p = mmap[String(r.member_number)] || null;
   const nm = r.requester_name || (p ? [p.first_name, p.last_name].filter(Boolean).join(' ').trim() : '') || '(no name on file)';
-  const closed = r.status === 'closed';
+  const cancelled = r.status === 'cancelled';
+  const closed = r.status === 'closed' || cancelled;
   const isTeam = r.kind === 'seeking_team';
   const tag = isTeam ? '<span class="cc-tag cc-team">Wants a TEAM</span>' : '<span class="cc-tag cc-player">Wants a PLAYER</span>';
   let body;
   if (isTeam) {
     body = '<div class="cc-kv"><b>Nights:</b> ' + esc(ccArr(r.days) || 'Flexible') + '</div>'
+      + (r.max_teams ? '<div class="cc-kv"><b>Teams wanted:</b> ' + esc(r.max_teams) + '</div>' : '')
       + '<div class="cc-kv"><b>Formats:</b> ' + esc(ccArr(r.formats) || 'Any') + '</div>'
       + '<div class="cc-kv"><b>Areas:</b> ' + esc(ccArr(r.areas) || '—') + (r.preferred_area ? '<span class="cc-fav">★ ' + esc(r.preferred_area) + '</span>' : '') + '</div>'
       + (r.about ? '<div class="cc-kv"><b>About:</b> ' + esc(r.about) + '</div>' : '');
@@ -11574,11 +11576,13 @@ function ccCard(r, mmap) {
       + '<div class="cc-kv"><b>8-Ball:</b> ' + esc(ccRange(r.sl8_min, r.sl8_max)) + ' &middot; <b>9-Ball:</b> ' + esc(ccRange(r.sl9_min, r.sl9_max)) + '</div>'
       + (r.looking_for ? '<div class="cc-kv"><b>Looking for:</b> ' + esc(r.looking_for) + '</div>' : '');
   }
+  if (cancelled) body += '<div class="cc-kv" style="color:#b3021f"><b>Cancelled by player:</b> ' + esc(r.cancel_reason || '(no reason given)') + '</div>';
   const meta = '<span class="cc-who">' + esc(nm) + '</span> <span class="cc-sub">&middot; APA #' + esc(r.member_number || '?')
     + ' &middot; <a class="cc-mail" href="mailto:' + esc(r.email) + '">' + esc(r.email) + '</a> &middot; ' + esc(ccRel(r.created_at)) + '</span>';
-  const act = closed
+  const act = (closed
     ? '<button class="btn btn-outline btn-sm" onclick="ccSetStatus(' + r.id + ',\'open\')">Reopen</button>'
-    : '<button class="btn btn-sm" onclick="ccSetStatus(' + r.id + ',\'closed\')">Mark handled</button>';
+    : '<button class="btn btn-sm" onclick="ccSetStatus(' + r.id + ',\'closed\')">Mark handled</button>')
+    + '<button class="btn btn-danger btn-sm cc-del" title="Permanently delete this request" onclick="ccDelete(' + r.id + ',this)">Delete</button>';
   return '<div class="cc-r cc-' + (closed ? 'closed' : (isTeam ? 'team' : 'player')) + '">'
     + '<div class="cc-top"><div class="cc-main">' + tag + '<div class="cc-body">' + body + '</div><div class="cc-metaline">' + meta + '</div></div>'
     + '<div class="cc-right">' + act + '</div></div></div>';
@@ -11587,10 +11591,10 @@ async function ccRender(rows) { _ccRows = rows || []; await ccPaint(); }
 async function ccPaint() {
   const list = document.getElementById('ccList'), count = document.getElementById('ccCount'), doneBtn = document.getElementById('ccShowClosed');
   const all = _ccRows;
-  let vis = all.filter(r => _ccShowClosed ? true : r.status !== 'closed');
+  let vis = all.filter(r => _ccShowClosed ? true : (r.status !== 'closed' && r.status !== 'cancelled'));
   if (_ccFilter === 'team') vis = vis.filter(r => r.kind === 'seeking_team');
   if (_ccFilter === 'player') vis = vis.filter(r => r.kind === 'seeking_player');
-  const openCt = all.filter(r => r.status !== 'closed').length, closedCt = all.length - openCt;
+  const openCt = all.filter(r => (r.status !== 'closed' && r.status !== 'cancelled')).length, closedCt = all.length - openCt;
   if (count) count.textContent = openCt ? (openCt + ' open') : 'No open requests';
   if (doneBtn) doneBtn.textContent = (_ccShowClosed ? 'Hide handled' : 'Show handled') + (closedCt ? ' (' + closedCt + ')' : '');
   if (!list) return;
@@ -11603,6 +11607,14 @@ function ccSetFilter(f) { _ccFilter = f; document.querySelectorAll('#tab-crewcal
 async function ccSetStatus(id, status) {
   try { await sb('PATCH', 'requests?id=eq.' + id, { status }, CC_W); await ccReload(); }
   catch (e) { alert('Could not update: ' + (e.message || e)); }
+}
+// Permanent hard-delete of a request row (operator worklist, irreversible → strong confirm).
+async function ccDelete(id, btn) {
+  const r = (_ccRows || []).find(x => x.id === id);
+  const who = r ? ((r.requester_name || 'APA #' + (r.member_number || '?')) + ' — ' + (r.kind === 'seeking_team' ? 'wants a team' : 'wants a player')) : ('request #' + id);
+  if (!confirm('Permanently delete this request?\n\n' + who + '\n\nThis removes the row for good and cannot be undone.')) return;
+  try { if (btn) { btn.disabled = true; btn.textContent = 'Deleting…'; } await sb('DELETE', 'requests?id=eq.' + id, null, CC_W); await ccReload(); }
+  catch (e) { alert('Could not delete: ' + (e.message || e)); if (btn) { btn.disabled = false; btn.textContent = 'Delete'; } }
 }
 async function ccReload() { const rows = await ccFetch(); _ccSig = ccSig(rows); await ccRender(rows); }
 function ccStartPoll() {
