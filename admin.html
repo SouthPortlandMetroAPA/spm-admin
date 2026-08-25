@@ -1063,6 +1063,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="matchfees">Match Fees</button>
       <button class="tab" data-tab="reports">Reports</button>
       <button class="tab" data-tab="outreach">Outreach</button>
+      <button class="tab" data-tab="newjoiners">New Joiners</button>
       <button class="tab" data-tab="switchboard">Switchboard</button>
       <button class="tab" data-tab="redtape">RedTape</button>
       <button class="tab" data-tab="hostplan">Host Plan</button>
@@ -4908,6 +4909,58 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
     <!-- ════════════════ /Contacts ════════════════ -->
 
     <!-- ══════════════════════════════════════════════════════════════
+         TAB: NEW JOINERS — read-only outreach list of members who joined
+         APA in the last 12 months (slate.players.date_started, MM/DD/YY)
+         and are NOT on any team in the current (is_current) session.
+         Data from the slate.new_unrostered_players() RPC (service_role).
+         County dropdown built from the result. No-Contact rows badged +
+         excluded from Copy emails. All JS global (nj*), near switchTab.
+         Brief: 2026-08-25-new-joiners-tab.md
+         ══════════════════════════════════════════════════════════════ -->
+    <div id="tab-newjoiners" class="tab-panel">
+      <style>
+        #tab-newjoiners .nj-controls{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin:12px 0 4px}
+        #tab-newjoiners .nj-controls label{font-size:.9rem;color:#374151}
+        #tab-newjoiners select,#tab-newjoiners input[type=search]{padding:8px 10px;border:1px solid var(--border-strong,#cbd0d8);border-radius:8px;font-size:.95rem}
+        #tab-newjoiners .nj-sub{color:#6b7280;font-size:.9rem;margin:4px 0 6px}
+        #tab-newjoiners .nj-wrap{max-height:70vh;overflow:auto;border:1px solid #eef0f2;border-radius:10px;margin-top:6px}
+        #tab-newjoiners table{border-collapse:collapse;width:100%;font-size:.9rem}
+        #tab-newjoiners th{text-align:left;color:#555;border-bottom:2px solid #e5e7eb;padding:8px 10px;position:sticky;top:0;background:#fff;cursor:pointer;white-space:nowrap;user-select:none}
+        #tab-newjoiners td{padding:7px 10px;border-bottom:1px solid #f0f1f3;vertical-align:top}
+        #tab-newjoiners tr:hover td{background:#fafbfc}
+        #tab-newjoiners a{color:var(--spm-accent,#0031a1);text-decoration:none}
+        #tab-newjoiners a:hover{text-decoration:underline}
+        #tab-newjoiners .nj-muted{color:#9ca3af}
+        #tab-newjoiners tr.nj-inact td{color:#9ca3af}
+        #tab-newjoiners .nj-dnc{display:inline-block;font-size:.68rem;font-weight:700;color:#b91c1c;background:#fee2e2;border-radius:6px;padding:1px 6px;margin-left:6px}
+      </style>
+      <h2 style="margin:6px 0 0">New Joiners</h2>
+      <div class="nj-sub" id="njSub">Members who joined APA in the last 12 months and are not on a team this session.</div>
+      <div class="nj-controls">
+        <label>County <select id="njCounty"></select></label>
+        <input type="search" id="njSearch" placeholder="Search name / member # / city…" style="min-width:230px">
+        <button class="btn btn-outline btn-sm" id="njCopy" type="button">Copy emails</button>
+        <button class="btn btn-outline btn-sm" id="njRefresh" type="button">↻ Refresh</button>
+        <span id="njStatus" style="color:#6b7280;font-size:.88rem"></span>
+      </div>
+      <div class="nj-wrap">
+        <table>
+          <thead><tr>
+            <th data-sort="name">Name</th>
+            <th data-sort="joined">Joined</th>
+            <th data-sort="sl">SL 8/9</th>
+            <th data-sort="county">County</th>
+            <th data-sort="city">City</th>
+            <th>Phone</th>
+            <th>Email</th>
+            <th data-sort="status">Status</th>
+          </tr></thead>
+          <tbody id="njBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════════
          TAB: FARGOSCOUT — bulk FargoRate lookup so a genuinely-skilled
          newcomer's starting APA skill level can be set correctly. Reads
          FargoRate's public search API (CORS *) directly from the browser;
@@ -5270,7 +5323,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.351';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.352';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10351,6 +10404,7 @@ const TAB_LABEL = {
   fargoscout: 'FargoScout',
   reports:       'Reports',
   outreach:      'Outreach',
+  newjoiners:    'New Joiners',
   switchboard:   'Switchboard',
   redtape:       'RedTape',
   rolodex:       'Rolodex',
@@ -10527,6 +10581,7 @@ function switchTab(name) {
   if (name === 'commonplayers') cpInit();
   if (name === 'reports')     rptInit();
   if (name === 'outreach')    otInit();
+  if (name === 'newjoiners')  njInit();
   if (name === 'switchboard') sbInit();
   if (name === 'redtape')     rtInit();
   if (name === 'rolodex')     rolInit();
@@ -10553,6 +10608,148 @@ function switchTab(name) {
   if (name === 'racktime') rktInit();
   if (name === 'fargoscout') fsInit();
   if (name === 'matchfees') mfInit();
+}
+
+/* ═══════════════ New Joiners — recent APA joins not on a current team ═══════════════
+   Read-only outreach list. Source = slate.new_unrostered_players() RPC (service_role
+   only): players whose date_started (MM/DD/YY — the 2-digit-year join-date field, a
+   Slate data-quality trap; to_date('YY') pivots nearest 2020) is within the last 365
+   days AND whose member_number is NOT on any team in the current (is_current) session.
+   County is a stored slate.players column; the dropdown is built from the result set.
+   dnc = an ACTIVE row on slate.email_blocklist (No-Contact) — badged, and excluded
+   from Copy emails. Called with HEADERS_READ (the ?key= service-role key). nj*. ── */
+let _nj = { rows: [], loaded: false, sort: { key: 'joined', dir: 'desc' } };
+
+function njSetStatus(m){ const e = document.getElementById('njStatus'); if (e) e.textContent = m || ''; }
+
+/* cell > home > alt (work excluded); drop <10-digit + all-zero; dedup; up to 2 shown. */
+function njPhone(r){
+  const seen = new Set(), out = [];
+  for (const raw of [r.cell_phone, r.home_phone, r.alt_phone]) {
+    let d = String(raw || '').replace(/\D/g, ''); if (d.length === 11 && d[0] === '1') d = d.slice(1);
+    if (d.length !== 10 || /^0+$/.test(d) || seen.has(d)) continue;
+    seen.add(d); out.push('(' + d.slice(0,3) + ') ' + d.slice(3,6) + '-' + d.slice(6));
+    if (out.length === 2) break;
+  }
+  return out.join('<br>') || '<span class="nj-muted">—</span>';
+}
+function njDate(iso){
+  if (!iso) return '<span class="nj-muted">—</span>';
+  const [y,m,d] = String(iso).slice(0,10).split('-'); return (+m) + '/' + (+d) + '/' + y;
+}
+function njMatch(r, county, qq){
+  if (county && (r.county || '(no county)') !== county) return false;
+  if (qq) {
+    const hay = ((r.first_name||'') + ' ' + (r.nickname||'') + ' ' + (r.last_name||'') + ' ' +
+                 (r.member_number||'') + ' ' + (r.city||'')).toLowerCase();
+    if (!hay.includes(qq)) return false;
+  }
+  return true;
+}
+
+async function njInit(){
+  const cSel = document.getElementById('njCounty'), search = document.getElementById('njSearch');
+  if (cSel && !cSel.dataset.wired)   { cSel.dataset.wired = '1';   cSel.addEventListener('change', njRender); }
+  if (search && !search.dataset.wired){ search.dataset.wired = '1'; search.addEventListener('input', njRender); }
+  const rf = document.getElementById('njRefresh');
+  if (rf && !rf.dataset.wired) { rf.dataset.wired = '1'; rf.addEventListener('click', () => njLoad()); }
+  const cp = document.getElementById('njCopy');
+  if (cp && !cp.dataset.wired) { cp.dataset.wired = '1'; cp.addEventListener('click', njCopyEmails); }
+  document.querySelectorAll('#tab-newjoiners th[data-sort]').forEach(th => {
+    if (th.dataset.wired) return; th.dataset.wired = '1';
+    th.addEventListener('click', () => {
+      const k = th.dataset.sort;
+      _nj.sort = { key: k, dir: (_nj.sort.key === k && _nj.sort.dir === 'asc') ? 'desc' : 'asc' };
+      njRender();
+    });
+  });
+  const sub = document.getElementById('njSub');
+  if (sub) sub.textContent = 'Members who joined APA in the last 12 months and are not on a team in '
+    + ((currentSession && currentSession.name) || 'the current session') + '.';
+  if (!_nj.loaded) await njLoad();
+}
+
+async function njLoad(){
+  njSetStatus('Loading…');
+  try {
+    const res = await fetch(SB_URL + '/rest/v1/rpc/new_unrostered_players', {
+      method: 'POST',
+      headers: { ...HEADERS_READ, 'Content-Type': 'application/json', 'Content-Profile': 'slate' },
+      body: '{}'
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status + ': ' + (await res.text()).slice(0, 140));
+    _nj.rows = await res.json(); _nj.loaded = true;
+    njBuildCounty(); njRender();
+  } catch (e) { njSetStatus('Failed: ' + e.message); }
+}
+
+function njBuildCounty(){
+  const sel = document.getElementById('njCounty'); if (!sel) return;
+  const prev = sel.value;
+  const counts = {};
+  for (const r of _nj.rows){ const c = r.county || '(no county)'; counts[c] = (counts[c] || 0) + 1; }
+  const opts = Object.entries(counts).sort((a,b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  sel.innerHTML = '<option value="">All counties (' + _nj.rows.length + ')</option>'
+    + opts.map(([c,n]) => '<option value="' + esc(c) + '">' + esc(c) + ' (' + n + ')</option>').join('');
+  if (prev) sel.value = prev;
+}
+
+function njRender(){
+  const county = (document.getElementById('njCounty') || {}).value || '';
+  const qq = ((document.getElementById('njSearch') || {}).value || '').trim().toLowerCase();
+  const rows = _nj.rows.filter(r => njMatch(r, county, qq));
+
+  const s = _nj.sort, dir = s.dir === 'asc' ? 1 : -1;
+  const keyOf = r => {
+    switch (s.key) {
+      case 'name':   return ((r.last_name||'') + ' ' + (r.first_name||'')).toLowerCase();
+      case 'joined': return r.date_started_iso || '';
+      case 'sl':     return (r.sl_8ball||0) * 100 + (r.sl_9ball||0);
+      case 'county': return (r.county||'').toLowerCase();
+      case 'city':   return (r.city||'').toLowerCase();
+      case 'status': return (r.member_status||'').toLowerCase();
+      default:       return '';
+    }
+  };
+  rows.sort((a,b) => { const ka = keyOf(a), kb = keyOf(b); return (ka < kb ? -1 : ka > kb ? 1 : 0) * dir; });
+
+  const body = document.getElementById('njBody');
+  body.innerHTML = rows.map(r => {
+    const inact = (r.member_status||'').toLowerCase() === 'inactive';
+    const nm = esc(r.first_name||'') + (r.nickname ? ' “' + esc(r.nickname) + '”' : '') + ' ' + esc(r.last_name||'')
+             + (r.dnc ? '<span class="nj-dnc">No contact</span>' : '');
+    const email = r.email ? '<a href="mailto:' + esc(r.email) + '">' + esc(r.email) + '</a>' : '<span class="nj-muted">—</span>';
+    const sl = (r.sl_8ball || '–') + ' / ' + (r.sl_9ball || '–');
+    const loc = esc(r.city||'') + (r.state && r.state !== 'OR' ? ' ' + esc(r.state) : '');
+    return '<tr' + (inact ? ' class="nj-inact"' : '') + '>'
+      + '<td>' + nm + '<div class="nj-muted" style="font-size:.78rem">#' + esc(r.member_number||'') + '</div></td>'
+      + '<td>' + njDate(r.date_started_iso) + '</td>'
+      + '<td>' + sl + '</td>'
+      + '<td>' + esc(r.county||'') + '</td>'
+      + '<td>' + loc + '</td>'
+      + '<td>' + njPhone(r) + '</td>'
+      + '<td>' + email + '</td>'
+      + '<td>' + esc(r.member_status||'') + '</td>'
+      + '</tr>';
+  }).join('') || '<tr><td colspan="8" class="nj-muted" style="padding:18px;text-align:center">No matching players.</td></tr>';
+
+  njSetStatus(rows.length + ' of ' + _nj.rows.length + ' shown');
+}
+
+async function njCopyEmails(){
+  const county = (document.getElementById('njCounty') || {}).value || '';
+  const qq = ((document.getElementById('njSearch') || {}).value || '').trim().toLowerCase();
+  // Pre-exclude member-number No-Contact (r.dnc from the RPC); sbCopyEmails then applies
+  // the authoritative email-based block check on top and fails closed (the canonical,
+  // validator-recognized clipboard path — never a raw navigator.clipboard write here).
+  const emails = [...new Set(_nj.rows
+    .filter(r => !r.dnc && r.email && njMatch(r, county, qq))
+    .map(r => r.email.trim().toLowerCase()))];
+  if (!emails.length) { njSetStatus('No emails to copy.'); return; }
+  const r = await sbCopyEmails(emails.join(', '), 'slate:newjoiners-copy');
+  if (!r.ok) { njSetStatus(r.error || 'Copy failed.'); return; }
+  njSetStatus('Copied ' + r.copied + ' email' + (r.copied === 1 ? '' : 's')
+    + (r.removed ? ' (' + r.removed + ' on No-Contact skipped)' : '') + '.');
 }
 
 /* ═══════════════ Match Fees — team payment tracker (Stripe report) ═══════════════
