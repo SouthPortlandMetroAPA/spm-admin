@@ -5027,6 +5027,23 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         #tab-matchfees .mf-late{background:#fef3c7;color:#92400e}
         #tab-matchfees .mf-unpaid{background:#fde8ec;color:#b91c1c}
         #tab-matchfees .mf-bye{background:#f1f3f5;color:#9aa1a9}
+        /* aligned week grid: fixed cell width so every division lines up */
+        #tab-matchfees .mf-tbl{table-layout:fixed}
+        #tab-matchfees .mf-c,#tab-matchfees .mf-wh{width:30px;min-width:30px;max-width:30px;text-align:center}
+        #tab-matchfees .mf-pad{background:repeating-linear-gradient(45deg,#fafbfc,#fafbfc 3px,#f1f3f5 3px,#f1f3f5 6px);cursor:default}
+        /* override: a DISTINCT check from the plain on-time tick */
+        #tab-matchfees .mf-ontime_ovr{background:#dbe8ff;color:#0031a1;font-weight:900;box-shadow:inset 0 -2px 0 #0031a1}
+        #tab-matchfees .mf-click{cursor:pointer}
+        #tab-matchfees .mf-click:hover{outline:2px solid #0031a1;outline-offset:-2px}
+        /* adjustment marker: a corner tick on any cell carrying an adjustment */
+        #tab-matchfees .mf-c[title*="RESCHEDULED"]{position:relative}
+        #tab-matchfees .mf-c[title*="RESCHEDULED"]::after{content:"";position:absolute;top:0;right:0;border-width:0 5px 5px 0;border-style:solid;border-color:transparent #0031a1 transparent transparent}
+        .mf-menu{position:absolute;z-index:9000;display:none;background:#fff;border:1px solid #d0d5da;border-radius:10px;box-shadow:0 10px 28px rgba(0,0,0,.18);padding:6px;min-width:200px}
+        .mf-mtitle{font-size:.75rem;font-weight:800;color:#0031a1;padding:4px 8px 6px}
+        .mf-mbtn{display:block;width:100%;text-align:left;font:inherit;font-size:.82rem;padding:7px 10px;border:0;background:#fff;border-radius:7px;cursor:pointer}
+        .mf-mbtn:hover{background:#eef5ff}
+        .mf-mdel{color:#b91c1c}
+        .mf-mcancel{color:#6b7280}
         #tab-matchfees .mf-due{background:#eff6ff;color:#1d4ed8}
         #tab-matchfees .mf-warn{background:#fde047;color:#713f12;font-weight:900}
         #tab-matchfees .mf-failed{background:#fed7aa;color:#c2410c;font-weight:900}
@@ -5068,6 +5085,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <span class="mf-legend">
             <span class="mf-key"><span class="mf-sw mf-ontime"></span>on time</span>
             <span class="mf-key"><span class="mf-sw mf-late"></span>late</span>
+            <span class="mf-key"><span class="mf-sw mf-ontime_ovr"></span>late, forgiven</span>
             <span class="mf-key"><span class="mf-sw mf-warn"></span>due &lt;24h (!)</span>
             <span class="mf-key"><span class="mf-sw mf-failed"></span>failed (retry)</span>
             <span class="mf-key"><span class="mf-sw mf-unpaid"></span>not paid (past due)</span>
@@ -5372,7 +5390,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.358';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.359';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10945,8 +10963,11 @@ async function mfLoadData() {
   if (divIds.length) matches = await mfFetchAll('matches?select=division_id,week_number,scheduled_date,row_type,home_team_id,away_team_id&division_id=in.(' + divIds.join(',') + ')');
   const payments = await mfFetchAll('match_fee_payments?select=*&session_id=eq.' + _mfSession);
   const ups = await sb('GET', 'match_fee_uploads?select=*&session_id=eq.' + _mfSession + '&order=uploaded_at.desc&limit=1');
+  // operator adjustments overlay: reschedules (move the due moment) and
+  // late->on-time overrides. Never a substitute for a payment — see mfCell.
+  const adjustments = await mfFetchAll('match_fee_adjustments?select=*&session_id=eq.' + _mfSession);
   await mfLoadDeadlines();
-  _mf = mfBuildModel(divs, matches, payments, ups && ups[0]);
+  _mf = mfBuildModel(divs, matches, payments, ups && ups[0], adjustments);
   mfRenderDeadlines();
   mfSetStatus('');
   // division filter options
@@ -10955,7 +10976,7 @@ async function mfLoadData() {
   mfRender();
 }
 
-function mfBuildModel(divs, matches, payments, upload) {
+function mfBuildModel(divs, matches, payments, upload, adjustments) {
   const idToNum = {};
   divs.forEach(d => { idToNum[d.id] = d.division_number; });
   // week -> date per division_number (authoritative from matches, earliest non-bye)
@@ -10995,7 +11016,13 @@ function mfBuildModel(divs, matches, payments, upload) {
     const ex = payIndex[k];
     if (!ex || (p.payment_date && (!ex.payment_date || p.payment_date < ex.payment_date))) payIndex[k] = p;
   }
-  return { divisions: divs, payments, weekDate, divWeeks, teamWeeks, payIndex, failKeys, upload };
+  // adjustment index: division|teamnorm|wop -> { reschedule: row, override_ontime: row }
+  const adjIndex = {};
+  for (const a of (adjustments || [])) {
+    const k = a.division_number + '|' + a.team_number_norm + '|' + a.wop;
+    (adjIndex[k] = adjIndex[k] || {})[a.kind] = a;
+  }
+  return { divisions: divs, payments, weekDate, divWeeks, teamWeeks, payIndex, failKeys, adjIndex, upload };
 }
 
 // classification for one (division, team, week) -> {k, pay, sched}
@@ -11004,9 +11031,21 @@ function mfCell(div, team, wk, today) {
   const teamNorm = String(parseInt(team.team_number, 10));
   const sched = (_mf.weekDate[dn] || {})[wk] || null;
   const dl = mfDeadlineFor(div, sched);
-  const deadline = dl ? dl.date : sched;   // configured deadline, else fall back to the play date
-  const dlTime = dl ? dl.time : null;
   const key = dn + '|' + teamNorm + '|' + wk;
+  // Operator adjustments. A RESCHEDULE replaces the effective due moment
+  // (day after the new match date, 11:00 — stored, not re-derived here so the
+  // validator can check the client and the row against each other).
+  const adj = (_mf.adjIndex || {})[key] || {};
+  const resched = adj.reschedule || null;
+  const override = adj.override_ontime || null;
+  let deadline, dlTime;
+  if (resched && resched.new_due_date) {
+    deadline = resched.new_due_date;
+    dlTime = resched.new_due_time || '11:00';
+  } else {
+    deadline = dl ? dl.date : sched;   // configured deadline, else fall back to the play date
+    dlTime = dl ? dl.time : null;
+  }
   const pay = _mf.payIndex[key];
   if (pay) {
     // late = the payment MOMENT is after the deadline MOMENT. The Stripe report carries
@@ -11019,42 +11058,50 @@ function mfCell(div, team, wk, today) {
     } else if (deadline && !pay.payment_date) {
       late = true;   // Success but no date parsed — never silently call it on-time
     }
-    return { k: late ? 'late' : 'ontime', pay, sched, deadline, dlTime };
+    // An override forgives a LATE payment only. It never invents a payment and
+    // never touches any other state, so a missing/unknown value can't reach the
+    // clean bucket through this path (v5.3: no silent clean-default).
+    if (late && override) return { k: 'ontime_ovr', pay, sched, deadline, dlTime, resched, override };
+    return { k: late ? 'late' : 'ontime', pay, sched, deadline, dlTime, resched, override };
   }
   // no successful payment yet
   const divWks = _mf.divWeeks[dn];
   const teamWks = _mf.teamWeeks[team.id];
   const isBye = divWks && divWks.has(wk) && teamWks && !teamWks.has(wk);
-  if (isBye) return { k: 'bye', sched };
-  if (!sched) return { k: 'none', sched };
-  if (sched > today) return { k: 'future', sched, deadline, dlTime };
+  if (isBye) return { k: 'bye', sched, resched, override };
+  if (!sched) return { k: 'none', sched, resched, override };
+  if (sched > today) return { k: 'future', sched, deadline, dlTime, resched, override };
   // played, no Success payment. If there were only FAILED attempts, flag distinctly
   // (they tried, the card declined — needs a retry nudge) vs a plain never-paid.
-  if (_mf.failKeys && _mf.failKeys.has(key)) return { k: 'failed', sched, deadline, dlTime };
+  if (_mf.failKeys && _mf.failKeys.has(key)) return { k: 'failed', sched, deadline, dlTime, resched, override };
   // otherwise escalate by the deadline MOMENT (date + time) vs now:
   //   >24h out → due (grace) · within 24h → warn (!) · past → unpaid (✗)
   const deadlineMs = deadline ? new Date(deadline + 'T' + (dlTime || '23:59') + ':00').getTime() : null;
   const nowMs = Date.now();
   if (deadlineMs != null && !isNaN(deadlineMs)) {
-    if (nowMs >= deadlineMs) return { k: 'unpaid', sched, deadline, dlTime };
-    if (nowMs >= deadlineMs - 86400000) return { k: 'warn', sched, deadline, dlTime };
-    return { k: 'due', sched, deadline, dlTime };
+    if (nowMs >= deadlineMs) return { k: 'unpaid', sched, deadline, dlTime, resched, override };
+    if (nowMs >= deadlineMs - 86400000) return { k: 'warn', sched, deadline, dlTime, resched, override };
+    return { k: 'due', sched, deadline, dlTime, resched, override };
   }
-  return { k: 'unpaid', sched, deadline, dlTime };
+  return { k: 'unpaid', sched, deadline, dlTime, resched, override };
 }
 
-function mfTeamRow(div, team, weeks, today) {
+function mfTeamRow(div, team, weeks, today, ownWeeks) {
   const teamNorm = String(parseInt(team.team_number, 10));
   let owing = 0;
   const cells = weeks.map(wk => {
+    // Columns are aligned across ALL divisions, so a short division gets inert
+    // pad cells past its own week count. Inert != unpaid: no state, no click.
+    if (ownWeeks && wk > ownWeeks) return '<td class="mf-c mf-pad"></td>';
     const c = mfCell(div, team, wk, today);
     if (c.k === 'unpaid' || c.k === 'late' || c.k === 'warn' || c.k === 'failed') owing++;
-    const label = { ontime: '✓', late: 'L', unpaid: '✗', bye: 'B', due: '•', warn: '!', failed: 'F', future: '', none: '' }[c.k];
+    const label = { ontime: '✓', ontime_ovr: '✔', late: 'L', unpaid: '✗', bye: 'B', due: '•', warn: '!', failed: 'F', future: '', none: '' }[c.k];
     const amt = c.pay ? '$' + (+c.pay.amount).toFixed(0) : '';
     const paidStr = c.pay ? (c.pay.payment_date || '?') + (c.pay.payment_time ? ' ' + c.pay.payment_time : '') : '?';
     const dueStr = c.deadline ? c.deadline + (c.dlTime ? ' ' + c.dlTime : '') : null;
-    const tip = 'Wk ' + wk + (c.sched ? ' · plays ' + c.sched : '') + (dueStr ? ' · due ' + dueStr : '') +
+    let tip = 'Wk ' + wk + (c.sched ? ' · plays ' + c.sched : '') + (dueStr ? ' · due ' + dueStr : '') +
       (c.k === 'ontime' ? ' · paid ' + paidStr + ' ' + amt + ' — on time' :
+       c.k === 'ontime_ovr' ? ' · paid ' + paidStr + ' ' + amt + ' — LATE, forgiven by override' :
        c.k === 'late' ? ' · paid ' + paidStr + ' ' + amt + ' — LATE' :
        c.k === 'warn' ? ' · NOT PAID — due within 24h!' :
        c.k === 'due' ? ' · not paid yet — still within grace' :
@@ -11062,9 +11109,118 @@ function mfTeamRow(div, team, weeks, today) {
        c.k === 'unpaid' ? ' · NOT PAID — past deadline' :
        c.k === 'bye' ? ' · bye' :
        c.k === 'future' ? ' · upcoming' : '');
-    return '<td class="mf-c mf-' + c.k + '" title="' + esc(tip) + '">' + label + '</td>';
+    // adjustment provenance on the hover: who moved what, when, and why
+    // NOTE: esc() escapes & < > but NOT the double quote, so a raw " here would
+    // terminate the title="..." attribute and silently truncate the tooltip.
+    // Typographic quotes are safe inside the attribute.
+    if (c.resched) tip += '\nRESCHEDULED to ' + (c.resched.resched_date || '?') + (c.resched.resched_time ? ' ' + c.resched.resched_time : '') +
+      ' · new due ' + (c.resched.new_due_date || '?') + ' ' + (c.resched.new_due_time || '11:00') +
+      ' · set ' + mfStamp(c.resched.created_at) + '\n“' + (c.resched.comment || '').replace(/"/g, '”') + '”';
+    if (c.override) tip += '\nOVERRIDE late→on time · set ' + mfStamp(c.override.created_at) +
+      '\n“' + (c.override.comment || '').replace(/"/g, '”') + '”';
+    const clickable = (c.k !== 'none');
+    return '<td class="mf-c mf-' + c.k + (clickable ? ' mf-click' : '') + '"' +
+      (clickable ? ' onclick="mfCellMenu(this)"' + ' data-dn="' + esc(div.division_number) + '" data-tn="' + esc(teamNorm) +
+        '" data-wk="' + wk + '" data-k="' + c.k + '" data-team="' + esc(team.team_name || '') + '"' : '') +
+      ' title="' + esc(tip) + '">' + label + '</td>';
   }).join('');
   return { html: '<tr' + (owing ? ' data-owing="1"' : '') + '><td class="mf-tn">' + esc(team.team_number) + '</td><td class="mf-tname">' + esc(team.team_name || '') + '</td>' + cells + '<td class="mf-owe">' + (owing ? owing : '') + '</td></tr>', owing };
+}
+
+/* ── Adjustments: reschedule + late→on-time override ────────────────────────
+ * Both are OPERATOR JUDGMENTS stored in slate.match_fee_adjustments and applied
+ * as an overlay in mfCell. Neither ever invents or mutates a payment: the Stripe
+ * report stays the source of truth for whether money moved. A comment is
+ * REQUIRED on both — an unattributed override is the audit hole this closes.  */
+function mfStamp(iso) { return iso ? String(iso).replace('T', ' ').slice(0, 16) : '?'; }
+
+// due date after a reschedule = the day AFTER the new match date, at 11:00.
+function mfReschedDue(dateISO) {
+  const d = new Date(dateISO + 'T00:00:00Z');
+  if (isNaN(d.getTime())) return null;
+  return new Date(d.getTime() + 86400000).toISOString().slice(0, 10);
+}
+
+function mfCellMenu(td) {
+  const dn = td.getAttribute('data-dn'), tn = td.getAttribute('data-tn');
+  const wk = +td.getAttribute('data-wk'), k = td.getAttribute('data-k');
+  const team = td.getAttribute('data-team');
+  const key = dn + '|' + tn + '|' + wk;
+  const adj = (_mf.adjIndex || {})[key] || {};
+  const lines = [];
+  lines.push('<div class="mf-mtitle">' + esc(dn + ' · ' + team) + ' — week ' + wk + '</div>');
+  lines.push('<button type="button" class="mf-mbtn" onclick="mfAskReschedule(\'' + esc(dn) + '\',\'' + esc(tn) + '\',' + wk + ')">' +
+    (adj.reschedule ? 'Edit reschedule' : 'Mark rescheduled') + '</button>');
+  if (k === 'late') lines.push('<button type="button" class="mf-mbtn" onclick="mfAskOverride(\'' + esc(dn) + '\',\'' + esc(tn) + '\',' + wk + ')">Override to on time</button>');
+  if (adj.override_ontime) lines.push('<button type="button" class="mf-mbtn mf-mdel" onclick="mfClearAdj(\'' + esc(dn) + '\',\'' + esc(tn) + '\',' + wk + ',\'override_ontime\')">Remove override</button>');
+  if (adj.reschedule) lines.push('<button type="button" class="mf-mbtn mf-mdel" onclick="mfClearAdj(\'' + esc(dn) + '\',\'' + esc(tn) + '\',' + wk + ',\'reschedule\')">Remove reschedule</button>');
+  lines.push('<button type="button" class="mf-mbtn mf-mcancel" onclick="mfCloseMenu()">Cancel</button>');
+  let m = document.getElementById('mfCellMenu');
+  if (!m) { m = document.createElement('div'); m.id = 'mfCellMenu'; m.className = 'mf-menu'; document.body.appendChild(m); }
+  m.innerHTML = lines.join('');
+  const r = td.getBoundingClientRect();
+  m.style.left = Math.min(r.left + window.scrollX, window.innerWidth - 220) + 'px';
+  m.style.top = (r.bottom + window.scrollY + 4) + 'px';
+  m.style.display = 'block';
+}
+function mfCloseMenu() { const m = document.getElementById('mfCellMenu'); if (m) m.style.display = 'none'; }
+document.addEventListener('click', function (e) {
+  const m = document.getElementById('mfCellMenu');
+  if (m && m.style.display === 'block' && !m.contains(e.target) && !(e.target.classList && e.target.classList.contains('mf-click'))) mfCloseMenu();
+});
+
+async function mfAskReschedule(dn, tn, wk) {
+  mfCloseMenu();
+  const prev = ((_mf.adjIndex || {})[dn + '|' + tn + '|' + wk] || {}).reschedule;
+  // Prompt wording avoids "WORD (" — validate_admin_js reads that as a call
+  // even inside a string literal, so an em-dash carries the label instead.
+  const date = prompt('New match date — YYYY-MM-DD:', (prev && prev.resched_date) || '');
+  if (!date) return;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date.trim())) { alert('Date must be YYYY-MM-DD.'); return; }
+  const time = prompt('New match time — HH:MM, 24 hour:', (prev && prev.resched_time) || '19:00');
+  if (time === null) return;
+  const comment = prompt('Why is this rescheduled? (required)', (prev && prev.comment) || '');
+  if (comment === null) return;
+  if (!comment.trim()) { alert('A comment is required.'); return; }
+  const newDue = mfReschedDue(date.trim());
+  if (!newDue) { alert('Could not read that date.'); return; }
+  await mfSaveAdj({
+    session_id: _mfSession, division_number: dn, team_number_norm: tn, wop: wk,
+    kind: 'reschedule', comment: comment.trim(),
+    resched_date: date.trim(), resched_time: (time || '').trim() || null,
+    new_due_date: newDue, new_due_time: '11:00'
+  });
+}
+
+async function mfAskOverride(dn, tn, wk) {
+  mfCloseMenu();
+  const comment = prompt('Why is this late payment being forgiven? (required)', '');
+  if (comment === null) return;
+  if (!comment.trim()) { alert('A comment is required.'); return; }
+  await mfSaveAdj({
+    session_id: _mfSession, division_number: dn, team_number_norm: tn, wop: wk,
+    kind: 'override_ontime', comment: comment.trim()
+  });
+}
+
+async function mfSaveAdj(row) {
+  row.created_by_device = (navigator.userAgent || '').slice(0, 60);
+  try {
+    await sb('POST', 'match_fee_adjustments?on_conflict=session_id,division_number,team_number_norm,wop,kind',
+      row, { Prefer: 'resolution=merge-duplicates,return=minimal' });
+    await mfLoad();
+  } catch (e) { alert('Could not save: ' + (e.message || e)); }
+}
+
+async function mfClearAdj(dn, tn, wk, kind) {
+  mfCloseMenu();
+  if (!confirm('Remove this ' + (kind === 'reschedule' ? 'reschedule' : 'override') + '?')) return;
+  try {
+    await sb('DELETE', 'match_fee_adjustments?session_id=eq.' + _mfSession +
+      '&division_number=eq.' + encodeURIComponent(dn) + '&team_number_norm=eq.' + encodeURIComponent(tn) +
+      '&wop=eq.' + wk + '&kind=eq.' + kind);
+    await mfLoad();
+  } catch (e) { alert('Could not remove: ' + (e.message || e)); }
 }
 
 function mfRender() {
@@ -11095,14 +11251,19 @@ function mfRender() {
   let totOwing = 0;
   let totCollected = 0;
   _mf.payments.forEach(p => { if ((p.status || '') === 'Success') totCollected += +p.amount || 0; });
+  // Week columns are aligned across every displayed division: one shared column
+  // count (the max) at fixed widths, so weeks line up down the page. Divisions
+  // shorter than the max get inert pad cells (mfTeamRow).
+  const mfWeekCount = d => d.num_weeks || Math.max(0, ...Object.keys(_mf.weekDate[d.division_number] || {}).map(Number));
+  const maxWeeks = divs.reduce((m, d) => Math.max(m, mfWeekCount(d)), 0);
+  const weeks = [];
+  for (let w = 1; w <= maxWeeks; w++) weeks.push(w);
   const blocks = divs.map(d => {
     const teams = (d.teams || []).slice().sort((a, b) => String(a.team_number).localeCompare(String(b.team_number)));
-    const nWeeks = d.num_weeks || Math.max(0, ...Object.keys(_mf.weekDate[d.division_number] || {}).map(Number));
-    const weeks = [];
-    for (let w = 1; w <= nWeeks; w++) weeks.push(w);
+    const nWeeks = mfWeekCount(d);
     let divOwing = 0;
     const rows = teams.map(t => {
-      const r = mfTeamRow(d, t, weeks, today);
+      const r = mfTeamRow(d, t, weeks, today, nWeeks);
       if (r.owing) divOwing++;
       return r;
     });
