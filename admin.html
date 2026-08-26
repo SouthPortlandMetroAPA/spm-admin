@@ -4415,6 +4415,12 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         #tab-cuedrop .cd-assign{display:flex;gap:8px;align-items:center;margin-top:9px;padding-top:9px;border-top:1px dashed var(--border)}
         #tab-cuedrop .cd-assign label{font-size:.72rem;color:var(--muted);font-weight:600}
         #tab-cuedrop .cd-assign select{border:1px solid var(--border);border-radius:7px;padding:6px 8px;font:inherit;font-size:.85rem;background:var(--card);color:var(--text)}
+        #tab-cuedrop .cd-dlv-editor{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 14px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--card)}
+        #tab-cuedrop .cd-dlv-lbl{font-weight:700;color:var(--spm-accent);font-size:.8rem;text-transform:uppercase;letter-spacing:.04em}
+        #tab-cuedrop .cd-dlv-chip{display:inline-flex;align-items:center;gap:5px;background:#eef2f7;border:1px solid var(--border);border-radius:999px;padding:3px 6px 3px 11px;font-size:.88rem;font-weight:600}
+        #tab-cuedrop .cd-dlv-chip button{border:none;background:#d3dae4;color:#334;border-radius:50%;width:18px;height:18px;line-height:1;cursor:pointer;font-size:.9rem;display:flex;align-items:center;justify-content:center;padding:0}
+        #tab-cuedrop .cd-dlv-chip button:hover{background:var(--spm-primary);color:#fff}
+        #tab-cuedrop .cd-dlv-editor input{border:1px solid var(--border);border-radius:7px;padding:6px 9px;font:inherit;font-size:.85rem;background:var(--card);color:var(--text);max-width:160px}
         #tab-cuedrop .cd-inv{border:1px solid var(--border);border-radius:12px;padding:14px 16px;background:#fbfbfd}
         #tab-cuedrop .cd-inv-title{font-weight:800;margin-bottom:10px}
         /* Two mini-tables packed to content width and sitting close — NOT 1fr/1fr (which spreads them apart and re-opens gaps). */
@@ -4453,6 +4459,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         </div>
         <div class="cd-picked" id="cdPicked" style="display:none;margin-bottom:14px"></div>
         <div class="cd-inv" id="cdInv" style="margin-bottom:16px"></div>
+        <div class="cd-dlv-editor" id="cdDeliverers"></div>
         <div class="cd-sched" id="cdScheduleWrap" style="display:none"></div>
         <datalist id="cdLocList"></datalist>
         <div class="cd-list" id="cdList"><div class="cd-empty">Loading&hellip;</div></div>
@@ -5342,7 +5349,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.354';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.355';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -12462,14 +12469,23 @@ function psStartPoll() {
    on file). Brief 2026-08-19. */
 const CD_RP = { 'Accept-Profile': 'cuedrop' };
 const CD_WP = { 'Accept-Profile': 'cuedrop', 'Content-Profile': 'cuedrop' };
-/* Fixed set of people who hand out cues. cuedrop.requests.assigned_to holds one of
-   these display strings, or null = Unassigned. The delivery view splits into a list
-   per deliverer + an Unassigned list. */
-const CD_DELIVERERS = ['Paul', 'Michelle'];
+/* Editable set of people who hand out cues (cuedrop.deliverers). A request's
+   assigned_to holds one of these names, or null = Unassigned. The delivery view
+   splits into one list per active deliverer + Unassigned. Robust to a removed name:
+   an orphaned assigned_to still gets its own list so nothing vanishes. */
+let _cdDeliverers = ['Paul', 'Michelle'];   // seeded default; replaced from the table on load
+async function cdLoadDeliverers() {
+  try {
+    const rows = await sb('GET', 'deliverers?select=name&active=is.true&order=sort,name', null, CD_RP) || [];
+    if (rows.length) _cdDeliverers = rows.map(r => r.name);
+  } catch (e) { /* keep last-known list on a transient error */ }
+}
 function cdAssignSelect(r, cls) {
+  const opts = _cdDeliverers.slice();
+  if (r.assigned_to && !opts.includes(r.assigned_to)) opts.push(r.assigned_to);   // preserve an orphaned assignment
   return '<select' + (cls ? ' class="' + cls + '"' : '') + ' onchange="cdAssign(' + r.id + ', this.value)">'
     + '<option value=""' + (!r.assigned_to ? ' selected' : '') + '>Unassigned</option>'
-    + CD_DELIVERERS.map(d => '<option value="' + d + '"' + (r.assigned_to === d ? ' selected' : '') + '>' + esc(d) + '</option>').join('')
+    + opts.map(d => '<option value="' + esc(d) + '"' + (r.assigned_to === d ? ' selected' : '') + '>' + esc(d) + '</option>').join('')
     + '</select>';
 }
 async function cdAssign(id, who) {
@@ -12481,10 +12497,43 @@ async function cdAssign(id, who) {
     cdSetStatus(val ? ('Assigned to ' + val + '.') : 'Moved to Unassigned.');
   } catch (e) { cdSetStatus('Assign failed: ' + (e.message || e), true); }
 }
+
+/* Deliverer management — add / remove people. Removing one moves their cues to
+   Unassigned first (no orphans, nothing disappears). */
+function cdRenderDeliverers() {
+  const el = document.getElementById('cdDeliverers'); if (!el) return;
+  el.innerHTML = '<span class="cd-dlv-lbl">Deliverers</span>'
+    + _cdDeliverers.map(d => '<span class="cd-dlv-chip">' + esc(d)
+        + '<button title="Remove ' + esc(d) + '" data-n="' + esc(d) + '" onclick="cdRemoveDeliverer(this.dataset.n)">&times;</button></span>').join('')
+    + '<input id="cdNewDeliverer" placeholder="Add a name…" onkeydown="if(event.key===\'Enter\'){event.preventDefault();cdAddDeliverer();}">'
+    + '<button class="btn btn-sm" onclick="cdAddDeliverer()">Add</button>';
+}
+async function cdAddDeliverer() {
+  const inp = document.getElementById('cdNewDeliverer'); if (!inp) return;
+  const name = inp.value.trim(); if (!name) return;
+  if (_cdDeliverers.some(d => d.toLowerCase() === name.toLowerCase())) { cdSetStatus('“' + name + '” is already a deliverer.', true); return; }
+  try {
+    await sb('POST', 'deliverers', { name, sort: _cdDeliverers.length + 1 }, CD_WP);
+    inp.value = '';
+    await cdLoadDeliverers(); cdRender();
+    cdSetStatus('Added deliverer ' + name + '.');
+  } catch (e) { cdSetStatus('Add failed: ' + (e.message || e), true); }
+}
+async function cdRemoveDeliverer(name) {
+  if (!name) return;
+  if (!confirm('Remove ' + name + ' as a deliverer? Any cues assigned to them move to Unassigned.')) return;
+  try {
+    await sb('PATCH', 'requests?assigned_to=eq.' + encodeURIComponent(name), { assigned_to: null }, CD_WP);
+    await sb('DELETE', 'deliverers?name=eq.' + encodeURIComponent(name), null, CD_WP);
+    _cdReqs.forEach(r => { if (r.assigned_to === name) r.assigned_to = null; });
+    await cdLoadDeliverers(); cdRender();
+    cdSetStatus('Removed ' + name + '.');
+  } catch (e) { cdSetStatus('Remove failed: ' + (e.message || e), true); }
+}
 const CUEDROP_MAILER_URL = 'https://script.google.com/macros/s/AKfycbzGTzkBRTrIIP_tD6sbtOOUmNZkXDdtxPoO4c8fdWt5h3tZFueNSISPv8Q3LWStx73Whw/exec';
 let _cdCues = [], _cdCases = [], _cdReqs = [], _cdPicked = null, _cdAc = [], _cdAcFocus = -1, _cdTimer = null, _cdPoll = null, _cdSig = '', _cdExpanded = new Set();
 
-async function cdInit() { await cdLoadCatalog(); await cdLoad(); cdWireSearch(); cdStartPoll(); }
+async function cdInit() { await cdLoadDeliverers(); await cdLoadCatalog(); await cdLoad(); cdWireSearch(); cdStartPoll(); }
 function cdSetStatus(m, err) { const el = document.getElementById('cdStatus'); if (el) { el.textContent = m; el.style.color = err ? 'var(--spm-primary)' : 'var(--muted)'; clearTimeout(el._t); el._t = setTimeout(() => { el.textContent = ''; }, 6000); } }
 
 async function cdLoadCatalog() {
@@ -12587,7 +12636,9 @@ function cdRenderSchedule() {
   const undelivered = _cdReqs.filter(r => r.status !== 'delivered');
   if (!undelivered.length) { wrap.style.display = 'none'; wrap.innerHTML = ''; return; }
   const sortFn = (a, b) => ((a.delivery_date || '9999-99-99') + 'T' + (a.delivery_time || '99')).localeCompare((b.delivery_date || '9999-99-99') + 'T' + (b.delivery_time || '99'));
-  const groups = CD_DELIVERERS.map(d => [d, d]).concat([['', 'Unassigned']]);
+  // active deliverers + any orphaned assignment (a name that was removed) so nothing vanishes
+  const orphans = [...new Set(undelivered.map(r => r.assigned_to).filter(a => a && !_cdDeliverers.includes(a)))];
+  const groups = _cdDeliverers.map(d => [d, d]).concat(orphans.map(o => [o, o + ' (removed)'])).concat([['', 'Unassigned']]);
   let html = '<div class="cd-sched-title">Delivery lists &mdash; ' + undelivered.length + ' to hand out</div><div class="cd-dlists">';
   for (const [key, label] of groups) {
     const rows = undelivered.filter(r => (r.assigned_to || '') === key).sort(sortFn);
@@ -12651,7 +12702,7 @@ async function cdSaveStock() {
 
 function cdRender() {
   const list = document.getElementById('cdList'); if (!list) return;
-  cdRenderSchedule(); cdRenderInventory();
+  cdRenderDeliverers(); cdRenderSchedule(); cdRenderInventory();
   if (!_cdReqs.length) { list.innerHTML = '<div class="cd-empty">No giveaway requests yet. Search a player above, pick a cue + case, and add one.</div>'; return; }
   const pill = s => '<span class="badge st-' + s + '">' + (s === 'requested' ? 'Requested' : s === 'emailed' ? 'Emailed' : s === 'scheduled' ? 'Scheduled' : 'Delivered') + '</span>';
   const legend = '<div class="cd-legend"><span><i style="background:#cbd5e1"></i>Requested</span><span><i style="background:var(--spm-accent)"></i>Emailed</span><span><i style="background:#f59e0b"></i>Delivery scheduled</span><span><i style="background:#16a34a"></i>Delivered</span></div>';
