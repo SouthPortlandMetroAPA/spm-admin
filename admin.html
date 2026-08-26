@@ -5027,6 +5027,22 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         #tab-matchfees .mf-late{background:#fef3c7;color:#92400e}
         #tab-matchfees .mf-unpaid{background:#fde8ec;color:#b91c1c}
         #tab-matchfees .mf-bye{background:#f1f3f5;color:#9aa1a9}
+        .mf-dlg-wrap{position:fixed;inset:0;z-index:10000;background:rgba(17,24,39,.45);display:flex;align-items:center;justify-content:center;padding:20px}
+        .mf-dlg{background:#fff;border-radius:16px;box-shadow:0 24px 60px rgba(0,0,0,.28);padding:20px 20px 16px;width:100%;max-width:420px}
+        .mf-dlg-h{font-size:1.05rem;font-weight:800;color:#0031a1;margin-bottom:4px}
+        .mf-dlg-b{font-size:.88rem;color:#4b5563;margin-bottom:12px}
+        .mf-dlg-lb{display:block;font-size:.82rem;font-weight:700;margin:12px 0 4px}
+        .mf-dlg-req{color:#ea002a}
+        .mf-dlg-in{width:100%;font:inherit;font-size:.95rem;padding:10px 11px;border:1px solid #d0d5da;border-radius:10px;background:#fff}
+        .mf-dlg-in:focus{outline:none;border-color:#0031a1;box-shadow:0 0 0 3px rgba(0,49,161,.15)}
+        .mf-dlg-err{color:#ea002a;font-size:.8rem;min-height:16px;margin-top:6px}
+        .mf-dlg-row{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}
+        .mf-dlg-btn{font:inherit;font-size:.88rem;font-weight:700;padding:9px 16px;border-radius:999px;border:1.5px solid #d0d5da;background:#fff;color:#4b5563;cursor:pointer}
+        .mf-dlg-go{background:#0031a1;border-color:#0031a1;color:#fff}
+        .mf-dlg-danger{background:#ea002a;border-color:#ea002a}
+        .mf-toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:10001;background:#111827;color:#fff;font-size:.9rem;font-weight:600;padding:11px 18px;border-radius:999px;box-shadow:0 10px 30px rgba(0,0,0,.25);transition:opacity .3s}
+        .mf-toast-bad{background:#ea002a}
+        .mf-toast-out{opacity:0}
         /* aligned week grid: fixed cell width so every division lines up */
         #tab-matchfees .mf-tbl{table-layout:fixed}
         #tab-matchfees .mf-c,#tab-matchfees .mf-wh{width:30px;min-width:30px;max-width:30px;text-align:center}
@@ -5390,7 +5406,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.361';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.362';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11133,6 +11149,67 @@ function mfTeamRow(div, team, weeks, today, ownWeeks) {
  * as an overlay in mfCell. Neither ever invents or mutates a payment: the Stripe
  * report stays the source of truth for whether money moved. A comment is
  * REQUIRED on both — an unattributed override is the audit hole this closes.  */
+
+/* ── mfDialog: the house modal. Resolves to the field values, or null on
+ * cancel. Replaces prompt()/confirm()/alert() in the Match Fees tab, which
+ * the operator called out as "ugly browser popups". Keyboard: Esc cancels,
+ * Enter submits from any single-line input.                              */
+function mfDialog(opts) {
+  return new Promise(function (resolve) {
+    const wrap = document.createElement('div');
+    wrap.className = 'mf-dlg-wrap';
+    const fields = (opts.fields || []).map(function (f) {
+      const id = 'mfdlg_' + f.name;
+      const val = f.value == null ? '' : String(f.value);
+      if (f.type === 'textarea') {
+        return '<label class="mf-dlg-lb" for="' + id + '">' + esc(f.label) + (f.required ? ' <span class="mf-dlg-req">*</span>' : '') + '</label>' +
+          '<textarea id="' + id + '" class="mf-dlg-in" rows="3" placeholder="' + esc(f.placeholder || '') + '">' + esc(val) + '</textarea>';
+      }
+      return '<label class="mf-dlg-lb" for="' + id + '">' + esc(f.label) + (f.required ? ' <span class="mf-dlg-req">*</span>' : '') + '</label>' +
+        '<input id="' + id + '" class="mf-dlg-in" type="' + (f.type || 'text') + '" value="' + esc(val) + '" placeholder="' + esc(f.placeholder || '') + '">';
+    }).join('');
+    wrap.innerHTML =
+      '<div class="mf-dlg" role="dialog" aria-modal="true" aria-labelledby="mfDlgTitle">' +
+        '<div class="mf-dlg-h" id="mfDlgTitle">' + esc(opts.title || '') + '</div>' +
+        (opts.body ? '<div class="mf-dlg-b">' + esc(opts.body) + '</div>' : '') +
+        fields +
+        '<div class="mf-dlg-err" id="mfDlgErr"></div>' +
+        '<div class="mf-dlg-row">' +
+          '<button type="button" class="mf-dlg-btn" id="mfDlgCancel">' + esc(opts.cancelText || 'Cancel') + '</button>' +
+          '<button type="button" class="mf-dlg-btn mf-dlg-go' + (opts.danger ? ' mf-dlg-danger' : '') + '" id="mfDlgOk">' + esc(opts.okText || 'Save') + '</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(wrap);
+    const close = function (v) { document.removeEventListener('keydown', onKey); wrap.remove(); resolve(v); };
+    const submit = function () {
+      const out = {};
+      for (const f of (opts.fields || [])) {
+        const el = document.getElementById('mfdlg_' + f.name);
+        out[f.name] = (el && el.value || '').trim();
+        if (f.required && !out[f.name]) { document.getElementById('mfDlgErr').textContent = f.label + ' is required.'; if (el) el.focus(); return; }
+        if (f.pattern && out[f.name] && !new RegExp(f.pattern).test(out[f.name])) { document.getElementById('mfDlgErr').textContent = f.hint || ('Check ' + f.label + '.'); if (el) el.focus(); return; }
+      }
+      close(out);
+    };
+    const onKey = function (e) {
+      if (e.key === 'Escape') { e.preventDefault(); close(null); }
+      else if (e.key === 'Enter' && e.target && e.target.tagName !== 'TEXTAREA') { e.preventDefault(); submit(); }
+    };
+    document.addEventListener('keydown', onKey);
+    wrap.addEventListener('click', function (e) { if (e.target === wrap) close(null); });
+    document.getElementById('mfDlgCancel').onclick = function () { close(null); };
+    document.getElementById('mfDlgOk').onclick = submit;
+    const first = wrap.querySelector('.mf-dlg-in'); if (first) first.focus();
+  });
+}
+function mfToast(msg, bad) {
+  const t = document.createElement('div');
+  t.className = 'mf-toast' + (bad ? ' mf-toast-bad' : '');
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(function () { t.classList.add('mf-toast-out'); setTimeout(function () { t.remove(); }, 300); }, 2600);
+}
+
 function mfStamp(iso) { return iso ? String(iso).replace('T', ' ').slice(0, 16) : '?'; }
 
 // due date after a reschedule = the day AFTER the new match date, at 11:00.
@@ -11173,18 +11250,24 @@ document.addEventListener('click', function (e) {
 async function mfAskReschedule(dn, tn, wk) {
   mfCloseMenu();
   const prev = ((_mf.adjIndex || {})[dn + '|' + tn + '|' + wk] || {}).reschedule;
-  // Prompt wording avoids "WORD (" — validate_admin_js reads that as a call
-  // even inside a string literal, so an em-dash carries the label instead.
-  const date = prompt('New match date — YYYY-MM-DD:', (prev && prev.resched_date) || '');
-  if (!date) return;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date.trim())) { alert('Date must be YYYY-MM-DD.'); return; }
-  const time = prompt('New match time — HH:MM, 24 hour:', (prev && prev.resched_time) || '19:00');
-  if (time === null) return;
-  const comment = prompt('Why is this rescheduled? (required)', (prev && prev.comment) || '');
-  if (comment === null) return;
-  if (!comment.trim()) { alert('A comment is required.'); return; }
-  const newDue = mfReschedDue(date.trim());
-  if (!newDue) { alert('Could not read that date.'); return; }
+  // One house modal, not three chained browser prompts. Native date/time inputs
+  // remove the format-typo class entirely.
+  const res = await mfDialog({
+    title: 'Mark week ' + wk + ' rescheduled',
+    body: 'Payment becomes due the day after the new match date, at 11:00.',
+    okText: 'Save reschedule',
+    fields: [
+      { name: 'date', label: 'New match date', type: 'date', value: (prev && prev.resched_date) || '',
+        required: true, pattern: '^\\d{4}-\\d{2}-\\d{2}$', hint: 'Pick a date.' },
+      { name: 'time', label: 'New match time', type: 'time', value: (prev && prev.resched_time) || '19:00' },
+      { name: 'comment', label: 'Why is it rescheduled?', type: 'textarea', value: (prev && prev.comment) || '',
+        required: true, placeholder: 'Venue closed, weather, agreed between captains…' }
+    ]
+  });
+  if (!res) return;
+  const date = res.date, time = res.time, comment = res.comment;
+  const newDue = mfReschedDue(date);
+  if (!newDue) { mfToast('Could not read that date.', true); return; }
   await mfSaveAdj({
     session_id: _mfSession, division_number: dn, team_number_norm: tn, wop: wk,
     kind: 'reschedule', comment: comment.trim(),
@@ -11195,9 +11278,15 @@ async function mfAskReschedule(dn, tn, wk) {
 
 async function mfAskOverride(dn, tn, wk) {
   mfCloseMenu();
-  const comment = prompt('Why is this late payment being forgiven? (required)', '');
-  if (comment === null) return;
-  if (!comment.trim()) { alert('A comment is required.'); return; }
+  const res = await mfDialog({
+    title: 'Forgive this late payment',
+    body: 'The team paid after the deadline. This marks the week on time and records why.',
+    okText: 'Mark on time',
+    fields: [{ name: 'comment', label: 'Why is it being forgiven?', type: 'textarea', required: true,
+      placeholder: 'Bank hold, captain notified in advance, operator error…' }]
+  });
+  if (!res) return;
+  const comment = res.comment;
   await mfSaveAdj({
     session_id: _mfSession, division_number: dn, team_number_norm: tn, wop: wk,
     kind: 'override_ontime', comment: comment.trim()
@@ -11210,18 +11299,23 @@ async function mfSaveAdj(row) {
     await sb('POST', 'match_fee_adjustments?on_conflict=session_id,division_number,team_number_norm,wop,kind',
       row, { Prefer: 'resolution=merge-duplicates,return=minimal' });
     await mfLoadData();
-  } catch (e) { alert('Could not save: ' + (e.message || e)); }
+  } catch (e) { mfToast('Could not save: ' + (e.message || e), true); }
 }
 
 async function mfClearAdj(dn, tn, wk, kind) {
   mfCloseMenu();
-  if (!confirm('Remove this ' + (kind === 'reschedule' ? 'reschedule' : 'override') + '?')) return;
+  const ok = await mfDialog({
+    title: 'Remove this ' + (kind === 'reschedule' ? 'reschedule' : 'override') + '?',
+    body: 'The week goes back to whatever the payment report says.',
+    okText: 'Remove', danger: true, fields: []
+  });
+  if (!ok) return;
   try {
     await sb('DELETE', 'match_fee_adjustments?session_id=eq.' + _mfSession +
       '&division_number=eq.' + encodeURIComponent(dn) + '&team_number_norm=eq.' + encodeURIComponent(tn) +
       '&wop=eq.' + wk + '&kind=eq.' + kind);
     await mfLoadData();
-  } catch (e) { alert('Could not remove: ' + (e.message || e)); }
+  } catch (e) { mfToast('Could not remove: ' + (e.message || e), true); }
 }
 
 function mfRender() {
