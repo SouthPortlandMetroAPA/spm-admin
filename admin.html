@@ -5027,8 +5027,17 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         #tab-matchfees .mf-late{background:#fef3c7;color:#92400e}
         #tab-matchfees .mf-unpaid{background:#fde8ec;color:#b91c1c}
         #tab-matchfees .mf-bye{background:#f1f3f5;color:#9aa1a9}
+        #tab-matchfees .mf-due{background:#eff6ff;color:#1d4ed8}
         #tab-matchfees .mf-future,#tab-matchfees .mf-none{background:#fff;color:#d1d5db}
         #tab-matchfees .mf-owe{font-weight:700;color:#b91c1c}
+        #tab-matchfees .mf-deadlines{border:1px solid var(--border,#e5e7eb);border-radius:10px;margin:0 0 14px;background:#fafbfc}
+        #tab-matchfees .mf-deadlines>summary{cursor:pointer;font-weight:700;padding:10px 14px;list-style:none}
+        #tab-matchfees .mf-deadlines>summary::-webkit-details-marker{display:none}
+        #tab-matchfees .mf-dl-body{padding:0 14px 14px}
+        #tab-matchfees .mf-dl-row{display:flex;align-items:center;gap:8px;margin:5px 0;font-size:.9rem;flex-wrap:wrap}
+        #tab-matchfees .mf-dl-night{min-width:120px;font-weight:600}
+        #tab-matchfees .mf-dl-arrow{color:var(--muted,#6b7280)}
+        #tab-matchfees .mf-dl-row select,#tab-matchfees .mf-dl-row input{border:1px solid var(--border,#cbd0d8);border-radius:7px;padding:5px 8px;font:inherit;font-size:.88rem;background:#fff}
       </style>
       <div class="card">
         <h2 style="margin-top:0">Match Fees</h2>
@@ -5042,6 +5051,15 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         <div id="mfMeta" class="muted" style="font-size:.85rem"></div>
       </div>
       <div class="card">
+        <details class="mf-deadlines" id="mfDeadlinesPanel">
+          <summary>⚙ Payment deadlines by night — drives the late/on-time flags</summary>
+          <div class="mf-dl-body">
+            <p class="muted" style="margin:2px 0 10px">Each division's fees are due by the day &amp; time set for its <b>night of play</b>. A payment is <b>late</b> when the Stripe payment date is after this deadline. (The report carries no payment time, so the time is a captain-facing guideline; lateness is judged by date.)</p>
+            <div id="mfDeadlinesRows"></div>
+            <button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="mfSaveDeadlines()">Save deadlines</button>
+            <span id="mfDlStatus" class="muted" style="margin-left:10px;font-size:.85rem"></span>
+          </div>
+        </details>
         <div class="mf-filters">
           <label>Division <select id="mfDivFilter"><option value="">All divisions</option></select></label>
           <label><input type="checkbox" id="mfOnlyOwing"> Only teams with unpaid or late weeks</label>
@@ -5049,6 +5067,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             <span class="mf-key"><span class="mf-sw mf-ontime"></span>on time</span>
             <span class="mf-key"><span class="mf-sw mf-late"></span>late</span>
             <span class="mf-key"><span class="mf-sw mf-unpaid"></span>not paid</span>
+            <span class="mf-key"><span class="mf-sw mf-due"></span>due (grace)</span>
             <span class="mf-key"><span class="mf-sw mf-bye"></span>bye</span>
             <span class="mf-key"><span class="mf-sw mf-future" style="border-color:#d1d5db"></span>upcoming</span>
           </span>
@@ -5349,7 +5368,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.355';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.356';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10808,6 +10827,60 @@ let _mfSessions = [];
 let _mfSession = null;
 let _mf = { divisions: [], payments: [], weekDate: {}, byeWeeks: null, upload: null };
 let _mfFilter = { division: '', onlyOwing: false };
+/* Per-night payment deadlines (slate.match_fee_deadlines). Night of play → the
+   weekday (0=Sun..6=Sat) fees are due by + a time (display-only; the Stripe report
+   has no payment time). A payment is LATE when its date is after the deadline date. */
+let _mfDeadlines = {};   // night_of_play -> { due_weekday:int, due_time:str }
+const MF_DAYS   = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const MF_NIGHTS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+async function mfLoadDeadlines() {
+  const rows = await sb('GET', 'match_fee_deadlines?select=night_of_play,due_weekday,due_time') || [];
+  _mfDeadlines = {};
+  for (const r of rows) _mfDeadlines[r.night_of_play] = { due_weekday: r.due_weekday, due_time: r.due_time || '11:00' };
+}
+/* Deadline date for one week: the first date AFTER the week's play date whose weekday
+   matches the division-night's configured due-day. Returns {date,time} or null (→ the
+   caller falls back to the play date so un-configured nights keep the old behavior). */
+function mfDeadlineFor(div, sched) {
+  if (!sched) return null;
+  const cfg = _mfDeadlines[(div.night_of_play || '').trim()];
+  if (!cfg || cfg.due_weekday == null) return null;
+  const base = new Date(sched + 'T00:00:00Z');
+  if (isNaN(base.getTime())) return null;
+  for (let i = 1; i <= 7; i++) {
+    const nd = new Date(base.getTime() + i * 86400000);
+    if (nd.getUTCDay() === cfg.due_weekday) return { date: nd.toISOString().slice(0, 10), time: cfg.due_time || '11:00' };
+  }
+  return null;
+}
+function mfRenderDeadlines() {
+  const el = document.getElementById('mfDeadlinesRows'); if (!el) return;
+  el.innerHTML = MF_NIGHTS.map(night => {
+    const cfg = _mfDeadlines[night] || { due_weekday: '', due_time: '11:00' };
+    const opts = MF_DAYS.map((d, i) => '<option value="' + i + '"' + (cfg.due_weekday === i ? ' selected' : '') + '>' + d + '</option>').join('');
+    return '<div class="mf-dl-row"><span class="mf-dl-night">' + night + ' games</span>'
+      + '<span class="mf-dl-arrow">due</span>'
+      + '<select class="mf-dl-day" data-night="' + night + '"><option value="">—</option>' + opts + '</select>'
+      + '<span class="mf-dl-arrow">by</span>'
+      + '<input type="time" class="mf-dl-time" data-night="' + night + '" value="' + esc(cfg.due_time || '11:00') + '"></div>';
+  }).join('');
+}
+async function mfSaveDeadlines() {
+  const rows = MF_NIGHTS.map(night => {
+    const day = document.querySelector('.mf-dl-day[data-night="' + night + '"]');
+    const time = document.querySelector('.mf-dl-time[data-night="' + night + '"]');
+    const dw = day && day.value !== '' ? parseInt(day.value, 10) : null;
+    return dw == null ? null : { night_of_play: night, due_weekday: dw, due_time: (time && time.value) || '11:00' };
+  }).filter(Boolean);
+  const st = document.getElementById('mfDlStatus');
+  if (st) st.textContent = 'Saving…';
+  try {
+    await sb('POST', 'match_fee_deadlines?on_conflict=night_of_play', rows, { Prefer: 'resolution=merge-duplicates,return=minimal' });
+    await mfLoadDeadlines(); mfRenderDeadlines(); mfRender();
+    if (st) st.textContent = 'Saved ✓ — late/on-time flags recomputed.';
+  } catch (e) { if (st) st.textContent = 'Save failed: ' + (e.message || e); }
+}
 
 function mfSetStatus(msg) { const el = document.getElementById('mfStatus'); if (el) el.textContent = msg || ''; }
 
@@ -10868,7 +10941,9 @@ async function mfLoadData() {
   if (divIds.length) matches = await mfFetchAll('matches?select=division_id,week_number,scheduled_date,row_type,home_team_id,away_team_id&division_id=in.(' + divIds.join(',') + ')');
   const payments = await mfFetchAll('match_fee_payments?select=*&session_id=eq.' + _mfSession);
   const ups = await sb('GET', 'match_fee_uploads?select=*&session_id=eq.' + _mfSession + '&order=uploaded_at.desc&limit=1');
+  await mfLoadDeadlines();
   _mf = mfBuildModel(divs, matches, payments, ups && ups[0]);
+  mfRenderDeadlines();
   mfSetStatus('');
   // division filter options
   const df = document.getElementById('mfDivFilter');
@@ -10920,10 +10995,13 @@ function mfCell(div, team, wk, today) {
   const dn = div.division_number;
   const teamNorm = String(parseInt(team.team_number, 10));
   const sched = (_mf.weekDate[dn] || {})[wk] || null;
+  const dl = mfDeadlineFor(div, sched);
+  const deadline = dl ? dl.date : sched;   // configured deadline, else fall back to the play date
+  const dlTime = dl ? dl.time : null;
   const pay = _mf.payIndex[dn + '|' + teamNorm + '|' + wk];
   if (pay) {
-    const late = sched && pay.payment_date && pay.payment_date > sched;
-    return { k: late ? 'late' : 'ontime', pay, sched };
+    const late = deadline && pay.payment_date && pay.payment_date > deadline;
+    return { k: late ? 'late' : 'ontime', pay, sched, deadline, dlTime };
   }
   // no successful payment yet
   const divWks = _mf.divWeeks[dn];
@@ -10931,8 +11009,10 @@ function mfCell(div, team, wk, today) {
   const isBye = divWks && divWks.has(wk) && teamWks && !teamWks.has(wk);
   if (isBye) return { k: 'bye', sched };
   if (!sched) return { k: 'none', sched };
-  if (sched > today) return { k: 'future', sched };
-  return { k: 'unpaid', sched };
+  if (sched > today) return { k: 'future', sched, deadline, dlTime };
+  // played, unpaid: still within the grace window until the deadline passes
+  if (deadline && deadline >= today) return { k: 'due', sched, deadline, dlTime };
+  return { k: 'unpaid', sched, deadline, dlTime };
 }
 
 function mfTeamRow(div, team, weeks, today) {
@@ -10941,12 +11021,14 @@ function mfTeamRow(div, team, weeks, today) {
   const cells = weeks.map(wk => {
     const c = mfCell(div, team, wk, today);
     if (c.k === 'unpaid' || c.k === 'late') owing++;
-    const label = { ontime: '✓', late: 'L', unpaid: '✗', bye: 'B', future: '', none: '' }[c.k];
+    const label = { ontime: '✓', late: 'L', unpaid: '✗', bye: 'B', due: '•', future: '', none: '' }[c.k];
     const amt = c.pay ? '$' + (+c.pay.amount).toFixed(0) : '';
-    const tip = 'Wk ' + wk + (c.sched ? ' · plays ' + c.sched : '') +
+    const dueStr = c.deadline ? c.deadline + (c.dlTime ? ' ' + c.dlTime : '') : null;
+    const tip = 'Wk ' + wk + (c.sched ? ' · plays ' + c.sched : '') + (dueStr ? ' · due ' + dueStr : '') +
       (c.k === 'ontime' ? ' · paid ' + (c.pay.payment_date || '?') + ' ' + amt + ' — on time' :
        c.k === 'late' ? ' · paid ' + (c.pay.payment_date || '?') + ' ' + amt + ' — LATE' :
-       c.k === 'unpaid' ? ' · NOT PAID' :
+       c.k === 'due' ? ' · not paid yet — still within grace' :
+       c.k === 'unpaid' ? ' · NOT PAID — past deadline' :
        c.k === 'bye' ? ' · bye' :
        c.k === 'future' ? ' · upcoming' : '');
     return '<td class="mf-c mf-' + c.k + '" title="' + esc(tip) + '">' + label + '</td>';
