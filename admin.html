@@ -5028,6 +5028,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         #tab-matchfees .mf-unpaid{background:#fde8ec;color:#b91c1c}
         #tab-matchfees .mf-bye{background:#f1f3f5;color:#9aa1a9}
         #tab-matchfees .mf-due{background:#eff6ff;color:#1d4ed8}
+        #tab-matchfees .mf-warn{background:#fde047;color:#713f12;font-weight:900}
         #tab-matchfees .mf-future,#tab-matchfees .mf-none{background:#fff;color:#d1d5db}
         #tab-matchfees .mf-owe{font-weight:700;color:#b91c1c}
         #tab-matchfees .mf-deadlines{border:1px solid var(--border,#e5e7eb);border-radius:10px;margin:0 0 14px;background:#fafbfc}
@@ -5062,11 +5063,12 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         </details>
         <div class="mf-filters">
           <label>Division <select id="mfDivFilter"><option value="">All divisions</option></select></label>
-          <label><input type="checkbox" id="mfOnlyOwing"> Only teams with unpaid or late weeks</label>
+          <label><input type="checkbox" id="mfOnlyOwing"> Only teams needing attention — due &lt;24h, unpaid, or late</label>
           <span class="mf-legend">
             <span class="mf-key"><span class="mf-sw mf-ontime"></span>on time</span>
             <span class="mf-key"><span class="mf-sw mf-late"></span>late</span>
-            <span class="mf-key"><span class="mf-sw mf-unpaid"></span>not paid</span>
+            <span class="mf-key"><span class="mf-sw mf-warn"></span>due &lt;24h (!)</span>
+            <span class="mf-key"><span class="mf-sw mf-unpaid"></span>not paid (past due)</span>
             <span class="mf-key"><span class="mf-sw mf-due"></span>due (grace)</span>
             <span class="mf-key"><span class="mf-sw mf-bye"></span>bye</span>
             <span class="mf-key"><span class="mf-sw mf-future" style="border-color:#d1d5db"></span>upcoming</span>
@@ -5368,7 +5370,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.356';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.357';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11010,8 +11012,15 @@ function mfCell(div, team, wk, today) {
   if (isBye) return { k: 'bye', sched };
   if (!sched) return { k: 'none', sched };
   if (sched > today) return { k: 'future', sched, deadline, dlTime };
-  // played, unpaid: still within the grace window until the deadline passes
-  if (deadline && deadline >= today) return { k: 'due', sched, deadline, dlTime };
+  // played + unpaid — escalate by the deadline MOMENT (date + time) vs now:
+  //   >24h out → due (grace) · within 24h → warn (!) · past → unpaid (✗)
+  const deadlineMs = deadline ? new Date(deadline + 'T' + (dlTime || '23:59') + ':00').getTime() : null;
+  const nowMs = Date.now();
+  if (deadlineMs != null && !isNaN(deadlineMs)) {
+    if (nowMs >= deadlineMs) return { k: 'unpaid', sched, deadline, dlTime };
+    if (nowMs >= deadlineMs - 86400000) return { k: 'warn', sched, deadline, dlTime };
+    return { k: 'due', sched, deadline, dlTime };
+  }
   return { k: 'unpaid', sched, deadline, dlTime };
 }
 
@@ -11020,13 +11029,14 @@ function mfTeamRow(div, team, weeks, today) {
   let owing = 0;
   const cells = weeks.map(wk => {
     const c = mfCell(div, team, wk, today);
-    if (c.k === 'unpaid' || c.k === 'late') owing++;
-    const label = { ontime: '✓', late: 'L', unpaid: '✗', bye: 'B', due: '•', future: '', none: '' }[c.k];
+    if (c.k === 'unpaid' || c.k === 'late' || c.k === 'warn') owing++;
+    const label = { ontime: '✓', late: 'L', unpaid: '✗', bye: 'B', due: '•', warn: '!', future: '', none: '' }[c.k];
     const amt = c.pay ? '$' + (+c.pay.amount).toFixed(0) : '';
     const dueStr = c.deadline ? c.deadline + (c.dlTime ? ' ' + c.dlTime : '') : null;
     const tip = 'Wk ' + wk + (c.sched ? ' · plays ' + c.sched : '') + (dueStr ? ' · due ' + dueStr : '') +
       (c.k === 'ontime' ? ' · paid ' + (c.pay.payment_date || '?') + ' ' + amt + ' — on time' :
        c.k === 'late' ? ' · paid ' + (c.pay.payment_date || '?') + ' ' + amt + ' — LATE' :
+       c.k === 'warn' ? ' · NOT PAID — due within 24h!' :
        c.k === 'due' ? ' · not paid yet — still within grace' :
        c.k === 'unpaid' ? ' · NOT PAID — past deadline' :
        c.k === 'bye' ? ' · bye' :
@@ -11085,7 +11095,7 @@ function mfRender() {
       (divOwing ? '<span class="mf-badge mf-b-owe">' + divOwing + ' owing</span>' : '<span class="mf-badge mf-b-ok">all current</span>') + '</div>' +
       '<div class="mf-scroll"><table class="mf-tbl"><thead><tr>' + head + '</tr></thead><tbody>' + shown.map(r => r.html).join('') + '</tbody></table></div></div>';
   }).join('');
-  if (sum) sum.innerHTML = '<div class="mf-stats"><span><b>' + totTeams + '</b> teams</span><span class="mf-s-owe"><b>' + totOwing + '</b> with unpaid/late weeks</span><span><b>$' + totCollected.toFixed(2) + '</b> collected</span>' + (_mfHidden ? '<span class="muted">' + _mfHidden + ' division' + (_mfHidden === 1 ? '' : 's') + ' hidden (no schedule)</span>' : '') + '</div>';
+  if (sum) sum.innerHTML = '<div class="mf-stats"><span><b>' + totTeams + '</b> teams</span><span class="mf-s-owe"><b>' + totOwing + '</b> needing attention — due-soon/unpaid/late</span><span><b>$' + totCollected.toFixed(2) + '</b> collected</span>' + (_mfHidden ? '<span class="muted">' + _mfHidden + ' division' + (_mfHidden === 1 ? '' : 's') + ' hidden (no schedule)</span>' : '') + '</div>';
   wrap.innerHTML = blocks || '<p class="muted">No divisions for this session.</p>';
 }
 
