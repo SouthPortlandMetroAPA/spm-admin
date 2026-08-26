@@ -5390,7 +5390,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.360';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.361';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11094,7 +11094,8 @@ function mfTeamRow(div, team, weeks, today, ownWeeks) {
     // pad cells past its own week count. Inert != unpaid: no state, no click.
     if (ownWeeks && wk > ownWeeks) return '<td class="mf-c mf-pad"></td>';
     const c = mfCell(div, team, wk, today);
-    if (c.k === 'unpaid' || c.k === 'late' || c.k === 'warn' || c.k === 'failed') owing++;
+    // 'late' is NOT owing: the money arrived, it was just after the deadline.
+    if (c.k === 'unpaid' || c.k === 'warn' || c.k === 'failed') owing++;
     const label = { ontime: '✓', ontime_ovr: '✔', late: 'L', unpaid: '✗', bye: 'B', due: '•', warn: '!', failed: 'F', future: '', none: '' }[c.k];
     const amt = c.pay ? '$' + (+c.pay.amount).toFixed(0) : '';
     const paidStr = c.pay ? (c.pay.payment_date || '?') + (c.pay.payment_time ? ' ' + c.pay.payment_time : '') : '?';
@@ -11208,7 +11209,7 @@ async function mfSaveAdj(row) {
   try {
     await sb('POST', 'match_fee_adjustments?on_conflict=session_id,division_number,team_number_norm,wop,kind',
       row, { Prefer: 'resolution=merge-duplicates,return=minimal' });
-    await mfLoad();
+    await mfLoadData();
   } catch (e) { alert('Could not save: ' + (e.message || e)); }
 }
 
@@ -11219,7 +11220,7 @@ async function mfClearAdj(dn, tn, wk, kind) {
     await sb('DELETE', 'match_fee_adjustments?session_id=eq.' + _mfSession +
       '&division_number=eq.' + encodeURIComponent(dn) + '&team_number_norm=eq.' + encodeURIComponent(tn) +
       '&wop=eq.' + wk + '&kind=eq.' + kind);
-    await mfLoad();
+    await mfLoadData();
   } catch (e) { alert('Could not remove: ' + (e.message || e)); }
 }
 
