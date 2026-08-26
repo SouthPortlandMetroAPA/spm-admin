@@ -4396,6 +4396,25 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         #tab-cuedrop .cd-sched-loc{min-width:110px;color:var(--spm-primary);font-weight:600}
         #tab-cuedrop .cd-sched-who{font-weight:600}
         #tab-cuedrop .cd-sched-cue{color:var(--muted)}
+        /* Delivery lists — one column per deliverer + Unassigned */
+        #tab-cuedrop .cd-dlists{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:8px}
+        @media(max-width:820px){#tab-cuedrop .cd-dlists{grid-template-columns:1fr}}
+        #tab-cuedrop .cd-dlist{border:1px solid var(--border);border-radius:10px;background:var(--card);overflow:hidden;display:flex;flex-direction:column}
+        #tab-cuedrop .cd-dlist-h{font-weight:800;padding:8px 12px;background:var(--spm-accent);color:#fff;display:flex;justify-content:space-between;align-items:center}
+        #tab-cuedrop .cd-dlist-n{background:rgba(255,255,255,.25);border-radius:999px;padding:0 8px;font-size:.8rem;font-weight:700}
+        #tab-cuedrop .cd-dlist-empty{padding:12px;color:var(--muted);font-size:.85rem;font-style:italic}
+        #tab-cuedrop .cd-drow{padding:9px 12px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between;align-items:center}
+        #tab-cuedrop .cd-drow:first-of-type{border-top:none}
+        #tab-cuedrop .cd-drow-who{font-weight:700;font-size:.92rem}
+        #tab-cuedrop .cd-drow-cue{color:var(--muted);font-size:.84rem}
+        #tab-cuedrop .cd-drow-when{color:var(--spm-accent);font-size:.82rem;font-weight:600;margin-top:2px}
+        #tab-cuedrop .cd-drow-acts{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+        #tab-cuedrop .cd-drow-assign{border:1px solid var(--border);border-radius:7px;padding:5px 7px;font:inherit;font-size:.8rem;background:var(--card);color:var(--text)}
+        #tab-cuedrop .cd-drow-dlv{background:#16a34a;border-color:#16a34a;color:#fff}
+        #tab-cuedrop .cd-drow-dlv:hover{background:#12833b}
+        #tab-cuedrop .cd-assign{display:flex;gap:8px;align-items:center;margin-top:9px;padding-top:9px;border-top:1px dashed var(--border)}
+        #tab-cuedrop .cd-assign label{font-size:.72rem;color:var(--muted);font-weight:600}
+        #tab-cuedrop .cd-assign select{border:1px solid var(--border);border-radius:7px;padding:6px 8px;font:inherit;font-size:.85rem;background:var(--card);color:var(--text)}
         #tab-cuedrop .cd-inv{border:1px solid var(--border);border-radius:12px;padding:14px 16px;background:#fbfbfd}
         #tab-cuedrop .cd-inv-title{font-weight:800;margin-bottom:10px}
         /* Two mini-tables packed to content width and sitting close — NOT 1fr/1fr (which spreads them apart and re-opens gaps). */
@@ -5323,7 +5342,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.353';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.354';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -12443,6 +12462,25 @@ function psStartPoll() {
    on file). Brief 2026-08-19. */
 const CD_RP = { 'Accept-Profile': 'cuedrop' };
 const CD_WP = { 'Accept-Profile': 'cuedrop', 'Content-Profile': 'cuedrop' };
+/* Fixed set of people who hand out cues. cuedrop.requests.assigned_to holds one of
+   these display strings, or null = Unassigned. The delivery view splits into a list
+   per deliverer + an Unassigned list. */
+const CD_DELIVERERS = ['Paul', 'Michelle'];
+function cdAssignSelect(r, cls) {
+  return '<select' + (cls ? ' class="' + cls + '"' : '') + ' onchange="cdAssign(' + r.id + ', this.value)">'
+    + '<option value=""' + (!r.assigned_to ? ' selected' : '') + '>Unassigned</option>'
+    + CD_DELIVERERS.map(d => '<option value="' + d + '"' + (r.assigned_to === d ? ' selected' : '') + '>' + esc(d) + '</option>').join('')
+    + '</select>';
+}
+async function cdAssign(id, who) {
+  const val = who || null;
+  try {
+    await sb('PATCH', 'requests?id=eq.' + id, { assigned_to: val }, CD_WP);
+    const r = _cdReqs.find(x => x.id === id); if (r) r.assigned_to = val;
+    cdRender();
+    cdSetStatus(val ? ('Assigned to ' + val + '.') : 'Moved to Unassigned.');
+  } catch (e) { cdSetStatus('Assign failed: ' + (e.message || e), true); }
+}
 const CUEDROP_MAILER_URL = 'https://script.google.com/macros/s/AKfycbzGTzkBRTrIIP_tD6sbtOOUmNZkXDdtxPoO4c8fdWt5h3tZFueNSISPv8Q3LWStx73Whw/exec';
 let _cdCues = [], _cdCases = [], _cdReqs = [], _cdPicked = null, _cdAc = [], _cdAcFocus = -1, _cdTimer = null, _cdPoll = null, _cdSig = '', _cdExpanded = new Set();
 
@@ -12539,22 +12577,38 @@ function cdFmtDay(d) { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d || ''); if (
 function cdFmtTime(t) { const m = /^(\d{1,2}):(\d{2})$/.exec(t || ''); if (!m) return t || ''; let h = +m[1]; const ap = h < 12 ? 'AM' : 'PM'; let h12 = h % 12; if (h12 === 0) h12 = 12; return h12 + ':' + m[2] + ' ' + ap; }
 function cdWhen(d, t) { const day = cdFmtDay(d), tm = cdFmtTime(t); return day && tm ? day + ' at ' + tm : (day || tm || 'TBD'); }
 
+/* Delivery lists: every undelivered cue, split into one list per deliverer
+   (Paul / Michelle) + an Unassigned list. Each row can be re-assigned and marked
+   Delivered inline. Rows sort by scheduled delivery date/time (undated last). */
 function cdRenderSchedule() {
   const wrap = document.getElementById('cdScheduleWrap'); if (!wrap) return;
   const loc = document.getElementById('cdLocList');
   if (loc) loc.innerHTML = [...new Set(_cdReqs.map(r => r.delivery_location).filter(Boolean))].map(l => '<option value="' + esc(l) + '">').join('');
-  const sched = _cdReqs.filter(r => r.delivery_date && r.status !== 'delivered')
-    .sort((a, b) => (a.delivery_date + 'T' + (a.delivery_time || '')).localeCompare(b.delivery_date + 'T' + (b.delivery_time || '')));
-  if (!sched.length) { wrap.style.display = 'none'; wrap.innerHTML = ''; return; }
-  let html = '<div class="cd-sched-title">Delivery schedule &mdash; ' + sched.length + ' to hand out</div>';
-  let curDay = '';
-  sched.forEach(r => {
-    if (r.delivery_date !== curDay) { curDay = r.delivery_date; html += '<div class="cd-sched-day">' + esc(cdFmtDay(curDay)) + '</div>'; }
-    html += '<div class="cd-sched-row"><span class="cd-sched-time">' + esc(cdFmtTime(r.delivery_time) || 'anytime') + '</span>'
-      + '<span class="cd-sched-loc">' + esc(r.delivery_location || '(location TBD)') + '</span>'
-      + '<span class="cd-sched-who">' + esc(r.player_name || r.member_number) + '</span>'
-      + '<span class="cd-sched-cue">' + esc(r.cue_friendly || r.cue_desc || r.cue_code) + ' + ' + esc(r.case_friendly || r.case_desc || r.case_code) + '</span></div>';
-  });
+  const undelivered = _cdReqs.filter(r => r.status !== 'delivered');
+  if (!undelivered.length) { wrap.style.display = 'none'; wrap.innerHTML = ''; return; }
+  const sortFn = (a, b) => ((a.delivery_date || '9999-99-99') + 'T' + (a.delivery_time || '99')).localeCompare((b.delivery_date || '9999-99-99') + 'T' + (b.delivery_time || '99'));
+  const groups = CD_DELIVERERS.map(d => [d, d]).concat([['', 'Unassigned']]);
+  let html = '<div class="cd-sched-title">Delivery lists &mdash; ' + undelivered.length + ' to hand out</div><div class="cd-dlists">';
+  for (const [key, label] of groups) {
+    const rows = undelivered.filter(r => (r.assigned_to || '') === key).sort(sortFn);
+    html += '<div class="cd-dlist"><div class="cd-dlist-h">' + esc(label) + '<span class="cd-dlist-n">' + rows.length + '</span></div>';
+    if (!rows.length) { html += '<div class="cd-dlist-empty">Nothing here yet.</div>'; }
+    else rows.forEach(r => {
+      const when = (r.delivery_date || r.delivery_time) ? cdWhen(r.delivery_date, r.delivery_time) : '';
+      const whenLoc = [when, r.delivery_location].filter(Boolean).join(' · ');
+      html += '<div class="cd-drow">'
+        + '<div class="cd-drow-main">'
+        + '<div class="cd-drow-who">' + esc(r.player_name || r.member_number) + '</div>'
+        + '<div class="cd-drow-cue">' + esc(r.cue_friendly || r.cue_desc || r.cue_code) + ' + ' + esc(r.case_friendly || r.case_desc || r.case_code) + '</div>'
+        + (whenLoc ? '<div class="cd-drow-when">📅 ' + esc(whenLoc) + '</div>' : '')
+        + '</div>'
+        + '<div class="cd-drow-acts">' + cdAssignSelect(r, 'cd-drow-assign')
+        + '<button class="btn btn-sm cd-drow-dlv" onclick="cdDeliver(' + r.id + ')">Delivered</button></div>'
+        + '</div>';
+    });
+    html += '</div>';
+  }
+  html += '</div>';
   wrap.innerHTML = html; wrap.style.display = 'block';
 }
 
@@ -12605,6 +12659,7 @@ function cdRender() {
     const emailBtn = r.status !== 'delivered' ? '<button class="btn btn-sm" onclick="cdEmail(' + r.id + ')">' + (r.status === 'requested' ? 'Email player' : 'Re-email') + '</button>' : '';
     const dlvBtn = r.status !== 'delivered' ? '<button class="btn btn-outline btn-sm" onclick="cdDeliver(' + r.id + ')">Mark delivered</button>' : '';
     const delBtn = '<button class="btn btn-outline btn-sm" style="color:var(--spm-primary);border-color:var(--spm-primary)" onclick="cdDelete(' + r.id + ')">Delete</button>';
+    const assignCtl = r.status !== 'delivered' ? '<div class="cd-assign"><label>Deliverer</label>' + cdAssignSelect(r) + '</div>' : '';
     const es = r.email_status && r.email_status !== 'sent' ? ' <span class="cd-gear" style="color:var(--spm-primary)">email ' + esc(r.email_status) + '</span>' : '';
     const hasDeliv = r.delivery_date || r.delivery_time || r.delivery_location;
     const setLine = hasDeliv ? '<div class="cd-set">📅 ' + esc(cdWhen(r.delivery_date, r.delivery_time)) + (r.delivery_location ? ' · ' + esc(r.delivery_location) : '') + '</div>' : '';
@@ -12630,7 +12685,7 @@ function cdRender() {
       + '</div>'
       + '<div class="cd-body">'
         + '<div class="cd-acts">' + emailBtn + editBtn + dlvBtn + delBtn + '</div>'
-        + editor + deliv
+        + assignCtl + editor + deliv
       + '</div></div>';
   }).join('');
 }
