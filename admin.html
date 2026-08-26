@@ -5029,6 +5029,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         #tab-matchfees .mf-bye{background:#f1f3f5;color:#9aa1a9}
         #tab-matchfees .mf-due{background:#eff6ff;color:#1d4ed8}
         #tab-matchfees .mf-warn{background:#fde047;color:#713f12;font-weight:900}
+        #tab-matchfees .mf-failed{background:#fed7aa;color:#c2410c;font-weight:900}
         #tab-matchfees .mf-future,#tab-matchfees .mf-none{background:#fff;color:#d1d5db}
         #tab-matchfees .mf-owe{font-weight:700;color:#b91c1c}
         #tab-matchfees .mf-deadlines{border:1px solid var(--border,#e5e7eb);border-radius:10px;margin:0 0 14px;background:#fafbfc}
@@ -5068,6 +5069,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             <span class="mf-key"><span class="mf-sw mf-ontime"></span>on time</span>
             <span class="mf-key"><span class="mf-sw mf-late"></span>late</span>
             <span class="mf-key"><span class="mf-sw mf-warn"></span>due &lt;24h (!)</span>
+            <span class="mf-key"><span class="mf-sw mf-failed"></span>failed (retry)</span>
             <span class="mf-key"><span class="mf-sw mf-unpaid"></span>not paid (past due)</span>
             <span class="mf-key"><span class="mf-sw mf-due"></span>due (grace)</span>
             <span class="mf-key"><span class="mf-sw mf-bye"></span>bye</span>
@@ -5370,7 +5372,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.357';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.358';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10981,15 +10983,19 @@ function mfBuildModel(divs, matches, payments, upload) {
     const cur = weekDate[p.division_number][p.wop];
     if (!cur || p.schedule_date < cur) weekDate[p.division_number][p.wop] = p.schedule_date;
   }
-  // Success payment index: division|teamnorm|wop -> earliest-paid payment
+  // Success payment index: division|teamnorm|wop -> earliest-paid Success. A team can
+  // make several attempts for one week (some Failed, some Success) — we take the
+  // earliest SUCCESS. failKeys tracks weeks that have a non-Success attempt so a
+  // week with ONLY failed attempts renders distinctly (tried, declined) vs never-paid.
   const payIndex = {};
+  const failKeys = new Set();
   for (const p of payments) {
-    if ((p.status || '') !== 'Success') continue;
     const k = p.division_number + '|' + p.team_number_norm + '|' + p.wop;
+    if ((p.status || '') !== 'Success') { failKeys.add(k); continue; }
     const ex = payIndex[k];
     if (!ex || (p.payment_date && (!ex.payment_date || p.payment_date < ex.payment_date))) payIndex[k] = p;
   }
-  return { divisions: divs, payments, weekDate, divWeeks, teamWeeks, payIndex, upload };
+  return { divisions: divs, payments, weekDate, divWeeks, teamWeeks, payIndex, failKeys, upload };
 }
 
 // classification for one (division, team, week) -> {k, pay, sched}
@@ -11000,9 +11006,19 @@ function mfCell(div, team, wk, today) {
   const dl = mfDeadlineFor(div, sched);
   const deadline = dl ? dl.date : sched;   // configured deadline, else fall back to the play date
   const dlTime = dl ? dl.time : null;
-  const pay = _mf.payIndex[dn + '|' + teamNorm + '|' + wk];
+  const key = dn + '|' + teamNorm + '|' + wk;
+  const pay = _mf.payIndex[key];
   if (pay) {
-    const late = deadline && pay.payment_date && pay.payment_date > deadline;
+    // late = the payment MOMENT is after the deadline MOMENT. The Stripe report carries
+    // the payment TIME, so paying 11:15 against an 11:00 deadline correctly reads LATE.
+    let late = false;
+    if (deadline && pay.payment_date) {
+      const payMs = new Date(pay.payment_date + 'T' + (pay.payment_time || '23:59') + ':00').getTime();
+      const dlMs  = new Date(deadline + 'T' + (dlTime || '23:59') + ':00').getTime();
+      late = payMs > dlMs;
+    } else if (deadline && !pay.payment_date) {
+      late = true;   // Success but no date parsed — never silently call it on-time
+    }
     return { k: late ? 'late' : 'ontime', pay, sched, deadline, dlTime };
   }
   // no successful payment yet
@@ -11012,7 +11028,10 @@ function mfCell(div, team, wk, today) {
   if (isBye) return { k: 'bye', sched };
   if (!sched) return { k: 'none', sched };
   if (sched > today) return { k: 'future', sched, deadline, dlTime };
-  // played + unpaid — escalate by the deadline MOMENT (date + time) vs now:
+  // played, no Success payment. If there were only FAILED attempts, flag distinctly
+  // (they tried, the card declined — needs a retry nudge) vs a plain never-paid.
+  if (_mf.failKeys && _mf.failKeys.has(key)) return { k: 'failed', sched, deadline, dlTime };
+  // otherwise escalate by the deadline MOMENT (date + time) vs now:
   //   >24h out → due (grace) · within 24h → warn (!) · past → unpaid (✗)
   const deadlineMs = deadline ? new Date(deadline + 'T' + (dlTime || '23:59') + ':00').getTime() : null;
   const nowMs = Date.now();
@@ -11029,15 +11048,17 @@ function mfTeamRow(div, team, weeks, today) {
   let owing = 0;
   const cells = weeks.map(wk => {
     const c = mfCell(div, team, wk, today);
-    if (c.k === 'unpaid' || c.k === 'late' || c.k === 'warn') owing++;
-    const label = { ontime: '✓', late: 'L', unpaid: '✗', bye: 'B', due: '•', warn: '!', future: '', none: '' }[c.k];
+    if (c.k === 'unpaid' || c.k === 'late' || c.k === 'warn' || c.k === 'failed') owing++;
+    const label = { ontime: '✓', late: 'L', unpaid: '✗', bye: 'B', due: '•', warn: '!', failed: 'F', future: '', none: '' }[c.k];
     const amt = c.pay ? '$' + (+c.pay.amount).toFixed(0) : '';
+    const paidStr = c.pay ? (c.pay.payment_date || '?') + (c.pay.payment_time ? ' ' + c.pay.payment_time : '') : '?';
     const dueStr = c.deadline ? c.deadline + (c.dlTime ? ' ' + c.dlTime : '') : null;
     const tip = 'Wk ' + wk + (c.sched ? ' · plays ' + c.sched : '') + (dueStr ? ' · due ' + dueStr : '') +
-      (c.k === 'ontime' ? ' · paid ' + (c.pay.payment_date || '?') + ' ' + amt + ' — on time' :
-       c.k === 'late' ? ' · paid ' + (c.pay.payment_date || '?') + ' ' + amt + ' — LATE' :
+      (c.k === 'ontime' ? ' · paid ' + paidStr + ' ' + amt + ' — on time' :
+       c.k === 'late' ? ' · paid ' + paidStr + ' ' + amt + ' — LATE' :
        c.k === 'warn' ? ' · NOT PAID — due within 24h!' :
        c.k === 'due' ? ' · not paid yet — still within grace' :
+       c.k === 'failed' ? ' · payment FAILED — attempt(s) declined, needs retry' :
        c.k === 'unpaid' ? ' · NOT PAID — past deadline' :
        c.k === 'bye' ? ' · bye' :
        c.k === 'future' ? ' · upcoming' : '');
@@ -11144,7 +11165,7 @@ async function mfSave(parsed, file, sid) {
   const recs = parsed.rows.map(r => ({
     upload_id: uploadId, session_id: sid, division_number: r.division_number, team_number_norm: r.team_number_norm,
     team_number_raw: r.team_number_raw, team_name: r.team_name, payer_name: r.payer_name, card_holder: r.card_holder,
-    wop: r.wop, schedule_date: r.schedule_date, payment_date: r.payment_date, amount: r.amount,
+    wop: r.wop, schedule_date: r.schedule_date, payment_date: r.payment_date, payment_time: r.payment_time, amount: r.amount,
     confirmation: r.confirmation, status: r.status
   }));
   for (let i = 0; i < recs.length; i += 500) await sb('POST', 'match_fee_payments', recs.slice(i, i + 500));
@@ -11164,7 +11185,11 @@ async function mfParsePdf(file) {
   const reWop = /^\d{1,2}$/;
   const reSched = /^\d{1,2}\/\d{1,2}\/\d{4}$/;
   const rePay = /^\d{1,2}\/\d{1,2}\/\d{2,4}$/;
-  const iso = d => { const m = (d || '').match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/); if (!m) return null; const yr = m[3].length === 2 ? '20' + m[3] : m[3]; return yr + '-' + String(m[1]).padStart(2, '0') + '-' + String(m[2]).padStart(2, '0'); };
+  const iso = d => { const m = String(d || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/); if (!m) return null; const yr = m[3].length === 2 ? '20' + m[3] : m[3]; return yr + '-' + String(m[1]).padStart(2, '0') + '-' + String(m[2]).padStart(2, '0'); };
+  const to24h = s => { const m = String(s || '').match(/(\d{1,2}):(\d{2})\s*([ap])\.?m?/i); if (!m) return null; let h = +m[1]; const ap = m[3].toLowerCase(); if (ap === 'p' && h !== 12) h += 12; if (ap === 'a' && h === 12) h = 0; return String(h).padStart(2, '0') + ':' + m[2]; };
+  // Stripe may put the payment DATE+TIME in one text item (lands in paydate) or split
+  // them (date=paydate, time=paytime). Grab the date + time from wherever they are.
+  const payDT = (pd, pt) => { const both = (String(pd || '') + ' ' + String(pt || '')).trim(); return { payment_date: /\d{1,2}\/\d{1,2}\/\d{2,4}/.test(both) ? iso(both) : null, payment_time: to24h(both) }; };
   const rows = [];
   const meta = { date_from: null, date_to: null, footer_teams: null, footer_total: null };
   for (let p = 1; p <= pdf.numPages; p++) {
@@ -11190,7 +11215,7 @@ async function mfParsePdf(file) {
       rows.push({
         division_number: c.div, payer_name: c.name || '', amount: Math.abs(+(c.amount || '').replace(/,/g, '')),
         team_number_raw: c.team, team_number_norm: String(parseInt(c.team, 10)), team_name: c.teamname || '',
-        wop: +c.wop, schedule_date: iso(c.sched), payment_date: rePay.test(c.paydate || '') ? iso(c.paydate) : null,
+        wop: +c.wop, schedule_date: iso(c.sched), ...payDT(c.paydate, c.paytime),
         confirmation: c.conf || null, card_holder: c.holder || '', session_label: c.session || '', status: (c.txn || '').trim()
       });
     }
