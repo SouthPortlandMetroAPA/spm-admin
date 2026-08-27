@@ -5406,7 +5406,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.362';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.363';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11077,7 +11077,7 @@ function mfCell(div, team, wk, today) {
     // An override forgives a LATE payment only. It never invents a payment and
     // never touches any other state, so a missing/unknown value can't reach the
     // clean bucket through this path (v5.3: no silent clean-default).
-    if (late && override) return { k: 'ontime_ovr', pay, sched, deadline, dlTime, resched, override };
+    if (override) return { k: 'ontime_ovr', pay, sched, deadline, dlTime, resched, override };
     return { k: late ? 'late' : 'ontime', pay, sched, deadline, dlTime, resched, override };
   }
   // no successful payment yet
@@ -11086,6 +11086,11 @@ function mfCell(div, team, wk, today) {
   const isBye = divWks && divWks.has(wk) && teamWks && !teamWks.has(wk);
   if (isBye) return { k: 'bye', sched, resched, override };
   if (!sched) return { k: 'none', sched, resched, override };
+  // An override settles the week whatever its current state — including before
+  // the deadline, and with no payment on file. It is always an explicit operator
+  // decision carrying a required comment, so this is not a silent clean-default:
+  // the hover says plainly that no payment was recorded.
+  if (override) return { k: 'ontime_ovr', sched, deadline, dlTime, resched, override };
   if (sched > today) return { k: 'future', sched, deadline, dlTime, resched, override };
   // played, no Success payment. If there were only FAILED attempts, flag distinctly
   // (they tried, the card declined — needs a retry nudge) vs a plain never-paid.
@@ -11118,7 +11123,8 @@ function mfTeamRow(div, team, weeks, today, ownWeeks) {
     const dueStr = c.deadline ? c.deadline + (c.dlTime ? ' ' + c.dlTime : '') : null;
     let tip = 'Wk ' + wk + (c.sched ? ' · plays ' + c.sched : '') + (dueStr ? ' · due ' + dueStr : '') +
       (c.k === 'ontime' ? ' · paid ' + paidStr + ' ' + amt + ' — on time' :
-       c.k === 'ontime_ovr' ? ' · paid ' + paidStr + ' ' + amt + ' — LATE, forgiven by override' :
+       c.k === 'ontime_ovr' ? (c.pay ? ' · paid ' + paidStr + ' ' + amt + ' — LATE, forgiven by override'
+                                     : ' · NO PAYMENT RECORDED — marked on time by override') :
        c.k === 'late' ? ' · paid ' + paidStr + ' ' + amt + ' — LATE' :
        c.k === 'warn' ? ' · NOT PAID — due within 24h!' :
        c.k === 'due' ? ' · not paid yet — still within grace' :
@@ -11229,7 +11235,11 @@ function mfCellMenu(td) {
   lines.push('<div class="mf-mtitle">' + esc(dn + ' · ' + team) + ' — week ' + wk + '</div>');
   lines.push('<button type="button" class="mf-mbtn" onclick="mfAskReschedule(\'' + esc(dn) + '\',\'' + esc(tn) + '\',' + wk + ')">' +
     (adj.reschedule ? 'Edit reschedule' : 'Mark rescheduled') + '</button>');
-  if (k === 'late') lines.push('<button type="button" class="mf-mbtn" onclick="mfAskOverride(\'' + esc(dn) + '\',\'' + esc(tn) + '\',' + wk + ')">Override to on time</button>');
+  // Any owed or upcoming week can be settled early, not just an already-late one.
+  if (k === 'late' || k === 'unpaid' || k === 'warn' || k === 'due' || k === 'failed' || k === 'future') {
+    lines.push('<button type="button" class="mf-mbtn" onclick="mfAskOverride(\'' + esc(dn) + '\',\'' + esc(tn) + '\',' + wk + ')">' +
+      (k === 'late' ? 'Override to on time' : 'Mark on time now') + '</button>');
+  }
   if (adj.override_ontime) lines.push('<button type="button" class="mf-mbtn mf-mdel" onclick="mfClearAdj(\'' + esc(dn) + '\',\'' + esc(tn) + '\',' + wk + ',\'override_ontime\')">Remove override</button>');
   if (adj.reschedule) lines.push('<button type="button" class="mf-mbtn mf-mdel" onclick="mfClearAdj(\'' + esc(dn) + '\',\'' + esc(tn) + '\',' + wk + ',\'reschedule\')">Remove reschedule</button>');
   lines.push('<button type="button" class="mf-mbtn mf-mcancel" onclick="mfCloseMenu()">Cancel</button>');
@@ -11279,8 +11289,8 @@ async function mfAskReschedule(dn, tn, wk) {
 async function mfAskOverride(dn, tn, wk) {
   mfCloseMenu();
   const res = await mfDialog({
-    title: 'Forgive this late payment',
-    body: 'The team paid after the deadline. This marks the week on time and records why.',
+    title: 'Mark this week on time',
+    body: 'Settles the week whatever the report says, now or later, and records why. Use it to forgive a late payment or to clear a week early.',
     okText: 'Mark on time',
     fields: [{ name: 'comment', label: 'Why is it being forgiven?', type: 'textarea', required: true,
       placeholder: 'Bank hold, captain notified in advance, operator error…' }]
