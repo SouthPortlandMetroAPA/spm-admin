@@ -5445,7 +5445,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.368';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.369';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10763,16 +10763,49 @@ let _nj = { rows: [], loaded: false, sort: { key: 'joined', dir: 'desc' } };
 
 function njSetStatus(m){ const e = document.getElementById('njStatus'); if (e) e.textContent = m || ''; }
 
-/* cell > home > alt (work excluded); drop <10-digit + all-zero; dedup; up to 2 shown. */
+/* cell > home > alt, work excluded; drop <10-digit + all-zero; dedup; up to 2 shown.
+   Each surviving number renders as the SAME pill the Outreach tab uses and opens the
+   SAME popover — otOpenPhoneMenu — offering Call / Text / Copy number. Reused, not
+   forked: that popover is already a registered no-contact surface and re-checks
+   dncIsBlocked when it opens.
+
+   The digit test here is load-bearing beyond formatting: slate.players stores an
+   unfilled input mask as a literal value on ~18.8k rows, which is TRUTHY and defeats
+   every emptiness test. Requiring exactly 10 digits is what keeps those rows showing
+   an em-dash instead of a control that texts nobody. Do not relax it. */
 function njPhone(r){
+  /* No-contact members are filtered out of the list by njVisibleRows, so this branch
+     should be unreachable. It stays anyway: a no-contact guarantee must not have a
+     single point of failure, and if that filter ever regresses this still refuses. */
+  if (r.dnc || dncIsBlocked(r.member_number)) return dncChipHtml('text');
   const seen = new Set(), out = [];
-  for (const raw of [r.cell_phone, r.home_phone, r.alt_phone]) {
-    let d = String(raw || '').replace(/\D/g, ''); if (d.length === 11 && d[0] === '1') d = d.slice(1);
+  for (const pair of [['Cell', r.cell_phone], ['Home', r.home_phone], ['Alt', r.alt_phone]]) {
+    const label = pair[0];
+    let d = String(pair[1] || '').replace(/\D/g, ''); if (d.length === 11 && d[0] === '1') d = d.slice(1);
     if (d.length !== 10 || /^0+$/.test(d) || seen.has(d)) continue;
-    seen.add(d); out.push('(' + d.slice(0,3) + ') ' + d.slice(3,6) + '-' + d.slice(6));
+    seen.add(d);
+    const pretty = '(' + d.slice(0,3) + ') ' + d.slice(3,6) + '-' + d.slice(6);
+    out.push('<button type="button" class="ot-phone-btn"'
+      + ' data-phone-raw="' + esc(pretty) + '"'
+      + ' data-phone-digits="' + esc(d) + '"'
+      + ' data-phone-label="' + esc(label) + '"'
+      + ' data-mn="' + esc(r.member_number || '') + '">📞 ' + esc(label) + ': ' + esc(pretty) + '</button>');
     if (out.length === 2) break;
   }
-  return out.join('<br>') || '<span class="nj-muted">—</span>';
+  return out.join(' ') || '<span class="nj-muted">—</span>';
+}
+
+/* Rows the tab is allowed to show. Operator decision 2026-08-27: a no-contact member
+   is removed from New Joiners entirely, not merely stripped of contact controls. The
+   hidden count is recorded and surfaced, so a shortened list never reads as a complete
+   one — a silently short roster misleads whoever counts it months later.
+   Both signals are honoured: r.dnc from the RPC, and the client no-contact set, which
+   can be fresher than the row. */
+function njVisibleRows(){
+  const all = _nj.rows || [];
+  const vis = all.filter(r => !(r.dnc || dncIsBlocked(r.member_number)));
+  _nj.hiddenDnc = all.length - vis.length;
+  return vis;
 }
 function njDate(iso){
   if (!iso) return '<span class="nj-muted">—</span>';
@@ -10828,9 +10861,11 @@ function njBuildCounty(){
   const sel = document.getElementById('njCounty'); if (!sel) return;
   const prev = sel.value;
   const counts = {};
-  for (const r of _nj.rows){ const c = r.county || '(no county)'; counts[c] = (counts[c] || 0) + 1; }
+  /* Count over VISIBLE rows so the dropdown totals agree with the table. */
+  const vis = njVisibleRows();
+  for (const r of vis){ const c = r.county || '(no county)'; counts[c] = (counts[c] || 0) + 1; }
   const opts = Object.entries(counts).sort((a,b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  sel.innerHTML = '<option value="">All counties (' + _nj.rows.length + ')</option>'
+  sel.innerHTML = '<option value="">All counties (' + vis.length + ')</option>'
     + opts.map(([c,n]) => '<option value="' + esc(c) + '">' + esc(c) + ' (' + n + ')</option>').join('');
   if (prev) sel.value = prev;
 }
@@ -10838,7 +10873,8 @@ function njBuildCounty(){
 function njRender(){
   const county = (document.getElementById('njCounty') || {}).value || '';
   const qq = ((document.getElementById('njSearch') || {}).value || '').trim().toLowerCase();
-  const rows = _nj.rows.filter(r => njMatch(r, county, qq));
+  const base = njVisibleRows();
+  const rows = base.filter(r => njMatch(r, county, qq));
 
   const s = _nj.sort, dir = s.dir === 'asc' ? 1 : -1;
   const keyOf = r => {
@@ -10874,7 +10910,15 @@ function njRender(){
       + '</tr>';
   }).join('') || '<tr><td colspan="8" class="nj-muted" style="padding:18px;text-align:center">No matching players.</td></tr>';
 
-  njSetStatus(rows.length + ' of ' + _nj.rows.length + ' shown');
+  /* Wire the phone pills to the shared popover. The Outreach wiring is scoped to its
+     own card element, so New Joiners needs its own — widening that one to the document
+     would attach handlers to cards it does not own. */
+  body.querySelectorAll('.ot-phone-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => { e.stopPropagation(); otOpenPhoneMenu(btn); });
+  });
+
+  njSetStatus(rows.length + ' of ' + base.length + ' shown'
+    + (_nj.hiddenDnc ? ' · ' + _nj.hiddenDnc + ' no-contact hidden' : ''));
 }
 
 async function njCopyEmails(){
@@ -26981,13 +27025,16 @@ const OT_TAB_STYLE = `
     display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; font-size:0.85rem;
   }
   #tab-outreach .ot-contact a,
+  #tab-newjoiners .ot-phone-btn,
   #tab-outreach .ot-contact .ot-phone-btn {
     padding:4px 10px; border-radius:6px; background:#f3f4f6; color:var(--text);
     text-decoration:none; font-weight:600; border:0; cursor:pointer;
     font-size:0.85rem; font-family:inherit;
   }
   #tab-outreach .ot-contact a:hover,
+  #tab-newjoiners .ot-phone-btn:hover,
   #tab-outreach .ot-contact .ot-phone-btn:hover { background:#e5e7eb; }
+  #tab-newjoiners .ot-phone-btn:active,
   #tab-outreach .ot-contact .ot-phone-btn:active { background:#d5d8dc; }
 
   /* Status pill row */
