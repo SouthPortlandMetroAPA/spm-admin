@@ -5434,7 +5434,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.366';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.367';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11605,17 +11605,20 @@ async function mfParsePdf(file) {
       if (dr) { meta.date_from = iso(dr[1]); meta.date_to = iso(dr[2]); }
       const ft = joined.match(/Teams:\s*(\d+).*Total Amount:\s*([\d,]+\.\d{2})/);
       if (ft) { meta.footer_teams = +ft[1]; meta.footer_total = +ft[2].replace(/,/g, ''); }
-      // A LONG team name overruns the week-of-play column, so pdf.js emits
-      // "OMG! I know the Owner too 1" as ONE item and the wop cell is empty.
-      // The team NAME is never load-bearing — the team NUMBER is the key — so
-      // peel the trailing week off the name. (Dropped 2708/2808 before this.)
+      // Free-text columns overrun their neighbour and pdf.js fuses the cells
+      // ("Pablo Nieves Valenzuela 45.00", "OMG! I know the Owner too 1").
+      // Peel the trailing value back off; division + team number are
+      // fixed-width and stay reliable, so they anchor the drop check.
+      if (!reAmt.test(c.amount || '') && /\s\d[\d,]*\.\d{2}$/.test(c.name || '')) {
+        const ma = String(c.name).match(/^(.*?)\s+(\d[\d,]*\.\d{2})$/);
+        if (ma) { c.name = ma[1]; c.amount = ma[2]; }
+      }
       if (!reWop.test(c.wop || '') && /\s\d{1,2}$/.test(c.teamname || '')) {
         const mw = String(c.teamname).match(/^(.*?)\s+(\d{1,2})$/);
         if (mw) { c.teamname = mw[1]; c.wop = mw[2]; }
       }
-      // Never drop a data-looking line in silence — count it so the upload can say so.
-      if (reDiv.test(c.div || '') && reAmt.test(c.amount || '') && reTeam.test(c.team || '')
-          && !(reWop.test(c.wop || '') && reSched.test(c.sched || ''))) _mfDropped++;
+      if (reDiv.test(c.div || '') && reTeam.test(c.team || '')
+          && !(reAmt.test(c.amount || '') && reWop.test(c.wop || '') && reSched.test(c.sched || ''))) _mfDropped++;
       if (!(reDiv.test(c.div || '') && reAmt.test(c.amount || '') && reTeam.test(c.team || '') && reWop.test(c.wop || '') && reSched.test(c.sched || ''))) continue;
       rows.push({
         division_number: c.div, payer_name: c.name || '', amount: Math.abs(+(c.amount || '').replace(/,/g, '')),
