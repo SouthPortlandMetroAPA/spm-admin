@@ -5027,6 +5027,28 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         #tab-matchfees .mf-late{background:#fef3c7;color:#92400e}
         #tab-matchfees .mf-unpaid{background:#fde8ec;color:#b91c1c}
         #tab-matchfees .mf-bye{background:#f1f3f5;color:#9aa1a9}
+        /* collapsible divisions — collapsed by default (details has no [open]) */
+        #tab-matchfees details.mf-div>summary{cursor:pointer;list-style:none;user-select:none}
+        #tab-matchfees details.mf-div>summary::-webkit-details-marker{display:none}
+        #tab-matchfees details.mf-div>summary::before{content:"\25B8";display:inline-block;margin-right:8px;color:#0031a1;font-weight:900;transition:transform .15s}
+        #tab-matchfees details.mf-div[open]>summary::before{transform:rotate(90deg)}
+        /* team roster hover */
+        #tab-matchfees .mf-tname{white-space:nowrap}
+        #tab-matchfees .mf-tnwrap{position:relative;display:inline-block}
+        #tab-matchfees .mf-hasroster .mf-tnwrap{cursor:pointer;border-bottom:1px dotted #b8c0c8}
+        #tab-matchfees .mf-tip{position:absolute;z-index:60;left:0;top:100%;margin-top:6px;min-width:210px;max-width:300px;
+          background:#fff;border:1px solid #d0d5da;border-radius:10px;box-shadow:0 10px 28px rgba(0,0,0,.16);
+          padding:9px 11px;display:none;white-space:normal;text-align:left;font-weight:500;font-size:.82rem}
+        #tab-matchfees .mf-tnwrap:hover .mf-tip{display:block}
+        #tab-matchfees .mf-tip-h{display:block;font-weight:800;font-size:.8rem;margin-bottom:5px;color:#0031a1}
+        #tab-matchfees .mf-rrow{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:2px 0;line-height:1.35}
+        #tab-matchfees .mf-rname{font-weight:600;color:#1f2937}
+        #tab-matchfees .mf-cap{flex:none;font-size:.6rem;font-weight:800;text-transform:uppercase;letter-spacing:.03em;color:#b91c1c;background:#fee2e2;border-radius:999px;padding:1px 6px}
+        #tab-matchfees .mf-cocap{color:#0031a1;background:#dbe8ff}
+        #tab-matchfees .mf-capbtn{margin-left:8px}
+        #tab-matchfees .mf-textcap{font-size:.7rem;font-weight:700;color:#fff;background:#0031a1;border-radius:999px;padding:2px 9px;text-decoration:none}
+        #tab-matchfees .mf-textcap:hover{background:#00248a}
+        #tab-matchfees .mf-nocap{font-size:.68rem;color:#9aa1a9}
         .mf-dlg-wrap{position:fixed;inset:0;z-index:10000;background:rgba(17,24,39,.45);display:flex;align-items:center;justify-content:center;padding:20px}
         .mf-dlg{background:#fff;border-radius:16px;box-shadow:0 24px 60px rgba(0,0,0,.28);padding:20px 20px 16px;width:100%;max-width:420px}
         .mf-dlg-h{font-size:1.05rem;font-weight:800;color:#0031a1;margin-bottom:4px}
@@ -5406,7 +5428,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.363';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.364';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10982,8 +11004,21 @@ async function mfLoadData() {
   // operator adjustments overlay: reschedules (move the due moment) and
   // late->on-time overrides. Never a substitute for a payment — see mfCell.
   const adjustments = await mfFetchAll('match_fee_adjustments?select=*&session_id=eq.' + _mfSession);
+  // Rosters for the team-name hover + the captain text button. Two hops rather
+  // than an embedded join so it does not depend on an FK being exposed.
+  let roster = [], rosterPlayers = [];
+  const allTeamIds = divs.flatMap(d => (d.teams || []).map(t => t.id));
+  if (allTeamIds.length) {
+    roster = await mfFetchAll('team_memberships?select=team_id,role,member_number,name_raw&team_id=in.(' + allTeamIds.join(',') + ')');
+    const mns = [...new Set(roster.map(r => r.member_number).filter(Boolean))];
+    for (let i = 0; i < mns.length; i += 300) {
+      const chunk = mns.slice(i, i + 300);
+      const got = await mfFetchAll('players?select=member_number,first_name,nickname,last_name,cell_phone&member_number=in.(' + chunk.map(encodeURIComponent).join(',') + ')');
+      rosterPlayers = rosterPlayers.concat(got || []);
+    }
+  }
   await mfLoadDeadlines();
-  _mf = mfBuildModel(divs, matches, payments, ups && ups[0], adjustments);
+  _mf = mfBuildModel(divs, matches, payments, ups && ups[0], adjustments, roster, rosterPlayers);
   mfRenderDeadlines();
   mfSetStatus('');
   // division filter options
@@ -10992,7 +11027,7 @@ async function mfLoadData() {
   mfRender();
 }
 
-function mfBuildModel(divs, matches, payments, upload, adjustments) {
+function mfBuildModel(divs, matches, payments, upload, adjustments, roster, rosterPlayers) {
   const idToNum = {};
   divs.forEach(d => { idToNum[d.id] = d.division_number; });
   // week -> date per division_number (authoritative from matches, earliest non-bye)
@@ -11038,7 +11073,60 @@ function mfBuildModel(divs, matches, payments, upload, adjustments) {
     const k = a.division_number + '|' + a.team_number_norm + '|' + a.wop;
     (adjIndex[k] = adjIndex[k] || {})[a.kind] = a;
   }
-  return { divisions: divs, payments, weekDate, divWeeks, teamWeeks, payIndex, failKeys, adjIndex, upload };
+  // team_id -> [{first,nick,last,role,mn,cell}] with Captain/Co-Captain first.
+  const pById = {};
+  (rosterPlayers || []).forEach(p => { pById[String(p.member_number)] = p; });
+  const rosterByTeam = {};
+  const RANK = { captain: 0, 'co-captain': 1 };
+  (roster || []).forEach(r => {
+    const pl = pById[String(r.member_number)] || {};
+    (rosterByTeam[r.team_id] = rosterByTeam[r.team_id] || []).push({
+      first: pl.first_name || r.name_raw || '', nick: pl.nickname || '', last: pl.last_name || '',
+      role: r.role || '', mn: r.member_number || '', cell: pl.cell_phone || ''
+    });
+  });
+  Object.keys(rosterByTeam).forEach(k => rosterByTeam[k].sort((a, b) =>
+    (RANK[(a.role || '').toLowerCase()] ?? 2) - (RANK[(b.role || '').toLowerCase()] ?? 2) ||
+    String(a.last).localeCompare(String(b.last))));
+  return { divisions: divs, payments, weekDate, divWeeks, teamWeeks, payIndex, failKeys, adjIndex, rosterByTeam, upload };
+}
+
+/* ── Team roster hover + captain text ───────────────────────────────────────
+ * The hover shows who is on the team; the text button opens a group SMS to the
+ * captain plus the two league numbers. DNC is honoured client-side (TEXT has no
+ * server gate), so a blocked captain gets a chip instead of a text control.  */
+const MF_LEAGUE_SMS = ['5033092714', '5033093076'];
+function mfDigits(v) { return String(v || '').replace(/\D/g, '').replace(/^1(?=\d{10}$)/, ''); }
+function mfRosterHtml(teamId, teamName) {
+  const r = (_mf.rosterByTeam || {})[teamId];
+  if (!r || !r.length) return '';
+  return '<span class="mf-tip"><span class="mf-tip-h">' + esc(teamName || 'Roster') + '</span>' +
+    r.map(function (m) {
+      const nm = (m.first + (m.nick ? ' \u201C' + m.nick + '\u201D' : '') + (m.last ? ' ' + m.last : '')).trim();
+      const rl = (m.role || '').toLowerCase();
+      const badge = rl === 'captain' ? '<span class="mf-cap">Captain</span>'
+        : (rl === 'co-captain' ? '<span class="mf-cap mf-cocap">Co-Captain</span>' : '');
+      return '<span class="mf-rrow"><span class="mf-rname">' + esc(nm) + '</span>' + badge + '</span>';
+    }).join('') + '</span>';
+}
+function mfCaptainCell(teamId) {
+  const r = (_mf.rosterByTeam || {})[teamId] || [];
+  return r.find(function (m) { return (m.role || '').toLowerCase() === 'captain'; }) || null;
+}
+function mfTextCaptainHtml(teamId, teamName, divName) {
+  const cap = mfCaptainCell(teamId);
+  if (!cap) return '<span class="mf-nocap" title="No captain on this roster">no captain</span>';
+  if (typeof dncIsBlocked === 'function' && dncIsBlocked(cap.mn)) {
+    return typeof dncChipHtml === 'function' ? dncChipHtml('text')
+      : '<span class="mf-nocap">no contact</span>';
+  }
+  const capDigits = mfDigits(cap.cell);
+  if (!capDigits) return '<span class="mf-nocap" title="No cell on file">no cell</span>';
+  // Group text: the captain plus both league numbers.
+  const to = [capDigits].concat(MF_LEAGUE_SMS).join(',');
+  const body = 'Hi ' + (cap.first || 'there') + ' — ' + (teamName || 'your team') +
+    (divName ? ' (' + divName + ')' : '') + ' match fees. ';
+  return '<a class="mf-textcap" href="' + esc(otBuildSmsUrl(to, body)) + '" title="Text the captain + both league numbers">Text captain</a>';
 }
 
 // classification for one (division, team, week) -> {k, pay, sched}
@@ -11147,7 +11235,11 @@ function mfTeamRow(div, team, weeks, today, ownWeeks) {
         '" data-wk="' + wk + '" data-k="' + c.k + '" data-team="' + esc(team.team_name || '') + '"' : '') +
       ' title="' + esc(tip) + '">' + label + '</td>';
   }).join('');
-  return { html: '<tr' + (owing ? ' data-owing="1"' : '') + '><td class="mf-tn">' + esc(team.team_number) + '</td><td class="mf-tname">' + esc(team.team_name || '') + '</td>' + cells + '<td class="mf-owe">' + (owing ? owing : '') + '</td></tr>', owing };
+  const rosterTip = mfRosterHtml(team.id, team.team_name);
+  const nameCell = '<td class="mf-tname' + (rosterTip ? ' mf-hasroster' : '') + '">' +
+    '<span class="mf-tnwrap">' + esc(team.team_name || '') + rosterTip + '</span>' +
+    '<span class="mf-capbtn">' + mfTextCaptainHtml(team.id, team.team_name, div.name) + '</span></td>';
+  return { html: '<tr' + (owing ? ' data-owing="1"' : '') + '><td class="mf-tn">' + esc(team.team_number) + '</td>' + nameCell + cells + '<td class="mf-owe">' + (owing ? owing : '') + '</td></tr>', owing };
 }
 
 /* ── Adjustments: reschedule + late→on-time override ────────────────────────
@@ -11377,10 +11469,10 @@ function mfRender() {
     const shown = _mfFilter.onlyOwing ? rows.filter(r => r.owing) : rows;
     if (_mfFilter.onlyOwing && !shown.length) return '';
     const head = '<th class="mf-tn">Team</th><th class="mf-tname"></th>' + weeks.map(w => '<th class="mf-wh">' + w + '</th>').join('') + '<th class="mf-owe">Owe</th>';
-    return '<div class="mf-div"><div class="mf-divhdr">' + esc(d.division_number + ' · ' + d.name) +
+    return '<details class="mf-div"><summary class="mf-divhdr">' + esc(d.division_number + ' · ' + d.name) +
       ' <span class="muted">' + esc(d.format || '') + (d.night_of_play ? ' · ' + esc(d.night_of_play) : '') + '</span>' +
-      (divOwing ? '<span class="mf-badge mf-b-owe">' + divOwing + ' owing</span>' : '<span class="mf-badge mf-b-ok">all current</span>') + '</div>' +
-      '<div class="mf-scroll"><table class="mf-tbl"><thead><tr>' + head + '</tr></thead><tbody>' + shown.map(r => r.html).join('') + '</tbody></table></div></div>';
+      (divOwing ? '<span class="mf-badge mf-b-owe">' + divOwing + ' owing</span>' : '<span class="mf-badge mf-b-ok">all current</span>') + '</summary>' +
+      '<div class="mf-scroll"><table class="mf-tbl"><thead><tr>' + head + '</tr></thead><tbody>' + shown.map(r => r.html).join('') + '</tbody></table></div></details>';
   }).join('');
   if (sum) sum.innerHTML = '<div class="mf-stats"><span><b>' + totTeams + '</b> teams</span><span class="mf-s-owe"><b>' + totOwing + '</b> needing attention — due-soon/unpaid/late</span><span><b>$' + totCollected.toFixed(2) + '</b> collected</span>' + (_mfHidden ? '<span class="muted">' + _mfHidden + ' division' + (_mfHidden === 1 ? '' : 's') + ' hidden (no schedule)</span>' : '') + '</div>';
   wrap.innerHTML = blocks || '<p class="muted">No divisions for this session.</p>';
