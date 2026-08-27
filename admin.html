@@ -4535,6 +4535,32 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             <button class="btn btn-outline btn-sm" onclick="cmLoad()">Refresh</button>
             <button class="btn btn-outline btn-sm" onclick="cmCopyEmails()">Copy attendee emails</button></div>
           <div class="cm-counts" id="cmCounts"></div>
+
+          <div id="cmInvitePanel" style="margin:14px 0;padding:12px;border:1px solid var(--border,#e5e7eb);border-radius:8px">
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <strong style="font-size:0.95rem">Invitations</strong>
+              <span id="cmAudSummary" class="muted" style="font-size:0.82rem">not loaded</span>
+              <button class="btn" onclick="cmLoadAudience()">Refresh</button>
+              <button class="btn" onclick="cmExportDoorList()">Export door list</button>
+            </div>
+            <details style="margin-top:10px">
+              <summary class="muted" style="cursor:pointer;font-size:0.82rem">Invite email — subject and body</summary>
+              <input id="cmInvSubject" style="width:100%;margin-top:6px;padding:7px;border:1px solid var(--border,#d1d5db);border-radius:6px" placeholder="Subject">
+              <textarea id="cmInvBody" rows="9" style="width:100%;margin-top:6px;font-family:inherit;font-size:0.86rem;padding:8px;border:1px solid var(--border,#d1d5db);border-radius:6px" placeholder="HTML body"></textarea>
+              <div class="muted" style="font-size:0.74rem;margin-top:4px">
+                Use <code>{first_name}</code> for the recipient's first name. The body is HTML.
+                Addresses are resolved on the server &mdash; none are sent from this page.
+              </div>
+              <button class="btn" style="margin-top:6px" onclick="cmResetInviteTpl()">Reset to default</button>
+            </details>
+            <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+              <button class="btn btn-primary" onclick="cmSendWave('invite')">Send invite to everyone not yet emailed</button>
+              <button class="btn" onclick="cmSendWave('reminder1')">Send reminder to non-responders</button>
+              <button class="btn" onclick="cmSendTest()">Send one test to yourself</button>
+            </div>
+            <div id="cmBlastStatus" class="muted" style="font-size:0.82rem;margin-top:8px"></div>
+          </div>
+
           <div class="cm-list" id="cmList"><div class="cm-empty">Loading&hellip;</div></div>
         </div>
       </div>
@@ -5445,7 +5471,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.370';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.371';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -13730,6 +13756,8 @@ async function mjUnmark(id) {
 async function cmInit() {
   if (!SB_KEY) { document.getElementById('cmGate').style.display = 'block'; document.getElementById('cmMain').style.display = 'none'; return; }
   await cmLoadEvent(); await cmLoad(); cmStartPoll();
+  cmFillInviteTpl();
+  try { await cmLoadAudience(); } catch (e) { /* panel shows its own error */ }
 }
 function cmSetStatus(m, err) { const el = document.getElementById('cmStatus'); if (el) { el.textContent = m; el.style.color = err ? 'var(--spm-primary)' : 'var(--muted)'; clearTimeout(el._t); el._t = setTimeout(() => { el.textContent = ''; }, 6000); } }
 
@@ -13766,7 +13794,7 @@ async function cmLoad() {
   const list = document.getElementById('cmList'); if (!SB_KEY) return;
   try {
     const slug = _cmEvent ? _cmEvent.slug : '';
-    _cmRsvps = await sb('GET', 'rsvps?' + (slug ? 'event_slug=eq.' + encodeURIComponent(slug) + '&' : '') + 'select=*&order=created_at.desc&limit=1000', null, CM_RP) || [];
+    _cmRsvps = await sb('GET', 'rsvps?' + (slug ? 'event_slug=eq.' + encodeURIComponent(slug) + '&' : '') + 'select=*&order=created_at.desc&limit=10000', null, CM_RP) || [];
     _cmSig = _cmRsvps.length + ':' + _cmRsvps.map(r => r.id + r.status + r.party_size).join(',');
     cmRender();
   } catch (e) { if (list) list.innerHTML = '<div class="cm-empty">Couldn\'t load: ' + esc(e.message || String(e)) + '</div>'; }
@@ -13787,6 +13815,212 @@ function cmRender() {
   }).join('');
 }
 
+
+/* ══════════════════════════════════════════════════════════════════════
+   COUNTMEIN INVITES — denominator, waves, door list
+   ──────────────────────────────────────────────────────────────────────
+   The denominator comes from countmein.invite_audience, one SQL statement
+   over team_memberships -> teams -> divisions.session_id. It is NOT paged
+   client-side on purpose: three chained PostgREST reads each cap at 1000
+   rows and truncate silently, which is how Outreach once dropped 599
+   people without an error.
+
+   Recipients are named by member_number only. The GAS action resolves each
+   address server-side and drops anyone on the no-contact list, fail-closed.
+   No email address is handled by this page.
+   ══════════════════════════════════════════════════════════════════════ */
+
+let _cmAudience = [];
+
+const CM_INV_DEFAULT_SUBJECT = 'You are invited — South Portland Metro APA celebration';
+const CM_INV_DEFAULT_BODY =
+  '<p>Hi {first_name},</p>' +
+  '<p>We are getting everyone together to wrap up the summer session and celebrate ' +
+  'something pretty special &mdash; South Portland Metro APA is officially ours.</p>' +
+  '<p><strong>Saturday, September 19</strong><br>12:00pm &ndash; 5:00pm<br>' +
+  'Oaks Park, 7805 SE Oaks Park Way, Portland</p>' +
+  '<p>RSVPs are not required, but they help us plan. Let us know if you can make it:</p>' +
+  '<p><a href="' + (typeof COUNTMEIN_URL !== 'undefined' ? COUNTMEIN_URL : '') + '">RSVP here</a></p>' +
+  '<p>Hope to see you there.<br>Paul</p>';
+
+function cmInvTpl(which) {
+  const k = 'cmInv' + which;
+  let v = null; try { v = localStorage.getItem(k); } catch (e) {}
+  if (v == null) v = (which === 'Subject' ? CM_INV_DEFAULT_SUBJECT : CM_INV_DEFAULT_BODY);
+  return v;
+}
+function cmResetInviteTpl() {
+  try { localStorage.removeItem('cmInvSubject'); localStorage.removeItem('cmInvBody'); } catch (e) {}
+  cmFillInviteTpl();
+  cmBlastStatus('Template reset to the default wording.');
+}
+function cmFillInviteTpl() {
+  const s = document.getElementById('cmInvSubject'), b = document.getElementById('cmInvBody');
+  if (s) { s.value = cmInvTpl('Subject'); if (!s._wired) { s._wired = true; s.addEventListener('input', () => { try { localStorage.setItem('cmInvSubject', s.value); } catch (e) {} }); } }
+  if (b) { b.value = cmInvTpl('Body');    if (!b._wired) { b._wired = true; b.addEventListener('input', () => { try { localStorage.setItem('cmInvBody', b.value); } catch (e) {} }); } }
+}
+function cmBlastStatus(m) { const e = document.getElementById('cmBlastStatus'); if (e) e.textContent = m || ''; }
+
+/* Campaign keys are per WAVE. A reminder must not be skipped because the
+   invite was already logged for that member. */
+function cmCampaign(wave) {
+  const slug = _cmEvent ? _cmEvent.slug : 'event';
+  return 'countmein-' + slug + '-' + wave;
+}
+
+async function cmLoadAudience() {
+  const sum = document.getElementById('cmAudSummary');
+  if (!_cmEvent) { if (sum) sum.textContent = 'no event loaded'; return; }
+  if (!currentSession) { if (sum) sum.textContent = 'no current session set'; return; }
+  if (sum) sum.textContent = 'loading…';
+  try {
+    _cmAudience = await sb('POST', 'rpc/invite_audience',
+      { p_event_slug: _cmEvent.slug, p_session_id: currentSession.id },
+      { 'Accept-Profile': 'countmein', 'Content-Profile': 'countmein' }) || [];
+  } catch (e) { if (sum) sum.textContent = 'audience load failed: ' + (e.message || e); return; }
+  cmRenderAudience();
+}
+
+function cmRenderAudience() {
+  const sum = document.getElementById('cmAudSummary');
+  if (!sum) return;
+  const invited = _cmAudience.length;
+  const responded = _cmAudience.filter(a => a.responded).length;
+  const noEmail = _cmAudience.filter(a => !a.has_email).length;
+  const unmatched = (_cmRsvps || []).filter(r => !r.member_number).length;
+  sum.textContent = invited + ' invited · ' + responded + ' responded · '
+    + (invited - responded) + ' not yet · ' + noEmail + ' with no email'
+    + (unmatched ? ' · ' + unmatched + ' RSVP not matched to a member' : '');
+}
+
+/* Recipients for a wave. 'invite' targets everyone; any later wave targets
+   only those who have not responded. Both then drop anyone with no address
+   on file, because the server cannot send to them anyway. */
+function cmWaveRecipients(wave) {
+  const base = wave === 'invite' ? _cmAudience : _cmAudience.filter(a => !a.responded);
+  return base.filter(a => a.has_email);
+}
+
+async function cmSendTest() {
+  const subject = (document.getElementById('cmInvSubject') || {}).value || cmInvTpl('Subject');
+  const body    = (document.getElementById('cmInvBody') || {}).value || cmInvTpl('Body');
+  cmBlastStatus('Sending one test to the operator inbox…');
+  try {
+    const res = await nrGasJson({ action: 'outreach_email_send', admin_key: SB_KEY,
+      test_to: '1', subject: subject, html_body: body, is_preprod: IS_PREPROD });
+    cmBlastStatus(res && res.ok ? '✓ Test sent — open it and check the link, the date, and the wording.'
+                                : 'Test failed: ' + ((res && res.error) || 'unknown'));
+  } catch (e) { cmBlastStatus('Test failed: ' + e.message); }
+}
+
+async function cmSendWave(wave) {
+  if (!_cmEvent) { cmBlastStatus('No event loaded.'); return; }
+  if (!_cmAudience.length) { cmBlastStatus('Load the audience first.'); return; }
+  const subject = (document.getElementById('cmInvSubject') || {}).value.trim() || cmInvTpl('Subject');
+  const body    = (document.getElementById('cmInvBody') || {}).value.trim() || cmInvTpl('Body');
+  if (!subject || !body) { cmBlastStatus('Set a subject and a body first.'); return; }
+
+  const campaign = cmCampaign(wave);
+  const people = cmWaveRecipients(wave);
+  if (!people.length) { cmBlastStatus('Nobody to send to for this wave.'); return; }
+
+  cmBlastStatus('Checking who already got this wave…');
+  let sentSet = new Set();
+  try {
+    const stamps = await sb('GET', 'outreach_email_log?campaign_key=eq.' + encodeURIComponent(campaign)
+      + '&kind=eq.' + otBlastKind() + '&select=member_number', null, { 'Accept-Profile': 'slate' });
+    sentSet = new Set((stamps || []).map(s => s.member_number));
+  } catch (e) { cmBlastStatus('Could not read the send log — stopping rather than risk double-sending.'); return; }
+
+  const toSend = people.filter(p => !sentSet.has(p.member_number));
+  if (!toSend.length) { cmBlastStatus('✓ Everyone in this wave already got it.'); return; }
+
+  let remaining = null;
+  try {
+    const q = await nrGasJson({ action: 'mailer_quota', admin_key: SB_KEY });
+    if (q && q.ok) remaining = Number(q.remaining);
+  } catch (e) { /* unknown */ }
+  if (remaining == null || isNaN(remaining)) { cmBlastStatus('Could not check the mail quota — try again.'); return; }
+  if (toSend.length > remaining) {
+    await nrModal({ title: 'Will not fit in today’s quota',
+      body: '<strong>' + toSend.length + '</strong> to email, but only <strong>' + remaining
+        + '</strong> send' + (remaining === 1 ? '' : 's') + ' left today. Already-emailed people are skipped, '
+        + 'so stopping now and resuming tomorrow never double-sends.',
+      buttons: [{ label: 'OK', value: null, primary: true }] });
+    cmBlastStatus('Blocked — ' + toSend.length + ' to send, ' + remaining + ' quota left.');
+    return;
+  }
+
+  const go = await nrModal({
+    title: 'Email ' + toSend.length + ' member' + (toSend.length === 1 ? '' : 's') + '?',
+    body: 'Wave “' + esc(campaign) + '”. ' + toSend.length + ' to send · ' + remaining + ' quota left today'
+      + (sentSet.size ? ' · ' + sentSet.size + ' already done and skipped' : '') + '.'
+      + (IS_PREPROD ? ' PREPROD: everything goes to your inbox only.' : '')
+      + (toSend.length > 3 ? ' The first 3 go out as a canary, then you confirm the rest.' : ''),
+    buttons: [{ label: toSend.length > 3 ? 'Send canary — first 3' : 'Send', value: 'go', primary: true },
+              { label: 'Cancel', value: null }] });
+  if (!go) return;
+
+  window.slateBulkBusy = true;
+  let sent = 0; const failed = [];
+  for (let i = 0; i < toSend.length; i++) {
+    if (i === 3 && toSend.length > 3) {
+      const cont = await nrModal({
+        title: 'Canary done — ' + sent + ' sent' + (failed.length ? ', ' + failed.length + ' failed' : ''),
+        body: (IS_PREPROD ? 'Check your inbox for the three test emails.' : 'Spot-check delivery before the rest go out.')
+          + ' Continue with the remaining ' + (toSend.length - 3) + '?',
+        buttons: [{ label: 'Send the rest', value: 'go', primary: true }, { label: 'Stop here', value: null }] });
+      if (!cont) break;
+    }
+    const p = toSend[i];
+    cmBlastStatus('Emailing ' + (i + 1) + '/' + toSend.length + '…');
+    try {
+      const res = await nrGasJson({ action: 'outreach_email_send', admin_key: SB_KEY,
+        member_number: p.member_number, subject: subject, html_body: body, is_preprod: IS_PREPROD });
+      if (res && res.ok) {
+        sent++;
+        /* Stamp AFTER a confirmed success, never before — a marker written
+           ahead of the send consumes the skip and the real send never runs. */
+        await sb('POST', 'outreach_email_log?on_conflict=campaign_key,member_number,kind',
+          { campaign_key: campaign, member_number: p.member_number, kind: otBlastKind() },
+          { 'Accept-Profile': 'slate', 'Content-Profile': 'slate', 'Prefer': 'resolution=merge-duplicates,return=minimal' });
+      } else { failed.push(p.member_number + ' — ' + ((res && res.error) || 'unknown')); }
+    } catch (e) { failed.push(p.member_number + ' — ' + e.message); }
+  }
+  window.slateBulkBusy = false;
+  cmBlastStatus('✓ Emailed ' + sent + ' of ' + toSend.length
+    + (failed.length ? ' · FAILED ' + failed.length + ': ' + failed.slice(0, 2).join('; ') + (failed.length > 2 ? ' …' : '') : '') + '.');
+  await cmLoadAudience();
+}
+
+/* Door list: who is coming, with the party size, for the day-of table and
+   the caterer number. Yes and maybe are separated because a maybe is not a
+   headcount. */
+function cmExportDoorList() {
+  const rows = (_cmRsvps || []).filter(r => r.status === 'yes' || r.status === 'maybe');
+  if (!rows.length) { cmBlastStatus('No attendees yet.'); return; }
+  const esc2 = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+  const head = ['Name', 'Status', 'Party size', 'APA number', 'Note'].map(esc2).join(',');
+  const body = rows
+    .slice()
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
+    .map(r => [r.name, r.status, r.status === 'no' ? 0 : (r.party_size || 1), r.member_number || '', r.note || ''].map(esc2).join(','))
+    .join('\n');
+  const yes = rows.filter(r => r.status === 'yes');
+  const heads = yes.reduce((s, r) => s + (r.party_size || 1), 0);
+  const maybes = rows.filter(r => r.status === 'maybe').reduce((s, r) => s + (r.party_size || 1), 0);
+  const csv = head + '\n' + body
+    + '\n' + [esc2('TOTAL confirmed heads'), '', esc2(heads), '', ''].join(',')
+    + '\n' + [esc2('TOTAL if every maybe comes'), '', esc2(heads + maybes), '', ''].join(',');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'countmein-door-list.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  cmBlastStatus('Door list exported — ' + heads + ' confirmed heads, ' + (heads + maybes) + ' if every maybe comes.');
+}
+
 async function cmCopyEmails() {
   const emails = _cmRsvps.filter(r => r.status === 'yes' || r.status === 'maybe').map(r => r.email).filter(Boolean);
   const uniq = [...new Set(emails.map(e => e.toLowerCase()))];
@@ -13805,7 +14039,7 @@ function cmStartPoll() {
     if (document.activeElement && /INPUT|TEXTAREA/.test(document.activeElement.tagName)) return;
     try {
       const slug = _cmEvent ? _cmEvent.slug : '';
-      const rows = await sb('GET', 'rsvps?' + (slug ? 'event_slug=eq.' + encodeURIComponent(slug) + '&' : '') + 'select=*&order=created_at.desc&limit=1000', null, CM_RP) || [];
+      const rows = await sb('GET', 'rsvps?' + (slug ? 'event_slug=eq.' + encodeURIComponent(slug) + '&' : '') + 'select=*&order=created_at.desc&limit=10000', null, CM_RP) || [];
       const sig = rows.length + ':' + rows.map(r => r.id + r.status + r.party_size).join(',');
       if (sig !== _cmSig) { _cmRsvps = rows; _cmSig = sig; cmRender(); }
     } catch { /* transient */ }
