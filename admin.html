@@ -5045,7 +5045,8 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         #tab-matchfees .mf-rname{font-weight:600;color:#1f2937}
         #tab-matchfees .mf-cap{flex:none;font-size:.6rem;font-weight:800;text-transform:uppercase;letter-spacing:.03em;color:#b91c1c;background:#fee2e2;border-radius:999px;padding:1px 6px}
         #tab-matchfees .mf-cocap{color:#0031a1;background:#dbe8ff}
-        #tab-matchfees .mf-capbtn{margin-left:8px}
+        #tab-matchfees .mf-tn{white-space:nowrap}
+        #tab-matchfees .mf-capbtn{margin-left:6px}
         #tab-matchfees .mf-textcap{font-size:.7rem;font-weight:700;color:#fff;background:#0031a1;border-radius:999px;padding:2px 9px;text-decoration:none}
         #tab-matchfees .mf-textcap:hover{background:#00248a}
         #tab-matchfees .mf-nocap{font-size:.68rem;color:#9aa1a9}
@@ -5428,7 +5429,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.364';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.365';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11236,10 +11237,12 @@ function mfTeamRow(div, team, weeks, today, ownWeeks) {
       ' title="' + esc(tip) + '">' + label + '</td>';
   }).join('');
   const rosterTip = mfRosterHtml(team.id, team.team_name);
-  const nameCell = '<td class="mf-tname' + (rosterTip ? ' mf-hasroster' : '') + '">' +
-    '<span class="mf-tnwrap">' + esc(team.team_name || '') + rosterTip + '</span>' +
+  // Text button rides with the team NUMBER; the name column keeps the roster hover.
+  const numCell = '<td class="mf-tn">' + esc(team.team_number) +
     '<span class="mf-capbtn">' + mfTextCaptainHtml(team.id, team.team_name, div.name) + '</span></td>';
-  return { html: '<tr' + (owing ? ' data-owing="1"' : '') + '><td class="mf-tn">' + esc(team.team_number) + '</td>' + nameCell + cells + '<td class="mf-owe">' + (owing ? owing : '') + '</td></tr>', owing };
+  const nameCell = '<td class="mf-tname' + (rosterTip ? ' mf-hasroster' : '') + '">' +
+    '<span class="mf-tnwrap">' + esc(team.team_name || '') + rosterTip + '</span></td>';
+  return { html: '<tr' + (owing ? ' data-owing="1"' : '') + '>' + numCell + nameCell + cells + '<td class="mf-owe">' + (owing ? owing : '') + '</td></tr>', owing };
 }
 
 /* ── Adjustments: reschedule + late→on-time override ────────────────────────
@@ -11530,6 +11533,7 @@ async function mfSave(parsed, file, sid) {
 }
 
 // Parse the APA "Matches Paid By Division" PDF — bucket text items by x-column.
+let _mfDropped = 0;   // data-looking lines the browser parser could not read
 async function mfParsePdf(file) {
   const pdfjs = await spLoadPdfjs();
   const buf = new Uint8Array(await file.arrayBuffer());
@@ -11569,6 +11573,17 @@ async function mfParsePdf(file) {
       if (dr) { meta.date_from = iso(dr[1]); meta.date_to = iso(dr[2]); }
       const ft = joined.match(/Teams:\s*(\d+).*Total Amount:\s*([\d,]+\.\d{2})/);
       if (ft) { meta.footer_teams = +ft[1]; meta.footer_total = +ft[2].replace(/,/g, ''); }
+      // A LONG team name overruns the week-of-play column, so pdf.js emits
+      // "OMG! I know the Owner too 1" as ONE item and the wop cell is empty.
+      // The team NAME is never load-bearing — the team NUMBER is the key — so
+      // peel the trailing week off the name. (Dropped 2708/2808 before this.)
+      if (!reWop.test(c.wop || '') && /\s\d{1,2}$/.test(c.teamname || '')) {
+        const mw = String(c.teamname).match(/^(.*?)\s+(\d{1,2})$/);
+        if (mw) { c.teamname = mw[1]; c.wop = mw[2]; }
+      }
+      // Never drop a data-looking line in silence — count it so the upload can say so.
+      if (reDiv.test(c.div || '') && reAmt.test(c.amount || '') && reTeam.test(c.team || '')
+          && !(reWop.test(c.wop || '') && reSched.test(c.sched || ''))) _mfDropped++;
       if (!(reDiv.test(c.div || '') && reAmt.test(c.amount || '') && reTeam.test(c.team || '') && reWop.test(c.wop || '') && reSched.test(c.sched || ''))) continue;
       rows.push({
         division_number: c.div, payer_name: c.name || '', amount: Math.abs(+(c.amount || '').replace(/,/g, '')),
