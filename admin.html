@@ -5445,7 +5445,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.369';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.370';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -26884,7 +26884,7 @@ function rptRenderBucket(title, chipClass, rows, opts) {
       <td>${r.email
         ? `${esc(r.email)}<button class="copy-btn" data-copy="${esc(r.email)}" title="Copy email">📋</button>`
         : '<span class="hint">—</span>'}</td>
-      <td>${r.cell_phone
+      <td>${otIsRealPhone(r.cell_phone)
         ? `${esc(r.cell_phone)}<button class="copy-btn" data-copy="${esc(r.cell_phone)}" title="Copy phone">📋</button>`
         : '<span class="hint">—</span>'}</td>
     </tr>`;
@@ -31961,7 +31961,7 @@ async function rolToggleRow(headerEl) {
               + '<td style="padding:4px 6px">' + esc(c.first_name + ' ' + c.last_name) + ' ' + matchWarn + '</td>'
               + '<td style="padding:4px 6px;font-family:ui-monospace,monospace;font-size:0.82rem">' + esc(c.member_number || '—') + '</td>'
               + '<td style="padding:4px 6px"><span style="font-size:0.82rem">' + esc(c.email || '—') + '</span></td>'
-              + '<td style="padding:4px 6px;font-family:ui-monospace,monospace;font-size:0.82rem">' + esc(c.cell_phone || '—') + '</td>'
+              + '<td style="padding:4px 6px;font-family:ui-monospace,monospace;font-size:0.82rem">' + esc(otIsRealPhone(c.cell_phone) ? c.cell_phone : '—') + '</td>'
               + '</tr>';
           }).join('')
       + '</tbody></table>';
@@ -32791,10 +32791,10 @@ function tcqRenderTeamCard(team) {
     +   '</div>'
     +   '<div style="margin-left:auto;display:flex;gap:6px">'
     +     '<button class="btn btn-primary btn-sm" onclick="tcqTextCaptain(' + team.id + ')"'
-    +       (captain && captain.cell_phone ? '' : ' disabled title="No captain cell phone on file"')
+    +       (tcqCanTextCaptain(captain) ? '' : ' disabled title="No captain cell phone on file"')
     +       '>Text captain</button>'
     +     '<button class="btn btn-primary btn-sm" onclick="tcqTextTeam(' + team.id + ')"'
-    +       (players.some(p => p.cell_phone) ? '' : ' disabled title="No team cell phones on file"')
+    +       (tcqCanTextTeam(players) ? '' : ' disabled title="No team cell phones on file"')
     +       ' title="Group SMS to every player on this team">Text team</button>'
     +     '<button class="btn btn-primary btn-sm" onclick="tcqEmailRoster(' + team.id + ')"'
     +       (players.length ? '' : ' disabled title="No players on this team yet"')
@@ -33256,6 +33256,29 @@ async function tcqMakeCaptain(playerId) {
    slate.players). Opens the device's SMS app — admin reviews +
    sends. We don't auto-send; the link populates the recipient and
    body so the admin still has the final tap. */
+/* Can this team's captain actually be texted?
+
+   The button gate MUST ask the question the same way tcqTextCaptain answers it,
+   or the two drift — which is exactly what happened: the gate tested
+   `captain.cell_phone` for truthiness while the handler tested
+   tcqNormalizePhone. slate.players stores an unfilled input mask as a literal
+   value on ~18.8k rows; it is truthy, so the gate said reachable and the handler
+   said no, and the button rendered enabled onto a dead-end alert.
+
+   Both helpers below defer to the SAME predicates the handlers use —
+   tcqNormalizePhone and dncIsBlocked — so a future change to either is picked
+   up by the buttons automatically. */
+function tcqCanTextCaptain(captain) {
+  if (!captain) return false;
+  if (dncIsBlocked(captain.member_number)) return false;
+  return !!tcqNormalizePhone(captain.cell_phone);
+}
+/* Mirrors tcqTextTeam's recipient loop: a no-contact player is skipped, and a
+   player without a normalisable number is skipped. If nobody survives, there is
+   nobody to text and the button must be disabled. */
+function tcqCanTextTeam(players) {
+  return (players || []).some(p => !dncIsBlocked(p.member_number) && !!tcqNormalizePhone(p.cell_phone));
+}
 function tcqNormalizePhone(raw) {
   if (!raw) return null;
   const digits = String(raw).replace(/[^0-9]/g, '');
