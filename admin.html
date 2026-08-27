@@ -5028,6 +5028,11 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         #tab-matchfees .mf-unpaid{background:#fde8ec;color:#b91c1c}
         #tab-matchfees .mf-bye{background:#f1f3f5;color:#9aa1a9}
         /* collapsible divisions — collapsed by default (details has no [open]) */
+        #tab-switchboard details.sb-div>summary{cursor:pointer;list-style:none;user-select:none}
+        #tab-switchboard details.sb-div>summary::-webkit-details-marker{display:none}
+        #tab-switchboard details.sb-div>summary::before{content:"\25B8";display:inline-block;margin-right:8px;color:#0031a1;font-weight:900;transition:transform .15s}
+        #tab-switchboard details.sb-div[open]>summary::before{transform:rotate(90deg)}
+        #tab-switchboard .sb-div-count{margin-left:8px;font-size:.72rem;font-weight:700;color:#6b7280}
         #tab-matchfees details.mf-div>summary{cursor:pointer;list-style:none;user-select:none}
         #tab-matchfees details.mf-div>summary::-webkit-details-marker{display:none}
         #tab-matchfees details.mf-div>summary::before{content:"\25B8";display:inline-block;margin-right:8px;color:#0031a1;font-weight:900;transition:transform .15s}
@@ -5036,10 +5041,10 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         #tab-matchfees .mf-tname{white-space:nowrap}
         #tab-matchfees .mf-tnwrap{position:relative;display:inline-block}
         #tab-matchfees .mf-hasroster .mf-tnwrap{cursor:pointer;border-bottom:1px dotted #b8c0c8}
-        #tab-matchfees .mf-tip{position:absolute;z-index:60;left:0;top:100%;margin-top:6px;min-width:210px;max-width:300px;
+        #tab-matchfees .mf-tip{position:fixed;z-index:9500;min-width:210px;max-width:300px;
           background:#fff;border:1px solid #d0d5da;border-radius:10px;box-shadow:0 10px 28px rgba(0,0,0,.16);
           padding:9px 11px;display:none;white-space:normal;text-align:left;font-weight:500;font-size:.82rem}
-        #tab-matchfees .mf-tnwrap:hover .mf-tip{display:block}
+        #tab-matchfees .mf-tip.mf-tip-on{display:block}
         #tab-matchfees .mf-tip-h{display:block;font-weight:800;font-size:.8rem;margin-bottom:5px;color:#0031a1}
         #tab-matchfees .mf-rrow{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:2px 0;line-height:1.35}
         #tab-matchfees .mf-rname{font-weight:600;color:#1f2937}
@@ -5429,7 +5434,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.365';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.366';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11110,6 +11115,33 @@ function mfRosterHtml(teamId, teamName) {
       return '<span class="mf-rrow"><span class="mf-rname">' + esc(nm) + '</span>' + badge + '</span>';
     }).join('') + '</span>';
 }
+/* The roster tip is position:fixed BECAUSE .mf-scroll{overflow-x:auto} clips an
+ * absolutely-positioned child. Fixed elements are positioned against the
+ * viewport, so they escape the scroll container entirely — but that means the
+ * coordinates have to be set at hover time from the trigger's rect.        */
+function mfTipShow(wrap) {
+  const tip = wrap.querySelector('.mf-tip'); if (!tip) return;
+  tip.classList.add('mf-tip-on');
+  const r = wrap.getBoundingClientRect();
+  const w = tip.offsetWidth || 240, h = tip.offsetHeight || 180;
+  let left = r.left, top = r.bottom + 6;
+  if (left + w > window.innerWidth - 8) left = Math.max(8, window.innerWidth - w - 8);
+  if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 6);   // flip above
+  tip.style.left = Math.round(left) + 'px';
+  tip.style.top = Math.round(top) + 'px';
+}
+function mfTipHide(wrap) {
+  const tip = wrap.querySelector('.mf-tip'); if (tip) tip.classList.remove('mf-tip-on');
+}
+document.addEventListener('mouseover', function (e) {
+  const w = e.target && e.target.closest && e.target.closest('#tab-matchfees .mf-tnwrap');
+  if (w) mfTipShow(w);
+});
+document.addEventListener('mouseout', function (e) {
+  const w = e.target && e.target.closest && e.target.closest('#tab-matchfees .mf-tnwrap');
+  if (w && !w.contains(e.relatedTarget)) mfTipHide(w);
+});
+
 function mfCaptainCell(teamId) {
   const r = (_mf.rosterByTeam || {})[teamId] || [];
   return r.find(function (m) { return (m.role || '').toLowerCase() === 'captain'; }) || null;
@@ -29304,14 +29336,19 @@ function sbRender() {
     const priorBadge = d._priorSession
       ? `<span style="margin-left:6px;padding:1px 8px;background:#fef3c7;color:#92400e;border-radius:999px;font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.04em">${esc(d._sessionLabel || 'prior session')}</span>`
       : '';
-    html += `<div class="sb-div-head">
+    html += `<details class="sb-div"><summary class="sb-div-head">
       <span class="sb-team-num">${esc(d.division_number)}</span>
       ${esc(d.name)}${priorBadge}
       <span class="sb-div-meta">· ${esc(d.format || '')} · ${esc(d.night_of_play || '')}</span>
-    </div>`;
-    for (const t of d.teams) {
+      <span class="sb-div-count">${(d.teams || []).length} team${(d.teams || []).length === 1 ? '' : 's'}</span>
+    </summary>`;
+    // Team-number order, matching Match Fees. parseInt so "01003" sorts as 1003.
+    const sbTeams = (d.teams || []).slice().sort((a, b) =>
+      (parseInt(a.team_number, 10) || 0) - (parseInt(b.team_number, 10) || 0));
+    for (const t of sbTeams) {
       html += sbTeamCardHtml(t);
     }
+    html += '</details>';
   }
   wrap.innerHTML = html;
   sbWireTeamCards();
