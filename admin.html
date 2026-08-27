@@ -4514,6 +4514,25 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         <div id="cmMain">
           <h3 style="margin:6px 0 10px;font-size:1rem">Event details <span style="font-weight:400;color:var(--muted);font-size:.85rem">&mdash; this is what players see on the RSVP page</span></h3>
           <div class="cm-grid">
+            <div class="cm-fld full" style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+              <div style="flex:1 1 260px"><label>Event</label>
+                <select id="cmEventPicker" onchange="cmPickEvent(this.value)" style="width:100%"></select></div>
+              <button class="btn" type="button" onclick="cmToggleNewEvent()">New event</button>
+            </div>
+            <div class="cm-fld full" id="cmNewEventBox" style="display:none;padding:10px;border:1px solid var(--border,#e5e7eb);border-radius:8px;background:#fafafa">
+              <label>Create a new event</label>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
+                <input id="cmNewName" placeholder="Event name" style="flex:2 1 240px">
+                <input id="cmNewDate" type="date" style="flex:1 1 150px">
+                <button class="btn btn-primary" type="button" onclick="cmCreateEvent()">Create</button>
+                <button class="btn" type="button" onclick="cmToggleNewEvent()">Cancel</button>
+              </div>
+              <div class="muted" style="font-size:0.76rem;margin-top:6px">
+                Created switched OFF, so it cannot take over the public page. Turn it on
+                deliberately when it is ready. The web address is generated from the name
+                and cannot be changed afterwards.
+              </div>
+            </div>
             <div class="cm-fld full"><label>Party name</label><input id="cmName" placeholder="SPM APA Celebration Party"></div>
             <div class="cm-fld full"><label>Subtitle / tagline</label><input id="cmSubtitle" placeholder="Session-End Bash + We Bought the League!"></div>
             <div class="cm-fld"><label>Date</label><input id="cmDate" type="date"></div>
@@ -5471,7 +5490,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.371';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.372';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -13761,11 +13780,83 @@ async function cmInit() {
 }
 function cmSetStatus(m, err) { const el = document.getElementById('cmStatus'); if (el) { el.textContent = m; el.style.color = err ? 'var(--spm-primary)' : 'var(--muted)'; clearTimeout(el._t); el._t = setTimeout(() => { el.textContent = ''; }, 6000); } }
 
+/* Which event the tab is editing. Persisted so a reload does not silently
+   jump to a different one — the whole point of the picker. */
+let _cmEvents = [];
+function cmSelectedSlug() { try { return localStorage.getItem('cmSelectedSlug') || ''; } catch (e) { return ''; } }
+function cmSetSelectedSlug(s) { try { localStorage.setItem('cmSelectedSlug', s || ''); } catch (e) {} }
+
+/* House slug rule: derived from the name, lowercase, accents stripped,
+   non-alphanumerics collapsed to a single dash, trimmed. Immutable once
+   created — to rename an event you archive it and make a new one. */
+function cmSlugify(name) {
+  return String(name || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60) || 'event';
+}
+function cmUniqueSlug(base) {
+  const taken = new Set(_cmEvents.map(e => e.slug));
+  if (!taken.has(base)) return base;
+  for (let i = 2; i < 500; i++) if (!taken.has(base + '-' + i)) return base + '-' + i;
+  return base + '-' + Date.now();
+}
+
+function cmToggleNewEvent() {
+  const b = document.getElementById('cmNewEventBox');
+  if (b) b.style.display = b.style.display === 'none' ? '' : 'none';
+}
+
+function cmRenderPicker() {
+  const sel = document.getElementById('cmEventPicker');
+  if (!sel) return;
+  sel.innerHTML = _cmEvents.map(e =>
+    '<option value="' + esc(e.slug) + '"' + (_cmEvent && e.slug === _cmEvent.slug ? ' selected' : '') + '>'
+    + esc(e.name || e.slug)
+    + (e.event_date ? ' — ' + esc(e.event_date) : '')
+    + (e.active ? '' : ' (off)')
+    + '</option>').join('') || '<option value="">No events yet</option>';
+}
+
+async function cmPickEvent(slug) {
+  if (!slug) return;
+  cmSetSelectedSlug(slug);
+  await cmLoadEvent();
+  await cmLoad();
+  try { await cmLoadAudience(); } catch (e) {}
+}
+
+async function cmCreateEvent() {
+  const name = (document.getElementById('cmNewName') || {}).value.trim();
+  const date = (document.getElementById('cmNewDate') || {}).value;
+  if (!name) { cmSetStatus('Give the event a name first.', true); return; }
+  const slug = cmUniqueSlug(cmSlugify(name));
+  try {
+    /* Created INACTIVE on purpose — an active second event would take over
+       the public invite page through the newest-active fallback. */
+    await sb('POST', 'events', { slug: slug, name: name, event_date: date || null, active: false }, CM_WP);
+  } catch (e) { cmSetStatus('Create failed: ' + (e.message || e), true); return; }
+  cmSetSelectedSlug(slug);
+  cmToggleNewEvent();
+  const n = document.getElementById('cmNewName'); if (n) n.value = '';
+  await cmLoadEvent(); await cmLoad();
+  cmSetStatus('Created “' + name + '” — it is switched OFF until you turn it on.');
+}
+
 async function cmLoadEvent() {
   try {
-    const rows = await sb('GET', 'events?select=*&order=created_at.desc&limit=1', null, CM_RP) || [];
-    _cmEvent = rows[0] || null;
+    /* Every event, not just the newest. Binding to the newest is what let a
+       second event silently hijack this tab and orphan the first. */
+    _cmEvents = await sb('GET', 'events?select=*&order=event_date.desc.nullslast,created_at.desc', null, CM_RP) || [];
+    const want = cmSelectedSlug();
+    _cmEvent = _cmEvents.find(e => e.slug === want)
+            || _cmEvents.find(e => e.active)
+            || _cmEvents[0] || null;
+    cmRenderPicker();
     if (!_cmEvent) return;
+    cmSetSelectedSlug(_cmEvent.slug);
     const g = (id, v) => { const e = document.getElementById(id); if (e) e.value = v == null ? '' : v; };
     g('cmName', _cmEvent.name); g('cmSubtitle', _cmEvent.subtitle); g('cmDate', _cmEvent.event_date);
     g('cmStart', _cmEvent.start_time); g('cmEnd', _cmEvent.end_time); g('cmVenue', _cmEvent.venue);
@@ -13786,6 +13877,20 @@ async function cmSaveEvent() {
     active: document.getElementById('cmActive').checked,
     require_apa_login: document.getElementById('cmRequireLogin').checked, updated_at: new Date().toISOString()
   };
+  /* Two active events is the ambiguous state the public page resolves
+     arbitrarily. Name what would be displaced and make it a decision. */
+  if (body.active) {
+    const others = _cmEvents.filter(e => e.active && e.slug !== _cmEvent.slug);
+    if (others.length) {
+      const go = await nrModal({
+        title: 'Another event is already switched on',
+        body: '“' + esc(others[0].name || others[0].slug) + '” is currently live on the public page. '
+          + 'Turning this one on as well leaves which event guests see up to a tiebreak. '
+          + 'Switch the other one off first unless you are sure.',
+        buttons: [{ label: 'Turn this on anyway', value: 'go', primary: true }, { label: 'Cancel', value: null }] });
+      if (!go) { cmSetStatus('Left unchanged.'); return; }
+    }
+  }
   try { await sb('PATCH', 'events?slug=eq.' + encodeURIComponent(_cmEvent.slug), body, CM_WP); cmSetStatus('Event saved — the RSVP page is updated.'); await cmLoadEvent(); }
   catch (e) { cmSetStatus('Save failed: ' + (e.message || e), true); }
 }
