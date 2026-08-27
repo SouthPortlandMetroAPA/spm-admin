@@ -1088,6 +1088,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="preshot">PreShot</button>
       <button class="tab" data-tab="cuedrop">CueDrop</button>
       <button class="tab" data-tab="countmein">CountMeIn</button>
+      <button class="tab" data-tab="jackets">Jackets</button>
       <button class="tab" data-tab="racktime">RackTime</button>
       <button type="button" class="tab-reset" id="tabResetBtn" title="Drag tabs to reorder (Alt+←/→ by keyboard). Click to reset to the default order." aria-label="Reset tab order to default">⟲</button>
     </div>
@@ -4466,6 +4467,16 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       </div>
     </div>
 
+    <div id="tab-jackets" class="tab-panel">
+      <div class="card">
+        <h2 style="margin-top:0">Match Jackets</h2>
+        <div class="muted" style="margin-bottom:10px">
+          Honorees who earned a 500- or 1000-match jacket. Boomer has emailed each of them
+          and is waiting on order details; the Text button sends one nudge to one person.
+        </div>
+        <div id="mjBody"><div class="muted">Loading&hellip;</div></div>
+      </div>
+    </div>
     <div id="tab-countmein" class="tab-panel">
       <style>
         #tab-countmein .cm-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}
@@ -5434,7 +5445,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.367';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.368';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10734,6 +10745,7 @@ function switchTab(name) {
   if (name === 'preshot') psInit();
   if (name === 'cuedrop') cdInit();
   if (name === 'countmein') cmInit();
+  if (name === 'jackets') mjInit();
   if (name === 'racktime') rktInit();
   if (name === 'fargoscout') fsInit();
   if (name === 'matchfees') mfInit();
@@ -13376,6 +13388,300 @@ const CM_RP = { 'Accept-Profile': 'countmein' };
 const CM_WP = { 'Accept-Profile': 'countmein', 'Content-Profile': 'countmein' };
 const COUNTMEIN_URL = 'https://southportlandmetroapa.github.io/countmein/';
 let _cmEvent = null, _cmRsvps = [], _cmSig = '', _cmPoll = null;
+
+
+/* ══════════════════════════════════════════════════════════════════════
+   MATCH JACKETS TAB
+   ──────────────────────────────────────────────────────────────────────
+   PURPOSE   Recognise 500/1000-match jacket honorees and text each one a
+             congratulations nudge so Boomer receives their order details.
+
+   DATA      slate.match_jackets — RLS on, no anon policy; read/written
+             through sb() with the service-role key like every other tab.
+
+   IDENTITY  A row is textable ONLY after a human has confirmed its
+             member_number. The supplied name is provenance, never
+             identity: this roster holds three distinct "Scott Black"
+             members and an "Earl Dalby" Sr/Jr pair. Suggestions are
+             ranked by the seed script and merely PROPOSE a candidate —
+             nothing auto-selects a text recipient.
+
+   DNC       Text has NO server-side no-contact gate (email does). Every
+             send path here calls dncIsBlocked(), and this surface is
+             registered in DNC_SURFACES in validate-email-blocklist.mjs.
+             Re-checked at SEND time, not only at render time, because the
+             list can change while the tab sits open.
+
+   SEND      ONE recipient per sms: URL — operator decision 2026-08-27.
+             A group text would expose every honoree's phone number to all
+             the others and silently truncate past the OS recipient cap.
+   ══════════════════════════════════════════════════════════════════════ */
+
+const MJ_DEFAULT_MSG = {
+  '500':  'Hi this is Paul Soldan with APA\n\n'
+        + 'Congratulations on earning your 500 match jacket!\n\n'
+        + 'Boomer has emailed you and is awaiting your order details\n\n'
+        + 'Please respond ASAP so that you can get your jacket!',
+  '1000': 'Hi this is Paul Soldan with APA\n\n'
+        + 'Congratulations on earning your 1000 match jacket!\n\n'
+        + 'Boomer has emailed you and is awaiting your order details\n\n'
+        + 'Please respond ASAP so that you can get your jacket!'
+};
+
+const _mjState = { rows: [], players: {}, ac: [], acFor: null, msg: {} };
+
+/* Message body is operator-editable and sticky per browser. Defaults above
+   are the operator's own wording with one typo fixed ("jaclet" -> "jacket"). */
+function mjMsg(tier) {
+  if (_mjState.msg[tier] == null) {
+    let v = null;
+    try { v = localStorage.getItem('mjMsg' + tier); } catch (e) {}
+    _mjState.msg[tier] = (v == null ? MJ_DEFAULT_MSG[tier] : v);
+  }
+  return _mjState.msg[tier];
+}
+function mjSetMsg(tier, v) {
+  _mjState.msg[tier] = v;
+  try { localStorage.setItem('mjMsg' + tier, v); } catch (e) {}
+}
+function mjResetMsg(tier) {
+  try { localStorage.removeItem('mjMsg' + tier); } catch (e) {}
+  _mjState.msg[tier] = MJ_DEFAULT_MSG[tier];
+  mjRender();
+}
+
+async function mjInit() {
+  const body = document.getElementById('mjBody');
+  if (!body) return;
+  body.innerHTML = '<div class="muted">Loading&hellip;</div>';
+  try {
+    await dncEnsure();          /* fail-closed: dncIsBlocked returns true if this failed */
+    await mjLoad();
+  } catch (e) {
+    body.innerHTML = '<div class="muted">Could not load jackets: ' + esc(e.message) + '</div>';
+  }
+}
+
+async function mjLoad() {
+  _mjState.rows = await sb('GET',
+    'match_jackets?select=*&order=tier.desc,supplied_name.asc',
+    null, { 'Accept-Profile': 'slate' }) || [];
+
+  /* Hydrate confirmed rows with the player record so we can show the phone
+     state, and catch deceased/revoked before anyone is congratulated. */
+  const mns = [...new Set(_mjState.rows.map(r => r.member_number).filter(Boolean))];
+  _mjState.players = {};
+  for (let i = 0; i < mns.length; i += 100) {
+    const chunk = mns.slice(i, i + 100);
+    const rows = await sb('GET',
+      'players?member_number=in.(' + chunk.join(',') + ')' +
+      '&select=member_number,first_name,last_name,nickname,cell_phone,deceased,membership_revoked',
+      null, { 'Accept-Profile': 'slate' }) || [];
+    for (const p of rows) _mjState.players[p.member_number] = p;
+  }
+  mjRender();
+}
+
+const mjYes = v => /^(y|yes|true|1)$/i.test(String(v == null ? '' : v));
+
+/* One place decides whether a row may be texted. Render and send both call
+   it, so what the button shows and what the send allows cannot disagree. */
+function mjRowState(r) {
+  if (r.status !== 'confirmed' || !r.member_number) return { kind: 'unresolved' };
+  const p = _mjState.players[r.member_number];
+  if (!p) return { kind: 'noplayer' };
+  if (mjYes(p.deceased))           return { kind: 'deceased', p };
+  if (mjYes(p.membership_revoked)) return { kind: 'revoked', p };
+  if (dncIsBlocked(r.member_number)) return { kind: 'dnc', p };
+  if (!otIsRealPhone(p.cell_phone))  return { kind: 'nocell', p };
+  return { kind: 'ok', p };
+}
+
+function mjRender() {
+  const body = document.getElementById('mjBody');
+  if (!body) return;
+  body.innerHTML = ['1000', '500'].map(mjSectionHtml).join('');
+  for (const t of ['1000', '500']) {
+    const ta = document.getElementById('mjMsg' + t);
+    if (ta && !ta._wired) {
+      ta._wired = true;
+      ta.addEventListener('input', () => mjSetMsg(t, ta.value));
+    }
+  }
+}
+
+function mjSectionHtml(tier) {
+  const rows = _mjState.rows.filter(r => r.tier === tier);
+  if (!rows.length) return '';
+  const states = rows.map(r => ({ r, st: mjRowState(r) }));
+  const sendable  = states.filter(x => x.st.kind === 'ok').length;
+  const texted    = states.filter(x => x.r.texted_at).length;
+  const blocked   = states.filter(x => ['dnc', 'deceased', 'revoked', 'nocell', 'noplayer'].includes(x.st.kind)).length;
+  const unres     = states.filter(x => x.st.kind === 'unresolved').length;
+
+  return '<div style="margin:18px 0 8px"><h3 style="margin:0 0 4px">' + tier + '-match jackets</h3>'
+    + '<div class="muted" style="font-size:0.82rem">'
+    + rows.length + ' honoree' + (rows.length === 1 ? '' : 's') + ' &middot; '
+    + sendable + ' textable &middot; ' + texted + ' texted &middot; '
+    + unres + ' unresolved &middot; ' + blocked + ' not contactable'
+    + '</div></div>'
+    + '<details style="margin:0 0 10px"><summary class="muted" style="cursor:pointer;font-size:0.82rem">Message for this group (editable)</summary>'
+    + '<textarea id="mjMsg' + tier + '" rows="6" style="width:100%;margin-top:6px;font-family:inherit;font-size:0.86rem;padding:8px;border:1px solid var(--border,#d1d5db);border-radius:6px">'
+    + esc(mjMsg(tier)) + '</textarea>'
+    + '<button class="btn" style="margin-top:6px" onclick="mjResetMsg(\'' + tier + '\')">Reset to default</button>'
+    + '</details>'
+    + '<div class="mj-rows">' + states.map(x => mjRowHtml(x.r, x.st)).join('') + '</div>';
+}
+
+function mjRowHtml(r, st) {
+  const p = st.p;
+  const name = p ? cdPlayerName(p) : r.supplied_name;
+  const num  = r.member_number
+    ? '<span class="muted" style="font-size:0.78rem">APA #' + esc(r.member_number) + '</span>'
+    : '<span style="font-size:0.78rem;color:#b45309;font-weight:700">no APA # yet</span>';
+
+  let action = '';
+  if (st.kind === 'ok') {
+    action = '<button class="btn" onclick="mjText(' + r.id + ')">'
+           + (r.texted_at ? 'Text again' : 'Text') + '</button>';
+  } else if (st.kind === 'dnc') {
+    action = dncChipHtml('text');
+  } else if (st.kind === 'nocell') {
+    action = '<span class="muted" style="font-size:0.78rem">no cell on file</span>';
+  } else if (st.kind === 'deceased') {
+    action = '<span style="font-size:0.78rem;color:#6b7280;font-weight:700">deceased &mdash; do not contact</span>';
+  } else if (st.kind === 'revoked') {
+    action = '<span style="font-size:0.78rem;color:#6b7280;font-weight:700">membership revoked</span>';
+  } else if (st.kind === 'noplayer') {
+    action = '<span style="font-size:0.78rem;color:#b91c1c">member #' + esc(r.member_number) + ' not on roster</span>';
+  }
+
+  const textedTag = r.texted_at
+    ? '<span class="muted" style="font-size:0.74rem">texted ' + esc(fmtDateTime(r.texted_at))
+      + ' <a href="#" onclick="mjUnmark(' + r.id + ');return false;">undo</a></span>'
+    : '';
+
+  const head = '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+    + '<div style="flex:1 1 220px;min-width:0">'
+    + '<div style="font-weight:600">' + esc(name) + '</div>'
+    + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' + num
+    + (p && name !== r.supplied_name
+        ? '<span class="muted" style="font-size:0.74rem">supplied as &ldquo;' + esc(r.supplied_name) + '&rdquo;</span>'
+        : '')
+    + '</div></div>'
+    + '<div style="display:flex;gap:8px;align-items:center">' + textedTag + action + '</div>'
+    + '</div>';
+
+  return '<div class="mj-row" style="padding:10px 0;border-bottom:1px solid var(--border,#e5e7eb)">'
+    + head
+    + (st.kind === 'unresolved' ? mjResolveHtml(r) : '')
+    + '</div>';
+}
+
+/* Unresolved rows carry the seed's ranked candidates plus a live CueDrop
+   search. Both paths end in a human clicking a specific member_number. */
+function mjResolveHtml(r) {
+  let sugg = [];
+  try { sugg = Array.isArray(r.suggestions) ? r.suggestions : JSON.parse(r.suggestions || '[]'); } catch (e) {}
+  const note = r.note ? '<div class="muted" style="font-size:0.74rem;margin-top:4px">' + esc(r.note) + '</div>' : '';
+  const chips = sugg.length
+    ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">' + sugg.map(s =>
+        '<button class="btn" style="font-size:0.78rem" onclick="mjConfirm(' + r.id + ',\'' + esc(s.member_number) + '\')">'
+        + 'Confirm ' + esc([s.first_name, s.last_name].filter(Boolean).join(' '))
+        + (s.nickname ? ' &ldquo;' + esc(s.nickname) + '&rdquo;' : '')
+        + ' &middot; #' + esc(s.member_number)
+        + (s.has_cell === false ? ' (no cell)' : '')
+        + '</button>').join('') + '</div>'
+    : '<div class="muted" style="font-size:0.78rem;margin-top:6px">No suggestion &mdash; search below.</div>';
+
+  return '<div style="margin-top:8px;padding:8px;background:#fffbeb;border:1px solid #fde68a;border-radius:6px">'
+    + '<div style="font-size:0.78rem;font-weight:700;color:#92400e">Unresolved &mdash; excluded from sending until an APA # is confirmed</div>'
+    + note + chips
+    + '<div class="cd-search" style="position:relative;margin-top:8px">'
+    + '<input id="mjSearch' + r.id + '" class="cd-input" placeholder="Search roster by name or APA #&hellip;" '
+    + 'style="width:100%;padding:6px 8px;border:1px solid var(--border,#d1d5db);border-radius:6px" '
+    + 'oninput="mjSearch(' + r.id + ',this.value)" autocomplete="off">'
+    + '<div id="mjAc' + r.id + '" class="cd-ac"></div>'
+    + '</div></div>';
+}
+
+let _mjTimer = null;
+function mjSearch(id, q) {
+  clearTimeout(_mjTimer);
+  const box = document.getElementById('mjAc' + id);
+  if (!box) return;
+  if (String(q || '').trim().length < 2) { box.classList.remove('show'); box.innerHTML = ''; return; }
+  _mjTimer = setTimeout(async () => {
+    try {
+      const hits = await cdSearch(String(q).trim());   /* canonical CueDrop search */
+      if (!hits.length) {
+        box.innerHTML = '<div class="cd-ac-item" style="cursor:default;color:var(--muted)">No matches</div>';
+      } else {
+        box.innerHTML = hits.map(p =>
+          '<div class="cd-ac-item" onmousedown="mjConfirm(' + id + ',\'' + esc(p.member_number) + '\')">'
+          + '<div class="cd-ac-name">' + esc(cdPlayerName(p)) + '</div>'
+          + '<div class="cd-ac-sub">APA #' + esc(p.member_number) + '</div></div>').join('');
+      }
+      box.classList.add('show');
+    } catch (e) { box.classList.remove('show'); }
+  }, 250);
+}
+
+async function mjConfirm(id, memberNumber) {
+  try {
+    await sb('PATCH', 'match_jackets?id=eq.' + id,
+      { member_number: memberNumber, status: 'confirmed' },
+      { 'Accept-Profile': 'slate', 'Content-Profile': 'slate', 'Prefer': 'return=minimal' });
+  } catch (e) {
+    /* The (tier, member_number) unique index is what stops one person being
+       honoured — and texted — twice at the same tier. Surface it plainly. */
+    alert(/23505|duplicate/i.test(e.message)
+      ? 'That member is already on this jacket list.'
+      : 'Could not confirm: ' + e.message);
+    return;
+  }
+  await mjLoad();
+}
+
+async function mjText(id) {
+  const r = _mjState.rows.find(x => x.id === id);
+  if (!r) return;
+  const st = mjRowState(r);
+  /* Re-check at SEND time. The render could be minutes stale and the
+     no-contact list can change underneath an open tab. */
+  if (st.kind !== 'ok') {
+    alert('Not textable — ' + st.kind + '. Refresh the tab and try again.');
+    return;
+  }
+  if (dncIsBlocked(r.member_number)) {
+    alert('This member is on the no-contact list.');
+    return;
+  }
+  const url = otBuildSmsUrl(otPhoneDigits(st.p.cell_phone), mjMsg(r.tier));
+  const stamp = new Date().toISOString();
+  try {
+    await sb('PATCH', 'match_jackets?id=eq.' + r.id, { texted_at: stamp },
+      { 'Accept-Profile': 'slate', 'Content-Profile': 'slate', 'Prefer': 'return=minimal' });
+    r.texted_at = stamp;
+    mjRender();
+  } catch (e) {
+    /* Never block the send on a logging failure — but say so, because the
+       resume-without-double-texting guarantee depends on this stamp. */
+    alert('Warning: could not record that this was texted — ' + e.message + '. '
+        + 'The text will still open; mark it by hand if needed.');
+  }
+  window.location.href = url;
+}
+
+/* The stamp is written BEFORE the SMS app opens (navigating away kills JS),
+   so an abandoned send needs a way back. */
+async function mjUnmark(id) {
+  try {
+    await sb('PATCH', 'match_jackets?id=eq.' + id, { texted_at: null },
+      { 'Accept-Profile': 'slate', 'Content-Profile': 'slate', 'Prefer': 'return=minimal' });
+  } catch (e) { alert('Could not undo: ' + e.message); return; }
+  await mjLoad();
+}
 
 async function cmInit() {
   if (!SB_KEY) { document.getElementById('cmGate').style.display = 'block'; document.getElementById('cmMain').style.display = 'none'; return; }
