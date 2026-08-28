@@ -5504,7 +5504,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.375';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.376';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -14037,7 +14037,13 @@ async function cmLoadAudience() {
   if (!_sids.length) { if (sum) sum.textContent = 'pick at least one session'; return; }
   if (sum) sum.textContent = 'loading…';
   try {
-    _cmAudience = await sb('POST', 'rpc/invite_audience',
+    /* PAGED. A plain rpc call is capped by PostgREST at 1000 rows and
+       truncates SILENTLY — no error, no warning, just a short list. That is
+       how Outreach once dropped 599 people. This audience is 1142 today, so
+       an unpaged read would quietly omit 142 invitees. The RPC carries a
+       member_number tiebreaker in its ORDER BY so limit/offset paging is
+       deterministic and cannot skip or repeat a row between pages. */
+    _cmAudience = await sbRpcAll('invite_audience',
       { p_event_slug: _cmEvent.slug, p_session_ids: cmSessionIds() },
       { 'Accept-Profile': 'countmein', 'Content-Profile': 'countmein' }) || [];
   } catch (e) { if (sum) sum.textContent = 'audience load failed: ' + (e.message || e); return; }
@@ -14175,7 +14181,9 @@ async function cmLoadRelay() {
   if (!_cmEvent || !cmSessionIds().length) { if (sum) sum.textContent = 'need an event and at least one session'; return; }
   if (sum) sum.textContent = 'loading…';
   try {
-    _cmRelay = await sb('POST', 'rpc/captain_relay',
+    /* Paged for the same reason. 899 teams today, under the cap, but the
+       cap is not a thing to sit just beneath and hope. */
+    _cmRelay = await sbRpcAll('captain_relay',
       { p_event_slug: _cmEvent.slug, p_session_ids: cmSessionIds() },
       { 'Accept-Profile': 'countmein', 'Content-Profile': 'countmein' }) || [];
   } catch (e) { if (sum) sum.textContent = 'relay load failed: ' + (e.message || e); return; }
