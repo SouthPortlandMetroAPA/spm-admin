@@ -5504,7 +5504,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.378';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.381';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -6307,6 +6307,102 @@ async function runTeamScreenImport(file, pdf, opts) {
       await sb('POST', 'teams?on_conflict=division_id,team_number',
         teamUpserts.slice(i, i + 500),
         { Prefer: 'resolution=merge-duplicates,return=minimal' });
+    }
+
+    /* 4b. Orphan sweep — the team screen is a COMPLETE snapshot of the
+       divisions it covers, so a team in one of those divisions that the file
+       does not mention is no longer in the league. Without this, removing or
+       renumbering a team leaves the old row behind forever.
+
+       Scoped to the divisions PRESENT IN THIS UPLOAD, because a team screen
+       may cover only part of the session.
+
+       A departed team's FIXTURES are removed first. slate.matches references
+       teams with ON DELETE NO ACTION, so the team delete would otherwise be
+       refused by the database and throw mid-import. Match Fees reads an absent
+       match row as a bye, so the remaining teams correctly show a bye for the
+       weeks they were due to play the departed team. */
+    try {
+      const upDivIds = [...new Set(teamUpserts.map(t => t.division_id))].filter(Boolean);
+      const upKeys = new Set(teamUpserts.map(t => t.division_id + ':' + t.team_number));
+      if (upDivIds.length) {
+        setStatus(stId, 'Checking for teams no longer on the screen…', 'progress');
+        const existing = await sb('GET', 'teams?division_id=in.(' + upDivIds.join(',')
+          + ')&select=id,division_id,team_number,team_name') || [];
+        /* Only sweep a division the upload actually CONTRIBUTED teams for. A
+           division that parsed to zero teams is a broken read of the PDF, not
+           a division that emptied out — sweeping it would delete the lot. */
+        const filledDivs = new Set(teamUpserts.map(t => t.division_id));
+        let orphans = existing.filter(t => filledDivs.has(t.division_id)
+          && !upKeys.has(t.division_id + ':' + t.team_number));
+
+        /* Magnitude guard. The import's rollback covers team_memberships only,
+           NOT teams and NOT matches, so these deletes cannot be undone by it.
+           A division that parsed PARTIALLY looks exactly like a division that
+           lost teams, so if the sweep would take half or more of a division,
+           treat it as a bad read of the PDF and skip that division. A genuine
+           half-division exodus is rare; a misparse with that shape is not, and
+           skipping costs one more upload while deleting costs a rebuild. */
+        const implausibleDivs = new Set();
+        {
+          const haveByDiv = {}, dropByDiv = {};
+          existing.forEach(t => { haveByDiv[t.division_id] = (haveByDiv[t.division_id] || 0) + 1; });
+          orphans.forEach(t => { dropByDiv[t.division_id] = (dropByDiv[t.division_id] || 0) + 1; });
+          for (const divId of Object.keys(dropByDiv)) {
+            if (dropByDiv[divId] >= Math.max(2, Math.ceil((haveByDiv[divId] || 0) / 2))) {
+              implausibleDivs.add(Number(divId));
+            }
+          }
+          if (implausibleDivs.size) {
+            orphans = orphans.filter(t => !implausibleDivs.has(t.division_id));
+            const names = [...implausibleDivs]
+              .map(id => (Object.values(divByNum || {}).find(d => d.id === id) || {}).division_number || id)
+              .join(', ');
+            setStatus(stId, 'Skipped the stale-team cleanup for division(s) ' + names
+              + ' — the upload would have removed half or more of the teams there, which usually '
+              + 'means the file did not read cleanly for those divisions. Everything else imported. '
+              + 'Check those divisions on the screen and re-upload.', 'err');
+            console.log('[Slate] sweep skipped implausible divisions:', names);
+          }
+        }
+        if (orphans.length) {
+          const ids = orphans.map(o => o.id);
+          const label = o => o.team_number + (o.team_name ? ' "' + o.team_name + '"' : '');
+          /* The screen is the single source of truth for who is in the league,
+             so a departed team's FIXTURES go with it. Match Fees already reads
+             an absent match row as a bye, so the remaining teams correctly show
+             a bye that week. Re-importing the schedule regenerates everything,
+             so this is recoverable, not destructive. */
+          let fixturesRemoved = 0;
+          for (let i = 0; i < ids.length; i += 100) {
+            const chunk = ids.slice(i, i + 100).join(',');
+            const doomed = await sb('GET', 'matches?or=(home_team_id.in.(' + chunk
+              + '),away_team_id.in.(' + chunk + '))&select=id') || [];
+            for (let j = 0; j < doomed.length; j += 100) {
+              const mIds = doomed.slice(j, j + 100).map(m => m.id);
+              await sb('DELETE', 'matches?id=in.(' + mIds.join(',') + ')');
+            }
+            fixturesRemoved += doomed.length;
+          }
+          for (let i = 0; i < orphans.length; i += 100) {
+            const chunk = orphans.slice(i, i + 100).map(o => o.id);
+            await sb('DELETE', 'team_memberships?team_id=in.(' + chunk.join(',') + ')');
+            await sb('DELETE', 'teams?id=in.(' + chunk.join(',') + ')');
+          }
+          setStatus(stId, 'Removed ' + orphans.length + ' team(s) no longer on the screen: '
+            + orphans.map(label).join(', ')
+            + (fixturesRemoved ? ' — ' + fixturesRemoved + ' fixtures removed with them, so their '
+                + 'former opponents now show a bye those weeks. Re-import the schedule to rebuild it.' : ''), 'ok');
+          console.log('[Slate] team screen sweep — removed', orphans.length, 'team(s):',
+            orphans.map(label).join(', '), '| fixtures deleted:', fixturesRemoved);
+        }
+      }
+    } catch (e) {
+      /* A sweep failure must not fail the import — the upsert already
+         succeeded. Say plainly that the sweep did not run. */
+      setStatus(stId, 'Teams imported, but the stale-team check could not run: '
+        + (e.message || e), 'err');
+      console.log('[Slate] team screen orphan sweep failed:', e.message || e);
     }
 
     // 5. Fetch team IDs back so we can attach memberships.
