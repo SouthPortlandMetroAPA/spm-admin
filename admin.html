@@ -4578,6 +4578,14 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
               <button class="btn" onclick="cmSendTest()">Send one test to yourself</button>
             </div>
             <div id="cmBlastStatus" class="muted" style="font-size:0.82rem;margin-top:8px"></div>
+            <details style="margin-top:12px" id="cmRelayWrap">
+              <summary class="muted" style="cursor:pointer;font-size:0.82rem">Captain relay — hand each captain their own chase list</summary>
+              <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <button class="btn" onclick="cmLoadRelay()">Load teams</button>
+                <span id="cmRelaySummary" class="muted" style="font-size:0.82rem">not loaded</span>
+              </div>
+              <div id="cmRelayList" style="margin-top:10px;max-height:460px;overflow:auto"></div>
+            </details>
           </div>
 
           <div class="cm-list" id="cmList"><div class="cm-empty">Loading&hellip;</div></div>
@@ -5490,7 +5498,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.372';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.373';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -14096,6 +14104,94 @@ async function cmSendWave(wave) {
   cmBlastStatus('✓ Emailed ' + sent + ' of ' + toSend.length
     + (failed.length ? ' · FAILED ' + failed.length + ': ' + failed.slice(0, 2).join('; ') + (failed.length > 2 ? ' …' : '') : '') + '.');
   await cmLoadAudience();
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   CAPTAIN RELAY
+   ──────────────────────────────────────────────────────────────────
+   One card per team that still has someone who has not responded,
+   biggest list first so the operator works the highest-leverage teams.
+   The Text button opens a single-recipient sms: to the captain with
+   their own players named. It gates on dncIsBlocked for the captain and
+   is a registered no-contact surface.
+   ══════════════════════════════════════════════════════════════════ */
+
+let _cmRelay = [];
+
+async function cmLoadRelay() {
+  const sum = document.getElementById('cmRelaySummary');
+  if (!_cmEvent || !currentSession) { if (sum) sum.textContent = 'need an event and a current session'; return; }
+  if (sum) sum.textContent = 'loading…';
+  try {
+    _cmRelay = await sb('POST', 'rpc/captain_relay',
+      { p_event_slug: _cmEvent.slug, p_session_id: currentSession.id },
+      { 'Accept-Profile': 'countmein', 'Content-Profile': 'countmein' }) || [];
+  } catch (e) { if (sum) sum.textContent = 'relay load failed: ' + (e.message || e); return; }
+  cmRenderRelay();
+}
+
+function cmRelayMessage(row) {
+  const names = (row.non_responders || []).join(', ');
+  const first = String(row.captain_name || '').split(/\s+/)[0] || 'there';
+  return 'Hi ' + first + ' — quick favor. These ' + (row.team_name || 'team') + ' players '
+    + 'have not RSVPed for the APA celebration on Sept 19: ' + names + '. '
+    + 'Could you give them a nudge? They can RSVP here: ' + COUNTMEIN_URL;
+}
+
+function cmRenderRelay() {
+  const list = document.getElementById('cmRelayList'), sum = document.getElementById('cmRelaySummary');
+  if (!list) return;
+  const rows = _cmRelay.slice().sort((a, b) => b.non_responder_count - a.non_responder_count);
+  const slots = rows.reduce((s, r) => s + (r.non_responder_count || 0), 0);
+  const distinct = new Set();
+  for (const r of rows) for (const n of (r.non_responders || [])) distinct.add(n);
+  const noCap = rows.filter(r => !r.captain_member_number).length;
+  const noCell = rows.filter(r => r.captain_member_number && !otIsRealPhone(r.captain_cell)).length;
+  if (sum) sum.textContent = rows.length + ' teams · ' + slots + ' slots to chase across '
+    + distinct.size + ' distinct people (players sit on several teams) · '
+    + noCap + ' with no captain · ' + noCell + ' captains with no usable cell';
+
+  list.innerHTML = rows.map(r => {
+    const blocked = r.captain_member_number && dncIsBlocked(r.captain_member_number);
+    const textable = r.captain_member_number && !blocked && otIsRealPhone(r.captain_cell);
+    let action;
+    if (blocked) action = dncChipHtml('text');
+    else if (textable) action = '<button class="btn" onclick="cmTextCaptain(' + r.team_id + ')">Text captain</button>';
+    else if (!r.captain_member_number) action = '<span class="muted" style="font-size:0.76rem">no captain on this team</span>';
+    else action = '<span class="muted" style="font-size:0.76rem">no usable cell</span>';
+    return '<div style="padding:8px 0;border-bottom:1px solid var(--border,#e5e7eb)">'
+      + '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">'
+      + '<div style="flex:1 1 260px;min-width:0">'
+      + '<div style="font-weight:600;font-size:0.9rem">' + esc(r.team_name || ('Team ' + r.team_number))
+      + ' <span class="muted" style="font-weight:400">div ' + esc(r.division_number || '') + '</span></div>'
+      + '<div class="muted" style="font-size:0.76rem">'
+      + (r.captain_name ? 'Captain: ' + esc(r.captain_name) : 'No captain')
+      + ' · ' + r.non_responder_count + ' of ' + r.team_size + ' not responded</div></div>'
+      + '<div style="display:flex;gap:6px;align-items:center">'
+      + '<button class="btn" onclick="cmCopyRelay(' + r.team_id + ')">Copy</button>' + action
+      + '</div></div>'
+      + '<div class="muted" style="font-size:0.76rem;margin-top:3px">' + esc((r.non_responders || []).join(', ')) + '</div>'
+      + '</div>';
+  }).join('') || '<div class="muted">Everyone has responded.</div>';
+}
+
+async function cmTextCaptain(teamId) {
+  const r = _cmRelay.find(x => x.team_id === teamId);
+  if (!r) return;
+  /* Re-check at SEND time, not only at render: the no-contact list can
+     change while this panel sits open. */
+  if (!r.captain_member_number || dncIsBlocked(r.captain_member_number)) {
+    cmBlastStatus('That captain is on the no-contact list — not texting.'); return;
+  }
+  if (!otIsRealPhone(r.captain_cell)) { cmBlastStatus('No usable cell on file for that captain.'); return; }
+  window.location.href = otBuildSmsUrl(otPhoneDigits(r.captain_cell), cmRelayMessage(r));
+}
+
+async function cmCopyRelay(teamId) {
+  const r = _cmRelay.find(x => x.team_id === teamId);
+  if (!r) return;
+  try { await navigator.clipboard.writeText(cmRelayMessage(r)); cmBlastStatus('Copied the message for ' + (r.team_name || 'that team') + '.'); }
+  catch (e) { cmBlastStatus('Copy failed: ' + e.message); }
 }
 
 /* Door list: who is coming, with the party size, for the day-of table and
