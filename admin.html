@@ -5504,7 +5504,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.376';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.377';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -13957,12 +13957,19 @@ let _cmAudience = [];
 
 const CM_INV_DEFAULT_SUBJECT = 'You are invited — South Portland Metro APA celebration';
 const CM_INV_DEFAULT_BODY =
+  /* No HTML entities: the mailer's plain-text fallback strips tags but not
+     entities, so an entity arrives as literal junk. No em dashes either, per
+     the rule for anything sent under the operator's name. The time range
+     reads "to" for exactly those two reasons. */
   '<p>Hi {first_name},</p>' +
-  '<p>We are getting everyone together to wrap up the summer session and celebrate ' +
-  'something pretty special &mdash; South Portland Metro APA is officially ours.</p>' +
-  '<p><strong>Saturday, September 19</strong><br>12:00pm &ndash; 5:00pm<br>' +
+  '<p>We\'re getting everyone together to wrap up the summer session and celebrate ' +
+  'something pretty special. South Portland Metro APA is officially ours.</p>' +
+  '<p><strong>Saturday, September 19</strong><br>12:00pm to 5:00pm<br>' +
   'Oaks Park, 7805 SE Oaks Park Way, Portland</p>' +
-  '<p>RSVPs are not required, but they help us plan. Let us know if you can make it:</p>' +
+  '<p>Bring your family and friends. Everyone is welcome. Just tell us how many ' +
+  'are coming when you RSVP so we can plan food and space.</p>' +
+  '<p>RSVPs aren\'t required, but they\'re a huge help with planning. If you think ' +
+  'you\'ll be joining us, let us know:</p>' +
   '<p><a href="' + (typeof COUNTMEIN_URL !== 'undefined' ? COUNTMEIN_URL : '') + '">RSVP here</a></p>' +
   '<p>Hope to see you there.<br>Paul</p>';
 
