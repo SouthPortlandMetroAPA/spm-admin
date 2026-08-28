@@ -5504,7 +5504,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.377';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.378';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -13955,7 +13955,7 @@ function cmRender() {
 
 let _cmAudience = [];
 
-const CM_INV_DEFAULT_SUBJECT = 'You are invited — South Portland Metro APA celebration';
+const CM_INV_DEFAULT_SUBJECT = 'You\'re invited to the South Portland Metro APA celebration';
 const CM_INV_DEFAULT_BODY =
   /* No HTML entities: the mailer's plain-text fallback strips tags but not
      entities, so an entity arrives as literal junk. No em dashes either, per
