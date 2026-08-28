@@ -5498,7 +5498,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.373';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.374';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -13917,13 +13917,16 @@ function cmRender() {
   const list = document.getElementById('cmList'), counts = document.getElementById('cmCounts'); if (!list) return;
   const yes = _cmRsvps.filter(r => r.status === 'yes'), maybe = _cmRsvps.filter(r => r.status === 'maybe'), no = _cmRsvps.filter(r => r.status === 'no');
   const head = yes.reduce((s, r) => s + (r.party_size || 1), 0);
-  if (counts) counts.innerHTML = cmStat(yes.length, 'Coming') + cmStat(head, 'Headcount', 'head') + cmStat(maybe.length, 'Maybe') + cmStat(no.length, 'Can’t make it') + cmStat(_cmRsvps.length, 'Responded');
+  const cmVolunteers = _cmRsvps.filter(r => r.volunteer);
+  if (counts) counts.innerHTML = cmStat(yes.length, 'Coming') + cmStat(head, 'Headcount', 'head') + cmStat(maybe.length, 'Maybe') + cmStat(no.length, 'Can’t make it') + cmStat(_cmRsvps.length, 'Responded') + cmStat(cmVolunteers.length, 'Helping');
   if (!_cmRsvps.length) { list.innerHTML = '<div class="cm-empty">No RSVPs yet. Share the public link above to start collecting responses.</div>'; return; }
   const pill = s => '<span class="badge st-' + s + '">' + (s === 'yes' ? 'Coming' : s === 'maybe' ? 'Maybe' : 'Can’t') + '</span>';
   list.innerHTML = _cmRsvps.map(r => {
     const size = r.status === 'no' ? '' : ' &middot; party of ' + (r.party_size || 1) + ((r.party_size || 1) > 1 ? ' (+' + ((r.party_size || 1) - 1) + ')' : '');
     return '<div class="cm-row"><div class="cm-who">' + esc(r.name || '(no name)') + ' ' + pill(r.status) + '</div>'
       + '<div class="cm-meta">' + esc(r.email || '') + (r.member_number ? ' &middot; #' + esc(r.member_number) : ' &middot; no roster match') + size + '</div>'
+      + (r.volunteer ? '<div class="cm-note" style="color:#166534"><strong>Can help</strong>'
+          + (r.volunteer_note ? ' — ' + esc(r.volunteer_note) : '') + '</div>' : '')
       + (r.note ? '<div class="cm-note">“' + esc(r.note) + '”</div>' : '') + '</div>';
   }).join('');
 }
@@ -14201,18 +14204,20 @@ function cmExportDoorList() {
   const rows = (_cmRsvps || []).filter(r => r.status === 'yes' || r.status === 'maybe');
   if (!rows.length) { cmBlastStatus('No attendees yet.'); return; }
   const esc2 = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
-  const head = ['Name', 'Status', 'Party size', 'APA number', 'Note'].map(esc2).join(',');
+  const head = ['Name', 'Status', 'Party size', 'APA number', 'Helping', 'Can help with', 'Note'].map(esc2).join(',');
   const body = rows
     .slice()
     .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
-    .map(r => [r.name, r.status, r.status === 'no' ? 0 : (r.party_size || 1), r.member_number || '', r.note || ''].map(esc2).join(','))
+    .map(r => [r.name, r.status, r.status === 'no' ? 0 : (r.party_size || 1), r.member_number || '',
+               r.volunteer ? 'YES' : '', r.volunteer_note || '', r.note || ''].map(esc2).join(','))
     .join('\n');
   const yes = rows.filter(r => r.status === 'yes');
   const heads = yes.reduce((s, r) => s + (r.party_size || 1), 0);
   const maybes = rows.filter(r => r.status === 'maybe').reduce((s, r) => s + (r.party_size || 1), 0);
   const csv = head + '\n' + body
-    + '\n' + [esc2('TOTAL confirmed heads'), '', esc2(heads), '', ''].join(',')
-    + '\n' + [esc2('TOTAL if every maybe comes'), '', esc2(heads + maybes), '', ''].join(',');
+    + '\n' + [esc2('TOTAL confirmed heads'), '', esc2(heads), '', '', '', ''].join(',')
+    + '\n' + [esc2('TOTAL if every maybe comes'), '', esc2(heads + maybes), '', '', '', ''].join(',')
+    + '\n' + [esc2('TOTAL offering to help'), '', esc2(rows.filter(r => r.volunteer).length), '', '', '', ''].join(',');
   const blob = new Blob([csv], { type: 'text/csv' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
