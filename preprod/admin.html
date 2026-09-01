@@ -5210,6 +5210,9 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         #tab-matchfees .mf-warn{background:#fde047;color:#713f12;font-weight:900}
         /* rescheduled with no new date: an explicit UNKNOWN, not a debt and
            not a clean week. Distinct from mf-warn's brighter yellow "!". */
+        /* moved, new date set, nothing due yet — deliberately neutral: it is
+           not a warning, not a debt, and not a payment. */
+        #tab-matchfees .mf-resched{background:#e5e7eb;color:#4b5563;font-weight:900}
         #tab-matchfees .mf-resched_tbd{background:#fef08a;color:#854d0e;font-weight:900;outline:2px dashed #a16207;outline-offset:-3px}
         #tab-matchfees .mf-failed{background:#fed7aa;color:#c2410c;font-weight:900}
         #tab-matchfees .mf-future,#tab-matchfees .mf-none{background:#fff;color:#d1d5db}
@@ -5275,6 +5278,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             <span class="mf-key"><span class="mf-sw mf-late"></span>late</span>
             <span class="mf-key"><span class="mf-sw mf-ontime_ovr"></span>late, forgiven</span>
             <span class="mf-key"><span class="mf-sw mf-warn"></span>due &lt;24h (!)</span>
+            <span class="mf-key"><span class="mf-sw mf-resched"></span>rescheduled (R)</span>
             <span class="mf-key"><span class="mf-sw mf-resched_tbd"></span>rescheduled, no date (?)</span>
             <span class="mf-key muted" style="font-size:.76rem">Select → tap weeks · Shift-click for a run · Ctrl/⌘-click works anytime</span>
             <span class="mf-key"><span class="mf-sw mf-failed"></span>failed (retry)</span>
@@ -5580,7 +5584,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.390';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.391';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11535,20 +11539,30 @@ function mfCell(div, team, wk, today) {
   // Ahead of future/due/warn/unpaid — all four of those judge a deadline this
   // week no longer has.
   if (reschedTbd) return { k: 'resched_tbd', sched, deadline, dlTime, resched, override };
-  if (sched > today) return { k: 'future', sched, deadline, dlTime, resched, override };
+  /* A DATED reschedule that is not yet actionable shows R rather than the blue
+     dot or a blank — otherwise a moved match is indistinguishable from any
+     ordinary pending one. Only 'due' and 'future' are remapped: a rescheduled
+     week that is genuinely overdue, nearly due, declined or PAID keeps that
+     state, because R would hide it. Remapping at the return keeps the deadline
+     escalation below in ONE place — a second copy is how the two drift. */
+  const fin = function (k) {
+    if (resched && (k === 'due' || k === 'future')) k = 'resched';
+    return { k: k, sched: sched, deadline: deadline, dlTime: dlTime, resched: resched, override: override };
+  };
+  if (sched > today) return fin('future');
   // played, no Success payment. If there were only FAILED attempts, flag distinctly
   // (they tried, the card declined — needs a retry nudge) vs a plain never-paid.
-  if (_mf.failKeys && _mf.failKeys.has(key)) return { k: 'failed', sched, deadline, dlTime, resched, override };
+  if (_mf.failKeys && _mf.failKeys.has(key)) return fin('failed');
   // otherwise escalate by the deadline MOMENT (date + time) vs now:
   //   >24h out → due (grace) · within 24h → warn (!) · past → unpaid (✗)
   const deadlineMs = deadline ? new Date(deadline + 'T' + (dlTime || '23:59') + ':00').getTime() : null;
   const nowMs = Date.now();
   if (deadlineMs != null && !isNaN(deadlineMs)) {
-    if (nowMs >= deadlineMs) return { k: 'unpaid', sched, deadline, dlTime, resched, override };
-    if (nowMs >= deadlineMs - 86400000) return { k: 'warn', sched, deadline, dlTime, resched, override };
-    return { k: 'due', sched, deadline, dlTime, resched, override };
+    if (nowMs >= deadlineMs) return fin('unpaid');
+    if (nowMs >= deadlineMs - 86400000) return fin('warn');
+    return fin('due');
   }
-  return { k: 'unpaid', sched, deadline, dlTime, resched, override };
+  return fin('unpaid');
 }
 
 /* What each Show: mode selects. Defined once — the row filter and the
@@ -11600,7 +11614,7 @@ function mfTeamRow(div, team, weeks, today, ownWeeks) {
     // Keyed on the adjustment, NOT on c.k: a DATED reschedule still renders as
     // ontime / late / future, so a state check would miss nearly all of them.
     if (c.resched) resched++;
-    const label = { ontime: '✓', ontime_ovr: '✔', late: 'L', unpaid: '✗', bye: 'B', due: '•', warn: '!', failed: 'F', resched_tbd: '?', future: '', none: '' }[c.k];
+    const label = { ontime: '✓', ontime_ovr: '✔', late: 'L', unpaid: '✗', bye: 'B', due: '•', warn: '!', failed: 'F', resched_tbd: '?', resched: 'R', future: '', none: '' }[c.k];
     const amt = c.pay ? '$' + (+c.pay.amount).toFixed(0) : '';
     const paidStr = c.pay ? (c.pay.payment_date || '?') + (c.pay.payment_time ? ' ' + c.pay.payment_time : '') : '?';
     const dueStr = c.deadline ? c.deadline + (c.dlTime ? ' ' + c.dlTime : '') : null;
@@ -11614,6 +11628,7 @@ function mfTeamRow(div, team, weeks, today, ownWeeks) {
        c.k === 'failed' ? ' · payment FAILED — attempt(s) declined, needs retry' :
        c.k === 'unpaid' ? ' · NOT PAID — past deadline' :
        c.k === 'resched_tbd' ? ' · rescheduled, new date not set — no deadline to judge, not counted as owed' :
+       c.k === 'resched' ? ' · rescheduled — nothing due yet against the new date' :
        c.k === 'bye' ? ' · bye' :
        c.k === 'future' ? ' · upcoming' : '');
     // adjustment provenance on the hover: who moved what, when, and why
@@ -12047,7 +12062,7 @@ function mfCellMenu(td) {
   lines.push('<button type="button" class="mf-mbtn" onclick="mfAskReschedule(\'' + esc(dn) + '\',\'' + esc(tn) + '\',' + wk + ')">' +
     (adj.reschedule ? 'Edit reschedule' : 'Mark rescheduled') + '</button>');
   // Any owed or upcoming week can be settled early, not just an already-late one.
-  if (k === 'late' || k === 'unpaid' || k === 'warn' || k === 'due' || k === 'failed' || k === 'future' || k === 'resched_tbd') {
+  if (k === 'late' || k === 'unpaid' || k === 'warn' || k === 'due' || k === 'failed' || k === 'future' || k === 'resched_tbd' || k === 'resched') {
     lines.push('<button type="button" class="mf-mbtn" onclick="mfAskOverride(\'' + esc(dn) + '\',\'' + esc(tn) + '\',' + wk + ')">' +
       (k === 'late' ? 'Override to on time' : 'Mark on time now') + '</button>');
   }
