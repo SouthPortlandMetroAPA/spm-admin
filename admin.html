@@ -5520,7 +5520,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.384';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.385';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11260,6 +11260,19 @@ async function mfLoadData() {
   mfRender();
 }
 
+/* division|teamnorm|wop -> { reschedule: row, override_ontime: row }.
+   Defined ONCE: mfBuildModel builds it on a full load, mfReloadAdjustments
+   rebuilds it on a narrow refresh. Two copies of this loop would be the
+   single-source-of-truth defect the house rules call out by name. */
+function mfIndexAdjustments(adjustments) {
+  const adjIndex = {};
+  for (const a of (adjustments || [])) {
+    const k = a.division_number + '|' + a.team_number_norm + '|' + a.wop;
+    (adjIndex[k] = adjIndex[k] || {})[a.kind] = a;
+  }
+  return adjIndex;
+}
+
 function mfBuildModel(divs, matches, payments, upload, adjustments, roster, rosterPlayers) {
   const idToNum = {};
   divs.forEach(d => { idToNum[d.id] = d.division_number; });
@@ -11301,11 +11314,7 @@ function mfBuildModel(divs, matches, payments, upload, adjustments, roster, rost
     if (!ex || (p.payment_date && (!ex.payment_date || p.payment_date < ex.payment_date))) payIndex[k] = p;
   }
   // adjustment index: division|teamnorm|wop -> { reschedule: row, override_ontime: row }
-  const adjIndex = {};
-  for (const a of (adjustments || [])) {
-    const k = a.division_number + '|' + a.team_number_norm + '|' + a.wop;
-    (adjIndex[k] = adjIndex[k] || {})[a.kind] = a;
-  }
+  const adjIndex = mfIndexAdjustments(adjustments);
   // team_id -> [{first,nick,last,role,mn,cell}] with Captain/Co-Captain first.
   const pById = {};
   (rosterPlayers || []).forEach(p => { pById[String(p.member_number)] = p; });
@@ -11692,12 +11701,24 @@ async function mfAskOverride(dn, tn, wk) {
   });
 }
 
+/* Refetch ONLY the adjustments and re-index them. Everything else in the model
+   — payments, schedule, rosters, deadlines — is untouched by an adjustment
+   write, so reloading it was pure latency. Timed in-page on 3.385:
+   mfLoadData 2,429 ms vs 272/261 ms here. The read is still a real round-trip
+   to the server, so the board reflects what was actually stored, not what the
+   client hoped it wrote. */
+async function mfReloadAdjustments() {
+  const adjustments = await mfFetchAll('match_fee_adjustments?select=*&session_id=eq.' + _mfSession);
+  _mf.adjIndex = mfIndexAdjustments(adjustments);
+  mfRender();
+}
+
 async function mfSaveAdj(row) {
   row.created_by_device = (navigator.userAgent || '').slice(0, 60);
   try {
     await sb('POST', 'match_fee_adjustments?on_conflict=session_id,division_number,team_number_norm,wop,kind',
       row, { Prefer: 'resolution=merge-duplicates,return=minimal' });
-    await mfLoadData();
+    await mfReloadAdjustments();
   } catch (e) { mfToast('Could not save: ' + (e.message || e), true); }
 }
 
@@ -11713,11 +11734,50 @@ async function mfClearAdj(dn, tn, wk, kind) {
     await sb('DELETE', 'match_fee_adjustments?session_id=eq.' + _mfSession +
       '&division_number=eq.' + encodeURIComponent(dn) + '&team_number_norm=eq.' + encodeURIComponent(tn) +
       '&wop=eq.' + wk + '&kind=eq.' + kind);
-    await mfLoadData();
+    await mfReloadAdjustments();
   } catch (e) { mfToast('Could not remove: ' + (e.message || e), true); }
 }
 
+/* ── the operator's place in the board ─────────────────────────────────────
+ * mfRender() replaces #mfGrid wholesale, which drops every expanded division
+ * and every sideways scroll position. Marking a single week then had to be
+ * paid for by re-finding your place — the "it resets the UI" report.
+ *
+ * Captured by division NUMBER, never by index: the division filter and the
+ * no-schedule auto-hide both change which blocks exist, so an index would
+ * re-open a different division than the one that was open.                */
+function mfCaptureViewState() {
+  const open = [];
+  const sideways = {};
+  document.querySelectorAll('#mfGrid details.mf-div').forEach(function (d) {
+    const dn = d.getAttribute('data-dn');
+    if (!dn) return;
+    if (d.open) open.push(dn);
+    const sc = d.querySelector('.mf-scroll');
+    if (sc && sc.scrollLeft) sideways[dn] = sc.scrollLeft;
+  });
+  return { open: open, sideways: sideways, pageY: window.scrollY };
+}
+
+function mfRestoreViewState(st) {
+  if (!st) return;
+  const open = new Set(st.open);
+  document.querySelectorAll('#mfGrid details.mf-div').forEach(function (d) {
+    const dn = d.getAttribute('data-dn');
+    if (!dn) return;
+    /* Re-open BEFORE the scroll restores below: the page is the wrong height
+       while everything is collapsed, so a scroll set first would be clamped. */
+    if (open.has(dn)) d.open = true;
+    const sc = d.querySelector('.mf-scroll');
+    if (sc && st.sideways[dn]) sc.scrollLeft = st.sideways[dn];
+  });
+  /* A division that vanished (filter, auto-hide) makes the page shorter; the
+     browser clamps, which is the right outcome — never scroll past the end. */
+  if (typeof st.pageY === 'number') window.scrollTo(0, st.pageY);
+}
+
 function mfRender() {
+  const _mfView = mfCaptureViewState();
   const wrap = document.getElementById('mfGrid');
   const sum = document.getElementById('mfSummary');
   const meta = document.getElementById('mfMeta');
@@ -11766,13 +11826,14 @@ function mfRender() {
     const shown = _mfFilter.onlyOwing ? rows.filter(r => r.owing) : rows;
     if (_mfFilter.onlyOwing && !shown.length) return '';
     const head = '<th class="mf-tn">Team</th><th class="mf-tname"></th>' + weeks.map(w => '<th class="mf-wh">' + w + '</th>').join('') + '<th class="mf-owe">Owe</th>';
-    return '<details class="mf-div"><summary class="mf-divhdr">' + esc(d.division_number + ' · ' + d.name) +
+    return '<details class="mf-div" data-dn="' + esc(d.division_number) + '"><summary class="mf-divhdr">' + esc(d.division_number + ' · ' + d.name) +
       ' <span class="muted">' + esc(d.format || '') + (d.night_of_play ? ' · ' + esc(d.night_of_play) : '') + '</span>' +
       (divOwing ? '<span class="mf-badge mf-b-owe">' + divOwing + ' owing</span>' : '<span class="mf-badge mf-b-ok">all current</span>') + '</summary>' +
       '<div class="mf-scroll"><table class="mf-tbl"><thead><tr>' + head + '</tr></thead><tbody>' + shown.map(r => r.html).join('') + '</tbody></table></div></details>';
   }).join('');
   if (sum) sum.innerHTML = '<div class="mf-stats"><span><b>' + totTeams + '</b> teams</span><span class="mf-s-owe"><b>' + totOwing + '</b> needing attention — due-soon/unpaid/late</span><span><b>$' + totCollected.toFixed(2) + '</b> collected</span>' + (_mfHidden ? '<span class="muted">' + _mfHidden + ' division' + (_mfHidden === 1 ? '' : 's') + ' hidden (no schedule)</span>' : '') + '</div>';
   wrap.innerHTML = blocks || '<p class="muted">No divisions for this session.</p>';
+  mfRestoreViewState(_mfView);
 }
 
 function mfToday() {
