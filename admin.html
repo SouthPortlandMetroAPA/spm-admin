@@ -5584,7 +5584,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.392';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.393';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -25508,20 +25508,33 @@ async function ssgSwapWeek(matchId, teamId, otherMatchId) {
                        r2_path: ssgR2PathFor(x.toMatch, teamId, x.p.side), from: x.p.r2_path }));
 
   try {
-    /* COPY FIRST. Every blob lands at its destination before the database
-       moves, so an interruption leaves the original rows pointing at objects
-       that still exist. The old objects are deliberately left in place. */
-    say('Copying ' + moves.length + ' photo(s)…');
+    /* READ EVERY SOURCE FIRST, then write. Interleaving them destroys data on
+       a two-way swap, because the destination of one move IS the source of the
+       other:
+         move 1  read A -> write B   (B's object is gone before it is read)
+         move 2  read B -> finds A's bytes -> writes them to A
+       Both weeks end up holding the same photo. That shipped in 3.392 and cost
+       a real submission (escape 0901-papertrail-swap-clobber). Sources are
+       ~300 KB and a swap moves at most four, so draining them all first is
+       free. */
+    say('Reading ' + moves.length + ' photo(s)…');
+    const blobs = [];
     for (const mv of moves) {
       const got = await fetch(SS_R2_URL + '/' + mv.from);
       if (!got.ok) throw new Error('read ' + mv.from + ': ' + got.status);
-      const blob = await got.blob();
-      const put = await fetch(SS_R2_URL + '/' + mv.r2_path, {
+      blobs.push(await got.blob());
+    }
+    /* Nothing is written unless EVERY source was read. A partial swap that
+       half-overwrites is the same defect in a smaller costume. */
+    if (blobs.length !== moves.length) throw new Error('read ' + blobs.length + ' of ' + moves.length + ' photos — refusing to write');
+    say('Copying…');
+    for (let i = 0; i < moves.length; i++) {
+      const put = await fetch(SS_R2_URL + '/' + moves[i].r2_path, {
         method: 'PUT',
-        headers: { 'Content-Type': blob.type || 'image/jpeg' },
-        body: blob
+        headers: { 'Content-Type': blobs[i].type || 'image/jpeg' },
+        body: blobs[i]
       });
-      if (!put.ok) throw new Error('write ' + mv.r2_path + ': ' + put.status);
+      if (!put.ok) throw new Error('write ' + moves[i].r2_path + ': ' + put.status);
     }
 
     /* THEN the database, atomically — the RPC deletes and reinserts inside one
