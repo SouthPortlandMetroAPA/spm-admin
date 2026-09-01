@@ -5180,6 +5180,9 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         .mf-msw-owe{background:#b91c1c}
         .mf-msw-soon{background:#fde047}
         .mf-msw-fail{background:#fed7aa}
+        .mf-msw-late{background:#fef3c7;border:1px solid #d6bb6a}
+        .mf-msw-ovr{background:#dbe8ff;border:1px solid #0031a1}
+        .mf-msw-resched{background:#0031a1}
         .mf-msw-any{background:linear-gradient(90deg,#b91c1c 0 33%,#fde047 33% 66%,#fed7aa 66%)}
         .mf-modebtn{font:inherit;font-size:.84rem;font-weight:700;padding:6px 14px;border-radius:999px;border:1.5px solid #0031a1;background:#fff;color:#0031a1;cursor:pointer}
         .mf-modebtn:hover{background:#eef5ff}
@@ -5207,6 +5210,9 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         #tab-matchfees .mf-warn{background:#fde047;color:#713f12;font-weight:900}
         /* rescheduled with no new date: an explicit UNKNOWN, not a debt and
            not a clean week. Distinct from mf-warn's brighter yellow "!". */
+        /* moved, new date set, nothing due yet — deliberately neutral: it is
+           not a warning, not a debt, and not a payment. */
+        #tab-matchfees .mf-resched{background:#e5e7eb;color:#4b5563;font-weight:900}
         #tab-matchfees .mf-resched_tbd{background:#fef08a;color:#854d0e;font-weight:900;outline:2px dashed #a16207;outline-offset:-3px}
         #tab-matchfees .mf-failed{background:#fed7aa;color:#c2410c;font-weight:900}
         #tab-matchfees .mf-future,#tab-matchfees .mf-none{background:#fff;color:#d1d5db}
@@ -5215,6 +5221,10 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         #tab-matchfees .mf-soon{font-weight:700;color:#92400e}
         /* failed matches the F cell's own orange, so the column reads back to it */
         #tab-matchfees .mf-failc{font-weight:700;color:#c2410c}
+        /* late reads in the L cell's own amber — paid, just not on time */
+        #tab-matchfees .mf-latec{font-weight:700;color:#92400e;opacity:.75}
+        #tab-matchfees .mf-b-late{background:#fef3c7;color:#92400e}
+        #tab-matchfees .mf-stats .mf-s-late b{color:#92400e}
         #tab-matchfees .mf-deadlines{border:1px solid var(--border,#e5e7eb);border-radius:10px;margin:0 0 14px;background:#fafbfc}
         #tab-matchfees .mf-deadlines>summary{cursor:pointer;font-weight:700;padding:10px 14px;list-style:none}
         #tab-matchfees .mf-deadlines>summary::-webkit-details-marker{display:none}
@@ -5253,12 +5263,22 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             <button type="button" class="mf-xbtn" onclick="mfExpand('none')">Collapse all</button>
           </span>
           <label>Division <select id="mfDivFilter"><option value="">All divisions</option></select></label>
-          <label><input type="checkbox" id="mfOnlyOwing"> Only teams needing attention — owing, due soon, or failed</label>
+          <label>Show <select id="mfShowFilter">
+            <option value="">All teams</option>
+            <option value="attn">Needing attention — owing, due soon, or failed</option>
+            <option value="owe">Owing — past the deadline, unpaid</option>
+            <option value="soon">Due soon — unpaid, deadline within 24h</option>
+            <option value="fail">Failed — card declined, needs a retry</option>
+            <option value="late">Late — paid, but after the deadline</option>
+            <option value="ovr">Overridden — marked on time by you</option>
+            <option value="resched">Rescheduled — moved, or waiting on a date</option>
+          </select></label>
           <span class="mf-legend">
             <span class="mf-key"><span class="mf-sw mf-ontime"></span>on time</span>
             <span class="mf-key"><span class="mf-sw mf-late"></span>late</span>
             <span class="mf-key"><span class="mf-sw mf-ontime_ovr"></span>late, forgiven</span>
             <span class="mf-key"><span class="mf-sw mf-warn"></span>due &lt;24h (!)</span>
+            <span class="mf-key"><span class="mf-sw mf-resched"></span>rescheduled (R)</span>
             <span class="mf-key"><span class="mf-sw mf-resched_tbd"></span>rescheduled, no date (?)</span>
             <span class="mf-key muted" style="font-size:.76rem">Select → tap weeks · Shift-click for a run · Ctrl/⌘-click works anytime</span>
             <span class="mf-key"><span class="mf-sw mf-failed"></span>failed (retry)</span>
@@ -5564,7 +5584,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.389';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.391';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11163,7 +11183,7 @@ async function njCopyEmails(){
 let _mfSessions = [];
 let _mfSession = null;
 let _mf = { divisions: [], payments: [], weekDate: {}, byeWeeks: null, upload: null };
-let _mfFilter = { division: '', onlyOwing: false };
+let _mfFilter = { division: '', show: '' };
 /* Selected cells as "division|teamnorm|wop". Deliberately NOT held in the DOM:
    mfRender() replaces #mfGrid wholesale, so a class-only selection would be
    lost on the first apply. mfTeamRow re-applies it at render time. */
@@ -11267,8 +11287,8 @@ async function mfInit() {
   }
   const df = document.getElementById('mfDivFilter');
   if (df && !df.dataset.wired) { df.dataset.wired = '1'; df.addEventListener('change', () => { _mfFilter.division = df.value; mfRender(); }); }
-  const ou = document.getElementById('mfOnlyOwing');
-  if (ou && !ou.dataset.wired) { ou.dataset.wired = '1'; ou.addEventListener('change', () => { _mfFilter.onlyOwing = ou.checked; mfRender(); }); }
+  const ou = document.getElementById('mfShowFilter');
+  if (ou && !ou.dataset.wired) { ou.dataset.wired = '1'; ou.addEventListener('change', () => { _mfFilter.show = ou.value; mfRender(); }); }
   await mfLoadData();
 }
 
@@ -11519,25 +11539,51 @@ function mfCell(div, team, wk, today) {
   // Ahead of future/due/warn/unpaid — all four of those judge a deadline this
   // week no longer has.
   if (reschedTbd) return { k: 'resched_tbd', sched, deadline, dlTime, resched, override };
-  if (sched > today) return { k: 'future', sched, deadline, dlTime, resched, override };
+  /* A DATED reschedule that is not yet actionable shows R rather than the blue
+     dot or a blank — otherwise a moved match is indistinguishable from any
+     ordinary pending one. Only 'due' and 'future' are remapped: a rescheduled
+     week that is genuinely overdue, nearly due, declined or PAID keeps that
+     state, because R would hide it. Remapping at the return keeps the deadline
+     escalation below in ONE place — a second copy is how the two drift. */
+  const fin = function (k) {
+    if (resched && (k === 'due' || k === 'future')) k = 'resched';
+    return { k: k, sched: sched, deadline: deadline, dlTime: dlTime, resched: resched, override: override };
+  };
+  if (sched > today) return fin('future');
   // played, no Success payment. If there were only FAILED attempts, flag distinctly
   // (they tried, the card declined — needs a retry nudge) vs a plain never-paid.
-  if (_mf.failKeys && _mf.failKeys.has(key)) return { k: 'failed', sched, deadline, dlTime, resched, override };
+  if (_mf.failKeys && _mf.failKeys.has(key)) return fin('failed');
   // otherwise escalate by the deadline MOMENT (date + time) vs now:
   //   >24h out → due (grace) · within 24h → warn (!) · past → unpaid (✗)
   const deadlineMs = deadline ? new Date(deadline + 'T' + (dlTime || '23:59') + ':00').getTime() : null;
   const nowMs = Date.now();
   if (deadlineMs != null && !isNaN(deadlineMs)) {
-    if (nowMs >= deadlineMs) return { k: 'unpaid', sched, deadline, dlTime, resched, override };
-    if (nowMs >= deadlineMs - 86400000) return { k: 'warn', sched, deadline, dlTime, resched, override };
-    return { k: 'due', sched, deadline, dlTime, resched, override };
+    if (nowMs >= deadlineMs) return fin('unpaid');
+    if (nowMs >= deadlineMs - 86400000) return fin('warn');
+    return fin('due');
   }
-  return { k: 'unpaid', sched, deadline, dlTime, resched, override };
+  return fin('unpaid');
+}
+
+/* What each Show: mode selects. Defined once — the row filter and the
+   hide-empty-division check both call it, and a second copy would let them
+   drift into disagreeing about what "attention" means.
+   'attn' is owe/soon/failed and NOT late: late money arrived, so there is
+   nothing to chase. */
+function mfRowMatches(r, mode) {
+  if (mode === 'attn') return !!(r.owing || r.soon || r.failed);
+  if (mode === 'owe') return !!r.owing;
+  if (mode === 'soon') return !!r.soon;
+  if (mode === 'fail') return !!r.failed;
+  if (mode === 'late') return !!r.late;
+  if (mode === 'ovr') return !!r.ovr;
+  if (mode === 'resched') return !!r.resched;
+  return true;
 }
 
 function mfTeamRow(div, team, weeks, today, ownWeeks) {
   const teamNorm = String(parseInt(team.team_number, 10));
-  let owing = 0, soon = 0, failed = 0;
+  let owing = 0, soon = 0, failed = 0, late = 0, ovr = 0, resched = 0;
   const cells = weeks.map(wk => {
     // Columns are aligned across ALL divisions, so a short division gets inert
     // pad cells past its own week count. Inert != unpaid: no state, no click.
@@ -11556,7 +11602,19 @@ function mfTeamRow(div, team, weeks, today, ownWeeks) {
     if (c.k === 'unpaid') owing++;
     else if (c.k === 'warn') soon++;
     else if (c.k === 'failed') failed++;
-    const label = { ontime: '✓', ontime_ovr: '✔', late: 'L', unpaid: '✗', bye: 'B', due: '•', warn: '!', failed: 'F', resched_tbd: '?', future: '', none: '' }[c.k];
+    // LATE is money that ARRIVED, just after the deadline. It is in none of
+    // the three above on purpose — nothing is owed and nothing needs chasing —
+    // but "who keeps paying late" is a real question, so it is counted.
+    else if (c.k === 'late') late++;
+    // Operator ANNOTATIONS, counted independently of the money state above:
+    // an overridden week is also (say) a former late one, and a rescheduled
+    // week keeps whatever state its NEW deadline produces. Both are plain
+    // ifs, not else-ifs — they overlap the money states by design.
+    if (c.k === 'ontime_ovr') ovr++;
+    // Keyed on the adjustment, NOT on c.k: a DATED reschedule still renders as
+    // ontime / late / future, so a state check would miss nearly all of them.
+    if (c.resched) resched++;
+    const label = { ontime: '✓', ontime_ovr: '✔', late: 'L', unpaid: '✗', bye: 'B', due: '•', warn: '!', failed: 'F', resched_tbd: '?', resched: 'R', future: '', none: '' }[c.k];
     const amt = c.pay ? '$' + (+c.pay.amount).toFixed(0) : '';
     const paidStr = c.pay ? (c.pay.payment_date || '?') + (c.pay.payment_time ? ' ' + c.pay.payment_time : '') : '?';
     const dueStr = c.deadline ? c.deadline + (c.dlTime ? ' ' + c.dlTime : '') : null;
@@ -11570,6 +11628,7 @@ function mfTeamRow(div, team, weeks, today, ownWeeks) {
        c.k === 'failed' ? ' · payment FAILED — attempt(s) declined, needs retry' :
        c.k === 'unpaid' ? ' · NOT PAID — past deadline' :
        c.k === 'resched_tbd' ? ' · rescheduled, new date not set — no deadline to judge, not counted as owed' :
+       c.k === 'resched' ? ' · rescheduled — nothing due yet against the new date' :
        c.k === 'bye' ? ' · bye' :
        c.k === 'future' ? ' · upcoming' : '');
     // adjustment provenance on the hover: who moved what, when, and why
@@ -11602,7 +11661,8 @@ function mfTeamRow(div, team, weeks, today, ownWeeks) {
   return { html: '<tr' + (owing || soon || failed ? ' data-owing="1"' : '') + '>' + numCell + nameCell + cells +
     '<td class="mf-owe">' + (owing ? owing : '') + '</td>' +
     '<td class="mf-soon">' + (soon ? soon : '') + '</td>' +
-    '<td class="mf-failc">' + (failed ? failed : '') + '</td></tr>', owing, soon, failed };
+    '<td class="mf-failc">' + (failed ? failed : '') + '</td>' +
+    '<td class="mf-latec">' + (late ? late : '') + '</td></tr>', owing, soon, failed, late, ovr, resched };
 }
 
 /* ── Adjustments: reschedule + late→on-time override ────────────────────────
@@ -11716,19 +11776,26 @@ function mfExpandMatch(kind, d) {
   const owe = +(d.getAttribute('data-owe') || 0);
   const soon = +(d.getAttribute('data-soon') || 0);
   const fail = +(d.getAttribute('data-fail') || 0);
+  const late = +(d.getAttribute('data-late') || 0);
+  const ovr = +(d.getAttribute('data-ovr') || 0);
+  const resched = +(d.getAttribute('data-resched') || 0);
   if (kind === 'all') return true;
   if (kind === 'none') return false;
   if (kind === 'owe') return owe > 0;
   if (kind === 'soon') return soon > 0;
   if (kind === 'fail') return fail > 0;
+  if (kind === 'late') return late > 0;
+  if (kind === 'ovr') return ovr > 0;
+  if (kind === 'resched') return resched > 0;
+  /* 'any' stays the three that need ACTION — late is not one of them. */
   if (kind === 'any') return owe > 0 || soon > 0 || fail > 0;
   return false;
 }
 
 function mfExpandCounts() {
   const all = [...document.querySelectorAll('#mfGrid details.mf-div')];
-  const t = { all: all.length, owe: 0, soon: 0, fail: 0, any: 0 };
-  ['owe', 'soon', 'fail', 'any'].forEach(function (k) {
+  const t = { all: all.length, owe: 0, soon: 0, fail: 0, late: 0, ovr: 0, resched: 0, any: 0 };
+  ['owe', 'soon', 'fail', 'late', 'ovr', 'resched', 'any'].forEach(function (k) {
     t[k] = all.filter(function (d) { return mfExpandMatch(k, d); }).length;
   });
   return t;
@@ -11765,6 +11832,9 @@ function mfExpandMenu(btn) {
     row('owe', 'owe', 'Owing') +
     row('soon', 'soon', 'Due soon') +
     row('fail', 'fail', 'Failed') +
+    row('late', 'late', 'Late payments') +
+    row('ovr', 'ovr', 'Overridden to on time') +
+    row('resched', 'resched', 'Rescheduled') +
     row('any', 'any', 'Any of the three') +
     '<button type="button" class="mf-mbtn mf-mcancel" onclick="mfExpandClose()">Cancel</button>';
   const r = btn.getBoundingClientRect();
@@ -11992,7 +12062,7 @@ function mfCellMenu(td) {
   lines.push('<button type="button" class="mf-mbtn" onclick="mfAskReschedule(\'' + esc(dn) + '\',\'' + esc(tn) + '\',' + wk + ')">' +
     (adj.reschedule ? 'Edit reschedule' : 'Mark rescheduled') + '</button>');
   // Any owed or upcoming week can be settled early, not just an already-late one.
-  if (k === 'late' || k === 'unpaid' || k === 'warn' || k === 'due' || k === 'failed' || k === 'future' || k === 'resched_tbd') {
+  if (k === 'late' || k === 'unpaid' || k === 'warn' || k === 'due' || k === 'failed' || k === 'future' || k === 'resched_tbd' || k === 'resched') {
     lines.push('<button type="button" class="mf-mbtn" onclick="mfAskOverride(\'' + esc(dn) + '\',\'' + esc(tn) + '\',' + wk + ')">' +
       (k === 'late' ? 'Override to on time' : 'Mark on time now') + '</button>');
   }
@@ -12182,6 +12252,7 @@ function mfRender() {
   let totOwing = 0;
   let totSoon = 0;
   let totFailed = 0;
+  let totLate = 0;
   let totCollected = 0;
   _mf.payments.forEach(p => { if ((p.status || '') === 'Success') totCollected += +p.amount || 0; });
   // Week columns are aligned across every displayed division: one shared column
@@ -12194,33 +12265,39 @@ function mfRender() {
   const blocks = divs.map(d => {
     const teams = (d.teams || []).slice().sort((a, b) => String(a.team_number).localeCompare(String(b.team_number)));
     const nWeeks = mfWeekCount(d);
-    let divOwing = 0, divSoon = 0, divFailed = 0;
+    let divOwing = 0, divSoon = 0, divFailed = 0, divLate = 0, divOvr = 0, divResched = 0;
     const rows = teams.map(t => {
       const r = mfTeamRow(d, t, weeks, today, nWeeks);
       if (r.owing) divOwing++;
       if (r.soon) divSoon++;
       if (r.failed) divFailed++;
+      if (r.late) divLate++;
+      if (r.ovr) divOvr++;
+      if (r.resched) divResched++;
       return r;
     });
     totTeams += teams.length;
     totOwing += divOwing;
     totSoon += divSoon;
     totFailed += divFailed;
-    const shown = _mfFilter.onlyOwing ? rows.filter(r => r.owing || r.soon || r.failed) : rows;
-    if (_mfFilter.onlyOwing && !shown.length) return '';
+    totLate += divLate;
+    const shown = _mfFilter.show ? rows.filter(r => mfRowMatches(r, _mfFilter.show)) : rows;
+    if (_mfFilter.show && !shown.length) return '';
     const head = '<th class="mf-tn">Team</th><th class="mf-tname"></th>' + weeks.map(w => '<th class="mf-wh">' + w + '</th>').join('') +
       '<th class="mf-owe" title="Weeks past the deadline with no payment — ✗ — or where every attempt was declined — F">Owe</th>' +
       '<th class="mf-soon" title="Weeks played and unpaid whose deadline is inside 24 hours — the ! cells — not late yet">Due soon</th>' +
-      '<th class="mf-failc" title="Weeks where a card was tried and declined — the F cells — needs a retry, not a chase">Failed</th>';
+      '<th class="mf-failc" title="Weeks where a card was tried and declined — the F cells — needs a retry, not a chase">Failed</th>' +
+      '<th class="mf-latec" title="Weeks paid AFTER the deadline — the L cells. The money arrived, so nothing is owed">Late</th>';
     /* The tallies ride on the element so the expanders read exactly the
        numbers the badges show — one source, re-derived every render. */
     return '<details class="mf-div" data-dn="' + esc(d.division_number) +
-      '" data-owe="' + divOwing + '" data-soon="' + divSoon + '" data-fail="' + divFailed +
+      '" data-owe="' + divOwing + '" data-soon="' + divSoon + '" data-fail="' + divFailed + '" data-late="' + divLate + '" data-ovr="' + divOvr + '" data-resched="' + divResched +
       '"><summary class="mf-divhdr">' + esc(d.division_number + ' · ' + d.name) +
       ' <span class="muted">' + esc(d.format || '') + (d.night_of_play ? ' · ' + esc(d.night_of_play) : '') + '</span>' +
       (divOwing ? '<span class="mf-badge mf-b-owe">' + divOwing + ' owing</span>' : '') +
       (divSoon ? '<span class="mf-badge mf-b-soon">' + divSoon + ' due soon</span>' : '') +
       (divFailed ? '<span class="mf-badge mf-b-fail">' + divFailed + ' failed</span>' : '') +
+      (divLate ? '<span class="mf-badge mf-b-late">' + divLate + ' late</span>' : '') +
       (!divOwing && !divSoon && !divFailed ? '<span class="mf-badge mf-b-ok">all current</span>' : '') + '</summary>' +
       '<div class="mf-scroll"><table class="mf-tbl"><thead><tr>' + head + '</tr></thead><tbody>' + shown.map(r => r.html).join('') + '</tbody></table></div></details>';
   }).join('');
@@ -12228,6 +12305,7 @@ function mfRender() {
     '<span class="mf-s-owe"><b>' + totOwing + '</b> owing — past the deadline, unpaid</span>' +
     '<span class="mf-s-soon"><b>' + totSoon + '</b> due soon — unpaid, deadline within 24h</span>' +
     '<span class="mf-s-fail"><b>' + totFailed + '</b> failed — card declined, needs a retry</span>' +
+    '<span class="mf-s-late"><b>' + totLate + '</b> late — paid after the deadline</span>' +
     '<span><b>$' + totCollected.toFixed(2) + '</b> collected</span>' + (_mfHidden ? '<span class="muted">' + _mfHidden + ' division' + (_mfHidden === 1 ? '' : 's') + ' hidden (no schedule)</span>' : '') + '</div>';
   wrap.innerHTML = blocks || '<p class="muted">No divisions for this session.</p>';
   mfRestoreViewState(_mfView);
