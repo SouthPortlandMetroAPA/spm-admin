@@ -5165,6 +5165,18 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         #tab-matchfees .mf-c[title*="RESCHEDULED"]{position:relative}
         #tab-matchfees .mf-c[title*="RESCHEDULED"]::after{content:"";position:absolute;top:0;right:0;border-width:0 5px 5px 0;border-style:solid;border-color:transparent #0031a1 transparent transparent}
         .mf-menu{position:absolute;z-index:9000;display:none;background:#fff;border:1px solid #d0d5da;border-radius:10px;box-shadow:0 10px 28px rgba(0,0,0,.18);padding:6px;min-width:200px}
+        /* selection ring — never a fill, the state colour underneath still has to read */
+        #tab-matchfees .mf-c.mf-sel{box-shadow:inset 0 0 0 3px #0031a1}
+        #tab-matchfees .mf-c.mf-sel::before{content:"";position:absolute;inset:0;background:rgba(0,49,161,.12);pointer-events:none}
+        #tab-matchfees .mf-c.mf-sel{position:relative}
+        .mf-selbar{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:9500;display:none;align-items:center;gap:10px;background:#111827;color:#fff;padding:10px 14px;border-radius:999px;box-shadow:0 12px 34px rgba(0,0,0,.3);font-size:.86rem}
+        .mf-selbar.on{display:flex}
+        .mf-selbar b{font-weight:800}
+        .mf-selbtn{font:inherit;font-size:.82rem;font-weight:700;padding:7px 12px;border-radius:999px;border:1.5px solid rgba(255,255,255,.35);background:transparent;color:#fff;cursor:pointer;white-space:nowrap}
+        .mf-selbtn:hover{background:rgba(255,255,255,.14)}
+        .mf-selbtn.mf-selgo{background:#0031a1;border-color:#0031a1}
+        .mf-selbtn.mf-seldel{border-color:#ef8ea0;color:#ffd7de}
+        .mf-selhint{font-size:.74rem;color:#9aa1a9;margin-left:auto}
         .mf-mtitle{font-size:.75rem;font-weight:800;color:#0031a1;padding:4px 8px 6px}
         .mf-mbtn{display:block;width:100%;text-align:left;font:inherit;font-size:.82rem;padding:7px 10px;border:0;background:#fff;border-radius:7px;cursor:pointer}
         .mf-mbtn:hover{background:#eef5ff}
@@ -5217,6 +5229,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             <span class="mf-key"><span class="mf-sw mf-ontime_ovr"></span>late, forgiven</span>
             <span class="mf-key"><span class="mf-sw mf-warn"></span>due &lt;24h (!)</span>
             <span class="mf-key"><span class="mf-sw mf-resched_tbd"></span>rescheduled, no date (?)</span>
+            <span class="mf-key muted" style="font-size:.76rem">Ctrl/⌘-click to select several · Shift-click for a run</span>
             <span class="mf-key"><span class="mf-sw mf-failed"></span>failed (retry)</span>
             <span class="mf-key"><span class="mf-sw mf-unpaid"></span>not paid (past due)</span>
             <span class="mf-key"><span class="mf-sw mf-due"></span>due (grace)</span>
@@ -5520,7 +5533,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.385';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.386';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11120,6 +11133,11 @@ let _mfSessions = [];
 let _mfSession = null;
 let _mf = { divisions: [], payments: [], weekDate: {}, byeWeeks: null, upload: null };
 let _mfFilter = { division: '', onlyOwing: false };
+/* Selected cells as "division|teamnorm|wop". Deliberately NOT held in the DOM:
+   mfRender() replaces #mfGrid wholesale, so a class-only selection would be
+   lost on the first apply. mfTeamRow re-applies it at render time. */
+let _mfSel = new Set();
+let _mfSelAnchor = null;   // last plain-toggled cell, for shift-range
 /* Per-night payment deadlines (slate.match_fee_deadlines). Night of play → the
    weekday (0=Sun..6=Sat) fees are due by + a time (display-only; the Stripe report
    has no payment time). A payment is LATE when its date is after the deadline date. */
@@ -11522,8 +11540,10 @@ function mfTeamRow(div, team, weeks, today, ownWeeks) {
     if (c.override) tip += '\nOVERRIDE late→on time · set ' + mfStamp(c.override.created_at) +
       '\n“' + (c.override.comment || '').replace(/"/g, '”') + '”';
     const clickable = (c.k !== 'none');
-    return '<td class="mf-c mf-' + c.k + (clickable ? ' mf-click' : '') + '"' +
-      (clickable ? ' onclick="mfCellMenu(this)"' + ' data-dn="' + esc(div.division_number) + '" data-tn="' + esc(teamNorm) +
+    // Selection is repainted from _mfSel on every render — see the note there.
+    const _selKey = div.division_number + '|' + teamNorm + '|' + wk;
+    return '<td class="mf-c mf-' + c.k + (clickable ? ' mf-click' : '') + (_mfSel.has(_selKey) ? ' mf-sel' : '') + '"' +
+      (clickable ? ' onclick="mfCellClick(this, event)"' + ' data-dn="' + esc(div.division_number) + '" data-tn="' + esc(teamNorm) +
         '" data-wk="' + wk + '" data-k="' + c.k + '" data-team="' + esc(team.team_name || '') + '"' : '') +
       ' title="' + esc(tip) + '">' + label + '</td>';
   }).join('');
@@ -11609,6 +11629,197 @@ function mfReschedDue(dateISO) {
   const d = new Date(dateISO + 'T00:00:00Z');
   if (isNaN(d.getTime())) return null;
   return new Date(d.getTime() + 86400000).toISOString().slice(0, 10);
+}
+
+/* ══ multi-select ═══════════════════════════════════════════════════════════
+ * Ctrl/Cmd-click toggles a cell. Shift-click takes the run between the anchor
+ * and this cell WITHIN THE SAME TEAM ROW — the observed unit of work is "these
+ * weeks, this team, same reason", not a rectangle over the whole board.
+ * Plain click is untouched and still opens the per-cell menu.              */
+function mfSelKey(td) {
+  return td.getAttribute('data-dn') + '|' + td.getAttribute('data-tn') + '|' + td.getAttribute('data-wk');
+}
+
+function mfCellClick(td, ev) {
+  if (ev && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); mfSelToggle(td); return; }
+  if (ev && ev.shiftKey) { ev.preventDefault(); mfSelRange(td); return; }
+  mfCellMenu(td);
+}
+
+function mfSelToggle(td) {
+  const k = mfSelKey(td);
+  if (_mfSel.has(k)) { _mfSel.delete(k); td.classList.remove('mf-sel'); }
+  else { _mfSel.add(k); td.classList.add('mf-sel'); _mfSelAnchor = td; }
+  if (!_mfSel.size) _mfSelAnchor = null;
+  mfSelBar();
+}
+
+/* Range within ONE row. Crossing rows silently would select cells the operator
+   cannot see the extent of, so a cross-row shift-click just moves the anchor. */
+function mfSelRange(td) {
+  const row = td.closest('tr');
+  if (!_mfSelAnchor || _mfSelAnchor.closest('tr') !== row) { mfSelToggle(td); return; }
+  const cells = [...row.querySelectorAll('td.mf-c.mf-click')];
+  const a = cells.indexOf(_mfSelAnchor), b = cells.indexOf(td);
+  if (a < 0 || b < 0) { mfSelToggle(td); return; }
+  for (let i = Math.min(a, b); i <= Math.max(a, b); i++) {
+    _mfSel.add(mfSelKey(cells[i]));
+    cells[i].classList.add('mf-sel');
+  }
+  _mfSelAnchor = td;
+  mfSelBar();
+}
+
+function mfSelClear() {
+  _mfSel = new Set();
+  _mfSelAnchor = null;
+  document.querySelectorAll('#tab-matchfees td.mf-c.mf-sel').forEach(function (e) { e.classList.remove('mf-sel'); });
+  mfSelBar();
+}
+
+/* Parsed back out of the keys so the bar and every bulk action agree on what
+   "selected" means — one place, not three. */
+function mfSelCells() {
+  return [..._mfSel].map(function (k) {
+    const p = k.split('|');
+    return { key: k, dn: p[0], tn: p[1], wk: +p[2] };
+  });
+}
+
+function mfSelBar() {
+  let bar = document.getElementById('mfSelBar');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'mfSelBar';
+    bar.className = 'mf-selbar';
+    document.body.appendChild(bar);
+  }
+  const cells = mfSelCells();
+  if (!cells.length) { bar.classList.remove('on'); bar.innerHTML = ''; return; }
+  const teams = new Set(cells.map(function (c) { return c.dn + '|' + c.tn; })).size;
+  bar.innerHTML =
+    '<span><b>' + cells.length + '</b> week' + (cells.length === 1 ? '' : 's') +
+      ' on <b>' + teams + '</b> team' + (teams === 1 ? '' : 's') + '</span>' +
+    '<button type="button" class="mf-selbtn mf-selgo" onclick="mfBulkReschedule()">Mark rescheduled</button>' +
+    '<button type="button" class="mf-selbtn mf-selgo" onclick="mfBulkOverride()">Mark on time</button>' +
+    '<button type="button" class="mf-selbtn mf-seldel" onclick="mfBulkRemove(\'reschedule\')">Remove reschedule</button>' +
+    '<button type="button" class="mf-selbtn mf-seldel" onclick="mfBulkRemove(\'override_ontime\')">Remove override</button>' +
+    '<button type="button" class="mf-selbtn" onclick="mfSelClear()">Clear</button>';
+  bar.classList.add('on');
+}
+
+/* One request, not N. PostgREST accepts an array body for an upsert, so the
+   whole batch lands in a single transaction — N sequential POSTs would
+   half-apply on a mid-way failure and leave the operator guessing which half.
+   Chunked only as a URL/payload-size guard on very large selections. */
+async function mfBulkSave(rows) {
+  const dev = (navigator.userAgent || '').slice(0, 60);
+  rows.forEach(function (r) { r.created_by_device = dev; });
+  for (let i = 0; i < rows.length; i += 40) {
+    await sb('POST', 'match_fee_adjustments?on_conflict=session_id,division_number,team_number_norm,wop,kind',
+      rows.slice(i, i + 40), { Prefer: 'resolution=merge-duplicates,return=minimal' });
+  }
+}
+
+async function mfBulkReschedule() {
+  const cells = mfSelCells();
+  if (!cells.length) return;
+  const res = await mfDialog({
+    title: 'Mark ' + cells.length + ' week' + (cells.length === 1 ? '' : 's') + ' rescheduled',
+    body: 'The same date and reason are applied to every selected week. ' +
+          'Payment becomes due the day after the new match date, at 11:00. ' +
+          'Leave the date blank if the make-up date is not agreed yet — those weeks show a yellow ?.',
+    okText: 'Apply to ' + cells.length,
+    fields: [
+      { name: 'date', label: 'New match date — leave blank if not set yet', type: 'date', value: '',
+        required: false, pattern: '^\\d{4}-\\d{2}-\\d{2}$', hint: 'Pick a date, or leave it blank.' },
+      { name: 'time', label: 'New match time', type: 'time', value: '19:00' },
+      { name: 'comment', label: 'Why are they rescheduled?', type: 'textarea', required: true,
+        placeholder: 'Venue closed, weather, agreed between captains…' }
+    ]
+  });
+  if (!res) return;
+  const date = (res.date || '').trim();
+  const newDue = date ? mfReschedDue(date) : null;
+  if (date && !newDue) { mfToast('Could not read that date.', true); return; }
+  const rows = cells.map(function (c) {
+    return {
+      session_id: _mfSession, division_number: c.dn, team_number_norm: c.tn, wop: c.wk,
+      kind: 'reschedule', comment: res.comment.trim(),
+      resched_date: date || null,
+      resched_time: date ? ((res.time || '').trim() || null) : null,
+      new_due_date: newDue, new_due_time: date ? '11:00' : null
+    };
+  });
+  await mfBulkApply(rows, cells.length + ' week' + (cells.length === 1 ? '' : 's') + ' marked rescheduled.');
+}
+
+async function mfBulkOverride() {
+  const cells = mfSelCells();
+  if (!cells.length) return;
+  const res = await mfDialog({
+    title: 'Mark ' + cells.length + ' week' + (cells.length === 1 ? '' : 's') + ' on time',
+    body: 'Settles every selected week whatever the report says, and records the same reason on each.',
+    okText: 'Apply to ' + cells.length,
+    fields: [{ name: 'comment', label: 'Why are they being forgiven?', type: 'textarea', required: true,
+      placeholder: 'Bank hold, captains notified in advance, operator error…' }]
+  });
+  if (!res) return;
+  const rows = cells.map(function (c) {
+    return { session_id: _mfSession, division_number: c.dn, team_number_norm: c.tn, wop: c.wk,
+      kind: 'override_ontime', comment: res.comment.trim() };
+  });
+  await mfBulkApply(rows, cells.length + ' week' + (cells.length === 1 ? '' : 's') + ' marked on time.');
+}
+
+/* Removal destroys hand-typed comments and there is no audit log on this table,
+   so it only ever touches cells that ACTUALLY carry the named kind, it says how
+   many that really is (which is often fewer than are selected), and it shows
+   the distinct comments about to be lost. */
+async function mfBulkRemove(kind) {
+  const cells = mfSelCells();
+  if (!cells.length) return;
+  const hits = cells.filter(function (c) { return ((_mf.adjIndex || {})[c.key] || {})[kind]; });
+  const label = kind === 'reschedule' ? 'reschedule' : 'override';
+  if (!hits.length) { mfToast('None of the selected weeks has a ' + label + '.', true); return; }
+  const notes = [...new Set(hits.map(function (c) { return (_mf.adjIndex[c.key][kind].comment || '').trim(); }).filter(Boolean))];
+  const ok = await mfDialog({
+    title: 'Remove ' + hits.length + ' ' + label + (hits.length === 1 ? '' : 's') + '?',
+    body: (hits.length < cells.length
+            ? hits.length + ' of the ' + cells.length + ' selected weeks carry a ' + label + '; the rest are untouched. '
+            : '') +
+          'Those weeks go back to whatever the payment report says. ' +
+          'This permanently deletes the reason recorded on each — there is no undo. ' +
+          (notes.length ? 'Being deleted: ' + notes.map(function (n) { return '“' + n.slice(0, 60) + '”'; }).join('  ') : ''),
+    okText: 'Remove ' + hits.length, danger: true, fields: []
+  });
+  if (!ok) return;
+  try {
+    for (let i = 0; i < hits.length; i += 40) {
+      const chunk = hits.slice(i, i + 40);
+      const or = chunk.map(function (c) {
+        return 'and(division_number.eq.' + encodeURIComponent(c.dn) +
+               ',team_number_norm.eq.' + encodeURIComponent(c.tn) + ',wop.eq.' + c.wk + ')';
+      }).join(',');
+      await sb('DELETE', 'match_fee_adjustments?session_id=eq.' + _mfSession +
+        '&kind=eq.' + kind + '&or=(' + or + ')');
+    }
+    mfSelClear();
+    await mfReloadAdjustments();
+    mfToast(hits.length + ' ' + label + (hits.length === 1 ? '' : 's') + ' removed.');
+  } catch (e) { mfToast('Could not remove: ' + (e.message || e), true); }
+}
+
+/* Clearing BEFORE the refresh, and only on success: a failed apply keeps the
+   selection so the operator can retry it, and a successful one cannot be
+   re-fired at a stale set by a second click. */
+async function mfBulkApply(rows, msg) {
+  try {
+    await mfBulkSave(rows);
+    mfSelClear();
+    await mfReloadAdjustments();
+    mfToast(msg);
+  } catch (e) { mfToast('Could not save: ' + (e.message || e), true); }
 }
 
 function mfCellMenu(td) {
@@ -11834,6 +12045,9 @@ function mfRender() {
   if (sum) sum.innerHTML = '<div class="mf-stats"><span><b>' + totTeams + '</b> teams</span><span class="mf-s-owe"><b>' + totOwing + '</b> needing attention — due-soon/unpaid/late</span><span><b>$' + totCollected.toFixed(2) + '</b> collected</span>' + (_mfHidden ? '<span class="muted">' + _mfHidden + ' division' + (_mfHidden === 1 ? '' : 's') + ' hidden (no schedule)</span>' : '') + '</div>';
   wrap.innerHTML = blocks || '<p class="muted">No divisions for this session.</p>';
   mfRestoreViewState(_mfView);
+  /* A filter change can hide selected cells; the count still reflects the real
+     selection, which is what every bulk action operates on. */
+  mfSelBar();
 }
 
 function mfToday() {
