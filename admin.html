@@ -5166,6 +5166,12 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         #tab-matchfees .mf-c[title*="RESCHEDULED"]::after{content:"";position:absolute;top:0;right:0;border-width:0 5px 5px 0;border-style:solid;border-color:transparent #0031a1 transparent transparent}
         .mf-menu{position:absolute;z-index:9000;display:none;background:#fff;border:1px solid #d0d5da;border-radius:10px;box-shadow:0 10px 28px rgba(0,0,0,.18);padding:6px;min-width:200px}
         /* selection ring — never a fill, the state colour underneath still has to read */
+        .mf-modebtn{font:inherit;font-size:.84rem;font-weight:700;padding:6px 14px;border-radius:999px;border:1.5px solid #0031a1;background:#fff;color:#0031a1;cursor:pointer}
+        .mf-modebtn:hover{background:#eef5ff}
+        .mf-modebtn.on{background:#0031a1;color:#fff}
+        /* selecting: the grid stops being a menu surface, so say so */
+        #tab-matchfees .mf-selecting .mf-c.mf-click{cursor:copy}
+        #tab-matchfees .mf-selecting .mf-c.mf-click:hover{outline:2px dashed #0031a1;outline-offset:-2px}
         #tab-matchfees .mf-c.mf-sel{box-shadow:inset 0 0 0 3px #0031a1}
         #tab-matchfees .mf-c.mf-sel::before{content:"";position:absolute;inset:0;background:rgba(0,49,161,.12);pointer-events:none}
         #tab-matchfees .mf-c.mf-sel{position:relative}
@@ -5221,6 +5227,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           </div>
         </details>
         <div class="mf-filters">
+          <button type="button" id="mfSelModeBtn" class="mf-modebtn" onclick="mfSelModeToggle()">Select</button>
           <label>Division <select id="mfDivFilter"><option value="">All divisions</option></select></label>
           <label><input type="checkbox" id="mfOnlyOwing"> Only teams needing attention — due &lt;24h, unpaid, or late</label>
           <span class="mf-legend">
@@ -5229,7 +5236,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             <span class="mf-key"><span class="mf-sw mf-ontime_ovr"></span>late, forgiven</span>
             <span class="mf-key"><span class="mf-sw mf-warn"></span>due &lt;24h (!)</span>
             <span class="mf-key"><span class="mf-sw mf-resched_tbd"></span>rescheduled, no date (?)</span>
-            <span class="mf-key muted" style="font-size:.76rem">Ctrl/⌘-click to select several · Shift-click for a run</span>
+            <span class="mf-key muted" style="font-size:.76rem">Select → tap weeks · Shift-click for a run · Ctrl/⌘-click works anytime</span>
             <span class="mf-key"><span class="mf-sw mf-failed"></span>failed (retry)</span>
             <span class="mf-key"><span class="mf-sw mf-unpaid"></span>not paid (past due)</span>
             <span class="mf-key"><span class="mf-sw mf-due"></span>due (grace)</span>
@@ -5533,7 +5540,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.386';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.387';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11138,6 +11145,11 @@ let _mfFilter = { division: '', onlyOwing: false };
    lost on the first apply. mfTeamRow re-applies it at render time. */
 let _mfSel = new Set();
 let _mfSelAnchor = null;   // last plain-toggled cell, for shift-range
+/* Select mode (the iOS Photos model): while ON, a plain click toggles a cell
+   instead of opening its menu. A module variable rather than a DOM class —
+   mfRender() replaces #mfGrid wholesale, so a class alone would not survive an
+   apply. The grid class is DERIVED from this on every render. */
+let _mfSelMode = false;
 /* Per-night payment deadlines (slate.match_fee_deadlines). Night of play → the
    weekday (0=Sun..6=Sat) fees are due by + a time (display-only; the Stripe report
    has no payment time). A payment is LATE when its date is after the deadline date. */
@@ -11641,9 +11653,35 @@ function mfSelKey(td) {
 }
 
 function mfCellClick(td, ev) {
-  if (ev && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); mfSelToggle(td); return; }
+  /* Shift always extends a run, in or out of select mode — in select mode it is
+     the natural "…through here" gesture, out of it the 3.386 shortcut. */
   if (ev && ev.shiftKey) { ev.preventDefault(); mfSelRange(td); return; }
+  if (_mfSelMode) { if (ev) ev.preventDefault(); mfSelToggle(td); return; }
+  if (ev && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); mfSelToggle(td); return; }
   mfCellMenu(td);
+}
+
+/* Leaving select mode drops the selection. Keeping it would leave the bulk
+   buttons live over cells no longer visibly marked — the operator would be one
+   click from applying to a set they can no longer see. */
+function mfSelModeSet(on) {
+  _mfSelMode = !!on;
+  if (!_mfSelMode) mfSelClear();
+  mfCloseMenu();
+  mfSelModePaint();
+  mfSelBar();
+}
+function mfSelModeToggle() { mfSelModeSet(!_mfSelMode); }
+
+function mfSelModePaint() {
+  const btn = document.getElementById('mfSelModeBtn');
+  if (btn) {
+    btn.textContent = _mfSelMode ? 'Cancel' : 'Select';
+    btn.classList.toggle('on', _mfSelMode);
+    btn.setAttribute('aria-pressed', _mfSelMode ? 'true' : 'false');
+  }
+  const grid = document.getElementById('mfGrid');
+  if (grid) grid.classList.toggle('mf-selecting', _mfSelMode);
 }
 
 function mfSelToggle(td) {
@@ -11695,7 +11733,15 @@ function mfSelBar() {
     document.body.appendChild(bar);
   }
   const cells = mfSelCells();
-  if (!cells.length) { bar.classList.remove('on'); bar.innerHTML = ''; return; }
+  /* In select mode the bar stays up with nothing selected, so there is always a
+     way back out that is not the button you came in by. */
+  if (!cells.length) {
+    if (!_mfSelMode) { bar.classList.remove('on'); bar.innerHTML = ''; return; }
+    bar.innerHTML = '<span>Tap weeks to select them</span>' +
+      '<button type="button" class="mf-selbtn" onclick="mfSelModeSet(false)">Done</button>';
+    bar.classList.add('on');
+    return;
+  }
   const teams = new Set(cells.map(function (c) { return c.dn + '|' + c.tn; })).size;
   bar.innerHTML =
     '<span><b>' + cells.length + '</b> week' + (cells.length === 1 ? '' : 's') +
@@ -11704,7 +11750,8 @@ function mfSelBar() {
     '<button type="button" class="mf-selbtn mf-selgo" onclick="mfBulkOverride()">Mark on time</button>' +
     '<button type="button" class="mf-selbtn mf-seldel" onclick="mfBulkRemove(\'reschedule\')">Remove reschedule</button>' +
     '<button type="button" class="mf-selbtn mf-seldel" onclick="mfBulkRemove(\'override_ontime\')">Remove override</button>' +
-    '<button type="button" class="mf-selbtn" onclick="mfSelClear()">Clear</button>';
+    '<button type="button" class="mf-selbtn" onclick="mfSelClear()">Clear</button>' +
+    (_mfSelMode ? '<button type="button" class="mf-selbtn" onclick="mfSelModeSet(false)">Done</button>' : '');
   bar.classList.add('on');
 }
 
@@ -11849,6 +11896,13 @@ function mfCellMenu(td) {
   m.style.display = 'block';
 }
 function mfCloseMenu() { const m = document.getElementById('mfCellMenu'); if (m) m.style.display = 'none'; }
+/* Escape is the way out of every other overlay in this tab; select mode is no
+   different. Guarded on a dialog being open so it never steals Esc from one. */
+document.addEventListener('keydown', function (e) {
+  if (e.key !== 'Escape' || !_mfSelMode) return;
+  if (document.querySelector('.mf-dlg-wrap')) return;
+  mfSelModeSet(false);
+});
 document.addEventListener('click', function (e) {
   const m = document.getElementById('mfCellMenu');
   if (m && m.style.display === 'block' && !m.contains(e.target) && !(e.target.classList && e.target.classList.contains('mf-click'))) mfCloseMenu();
@@ -12045,6 +12099,9 @@ function mfRender() {
   if (sum) sum.innerHTML = '<div class="mf-stats"><span><b>' + totTeams + '</b> teams</span><span class="mf-s-owe"><b>' + totOwing + '</b> needing attention — due-soon/unpaid/late</span><span><b>$' + totCollected.toFixed(2) + '</b> collected</span>' + (_mfHidden ? '<span class="muted">' + _mfHidden + ' division' + (_mfHidden === 1 ? '' : 's') + ' hidden (no schedule)</span>' : '') + '</div>';
   wrap.innerHTML = blocks || '<p class="muted">No divisions for this session.</p>';
   mfRestoreViewState(_mfView);
+  /* The grid element is new after the innerHTML swap, so the mode class has to
+     be re-derived from _mfSelMode rather than assumed to have survived. */
+  mfSelModePaint();
   /* A filter change can hide selected cells; the count still reflects the real
      selection, which is what every bulk action operates on. */
   mfSelBar();
