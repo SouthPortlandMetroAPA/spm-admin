@@ -5172,6 +5172,9 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         .mf-mcancel{color:#6b7280}
         #tab-matchfees .mf-due{background:#eff6ff;color:#1d4ed8}
         #tab-matchfees .mf-warn{background:#fde047;color:#713f12;font-weight:900}
+        /* rescheduled with no new date: an explicit UNKNOWN, not a debt and
+           not a clean week. Distinct from mf-warn's brighter yellow "!". */
+        #tab-matchfees .mf-resched_tbd{background:#fef08a;color:#854d0e;font-weight:900;outline:2px dashed #a16207;outline-offset:-3px}
         #tab-matchfees .mf-failed{background:#fed7aa;color:#c2410c;font-weight:900}
         #tab-matchfees .mf-future,#tab-matchfees .mf-none{background:#fff;color:#d1d5db}
         #tab-matchfees .mf-owe{font-weight:700;color:#b91c1c}
@@ -5213,6 +5216,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             <span class="mf-key"><span class="mf-sw mf-late"></span>late</span>
             <span class="mf-key"><span class="mf-sw mf-ontime_ovr"></span>late, forgiven</span>
             <span class="mf-key"><span class="mf-sw mf-warn"></span>due &lt;24h (!)</span>
+            <span class="mf-key"><span class="mf-sw mf-resched_tbd"></span>rescheduled, no date (?)</span>
             <span class="mf-key"><span class="mf-sw mf-failed"></span>failed (retry)</span>
             <span class="mf-key"><span class="mf-sw mf-unpaid"></span>not paid (past due)</span>
             <span class="mf-key"><span class="mf-sw mf-due"></span>due (grace)</span>
@@ -5516,7 +5520,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.383';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.384';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11398,8 +11402,16 @@ function mfCell(div, team, wk, today) {
   const adj = (_mf.adjIndex || {})[key] || {};
   const resched = adj.reschedule || null;
   const override = adj.override_ontime || null;
+  // A reschedule with NO new date: the match has been pulled off the calendar
+  // and not re-dated. There is no deadline to judge against, so the original
+  // one is VOIDED rather than silently restored — restoring it is what made
+  // these weeks march to a red ✗ for a match that no longer happens then.
+  const reschedTbd = !!(resched && !resched.new_due_date);
   let deadline, dlTime;
-  if (resched && resched.new_due_date) {
+  if (reschedTbd) {
+    deadline = null;
+    dlTime = null;
+  } else if (resched && resched.new_due_date) {
     deadline = resched.new_due_date;
     dlTime = resched.new_due_time || '11:00';
   } else {
@@ -11411,7 +11423,12 @@ function mfCell(div, team, wk, today) {
     // late = the payment MOMENT is after the deadline MOMENT. The Stripe report carries
     // the payment TIME, so paying 11:15 against an 11:00 deadline correctly reads LATE.
     let late = false;
-    if (deadline && pay.payment_date) {
+    if (reschedTbd) {
+      // No deadline exists yet, so nothing can be late against it. The money
+      // arrived ahead of a match that has not been re-dated — prepaid. Stated
+      // explicitly rather than reached by falling past two null checks.
+      late = false;
+    } else if (deadline && pay.payment_date) {
       const payMs = new Date(pay.payment_date + 'T' + (pay.payment_time || '23:59') + ':00').getTime();
       const dlMs  = new Date(deadline + 'T' + (dlTime || '23:59') + ':00').getTime();
       late = payMs > dlMs;
@@ -11435,6 +11452,10 @@ function mfCell(div, team, wk, today) {
   // decision carrying a required comment, so this is not a silent clean-default:
   // the hover says plainly that no payment was recorded.
   if (override) return { k: 'ontime_ovr', sched, deadline, dlTime, resched, override };
+  // Rescheduled with no new date, nothing paid: an open question, not a debt.
+  // Ahead of future/due/warn/unpaid — all four of those judge a deadline this
+  // week no longer has.
+  if (reschedTbd) return { k: 'resched_tbd', sched, deadline, dlTime, resched, override };
   if (sched > today) return { k: 'future', sched, deadline, dlTime, resched, override };
   // played, no Success payment. If there were only FAILED attempts, flag distinctly
   // (they tried, the card declined — needs a retry nudge) vs a plain never-paid.
@@ -11460,8 +11481,11 @@ function mfTeamRow(div, team, weeks, today, ownWeeks) {
     if (ownWeeks && wk > ownWeeks) return '<td class="mf-c mf-pad"></td>';
     const c = mfCell(div, team, wk, today);
     // 'late' is NOT owing: the money arrived, it was just after the deadline.
+    // resched_tbd is deliberately NOT here: no deadline exists, so no money is
+    // judged owed. It is an operator to-do (set the date), not a debt, and the
+    // filter beside this column is labelled as a money filter.
     if (c.k === 'unpaid' || c.k === 'warn' || c.k === 'failed') owing++;
-    const label = { ontime: '✓', ontime_ovr: '✔', late: 'L', unpaid: '✗', bye: 'B', due: '•', warn: '!', failed: 'F', future: '', none: '' }[c.k];
+    const label = { ontime: '✓', ontime_ovr: '✔', late: 'L', unpaid: '✗', bye: 'B', due: '•', warn: '!', failed: 'F', resched_tbd: '?', future: '', none: '' }[c.k];
     const amt = c.pay ? '$' + (+c.pay.amount).toFixed(0) : '';
     const paidStr = c.pay ? (c.pay.payment_date || '?') + (c.pay.payment_time ? ' ' + c.pay.payment_time : '') : '?';
     const dueStr = c.deadline ? c.deadline + (c.dlTime ? ' ' + c.dlTime : '') : null;
@@ -11474,14 +11498,17 @@ function mfTeamRow(div, team, weeks, today, ownWeeks) {
        c.k === 'due' ? ' · not paid yet — still within grace' :
        c.k === 'failed' ? ' · payment FAILED — attempt(s) declined, needs retry' :
        c.k === 'unpaid' ? ' · NOT PAID — past deadline' :
+       c.k === 'resched_tbd' ? ' · rescheduled, new date not set — no deadline to judge, not counted as owed' :
        c.k === 'bye' ? ' · bye' :
        c.k === 'future' ? ' · upcoming' : '');
     // adjustment provenance on the hover: who moved what, when, and why
     // NOTE: esc() escapes & < > but NOT the double quote, so a raw " here would
     // terminate the title="..." attribute and silently truncate the tooltip.
     // Typographic quotes are safe inside the attribute.
-    if (c.resched) tip += '\nRESCHEDULED to ' + (c.resched.resched_date || '?') + (c.resched.resched_time ? ' ' + c.resched.resched_time : '') +
-      ' · new due ' + (c.resched.new_due_date || '?') + ' ' + (c.resched.new_due_time || '11:00') +
+    if (c.resched) tip += (c.resched.resched_date
+        ? '\nRESCHEDULED to ' + c.resched.resched_date + (c.resched.resched_time ? ' ' + c.resched.resched_time : '') +
+          ' · new due ' + (c.resched.new_due_date || '?') + ' ' + (c.resched.new_due_time || '11:00')
+        : '\nRESCHEDULED — new date not set yet') +
       ' · set ' + mfStamp(c.resched.created_at) + '\n“' + (c.resched.comment || '').replace(/"/g, '”') + '”';
     if (c.override) tip += '\nOVERRIDE late→on time · set ' + mfStamp(c.override.created_at) +
       '\n“' + (c.override.comment || '').replace(/"/g, '”') + '”';
@@ -11586,7 +11613,7 @@ function mfCellMenu(td) {
   lines.push('<button type="button" class="mf-mbtn" onclick="mfAskReschedule(\'' + esc(dn) + '\',\'' + esc(tn) + '\',' + wk + ')">' +
     (adj.reschedule ? 'Edit reschedule' : 'Mark rescheduled') + '</button>');
   // Any owed or upcoming week can be settled early, not just an already-late one.
-  if (k === 'late' || k === 'unpaid' || k === 'warn' || k === 'due' || k === 'failed' || k === 'future') {
+  if (k === 'late' || k === 'unpaid' || k === 'warn' || k === 'due' || k === 'failed' || k === 'future' || k === 'resched_tbd') {
     lines.push('<button type="button" class="mf-mbtn" onclick="mfAskOverride(\'' + esc(dn) + '\',\'' + esc(tn) + '\',' + wk + ')">' +
       (k === 'late' ? 'Override to on time' : 'Mark on time now') + '</button>');
   }
@@ -11614,24 +11641,36 @@ async function mfAskReschedule(dn, tn, wk) {
   // remove the format-typo class entirely.
   const res = await mfDialog({
     title: 'Mark week ' + wk + ' rescheduled',
-    body: 'Payment becomes due the day after the new match date, at 11:00.',
+    body: 'Payment becomes due the day after the new match date, at 11:00. ' +
+          'Leave the date blank if the make-up date is not agreed yet — the week shows a yellow ? ' +
+          'and is not counted as owed until you come back and set it.',
     okText: 'Save reschedule',
     fields: [
-      { name: 'date', label: 'New match date', type: 'date', value: (prev && prev.resched_date) || '',
-        required: true, pattern: '^\\d{4}-\\d{2}-\\d{2}$', hint: 'Pick a date.' },
+      { name: 'date', label: 'New match date — leave blank if not set yet', type: 'date', value: (prev && prev.resched_date) || '',
+        required: false, pattern: '^\\d{4}-\\d{2}-\\d{2}$', hint: 'Pick a date, or leave it blank.' },
       { name: 'time', label: 'New match time', type: 'time', value: (prev && prev.resched_time) || '19:00' },
       { name: 'comment', label: 'Why is it rescheduled?', type: 'textarea', value: (prev && prev.comment) || '',
         required: true, placeholder: 'Venue closed, weather, agreed between captains…' }
     ]
   });
   if (!res) return;
-  const date = res.date, time = res.time, comment = res.comment;
+  const date = (res.date || '').trim(), time = res.time, comment = res.comment;
+  // No date yet: all four date/time fields go NULL together. The DB enforces
+  // both-or-neither, but a half pair should never leave here in the first place.
+  if (!date) {
+    await mfSaveAdj({
+      session_id: _mfSession, division_number: dn, team_number_norm: tn, wop: wk,
+      kind: 'reschedule', comment: comment.trim(),
+      resched_date: null, resched_time: null, new_due_date: null, new_due_time: null
+    });
+    return;
+  }
   const newDue = mfReschedDue(date);
   if (!newDue) { mfToast('Could not read that date.', true); return; }
   await mfSaveAdj({
     session_id: _mfSession, division_number: dn, team_number_norm: tn, wop: wk,
     kind: 'reschedule', comment: comment.trim(),
-    resched_date: date.trim(), resched_time: (time || '').trim() || null,
+    resched_date: date, resched_time: (time || '').trim() || null,
     new_due_date: newDue, new_due_time: '11:00'
   });
 }
