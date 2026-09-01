@@ -5584,7 +5584,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.391';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.392';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -25458,6 +25458,104 @@ function ssgRenderGridDom(div) {
 }
 
 /* ── Inline popover on cell click ─────────────────────────────────── */
+/* The ONE place Slate builds a PaperTrail R2 key. Mirrors the captain app's
+   r2PathFor. Upload and swap both call it, so a moved photo always lands where
+   the readers look. */
+function ssgR2PathFor(matchId, teamId, side) {
+  return 'papertrail/' + currentSession.id + '/' + matchId + '/' + teamId + '/' + side + '.jpg';
+}
+
+/* Adjacent weeks this team actually plays in this division. Week ±1 only:
+   double-headers pair consecutive weeks on one date, which is the entire
+   failure mode. A free "move to any week" picker would turn a one-click fix
+   into a way to scatter submissions. */
+function ssgSwapTargets(match, teamId) {
+  if (!match || match.week_number == null) return [];
+  return _ssgState.matches
+    .filter(m => m.id !== match.id
+              && m.row_type === 'regular'
+              && m.week_number != null
+              && Math.abs(m.week_number - match.week_number) === 1
+              && (m.home_team_id === teamId || m.away_team_id === teamId))
+    .sort((a, b) => a.week_number - b.week_number)
+    .map(m => ({ match: m, photos: _ssgState.photosByMatchTeam.get(m.id + ':' + teamId) || [] }));
+}
+
+/* Move this team's submissions between two weeks. If the other week is empty
+   this is a MOVE; if both hold photos it is a SWAP. One code path, because the
+   difference is only which rows exist. */
+async function ssgSwapWeek(matchId, teamId, otherMatchId) {
+  const here  = (_ssgState.photosByMatchTeam.get(matchId + ':' + teamId) || []).slice();
+  const there = (_ssgState.photosByMatchTeam.get(otherMatchId + ':' + teamId) || []).slice();
+  if (!here.length && !there.length) return;
+  const a = _ssgState.matches.find(m => m.id === matchId);
+  const b = _ssgState.matches.find(m => m.id === otherMatchId);
+  const both = here.length && there.length;
+  const verb = both ? 'Swap' : 'Move';
+  if (!confirm(verb + ' this team\'s scoresheets between week ' + (a && a.week_number) +
+               ' and week ' + (b && b.week_number) + '?\n\n' +
+               'Week ' + (a && a.week_number) + ': ' + (here.length ? here.length + ' photo(s)' : 'empty') + '\n' +
+               'Week ' + (b && b.week_number) + ': ' + (there.length ? there.length + ' photo(s)' : 'empty') + '\n\n' +
+               'Uploader and upload time are kept. You can swap back at any time.')) return;
+
+  const st = document.getElementById('ssgSwapStatus_' + matchId + '_' + teamId);
+  const say = (t, bad) => { if (st) { st.textContent = t; st.style.color = bad ? 'var(--spm-primary)' : 'var(--muted)'; } };
+
+  /* Destination for every row, computed before anything is written. */
+  const moves = here.map(p => ({ p, toMatch: otherMatchId }))
+          .concat(there.map(p => ({ p, toMatch: matchId })))
+          .map(x => ({ id: x.p.id, match_id: x.toMatch,
+                       r2_path: ssgR2PathFor(x.toMatch, teamId, x.p.side), from: x.p.r2_path }));
+
+  try {
+    /* COPY FIRST. Every blob lands at its destination before the database
+       moves, so an interruption leaves the original rows pointing at objects
+       that still exist. The old objects are deliberately left in place. */
+    say('Copying ' + moves.length + ' photo(s)…');
+    for (const mv of moves) {
+      const got = await fetch(SS_R2_URL + '/' + mv.from);
+      if (!got.ok) throw new Error('read ' + mv.from + ': ' + got.status);
+      const blob = await got.blob();
+      const put = await fetch(SS_R2_URL + '/' + mv.r2_path, {
+        method: 'PUT',
+        headers: { 'Content-Type': blob.type || 'image/jpeg' },
+        body: blob
+      });
+      if (!put.ok) throw new Error('write ' + mv.r2_path + ': ' + put.status);
+    }
+
+    /* THEN the database, atomically — the RPC deletes and reinserts inside one
+       transaction so a two-way swap cannot trip the (match,team,side) unique. */
+    say('Updating…');
+    const r = await fetch(SB_URL + '/rest/v1/rpc/apply_photo_moves', {
+      method: 'POST',
+      headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Content-Type': 'application/json',
+                 'Accept-Profile': 'papertrail', 'Content-Profile': 'papertrail' },
+      body: JSON.stringify({ p_moves: moves.map(m => ({ id: m.id, match_id: m.match_id, r2_path: m.r2_path })) })
+    });
+    if (!r.ok) throw new Error('apply_photo_moves ' + r.status + ': ' + (await r.text()).slice(0, 200));
+
+    /* action_log is what makes a later "my photo moved" report diagnosable —
+       that is the whole reason the table exists. Fire and forget. */
+    fetch(SB_URL + '/rest/v1/action_log', {
+      method: 'POST',
+      headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Content-Type': 'application/json',
+                 'Accept-Profile': 'papertrail', 'Content-Profile': 'papertrail', Prefer: 'return=minimal' },
+      body: JSON.stringify(moves.map(m => ({
+        source: 'slate-admin', action: 'swap_week', ok: true,
+        team_id: teamId, match_id: m.match_id, r2_path: m.r2_path,
+        error_message: 'swap ' + (a && a.week_number) + '<->' + (b && b.week_number) + ' from ' + m.from
+      })))
+    }).catch(() => {});
+
+    say('Done.');
+    ssCellPopoverClose();
+    await ssgRenderGridForDivision(_ssgState.divisionId);
+  } catch (e) {
+    say((e && e.message) || String(e), true);
+  }
+}
+
 function ssgCellClick(ev, matchId, teamId) {
   ev.stopPropagation();
   const match = _ssgState.matches.find(m => m.id === matchId);
@@ -25505,6 +25603,27 @@ function ssgCellClick(ev, matchId, teamId) {
       </div>`;
     }
     body += '</div>';
+  }
+
+  /* Swap with an adjacent week. Offered whenever THIS cell or the adjacent one
+     holds something — a double-header filed under the wrong week is the case,
+     and it reads the same from either side of the pair. */
+  const swapTargets = ssgSwapTargets(match, teamId).filter(t => photos.length || t.photos.length);
+  if (swapTargets.length) {
+    const rows = swapTargets.map(t => {
+      const both = photos.length && t.photos.length;
+      const label = (both ? 'Swap with' : (photos.length ? 'Move to' : 'Take from')) + ' week ' + t.match.week_number;
+      const detail = t.photos.length ? t.photos.length + ' photo(s) there' : 'empty';
+      return '<button class="btn btn-outline btn-sm" style="padding:4px 12px;font-size:0.74rem;margin:2px 4px 2px 0"' +
+        ' onclick="event.stopPropagation();ssgSwapWeek(' + matchId + ',' + teamId + ',' + t.match.id + ')">' +
+        esc(label) + ' <span style="color:var(--muted)">&middot; ' + esc(detail) + '</span></button>';
+    }).join('');
+    body += '<div style="margin-top:10px;padding:10px;background:#f8fafc;border:1px dashed #64748b;border-radius:8px">' +
+      '<div style="font-size:0.78rem;font-weight:700;color:#334155;margin-bottom:4px">Wrong week?</div>' +
+      '<div style="font-size:0.72rem;color:var(--muted);margin-bottom:8px">Double-headers play two weeks on one night, so sheets often land on the wrong one. This moves the photos, keeps who uploaded them and when, and can be undone by doing it again.</div>' +
+      rows +
+      '<div id="ssgSwapStatus_' + matchId + '_' + teamId + '" style="font-size:0.72rem;color:var(--muted);margin-top:6px"></div>' +
+      '</div>';
   }
 
   // "Use opponent's upload" (M). Only when THIS team has no own photos and the
@@ -25867,7 +25986,7 @@ async function ssgUploadOnBehalf(matchId, teamId, inputId, missingSidesEscaped) 
       const side = missingSides[i];
       // R2 path mirrors PaperTrail's r2PathFor — same keys so the renderer
       // / popover URL builder doesn't care who uploaded it.
-      const path = 'papertrail/' + currentSession.id + '/' + matchId + '/' + teamId + '/' + side + '.jpg';
+      const path = ssgR2PathFor(matchId, teamId, side);
       const r = await fetch(SS_R2_URL + '/' + path, {
         method: 'PUT',
         headers: { 'Content-Type': pg.contentType },
