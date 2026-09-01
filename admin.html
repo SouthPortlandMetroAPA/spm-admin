@@ -5093,10 +5093,14 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         #tab-matchfees .mf-sw{width:14px;height:14px;border-radius:3px;display:inline-block;border:1px solid rgba(0,0,0,.15)}
         #tab-matchfees .mf-stats{display:flex;gap:22px;flex-wrap:wrap;font-size:.95rem;margin:4px 0 14px}
         #tab-matchfees .mf-stats .mf-s-owe b{color:#b91c1c}
+        #tab-matchfees .mf-stats .mf-s-soon b{color:#92400e}
+        #tab-matchfees .mf-stats .mf-s-fail b{color:#c2410c}
         #tab-matchfees .mf-div{margin:0 0 18px;border:1px solid var(--border,#e5e7eb);border-radius:10px;overflow:hidden}
         #tab-matchfees .mf-divhdr{background:#f3f4f6;padding:8px 12px;font-weight:700;display:flex;align-items:center;gap:10px}
         #tab-matchfees .mf-badge{font-size:.74rem;font-weight:700;padding:2px 8px;border-radius:999px;margin-left:auto}
         #tab-matchfees .mf-b-owe{background:#fde8ec;color:#b91c1c}
+        #tab-matchfees .mf-b-soon{background:#fef3c7;color:#92400e}
+        #tab-matchfees .mf-b-fail{background:#fed7aa;color:#c2410c}
         #tab-matchfees .mf-b-ok{background:#e7f6ec;color:#137a3a}
         #tab-matchfees .mf-scroll{overflow-x:auto}
         #tab-matchfees table.mf-tbl{border-collapse:collapse;font-size:.8rem;width:100%}
@@ -5166,6 +5170,17 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         #tab-matchfees .mf-c[title*="RESCHEDULED"]::after{content:"";position:absolute;top:0;right:0;border-width:0 5px 5px 0;border-style:solid;border-color:transparent #0031a1 transparent transparent}
         .mf-menu{position:absolute;z-index:9000;display:none;background:#fff;border:1px solid #d0d5da;border-radius:10px;box-shadow:0 10px 28px rgba(0,0,0,.18);padding:6px;min-width:200px}
         /* selection ring — never a fill, the state colour underneath still has to read */
+        .mf-expand{display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap}
+        .mf-xbtn{font:inherit;font-size:.78rem;font-weight:700;padding:5px 11px;border-radius:999px;border:1px solid #d0d5da;background:#fff;color:#374151;cursor:pointer}
+        .mf-xbtn:hover:not(:disabled){background:#eef5ff;border-color:#0031a1;color:#0031a1}
+        .mf-xbtn:disabled{opacity:.4;cursor:not-allowed}
+        /* popup rows reuse the cell menu's chrome; only the swatch is new */
+        .mf-mbtn:disabled{opacity:.4;cursor:not-allowed;background:#fff}
+        .mf-msw{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:7px;vertical-align:middle}
+        .mf-msw-owe{background:#b91c1c}
+        .mf-msw-soon{background:#fde047}
+        .mf-msw-fail{background:#fed7aa}
+        .mf-msw-any{background:linear-gradient(90deg,#b91c1c 0 33%,#fde047 33% 66%,#fed7aa 66%)}
         .mf-modebtn{font:inherit;font-size:.84rem;font-weight:700;padding:6px 14px;border-radius:999px;border:1.5px solid #0031a1;background:#fff;color:#0031a1;cursor:pointer}
         .mf-modebtn:hover{background:#eef5ff}
         .mf-modebtn.on{background:#0031a1;color:#fff}
@@ -5196,6 +5211,10 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         #tab-matchfees .mf-failed{background:#fed7aa;color:#c2410c;font-weight:900}
         #tab-matchfees .mf-future,#tab-matchfees .mf-none{background:#fff;color:#d1d5db}
         #tab-matchfees .mf-owe{font-weight:700;color:#b91c1c}
+        /* due-soon is a REMINDER, not a debt: amber, never the owe red */
+        #tab-matchfees .mf-soon{font-weight:700;color:#92400e}
+        /* failed matches the F cell's own orange, so the column reads back to it */
+        #tab-matchfees .mf-failc{font-weight:700;color:#c2410c}
         #tab-matchfees .mf-deadlines{border:1px solid var(--border,#e5e7eb);border-radius:10px;margin:0 0 14px;background:#fafbfc}
         #tab-matchfees .mf-deadlines>summary{cursor:pointer;font-weight:700;padding:10px 14px;list-style:none}
         #tab-matchfees .mf-deadlines>summary::-webkit-details-marker{display:none}
@@ -5228,8 +5247,13 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         </details>
         <div class="mf-filters">
           <button type="button" id="mfSelModeBtn" class="mf-modebtn" onclick="mfSelModeToggle()">Select</button>
+          <span class="mf-expand">
+            <button type="button" class="mf-xbtn" onclick="mfExpand('all')">Expand all</button>
+            <button type="button" class="mf-xbtn" id="mfExpandSome" onclick="mfExpandMenu(this)">Expand some…</button>
+            <button type="button" class="mf-xbtn" onclick="mfExpand('none')">Collapse all</button>
+          </span>
           <label>Division <select id="mfDivFilter"><option value="">All divisions</option></select></label>
-          <label><input type="checkbox" id="mfOnlyOwing"> Only teams needing attention — due &lt;24h, unpaid, or late</label>
+          <label><input type="checkbox" id="mfOnlyOwing"> Only teams needing attention — owing, due soon, or failed</label>
           <span class="mf-legend">
             <span class="mf-key"><span class="mf-sw mf-ontime"></span>on time</span>
             <span class="mf-key"><span class="mf-sw mf-late"></span>late</span>
@@ -5540,7 +5564,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.387';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.389';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11513,17 +11537,25 @@ function mfCell(div, team, wk, today) {
 
 function mfTeamRow(div, team, weeks, today, ownWeeks) {
   const teamNorm = String(parseInt(team.team_number, 10));
-  let owing = 0;
+  let owing = 0, soon = 0, failed = 0;
   const cells = weeks.map(wk => {
     // Columns are aligned across ALL divisions, so a short division gets inert
     // pad cells past its own week count. Inert != unpaid: no state, no click.
     if (ownWeeks && wk > ownWeeks) return '<td class="mf-c mf-pad"></td>';
     const c = mfCell(div, team, wk, today);
     // 'late' is NOT owing: the money arrived, it was just after the deadline.
-    // resched_tbd is deliberately NOT here: no deadline exists, so no money is
-    // judged owed. It is an operator to-do (set the date), not a debt, and the
-    // filter beside this column is labelled as a money filter.
-    if (c.k === 'unpaid' || c.k === 'warn' || c.k === 'failed') owing++;
+    // Two different questions, two different numbers:
+    //   OWE      — deadline passed, no Success payment. Chase it.
+    //   DUE SOON — played, unpaid, deadline inside 24h. Not late yet; the
+    //              action is a reminder. Counting it as owed made a team with
+    //              a deadline tomorrow read as a debtor.
+    //   FAILED   — they tried and the card was declined. The action is
+    //              "retry, your payment bounced" — neither of the other two.
+    // 'late' and 'ontime_ovr' are in NONE of them: the money arrived.
+    // resched_tbd is in none either: no deadline exists, so nothing is judged.
+    if (c.k === 'unpaid') owing++;
+    else if (c.k === 'warn') soon++;
+    else if (c.k === 'failed') failed++;
     const label = { ontime: '✓', ontime_ovr: '✔', late: 'L', unpaid: '✗', bye: 'B', due: '•', warn: '!', failed: 'F', resched_tbd: '?', future: '', none: '' }[c.k];
     const amt = c.pay ? '$' + (+c.pay.amount).toFixed(0) : '';
     const paidStr = c.pay ? (c.pay.payment_date || '?') + (c.pay.payment_time ? ' ' + c.pay.payment_time : '') : '?';
@@ -11565,7 +11597,12 @@ function mfTeamRow(div, team, weeks, today, ownWeeks) {
     '<span class="mf-capbtn">' + mfTextCaptainHtml(team.id, team.team_name, div.name) + '</span></td>';
   const nameCell = '<td class="mf-tname' + (rosterTip ? ' mf-hasroster' : '') + '">' +
     '<span class="mf-tnwrap">' + esc(team.team_name || '') + rosterTip + '</span></td>';
-  return { html: '<tr' + (owing ? ' data-owing="1"' : '') + '>' + numCell + nameCell + cells + '<td class="mf-owe">' + (owing ? owing : '') + '</td></tr>', owing };
+  /* data-owing marks "needs attention" — ANY of the three. The filter matches
+     on that; only the displayed COUNTS are separate. */
+  return { html: '<tr' + (owing || soon || failed ? ' data-owing="1"' : '') + '>' + numCell + nameCell + cells +
+    '<td class="mf-owe">' + (owing ? owing : '') + '</td>' +
+    '<td class="mf-soon">' + (soon ? soon : '') + '</td>' +
+    '<td class="mf-failc">' + (failed ? failed : '') + '</td></tr>', owing, soon, failed };
 }
 
 /* ── Adjustments: reschedule + late→on-time override ────────────────────────
@@ -11672,6 +11709,81 @@ function mfSelModeSet(on) {
   mfSelBar();
 }
 function mfSelModeToggle() { mfSelModeSet(!_mfSelMode); }
+
+/* Divisions matching a tally. 'any' is the union of the three — the "show me
+   everything that needs attention" case, which is the common one. */
+function mfExpandMatch(kind, d) {
+  const owe = +(d.getAttribute('data-owe') || 0);
+  const soon = +(d.getAttribute('data-soon') || 0);
+  const fail = +(d.getAttribute('data-fail') || 0);
+  if (kind === 'all') return true;
+  if (kind === 'none') return false;
+  if (kind === 'owe') return owe > 0;
+  if (kind === 'soon') return soon > 0;
+  if (kind === 'fail') return fail > 0;
+  if (kind === 'any') return owe > 0 || soon > 0 || fail > 0;
+  return false;
+}
+
+function mfExpandCounts() {
+  const all = [...document.querySelectorAll('#mfGrid details.mf-div')];
+  const t = { all: all.length, owe: 0, soon: 0, fail: 0, any: 0 };
+  ['owe', 'soon', 'fail', 'any'].forEach(function (k) {
+    t[k] = all.filter(function (d) { return mfExpandMatch(k, d); }).length;
+  });
+  return t;
+}
+
+/* Opens the matching divisions and CLOSES the rest. Closing matters: a control
+   that only ever opens leaves the previous answer on screen next to the new
+   one, and the operator works a division they already cleared. */
+function mfExpand(kind) {
+  mfExpandClose();
+  const all = [...document.querySelectorAll('#mfGrid details.mf-div')];
+  if (!all.length) return;
+  let n = 0;
+  all.forEach(function (d) { const on = mfExpandMatch(kind, d); d.open = on; if (on) n++; });
+  if (kind !== 'all' && kind !== 'none') {
+    mfToast(n ? n + ' division' + (n === 1 ? '' : 's') + ' expanded.' : 'No divisions in that state.');
+  }
+}
+
+/* Same chrome as the cell menu — the house rule is to mirror the canonical
+   pattern rather than invent a second popup style. */
+function mfExpandMenu(btn) {
+  let m = document.getElementById('mfExpandPop');
+  if (m && m.style.display === 'block') { mfExpandClose(); return; }
+  if (!m) { m = document.createElement('div'); m.id = 'mfExpandPop'; m.className = 'mf-menu'; document.body.appendChild(m); }
+  const t = mfExpandCounts();
+  const row = function (kind, sw, label) {
+    return '<button type="button" class="mf-mbtn"' + (t[kind] ? '' : ' disabled') +
+      ' onclick="mfExpand(\'' + kind + '\')">' +
+      '<span class="mf-msw mf-msw-' + sw + '"></span>' + label + ' (' + t[kind] + ')</button>';
+  };
+  m.innerHTML =
+    '<div class="mf-mtitle">Expand divisions with…</div>' +
+    row('owe', 'owe', 'Owing') +
+    row('soon', 'soon', 'Due soon') +
+    row('fail', 'fail', 'Failed') +
+    row('any', 'any', 'Any of the three') +
+    '<button type="button" class="mf-mbtn mf-mcancel" onclick="mfExpandClose()">Cancel</button>';
+  const r = btn.getBoundingClientRect();
+  m.style.left = Math.min(r.left + window.scrollX, window.innerWidth - 230) + 'px';
+  m.style.top = (r.bottom + window.scrollY + 4) + 'px';
+  m.style.display = 'block';
+}
+function mfExpandClose() { const m = document.getElementById('mfExpandPop'); if (m) m.style.display = 'none'; }
+document.addEventListener('click', function (e) {
+  const m = document.getElementById('mfExpandPop');
+  if (m && m.style.display === 'block' && !m.contains(e.target) && e.target.id !== 'mfExpandSome') mfExpandClose();
+});
+
+/* Disable the two unconditional buttons when there is nothing rendered at all,
+   so they are never live over an empty board. */
+function mfExpandPaint() {
+  const n = document.querySelectorAll('#mfGrid details.mf-div').length;
+  document.querySelectorAll('.mf-expand .mf-xbtn').forEach(function (b) { b.disabled = !n; });
+}
 
 function mfSelModePaint() {
   const btn = document.getElementById('mfSelModeBtn');
@@ -12068,6 +12180,8 @@ function mfRender() {
   const _mfHidden = _mfBefore - divs.length;
   let totTeams = 0;
   let totOwing = 0;
+  let totSoon = 0;
+  let totFailed = 0;
   let totCollected = 0;
   _mf.payments.forEach(p => { if ((p.status || '') === 'Success') totCollected += +p.amount || 0; });
   // Week columns are aligned across every displayed division: one shared column
@@ -12080,28 +12194,50 @@ function mfRender() {
   const blocks = divs.map(d => {
     const teams = (d.teams || []).slice().sort((a, b) => String(a.team_number).localeCompare(String(b.team_number)));
     const nWeeks = mfWeekCount(d);
-    let divOwing = 0;
+    let divOwing = 0, divSoon = 0, divFailed = 0;
     const rows = teams.map(t => {
       const r = mfTeamRow(d, t, weeks, today, nWeeks);
       if (r.owing) divOwing++;
+      if (r.soon) divSoon++;
+      if (r.failed) divFailed++;
       return r;
     });
     totTeams += teams.length;
     totOwing += divOwing;
-    const shown = _mfFilter.onlyOwing ? rows.filter(r => r.owing) : rows;
+    totSoon += divSoon;
+    totFailed += divFailed;
+    const shown = _mfFilter.onlyOwing ? rows.filter(r => r.owing || r.soon || r.failed) : rows;
     if (_mfFilter.onlyOwing && !shown.length) return '';
-    const head = '<th class="mf-tn">Team</th><th class="mf-tname"></th>' + weeks.map(w => '<th class="mf-wh">' + w + '</th>').join('') + '<th class="mf-owe">Owe</th>';
-    return '<details class="mf-div" data-dn="' + esc(d.division_number) + '"><summary class="mf-divhdr">' + esc(d.division_number + ' · ' + d.name) +
+    const head = '<th class="mf-tn">Team</th><th class="mf-tname"></th>' + weeks.map(w => '<th class="mf-wh">' + w + '</th>').join('') +
+      '<th class="mf-owe" title="Weeks past the deadline with no payment — ✗ — or where every attempt was declined — F">Owe</th>' +
+      '<th class="mf-soon" title="Weeks played and unpaid whose deadline is inside 24 hours — the ! cells — not late yet">Due soon</th>' +
+      '<th class="mf-failc" title="Weeks where a card was tried and declined — the F cells — needs a retry, not a chase">Failed</th>';
+    /* The tallies ride on the element so the expanders read exactly the
+       numbers the badges show — one source, re-derived every render. */
+    return '<details class="mf-div" data-dn="' + esc(d.division_number) +
+      '" data-owe="' + divOwing + '" data-soon="' + divSoon + '" data-fail="' + divFailed +
+      '"><summary class="mf-divhdr">' + esc(d.division_number + ' · ' + d.name) +
       ' <span class="muted">' + esc(d.format || '') + (d.night_of_play ? ' · ' + esc(d.night_of_play) : '') + '</span>' +
-      (divOwing ? '<span class="mf-badge mf-b-owe">' + divOwing + ' owing</span>' : '<span class="mf-badge mf-b-ok">all current</span>') + '</summary>' +
+      (divOwing ? '<span class="mf-badge mf-b-owe">' + divOwing + ' owing</span>' : '') +
+      (divSoon ? '<span class="mf-badge mf-b-soon">' + divSoon + ' due soon</span>' : '') +
+      (divFailed ? '<span class="mf-badge mf-b-fail">' + divFailed + ' failed</span>' : '') +
+      (!divOwing && !divSoon && !divFailed ? '<span class="mf-badge mf-b-ok">all current</span>' : '') + '</summary>' +
       '<div class="mf-scroll"><table class="mf-tbl"><thead><tr>' + head + '</tr></thead><tbody>' + shown.map(r => r.html).join('') + '</tbody></table></div></details>';
   }).join('');
-  if (sum) sum.innerHTML = '<div class="mf-stats"><span><b>' + totTeams + '</b> teams</span><span class="mf-s-owe"><b>' + totOwing + '</b> needing attention — due-soon/unpaid/late</span><span><b>$' + totCollected.toFixed(2) + '</b> collected</span>' + (_mfHidden ? '<span class="muted">' + _mfHidden + ' division' + (_mfHidden === 1 ? '' : 's') + ' hidden (no schedule)</span>' : '') + '</div>';
+  if (sum) sum.innerHTML = '<div class="mf-stats"><span><b>' + totTeams + '</b> teams</span>' +
+    '<span class="mf-s-owe"><b>' + totOwing + '</b> owing — past the deadline, unpaid</span>' +
+    '<span class="mf-s-soon"><b>' + totSoon + '</b> due soon — unpaid, deadline within 24h</span>' +
+    '<span class="mf-s-fail"><b>' + totFailed + '</b> failed — card declined, needs a retry</span>' +
+    '<span><b>$' + totCollected.toFixed(2) + '</b> collected</span>' + (_mfHidden ? '<span class="muted">' + _mfHidden + ' division' + (_mfHidden === 1 ? '' : 's') + ' hidden (no schedule)</span>' : '') + '</div>';
   wrap.innerHTML = blocks || '<p class="muted">No divisions for this session.</p>';
   mfRestoreViewState(_mfView);
   /* The grid element is new after the innerHTML swap, so the mode class has to
      be re-derived from _mfSelMode rather than assumed to have survived. */
   mfSelModePaint();
+  /* The popup's counts describe the divisions that were just rendered, so a
+     stale popup must not survive a re-render. */
+  mfExpandClose();
+  mfExpandPaint();
   /* A filter change can hide selected cells; the count still reflects the real
      selection, which is what every bulk action operates on. */
   mfSelBar();
