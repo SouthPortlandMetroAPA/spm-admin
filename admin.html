@@ -5184,6 +5184,29 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         .mf-msw-ovr{background:#dbe8ff;border:1px solid #0031a1}
         .mf-msw-resched{background:#0031a1}
         .mf-msw-any{background:linear-gradient(90deg,#b91c1c 0 33%,#fde047 33% 66%,#fed7aa 66%)}
+        /* ── scoresheet comparison overlay ─────────────────────────────── */
+        .sscmp{position:fixed;inset:0;z-index:12000;background:#0b0f17;display:none;flex-direction:column}
+        .sscmp.on{display:flex}
+        .sscmp-bar{display:flex;align-items:center;gap:10px;padding:8px 12px;background:#111827;color:#e5e7eb;font-size:.84rem;flex-wrap:wrap}
+        .sscmp-bar b{color:#fff}
+        .sscmp-btn{font:inherit;font-size:.78rem;font-weight:700;padding:5px 11px;border-radius:999px;border:1px solid rgba(255,255,255,.35);background:transparent;color:#fff;cursor:pointer}
+        .sscmp-btn:hover{background:rgba(255,255,255,.14)}
+        .sscmp-btn.on{background:#0031a1;border-color:#0031a1}
+        .sscmp-btn:disabled{opacity:.35;cursor:not-allowed}
+        .sscmp-keys{margin-left:auto;color:#9aa1a9;font-size:.72rem}
+        .sscmp-panes{flex:1;display:flex;gap:2px;overflow:hidden;background:#1f2937}
+        /* flip mode shows ONE pane at a time — the research finding that a
+           toggle beats side-by-side for fine-grained differences */
+        .sscmp.flip .sscmp-pane{display:none}
+        .sscmp.flip .sscmp-pane.active{display:flex}
+        .sscmp-pane{flex:1 1 0;min-width:0;display:flex;flex-direction:column;background:#0b0f17;position:relative}
+        .sscmp-head{padding:5px 10px;background:#111827;color:#cbd5e1;font-size:.76rem;display:flex;gap:8px;align-items:baseline}
+        .sscmp-head .t{font-weight:800;color:#fff}
+        .sscmp-head .u{color:#9aa1a9}
+        .sscmp-vp{flex:1;overflow:hidden;position:relative;cursor:grab;background:#0b0f17}
+        .sscmp-vp.drag{cursor:grabbing}
+        .sscmp-vp img{position:absolute;top:0;left:0;transform-origin:0 0;user-select:none;-webkit-user-drag:none;max-width:none}
+        .sscmp-none{margin:auto;color:#9aa1a9;font-size:.86rem;text-align:center;padding:20px}
         .mf-modebtn{font:inherit;font-size:.84rem;font-weight:700;padding:6px 14px;border-radius:999px;border:1.5px solid #0031a1;background:#fff;color:#0031a1;cursor:pointer}
         .mf-modebtn:hover{background:#eef5ff}
         .mf-modebtn.on{background:#0031a1;color:#fff}
@@ -5584,7 +5607,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.393';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.394';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -25569,6 +25592,181 @@ async function ssgSwapWeek(matchId, teamId, otherMatchId) {
   }
 }
 
+/* ══ side-by-side scoresheet comparison ═══════════════════════════════════
+ * Read-only. State is the two teams being shown plus ONE shared transform —
+ * both panes render from the same {scale,x,y}, which is what makes zooming
+ * one sheet move the other to the same place.                              */
+let _ssCmp = null;
+
+function ssgCompareOpen(matchId, teamId) {
+  const match = _ssgState.matches.find(m => m.id === matchId);
+  if (!match) return;
+  const div = _ssgState.divisions.find(d => d.id === _ssgState.divisionId);
+  const sides = (SSG_FORMATS[div && div.format] && SSG_FORMATS[div && div.format].sides) || ['single'];
+  const opp = ssgOpponentInfo(match, teamId, sides);
+  _ssCmp = {
+    matchId: matchId, teamId: teamId, oppId: opp.oppId,
+    sides: sides, side: sides[0], flip: false, which: 0,
+    /* One transform, both panes. scale 0 means "fit on first paint". */
+    t: { scale: 0, x: 0, y: 0 }
+  };
+  ssgCompareRender();
+  const el = document.getElementById('ssCmp');
+  if (el) { el.classList.add('on'); el.focus(); }
+}
+
+function ssgCompareClose() {
+  const el = document.getElementById('ssCmp');
+  if (el) el.classList.remove('on');
+  _ssCmp = null;
+}
+
+/* Weeks this team plays, in order — the arrow keys walk this, which is where
+   the click saving actually comes from. */
+function ssgCompareWeeks() {
+  if (!_ssCmp) return [];
+  return _ssgState.matches
+    .filter(m => m.row_type === 'regular' && m.week_number != null
+              && (m.home_team_id === _ssCmp.teamId || m.away_team_id === _ssCmp.teamId))
+    .sort((a, b) => a.week_number - b.week_number);
+}
+
+function ssgCompareStep(delta) {
+  if (!_ssCmp) return;
+  const weeks = ssgCompareWeeks();
+  const i = weeks.findIndex(m => m.id === _ssCmp.matchId);
+  const next = weeks[i + delta];
+  if (!next) return;
+  const keepSide = _ssCmp.side, keepFlip = _ssCmp.flip;
+  ssgCompareOpen(next.id, _ssCmp.teamId);
+  if (_ssCmp) { _ssCmp.side = keepSide; _ssCmp.flip = keepFlip; ssgCompareRender(); }
+}
+
+function ssgComparePhoto(teamId) {
+  if (!_ssCmp) return null;
+  const list = _ssgState.photosByMatchTeam.get(_ssCmp.matchId + ':' + teamId) || [];
+  return list.find(p => p.side === _ssCmp.side) || null;
+}
+
+function ssgCompareRender() {
+  let el = document.getElementById('ssCmp');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'ssCmp';
+    el.className = 'sscmp';
+    el.tabIndex = -1;   /* focusable so the shortcuts work with no extra click */
+    document.body.appendChild(el);
+    el.addEventListener('keydown', ssgCompareKey);
+  }
+  if (!_ssCmp) return;
+  const match = _ssgState.matches.find(m => m.id === _ssCmp.matchId);
+  const weeks = ssgCompareWeeks();
+  const idx = weeks.findIndex(m => m.id === _ssCmp.matchId);
+  const nameOf = (id) => {
+    const t = _ssgState.teams.find(x => x.id === id);
+    return t ? (t.team_number + ' ' + t.team_name) : '—';
+  };
+  const pane = (tid, i) => {
+    const p = ssgComparePhoto(tid);
+    const head = '<div class="sscmp-head"><span class="t">' + esc(nameOf(tid)) + '</span>' +
+      (p ? '<span class="u">' + esc(p.uploader_name || p.uploader_apa_number || 'uploader unknown') + '</span>' : '') + '</div>';
+    const body = p
+      ? '<div class="sscmp-vp" data-vp="' + i + '"><img id="ssCmpImg' + i + '" src="' + esc(ssR2Url(p.r2_path, p)) + '" alt=""></div>'
+      : '<div class="sscmp-vp"><div class="sscmp-none">No upload from this team for this week.</div></div>';
+    return '<div class="sscmp-pane' + (_ssCmp.which === i ? ' active' : '') + '">' + head + body + '</div>';
+  };
+  const sideBtns = _ssCmp.sides.length > 1
+    ? _ssCmp.sides.map(s => '<button class="sscmp-btn' + (s === _ssCmp.side ? ' on' : '') +
+        '" onclick="_ssCmp.side=\'' + s + '\';ssgCompareRender()">' + esc(s.charAt(0).toUpperCase() + s.slice(1)) + '</button>').join('')
+    : '';
+  el.innerHTML =
+    '<div class="sscmp-bar">' +
+      '<b>Week ' + (match ? match.week_number : '?') + '</b>' +
+      '<span>' + esc(match ? match.scheduled_date : '') + '</span>' +
+      '<button class="sscmp-btn" onclick="ssgCompareStep(-1)"' + (idx <= 0 ? ' disabled' : '') + '>&larr; Prev week</button>' +
+      '<button class="sscmp-btn" onclick="ssgCompareStep(1)"' + (idx < 0 || idx >= weeks.length - 1 ? ' disabled' : '') + '>Next week &rarr;</button>' +
+      sideBtns +
+      '<button class="sscmp-btn' + (_ssCmp.flip ? ' on' : '') + '" onclick="ssgCompareFlip()">Flip · F</button>' +
+      '<button class="sscmp-btn" onclick="ssgCompareReset()">Fit · 0</button>' +
+      '<button class="sscmp-btn" onclick="ssgCompareClose()">Close · Esc</button>' +
+      '<span class="sscmp-keys">scroll to zoom &middot; drag to pan &middot; both sheets move together</span>' +
+    '</div>' +
+    '<div class="sscmp-panes">' + pane(_ssCmp.teamId, 0) + pane(_ssCmp.oppId, 1) + '</div>';
+  el.classList.toggle('flip', !!_ssCmp.flip);
+  ssgCompareWire();
+}
+
+function ssgCompareFlip() {
+  if (!_ssCmp) return;
+  /* In flip mode the two sheets alternate in the SAME spot, which is what
+     makes a small difference pop; side-by-side is better for scanning. */
+  if (_ssCmp.flip) _ssCmp.which = _ssCmp.which ? 0 : 1;
+  else { _ssCmp.flip = true; _ssCmp.which = 0; }
+  ssgCompareRender();
+}
+function ssgCompareReset() { if (_ssCmp) { _ssCmp.t = { scale: 0, x: 0, y: 0 }; ssgCompareApply(); } }
+
+/* Fit-to-pane on first paint, so the operator starts by seeing whole sheets
+   and zooms in deliberately. */
+function ssgCompareApply() {
+  if (!_ssCmp) return;
+  for (let i = 0; i < 2; i++) {
+    const img = document.getElementById('ssCmpImg' + i);
+    if (!img) continue;
+    const vp = img.parentElement;
+    if (_ssCmp.t.scale === 0 && img.naturalWidth && vp.clientWidth) {
+      _ssCmp.t.scale = Math.min(vp.clientWidth / img.naturalWidth, vp.clientHeight / img.naturalHeight) || 1;
+      _ssCmp.t.x = (vp.clientWidth  - img.naturalWidth  * _ssCmp.t.scale) / 2;
+      _ssCmp.t.y = (vp.clientHeight - img.naturalHeight * _ssCmp.t.scale) / 2;
+    }
+    img.style.transform = 'translate(' + _ssCmp.t.x + 'px,' + _ssCmp.t.y + 'px) scale(' + _ssCmp.t.scale + ')';
+  }
+}
+
+function ssgCompareWire() {
+  const el = document.getElementById('ssCmp');
+  if (!el || !_ssCmp) return;
+  el.querySelectorAll('img[id^="ssCmpImg"]').forEach(img => {
+    if (img.complete) ssgCompareApply(); else img.onload = ssgCompareApply;
+  });
+  el.querySelectorAll('.sscmp-vp').forEach(vp => {
+    vp.addEventListener('wheel', function (e) {
+      e.preventDefault();
+      if (!_ssCmp) return;
+      const r = vp.getBoundingClientRect();
+      const cx = e.clientX - r.left, cy = e.clientY - r.top;
+      const f = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+      const s0 = _ssCmp.t.scale || 1, s1 = Math.max(0.05, Math.min(20, s0 * f));
+      /* Keep the point under the cursor fixed, then apply to BOTH panes. */
+      _ssCmp.t.x = cx - (cx - _ssCmp.t.x) * (s1 / s0);
+      _ssCmp.t.y = cy - (cy - _ssCmp.t.y) * (s1 / s0);
+      _ssCmp.t.scale = s1;
+      ssgCompareApply();
+    }, { passive: false });
+    let dragging = false, lx = 0, ly = 0;
+    vp.addEventListener('mousedown', function (e) { dragging = true; lx = e.clientX; ly = e.clientY; vp.classList.add('drag'); e.preventDefault(); });
+    window.addEventListener('mouseup', function () { dragging = false; vp.classList.remove('drag'); });
+    vp.addEventListener('mousemove', function (e) {
+      if (!dragging || !_ssCmp) return;
+      _ssCmp.t.x += e.clientX - lx; _ssCmp.t.y += e.clientY - ly;
+      lx = e.clientX; ly = e.clientY;
+      ssgCompareApply();
+    });
+  });
+}
+
+function ssgCompareKey(e) {
+  if (!_ssCmp) return;
+  const k = e.key;
+  if (k === 'Escape') { e.preventDefault(); ssgCompareClose(); }
+  else if (k === 'ArrowRight') { e.preventDefault(); ssgCompareStep(1); }
+  else if (k === 'ArrowLeft')  { e.preventDefault(); ssgCompareStep(-1); }
+  else if (k === 'f' || k === 'F') { e.preventDefault(); ssgCompareFlip(); }
+  else if (k === '0') { e.preventDefault(); ssgCompareReset(); }
+  else if (k === '+' || k === '=') { e.preventDefault(); _ssCmp.t.scale = (_ssCmp.t.scale || 1) * 1.25; ssgCompareApply(); }
+  else if (k === '-' || k === '_') { e.preventDefault(); _ssCmp.t.scale = (_ssCmp.t.scale || 1) / 1.25; ssgCompareApply(); }
+}
+
 function ssgCellClick(ev, matchId, teamId) {
   ev.stopPropagation();
   const match = _ssgState.matches.find(m => m.id === matchId);
@@ -25616,6 +25814,26 @@ function ssgCellClick(ev, matchId, teamId) {
       </div>`;
     }
     body += '</div>';
+  }
+
+  /* Compare the two teams' photographs of the SAME physical sheet. Two clicks
+     from the grid, and zero for every week after that (arrow keys). Only
+     offered when the opponent actually uploaded — otherwise it says who is
+     missing rather than opening an empty pane. */
+  const cmpMatch = match.row_type === 'regular' && match.home_team_id && match.away_team_id;
+  if (cmpMatch) {
+    const cOpp = ssgOpponentInfo(match, teamId, requiredSides);
+    const cOppName = cOpp.oppTeam ? (cOpp.oppTeam.team_number + ' ' + cOpp.oppTeam.team_name) : 'the opponent';
+    const bothHave = photos.length && cOpp.oppPhotos.length;
+    body += '<div style="margin-top:10px;padding:10px;background:#eef2ff;border:1px dashed #4338ca;border-radius:8px">' +
+      '<div style="font-size:0.78rem;font-weight:700;color:#3730a3;margin-bottom:4px">Compare both sheets</div>' +
+      (bothHave
+        ? '<div style="font-size:0.72rem;color:var(--muted);margin-bottom:8px">Both teams photographed the same sheet. Opens them side by side with synced zoom. Arrow keys walk the weeks, F flips between them.</div>' +
+          '<button class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:0.74rem"' +
+          ' onclick="event.stopPropagation();ssCellPopoverClose();ssgCompareOpen(' + matchId + ',' + teamId + ')">Compare side by side</button>'
+        : '<div style="font-size:0.72rem;color:var(--muted)">Needs an upload from both teams. ' +
+          (photos.length ? esc(cOppName) + ' has not uploaded yet.' : 'This team has not uploaded yet.') + '</div>') +
+      '</div>';
   }
 
   /* Swap with an adjacent week. Offered whenever THIS cell or the adjacent one
