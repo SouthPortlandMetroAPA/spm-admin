@@ -11703,9 +11703,10 @@ async function mfAskOverride(dn, tn, wk) {
 
 /* Refetch ONLY the adjustments and re-index them. Everything else in the model
    — payments, schedule, rosters, deadlines — is untouched by an adjustment
-   write, so reloading it was pure latency (measured 4.1 s per click on prod
-   3.384). The read is still a real round-trip to the server, so the board
-   reflects what was actually stored, not what the client hoped it wrote. */
+   write, so reloading it was pure latency. Timed in-page on 3.385:
+   mfLoadData 2,429 ms vs 272/261 ms here. The read is still a real round-trip
+   to the server, so the board reflects what was actually stored, not what the
+   client hoped it wrote. */
 async function mfReloadAdjustments() {
   const adjustments = await mfFetchAll('match_fee_adjustments?select=*&session_id=eq.' + _mfSession);
   _mf.adjIndex = mfIndexAdjustments(adjustments);
