@@ -5607,7 +5607,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.395';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.396';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -21709,6 +21709,12 @@ function spContactKey(p) {
 
 let _spPatches = [];            // slate.sp_patches_v rows for current (session, operator)
 let _spLastBatch = null;        // most-recent sp_mail_batches row (active = is_undone=false)
+/* The batch the EMAIL panel is pointed at. Defaults to the newest, but the
+   operator can select an older one — a mailing that was never emailed used to
+   become unreachable the moment the next batch was stamped, which stranded 84
+   patches across two Summer 2026 batches. Print/Undo still use _spLastBatch. */
+let _spNotifyBatch = null;
+let _spNotifyBatchList = [];
 let _spDivisionMeta = new Map();// division_number -> operator_id
 let _spPatchFilter = 'unmailed';// patch-list view filter: 'unmailed' | 'mailed' | 'all'
 
@@ -21768,6 +21774,30 @@ async function spLoadPatches() {
         + '&created_by_device=neq.legacy-backfill-spring'
         + '&select=*&order=created_at.desc&limit=1');
       _spLastBatch = batches && batches[0] || null;
+      /* Every non-undone batch in the session, so an un-emailed older mailing
+         can still be reached. Kept ordered newest-first for the picker. */
+      try {
+        const all = await sb('GET',
+          'sp_mail_batches?operator_id=eq.' + opId
+          + '&session_id=eq.' + currentSession.id
+          + '&is_undone=eq.false'
+          + '&created_by_device=neq.legacy-backfill-spring'
+          + '&select=*&order=created_at.desc');
+        _spNotifyBatchList = all || [];
+        /* How many DISTINCT people were emailed per batch — that is what makes
+           "never emailed" visible rather than something you find out months
+           later from a member. */
+        const log = await sbGetAll('patch_notify_log?select=batch_id,member_number');
+        const seen = {};
+        for (const r of (log || [])) {
+          if (!r.batch_id) continue;
+          (seen[r.batch_id] = seen[r.batch_id] || new Set()).add(r.member_number);
+        }
+        for (const b of _spNotifyBatchList) b._emailed = seen[b.id] ? seen[b.id].size : 0;
+      } catch (e) { _spNotifyBatchList = _spLastBatch ? [_spLastBatch] : []; }
+      /* Keep the operator's choice across refreshes if it still exists. */
+      const keep = _spNotifyBatch && _spNotifyBatchList.find(b => b.id === _spNotifyBatch.id);
+      _spNotifyBatch = keep || _spLastBatch;
     } catch (e) {
       _spLastBatch = null;
     }
@@ -23252,15 +23282,48 @@ function spNotifyRefreshBatchInfo() {
   /* Populate the template editors on first sight of the card — without
      this they'd sit empty until the first Preview click. */
   spNotifyLoadTemplates().catch(e => console.warn('[patch-notify] template load', e));
-  if (!_spLastBatch) {
+  if (!_spNotifyBatch) {
     el.textContent = 'No active mailing — stamp a batch with "Mail Patches" first.';
     document.getElementById('spNotifySendBtn').disabled = true;
     return;
   }
-  el.textContent = 'Last mailing: ' + new Date(_spLastBatch.created_at).toLocaleString()
-    + ' — ' + _spLastBatch.patch_count + ' patches / ' + _spLastBatch.envelope_count + ' envelopes.';
-  /* New batch invalidates any previously built model. */
-  if (_spNotify.builtForBatch && _spNotify.builtForBatch !== _spLastBatch.id) {
+  /* A picker over every non-undone batch, not just the newest. Each option
+     says whether it has been emailed, so a stranded mailing is visible. */
+  const opts = _spNotifyBatchList.map(b => {
+    const when = new Date(b.created_at).toLocaleString();
+    const state = b._emailed ? ('emailed ' + b._emailed) : 'NEVER EMAILED';
+    return '<option value="' + esc(b.id) + '"' + (b.id === _spNotifyBatch.id ? ' selected' : '') + '>'
+      + esc(when + '  ·  ' + b.patch_count + ' patches / ' + b.envelope_count + ' envelopes  ·  ' + state)
+      + '</option>';
+  }).join('');
+  const never = _spNotifyBatchList.filter(b => !b._emailed && b.patch_count > 0);
+  el.innerHTML =
+    '<label style="display:block;font-weight:700;margin-bottom:4px">Mailing to email</label>' +
+    '<select id="spNotifyBatchSel" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px">'
+      + opts + '</select>' +
+    (never.length
+      ? '<div style="margin-top:6px;font-size:0.8rem;color:#b45309;font-weight:600">&#9888; '
+        + never.length + ' mailing' + (never.length === 1 ? '' : 's') + ' in this session '
+        + (never.length === 1 ? 'has' : 'have') + ' never been emailed ('
+        + esc(never.reduce((n, b) => n + b.patch_count, 0)) + ' patches). Pick one above to send it.</div>'
+      : '<div style="margin-top:6px;font-size:0.8rem;color:var(--muted)">Every mailing in this session has been emailed.</div>') +
+    '<div style="margin-top:6px;font-size:0.76rem;color:var(--muted)">Print slips, print envelopes and undo always act on the MOST RECENT mailing, not this selection.</div>';
+  const sel = document.getElementById('spNotifyBatchSel');
+  if (sel && !sel.dataset.wired) {
+    sel.dataset.wired = '1';
+    sel.addEventListener('change', () => {
+      _spNotifyBatch = _spNotifyBatchList.find(b => b.id === sel.value) || _spNotifyBatch;
+      /* Switching batches invalidates the built recipient model — sending a
+         model built for a different batch is the worst outcome here. */
+      _spNotify.model = null;
+      _spNotify.builtForBatch = null;
+      const sb2 = document.getElementById('spNotifySendBtn');
+      if (sb2) sb2.disabled = true;
+      spNotifyRefreshBatchInfo();
+    });
+  }
+  /* A different batch invalidates any previously built model. */
+  if (_spNotify.builtForBatch && _spNotify.builtForBatch !== _spNotifyBatch.id) {
     _spNotify.model = null;
     _spNotify.builtForBatch = null;
     document.getElementById('spNotifySendBtn').disabled = true;
@@ -23341,10 +23404,10 @@ function spAddrKey(addr1, zip) {
 
 /* Build the full recipient model for the active batch. */
 async function spNotifyBuild() {
-  if (!_spLastBatch) throw new Error('No active mailing batch.');
-  const batchId = _spLastBatch.id;
+  if (!_spNotifyBatch) throw new Error('No mailing selected.');
+  const batchId = _spNotifyBatch.id;
   const patches = await sbGetAll('sp_patches_v?batch_id=eq.' + batchId + '&select=*&order=id.asc');
-  if (!patches.length) throw new Error('The last batch has no patches.');
+  if (!patches.length) throw new Error('That mailing has no patches.');
 
   /* Rosters for every team in the batch (current session), keyed by
      NORMALIZED team number. */
@@ -23622,7 +23685,7 @@ async function spNotifyTestSend(kind) {
   const stat = document.getElementById(kind === 'contact' ? 'spNotifyCapStatus' : 'spNotifyPlyStatus');
   try {
     await spNotifyLoadTemplates();
-    if (!_spNotify.model || _spNotify.builtForBatch !== _spLastBatch?.id) {
+    if (!_spNotify.model || _spNotify.builtForBatch !== _spNotifyBatch?.id) {
       stat.textContent = 'Building sample…'; stat.className = 'status-line';
       _spNotify.model = await spNotifyBuild();
       _spNotify.builtForBatch = _spNotify.model.batchId;
@@ -23646,7 +23709,7 @@ async function spNotifyTestSend(kind) {
 async function spNotifySendAll() {
   const stat = document.getElementById('spNotifyStatus');
   const m = _spNotify.model;
-  if (!m || _spNotify.builtForBatch !== _spLastBatch?.id) {
+  if (!m || _spNotify.builtForBatch !== _spNotifyBatch?.id) {
     stat.textContent = 'Run Preview first — the recipient list must match the current batch.';
     stat.className = 'status-line err';
     return;
@@ -23702,7 +23765,7 @@ async function spNotifyPreviewFor() {
   const m5 = spNotifyM5(raw);
   try {
     await spNotifyLoadTemplates();
-    if (!_spNotify.model || _spNotify.builtForBatch !== _spLastBatch?.id) {
+    if (!_spNotify.model || _spNotify.builtForBatch !== _spNotifyBatch?.id) {
       stat.textContent = 'Building recipient list…'; stat.className = 'status-line';
       _spNotify.model = await spNotifyBuild();
       _spNotify.builtForBatch = _spNotify.model.batchId;
