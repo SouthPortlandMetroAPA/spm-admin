@@ -1739,6 +1739,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         </details>
 
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <div id="spPrintTargetNote" style="flex-basis:100%;font-size:0.78rem;color:var(--muted);margin-bottom:4px"></div>
           <button type="button" class="btn btn-outline" id="spNotifyPreviewBtn" onclick="spNotifyPreview()">🔍 Preview recipients</button>
           <button type="button" class="btn btn-primary" id="spNotifySendBtn" onclick="spNotifySendAll()" disabled>📧 Email this mailing</button>
           <span id="spNotifyStatus" class="status-line" style="flex:1" role="status" aria-live="polite"></span>
@@ -5607,7 +5608,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.396';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.397';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -21714,6 +21715,10 @@ let _spLastBatch = null;        // most-recent sp_mail_batches row (active = is_
    become unreachable the moment the next batch was stamped, which stranded 84
    patches across two Summer 2026 batches. Print/Undo still use _spLastBatch. */
 let _spNotifyBatch = null;
+/* The mailing every NON-DESTRUCTIVE surface acts on: the email panel and both
+   print paths. Falls back to the newest batch before the picker has rendered.
+   Undo deliberately does NOT use this — see spUndoLastMailing. */
+function spSelectedBatch() { return _spNotifyBatch || _spLastBatch; }
 let _spNotifyBatchList = [];
 let _spDivisionMeta = new Map();// division_number -> operator_id
 let _spPatchFilter = 'unmailed';// patch-list view filter: 'unmailed' | 'mailed' | 'all'
@@ -23307,7 +23312,7 @@ function spNotifyRefreshBatchInfo() {
         + (never.length === 1 ? 'has' : 'have') + ' never been emailed ('
         + esc(never.reduce((n, b) => n + b.patch_count, 0)) + ' patches). Pick one above to send it.</div>'
       : '<div style="margin-top:6px;font-size:0.8rem;color:var(--muted)">Every mailing in this session has been emailed.</div>') +
-    '<div style="margin-top:6px;font-size:0.76rem;color:var(--muted)">Print slips, print envelopes and undo always act on the MOST RECENT mailing, not this selection.</div>';
+    '<div style="margin-top:6px;font-size:0.76rem;color:var(--muted)">Print slips and print envelopes follow this selection. <b>Undo always acts on the most recent mailing</b>, never on an earlier one.</div>';
   const sel = document.getElementById('spNotifyBatchSel');
   if (sel && !sel.dataset.wired) {
     sel.dataset.wired = '1';
@@ -23319,6 +23324,9 @@ function spNotifyRefreshBatchInfo() {
       _spNotify.builtForBatch = null;
       const sb2 = document.getElementById('spNotifySendBtn');
       if (sb2) sb2.disabled = true;
+      /* Print follows the same selection, so its buttons and their label have
+         to move with it. */
+      try { spRefreshPrintButtonsState(); } catch (e) {}
       spNotifyRefreshBatchInfo();
     });
   }
@@ -23909,9 +23917,10 @@ function spBatchEnvelopes(patches) {
 
 /* Print Slips — opens a new window with imposition-laid-out slips. */
 async function spPrintSlips() {
-  if (!_spLastBatch) return;
+  const _b = spSelectedBatch();
+  if (!_b) return;
   await spLoadOperatorProfile();
-  const patches = await spPatchesForBatch(_spLastBatch.id);
+  const patches = await spPatchesForBatch(_b.id);
   if (!patches.length) {
     setStatus('spPatchesBlocker', 'No patches in last batch.', 'err');
     return;
@@ -23988,7 +23997,7 @@ async function spPrintSlips() {
     envelopeCount: spBatchEnvelopes(patches).length
   };
   const html = spBuildSlipsHTML(pages, op, summary);
-  spOpenPrintWindow(html, 'Print slips — batch ' + _spLastBatch.id.slice(0, 8));
+  spOpenPrintWindow(html, 'Print slips — batch ' + spSelectedBatch().id.slice(0, 8));
 }
 
 function spBuildSlipsHTML(pages, op, summary) {
@@ -24146,9 +24155,10 @@ function spBuildSlipsHTML(pages, op, summary) {
 }
 
 async function spPrintEnvelopes(half) {
-  if (!_spLastBatch) return;
+  const _b = spSelectedBatch();
+  if (!_b) return;
   await spLoadOperatorProfile();
-  const patches = await spPatchesForBatch(_spLastBatch.id);
+  const patches = await spPatchesForBatch(_b.id);
   if (!patches.length) return;
   const envs = spBatchEnvelopes(patches);
   if (!envs.length) return;
@@ -24170,7 +24180,7 @@ async function spPrintEnvelopes(half) {
   }
   const op = _spOperatorProfile || {};
   const html = spBuildEnvelopesHTML(subset, op);
-  spOpenPrintWindow(html, 'Print envelopes — batch ' + _spLastBatch.id.slice(0, 8) + suffix);
+  spOpenPrintWindow(html, 'Print envelopes — batch ' + spSelectedBatch().id.slice(0, 8) + suffix);
 }
 
 /* Envelope graphics — copied verbatim from the legacy SP Admin
@@ -24282,10 +24292,21 @@ function spRefreshPrintButtonsState() {
   const slips = document.getElementById('spPrintSlipsBtn');
   const env1  = document.getElementById('spPrintEnvBtn1');
   const env2  = document.getElementById('spPrintEnvBtn2');
-  const enable = !!(_spLastBatch && _spLastBatch.patch_count > 0);
+  const _b = spSelectedBatch();
+  const enable = !!(_b && _b.patch_count > 0);
   if (slips) slips.disabled = !enable;
   if (env1)  env1.disabled  = !enable;
   if (env2)  env2.disabled  = !enable;
+  const note = document.getElementById('spPrintTargetNote');
+  if (note) {
+    note.textContent = _b
+      ? 'Printing: ' + new Date(_b.created_at).toLocaleString() + '  ·  ' +
+        _b.patch_count + ' patches / ' + _b.envelope_count + ' envelopes' +
+        (_spLastBatch && _b.id !== _spLastBatch.id ? '  (an EARLIER mailing, chosen above)' : '')
+      : '';
+    note.style.color = (_spLastBatch && _b && _b.id !== _spLastBatch.id) ? '#b45309' : 'var(--muted)';
+    note.style.fontWeight = (_spLastBatch && _b && _b.id !== _spLastBatch.id) ? '700' : '400';
+  }
 }
 
 /* Hook into the existing render so the print buttons toggle alongside
