@@ -5608,7 +5608,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.398';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.399';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -28961,6 +28961,36 @@ function otIsRealPhone(p) {
   const digits = String(p).replace(/\D+/g, '');
   return digits.length >= 7;
 }
+/* Every usable number on a player row, best first, each labelled with where
+   it came from. THE one place this rule lives.
+
+   Lifted verbatim from njPhone (New Joiners), which already had it right:
+   cell, then home, then alt; strip to digits; drop a leading 1 from an
+   11-digit number; require exactly 10; reject all-zeros; de-duplicate.
+
+   Why the rule is digit-count based and not truthiness: 18,846 player rows
+   carry the literal mask "(___) ___-____", which is a non-empty string and
+   would pass any truthiness test while containing zero digits.
+
+   Why home counts: of the members holding a real number in both fields, 81%
+   have the SAME number in both — home_phone is usually the member's mobile
+   entered in the wrong box, which is why texting it works. The remaining 19%
+   genuinely differ and some are landlines, so callers MUST show the label
+   rather than implying every number is a textable cell. */
+function spmPhoneCandidates(p) {
+  const seen = {}, out = [];
+  const fields = [['Cell', p && p.cell_phone], ['Home', p && p.home_phone], ['Alt', p && p.alt_phone]];
+  for (let i = 0; i < fields.length; i++) {
+    let d = String(fields[i][1] || '').replace(/\D/g, '');
+    if (d.length === 11 && d.charAt(0) === '1') d = d.slice(1);
+    if (d.length !== 10 || /^0+$/.test(d) || seen[d]) continue;
+    seen[d] = 1;
+    out.push({ label: fields[i][0], digits: d,
+               pretty: '(' + d.slice(0, 3) + ') ' + d.slice(3, 6) + '-' + d.slice(6) });
+  }
+  return out;
+}
+
 function otPhoneDigits(p) {
   return String(p || '').replace(/\D+/g, '');
 }
@@ -31091,6 +31121,8 @@ const SB_STYLE = `
   }
   #tab-switchboard .sb-team-name { font-weight:800; color:var(--text); }
   #tab-switchboard .sb-team-num  { color:var(--spm-accent); font-family:ui-monospace,monospace; font-weight:700; margin-right:4px; }
+  #tab-switchboard .sb-phone-src { font-size:0.7rem; font-weight:700; color:#92400e; background:#fef3c7; border-radius:4px; padding:1px 5px; margin-left:4px; }
+  #tab-switchboard .sb-hidden-note { font-size:0.72rem; color:#92400e; font-weight:600; margin-left:6px; }
   #tab-switchboard .sb-roster { display:flex; flex-direction:column; gap:4px; margin:10px 0; }
   #tab-switchboard .sb-roster-row {
     display:flex; align-items:center; gap:8px; padding:4px 0;
@@ -31313,9 +31345,14 @@ function sbVisible() {
         return {
           role: m.role,
           name: (p.first_name || p.nickname || '') + (p.last_name ? ' ' + p.last_name : ''),
-          phone_raw: p.cell_phone || '',
-          phone_digits: otPhoneDigits(p.cell_phone || ''),
-          has_cell: otIsRealPhone(p.cell_phone),
+          /* Best number on file, whichever field it sits in. has_cell keeps
+             its name because every downstream reader already uses it; what
+             changed is that it no longer means "the cell column is populated"
+             but "we have a number we can text". */
+          phone_raw: (spmPhoneCandidates(p)[0] || {}).pretty || '',
+          phone_digits: (spmPhoneCandidates(p)[0] || {}).digits || '',
+          has_cell: spmPhoneCandidates(p).length > 0,
+          phone_src: (spmPhoneCandidates(p)[0] || {}).label || '',
           player: p
         };
       });
@@ -31408,6 +31445,13 @@ function sbRender() {
 function sbTeamCardHtml(t) {
   const sel = _sbState.selectedTeams.has(t.id);
   const rows = t.visibleRows;
+  /* "Filtered" must never read as "absent". The role filter defaults to
+     Captain, so a five-person team shows one row and looks like a data gap —
+     which is exactly how this was reported. */
+  const _hiddenCount = (t.rows || []).length - rows.length;
+  const hiddenNote = _hiddenCount > 0
+    ? `<span class="sb-hidden-note">${_hiddenCount} more on this team hidden by the role filter</span>`
+    : '';
   const rowsHtml = rows.map(r => {
     const tag = r.role === 'Captain'    ? 'captain'
               : r.role === 'Co-Captain' ? 'cocap' : 'player';
@@ -31415,13 +31459,16 @@ function sbTeamCardHtml(t) {
       ? dncChipHtml('text')
       : r.has_cell
       ? `<a class="sb-phone real" href="${esc(sbBuildSmsUrl([r], r.player))}">${esc(r.phone_raw)}</a>`
-      : '<span class="sb-no-phone">(no cell)</span>';
+        + (r.phone_src && r.phone_src !== 'Cell'
+            ? ` <span class="sb-phone-src" title="No cell on file — this is their ${esc(r.phone_src.toLowerCase())} number, which may be a landline">${esc(r.phone_src.toLowerCase())}</span>`
+            : '')
+      : '<span class="sb-no-phone">(no number)</span>';
     return `<div class="sb-roster-row">
       <span class="sb-role-tag ${tag}">${esc(r.role || 'Member')}</span>
       <span style="font-weight:600">${esc(r.name) || '(unknown)'}</span>
       ${phoneHtml}
     </div>`;
-  }).join('');
+  }).join('') + hiddenNote;
   /* Per-team aggregate buttons. DNC members are excluded from every count +
      recipient set, so a fully-DNC team disables the button (sbBuildSmsUrl
      also drops them centrally as a backstop). */
