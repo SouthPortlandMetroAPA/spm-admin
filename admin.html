@@ -5608,7 +5608,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.397';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.398';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -25692,7 +25692,11 @@ function ssgCompareOpen(matchId, teamId) {
     matchId: matchId, teamId: teamId, oppId: opp.oppId,
     sides: sides, side: sides[0], flip: false, which: 0,
     /* One transform, both panes. scale 0 means "fit on first paint". */
-    t: { scale: 0, x: 0, y: 0 }
+    t: { scale: 0, x: 0, y: 0 },
+    /* Natural size the current transform was fitted to. Carrying a zoom onto
+       a differently-sized sheet would show it at the wrong scale, so this is
+       what lets the carry-over be safe rather than merely convenient. */
+    fitFor: null
   };
   ssgCompareRender();
   const el = document.getElementById('ssCmp');
@@ -25722,8 +25726,19 @@ function ssgCompareStep(delta) {
   const next = weeks[i + delta];
   if (!next) return;
   const keepSide = _ssCmp.side, keepFlip = _ssCmp.flip;
+  /* Keep the zoom and pan. Stepping weeks is meant to be the cheap move; if it
+     dropped you back to fit-to-window every time, the arrow keys would cost
+     more than they save. */
+  const keepT = { scale: _ssCmp.t.scale, x: _ssCmp.t.x, y: _ssCmp.t.y };
+  const keepFit = _ssCmp.fitFor;
   ssgCompareOpen(next.id, _ssCmp.teamId);
-  if (_ssCmp) { _ssCmp.side = keepSide; _ssCmp.flip = keepFlip; ssgCompareRender(); }
+  if (_ssCmp) {
+    _ssCmp.side = keepSide;
+    _ssCmp.flip = keepFlip;
+    _ssCmp.t = keepT;
+    _ssCmp.fitFor = keepFit;
+    ssgCompareRender();
+  }
 }
 
 function ssgComparePhoto(teamId) {
@@ -25798,7 +25813,15 @@ function ssgCompareApply() {
     const img = document.getElementById('ssCmpImg' + i);
     if (!img) continue;
     const vp = img.parentElement;
+    /* A carried transform is only valid for the size it was fitted to. A
+       different sheet re-fits rather than rendering at a wrong scale. */
+    const dims = img.naturalWidth + 'x' + img.naturalHeight;
+    if (_ssCmp.fitFor && img.naturalWidth && _ssCmp.fitFor !== dims) {
+      _ssCmp.t = { scale: 0, x: 0, y: 0 };
+      _ssCmp.fitFor = null;
+    }
     if (_ssCmp.t.scale === 0 && img.naturalWidth && vp.clientWidth) {
+      _ssCmp.fitFor = dims;
       _ssCmp.t.scale = Math.min(vp.clientWidth / img.naturalWidth, vp.clientHeight / img.naturalHeight) || 1;
       _ssCmp.t.x = (vp.clientWidth  - img.naturalWidth  * _ssCmp.t.scale) / 2;
       _ssCmp.t.y = (vp.clientHeight - img.naturalHeight * _ssCmp.t.scale) / 2;
