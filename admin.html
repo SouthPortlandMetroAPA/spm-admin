@@ -5607,7 +5607,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.394';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.395';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -39833,6 +39833,24 @@ async function ehDeleteForeign() {
     });
   }
 
+  /* The text a division page is IDENTIFIED by, with per-export noise removed.
+     APA stamps "Printed <date>" in the footer of every page, so hashing the
+     raw text made an identical re-export look like a schedule change on every
+     division, every time. Verified on the 2026-09-02 export: all 37 pages were
+     content-identical to the stored PDFs, yet every raw hash differed.
+
+     Anything added here MUST also be added to the baseline script, or the two
+     sides of the comparison stop agreeing and everything reads as changed
+     again — which is exactly the failure this replaces. */
+  function rktHashableText(items) {
+    return items.slice()
+      .sort((a, b) => b.y - a.y || a.x - b.x)
+      .map(it => it.str).join(' ')
+      .replace(/\s+/g, ' ')
+      .replace(/Printed\s+\d{1,2}\/\d{1,2}\/\d{2,4}/gi, 'Printed <date>')
+      .trim();
+  }
+
   async function parsePdfPages(file) {
     const lib = await window.ensurePdfJs();
     const data = await file.arrayBuffer();
@@ -39857,9 +39875,7 @@ async function ehDeleteForeign() {
         // re-extracted PDF bytes, which pdf-lib doesn't emit deterministically)
         // is what lets saveOnePreview tell a real schedule change from a
         // byte-different re-export of the same schedule.
-        const pageText = items.slice()
-          .sort((a, b) => b.y - a.y || a.x - b.x)
-          .map(it => it.str).join(' ').replace(/\s+/g, ' ').trim();
+        const pageText = rktHashableText(items);
         const schedule = rktParseSchedule(items);
         results.push({ ...r, pageIndex: i, totalPages: total, pageText, schedule });
       }
