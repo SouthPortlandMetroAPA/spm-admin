@@ -5678,7 +5678,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.402';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.403';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -41030,6 +41030,7 @@ const APA_MAX_ATTACH = 18 * 1024 * 1024;
 
 let _apaNxPlayer = null, _apaNxAc = [], _apaNxFocus = -1, _apaNxTimer = null;
 let _apaNexusReady = false, _apaFundReady = false;
+let _apaSessionId = null;
 
 function apaSetStatus(id, msg, kind) {
   const el = document.getElementById(id); if (!el) return;
@@ -41076,10 +41077,18 @@ async function apaNexusInit() {
   try {
     /* Season word only -- the template asks for "Fall", not "Fall 2026".
        is_current, never max(id): session ids are not chronological. */
-    const s = await sb('GET', 'sessions?is_current=eq.true&select=name&limit=1', null, { 'Accept-Profile': 'slate' });
+    const s = await sb('GET', 'sessions?is_current=eq.true&select=id,name&limit=1', null, { 'Accept-Profile': 'slate' });
     const nm = (s && s[0] && s[0].name) || '';
+    _apaSessionId = s && s[0] ? s[0].id : null;
     document.getElementById('apaNxSession').value = nm.split(' ')[0] || '';
-    const divs = await sb('GET', 'divisions?select=id,division_number,name&order=division_number', null, { 'Accept-Profile': 'slate' }) || [];
+    /* Scoped to the current session. Unscoped this returned 337 rows for 76
+       real divisions, the same number repeated once per session with identical
+       labels -- an operator picking "173" had five indistinguishable choices
+       and four of them were wrong. */
+    const divs = _apaSessionId
+      ? (await sb('GET', 'divisions?session_id=eq.' + encodeURIComponent(_apaSessionId)
+          + '&select=id,division_number,name&order=division_number', null, { 'Accept-Profile': 'slate' }) || [])
+      : [];
     const sel = document.getElementById('apaNxDivision');
     sel.innerHTML = '<option value="">(none)</option>' + divs.map(d =>
       '<option value="' + esc(d.division_number) + '" data-id="' + esc(d.id) + '">' + esc(d.division_number + ' · ' + (d.name || '')) + '</option>').join('');
