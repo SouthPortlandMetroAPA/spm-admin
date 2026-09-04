@@ -5678,7 +5678,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.403';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.404';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -41102,10 +41102,17 @@ async function apaNxLoadTeams(sel) {
   if (!id) { tSel.innerHTML = '<option value="">Pick a division first</option>'; return; }
   tSel.innerHTML = '<option value="">Loading…</option>';
   try {
-    const teams = await sb('GET', 'teams?division_id=eq.' + encodeURIComponent(id) + '&select=team_number,name&order=team_number', null, { 'Accept-Profile': 'slate' }) || [];
+    /* team_name, not name -- slate.teams has no `name` column and selecting
+       one 400s the whole request. */
+    const teams = await sb('GET', 'teams?division_id=eq.' + encodeURIComponent(id) + '&select=team_number,team_name&order=team_number', null, { 'Accept-Profile': 'slate' }) || [];
     tSel.innerHTML = '<option value="">(none)</option>' + teams.map(t =>
-      '<option value="' + esc(t.team_number) + '">' + esc(t.team_number + ' · ' + (t.name || '')) + '</option>').join('');
-  } catch (e) { tSel.innerHTML = '<option value="">(could not load)</option>'; }
+      '<option value="' + esc(t.team_number) + '">' + esc(t.team_number + ' · ' + (t.team_name || '')) + '</option>').join('');
+  } catch (e) {
+    /* Say what broke. The previous version swallowed this into a bland
+       "(could not load)", which is how a dead dropdown survived to ship. */
+    tSel.innerHTML = '<option value="">(could not load)</option>';
+    apaSetStatus('apaNxStatus', 'Teams did not load: ' + e.message, 'err');
+  }
 }
 
 /* CueDrop find-player. cdSearch and cdPlayerName are the canonical helpers and
