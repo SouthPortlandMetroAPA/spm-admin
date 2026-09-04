@@ -5608,7 +5608,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.399';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.401';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11344,7 +11344,7 @@ async function mfLoadData() {
     const mns = [...new Set(roster.map(r => r.member_number).filter(Boolean))];
     for (let i = 0; i < mns.length; i += 300) {
       const chunk = mns.slice(i, i + 300);
-      const got = await mfFetchAll('players?select=member_number,first_name,nickname,last_name,cell_phone&member_number=in.(' + chunk.map(encodeURIComponent).join(',') + ')');
+      const got = await mfFetchAll('players?select=member_number,first_name,nickname,last_name,cell_phone,home_phone,alt_phone&member_number=in.(' + chunk.map(encodeURIComponent).join(',') + ')');
       rosterPlayers = rosterPlayers.concat(got || []);
     }
   }
@@ -11422,7 +11422,12 @@ function mfBuildModel(divs, matches, payments, upload, adjustments, roster, rost
     const pl = pById[String(r.member_number)] || {};
     (rosterByTeam[r.team_id] = rosterByTeam[r.team_id] || []).push({
       first: pl.first_name || r.name_raw || '', nick: pl.nickname || '', last: pl.last_name || '',
-      role: r.role || '', mn: r.member_number || '', cell: pl.cell_phone || ''
+      /* Best usable number, whichever column it sits in, plus where it came
+         from so the button can say so. `cell` keeps its name because the
+         hover card and the text button both already read it. */
+      role: r.role || '', mn: r.member_number || '',
+      cell: (spmBestPhone(pl) || {}).digits || '',
+      cellSrc: (spmBestPhone(pl) || {}).label || ''
     });
   });
   Object.keys(rosterByTeam).forEach(k => rosterByTeam[k].sort((a, b) =>
@@ -11488,12 +11493,18 @@ function mfTextCaptainHtml(teamId, teamName, divName) {
       : '<span class="mf-nocap">no contact</span>';
   }
   const capDigits = mfDigits(cap.cell);
-  if (!capDigits) return '<span class="mf-nocap" title="No cell on file">no cell</span>';
+  if (!capDigits) return '<span class="mf-nocap" title="No usable number on file">no number</span>';
+  /* Say when this is not a mobile. A text to a landline is delivered nowhere
+     and reports nothing, so an unlabelled number would read as a sent
+     message that simply went unanswered. */
+  const srcNote = (cap.cellSrc && cap.cellSrc !== 'Cell')
+    ? ' <span class="mf-phone-src" title="No cell on file — this is their ' + esc(cap.cellSrc.toLowerCase()) + ' number, which may be a landline">' + esc(cap.cellSrc.toLowerCase()) + '</span>'
+    : '';
   // Group text: the captain plus both league numbers.
   const to = [capDigits].concat(MF_LEAGUE_SMS).join(',');
   const body = 'Hi ' + (cap.first || 'there') + ' — ' + (teamName || 'your team') +
     (divName ? ' (' + divName + ')' : '') + ' match fees. ';
-  return '<a class="mf-textcap" href="' + esc(otBuildSmsUrl(to, body)) + '" title="Text the captain + both league numbers">Text captain</a>';
+  return '<a class="mf-textcap" href="' + esc(otBuildSmsUrl(to, body)) + '" title="Text the captain + both league numbers">Text captain</a>' + srcNote;
 }
 
 // classification for one (division, team, week) -> {k, pay, sched}
@@ -14304,7 +14315,7 @@ async function mjLoad() {
     const chunk = mns.slice(i, i + 100);
     const rows = await sb('GET',
       'players?member_number=in.(' + chunk.join(',') + ')' +
-      '&select=member_number,first_name,last_name,nickname,cell_phone,deceased,membership_revoked',
+      '&select=member_number,first_name,last_name,nickname,cell_phone,home_phone,alt_phone,deceased,membership_revoked',
       null, { 'Accept-Profile': 'slate' }) || [];
     for (const p of rows) _mjState.players[p.member_number] = p;
   }
@@ -14322,8 +14333,10 @@ function mjRowState(r) {
   if (mjYes(p.deceased))           return { kind: 'deceased', p };
   if (mjYes(p.membership_revoked)) return { kind: 'revoked', p };
   if (dncIsBlocked(r.member_number)) return { kind: 'dnc', p };
-  if (!otIsRealPhone(p.cell_phone))  return { kind: 'nocell', p };
-  return { kind: 'ok', p };
+  /* Any number on file, and not one that also rings a no-contact household. */
+  const best = spmBestPhone(p);
+  if (!best) return { kind: 'nocell', p };
+  return { kind: 'ok', p, phone: best };
 }
 
 function mjRender() {
@@ -14486,7 +14499,9 @@ async function mjText(id) {
     alert('This member is on the no-contact list.');
     return;
   }
-  const url = otBuildSmsUrl(otPhoneDigits(st.p.cell_phone), mjMsg(r.tier));
+  /* The number mjRowState already approved — re-deriving it here is how the
+     gate and the send drift apart (the TCQ truthiness bug, one tab over). */
+  const url = otBuildSmsUrl(st.phone.digits, mjMsg(r.tier));
   const stamp = new Date().toISOString();
   try {
     await sb('PATCH', 'match_jackets?id=eq.' + r.id, { texted_at: stamp },
@@ -18591,6 +18606,13 @@ async function sbCopyEmails(text, context) {
    8-digit string; surfaces pass whatever key they hold (5- or 8-digit) through
    dncKey() which canonicalizes to 8. */
 let _dncSet = new Set();
+/* Ten-digit numbers belonging to somebody on the no-contact list.
+
+   dncIsBlocked answers "is this MEMBER blocked". Once a text can go to a
+   household line, that is the wrong question: the number may also reach a
+   blocked person who is not the member being addressed. This set makes the
+   number itself answerable. */
+let _dncPhones = new Set();
 let _dncLoaded = false;
 let _dncLoadErr = false;
 function dncKey(mn) {
@@ -18604,9 +18626,21 @@ async function dncEnsure() {
   try {
     const rows = await sb('GET', 'email_blocklist?active=eq.true&member_number=not.is.null&select=member_number');
     _dncSet = new Set((rows || []).map(r => dncKey(r.member_number)));
+    /* Also pull the blocked members' own numbers so a shared household line
+       is refused for everyone on it. Loaded in the SAME step as the member
+       set: if this failed independently the gate would silently narrow back
+       to member-keyed, which is the bug it exists to prevent. */
+    _dncPhones = new Set();
+    const mns = (rows || []).map(r => r.member_number).filter(Boolean);
+    for (let i = 0; i < mns.length; i += 200) {
+      const chunk = mns.slice(i, i + 200).map(encodeURIComponent).join(',');
+      const ph = await sb('GET', 'players?member_number=in.(' + chunk + ')'
+        + '&select=cell_phone,home_phone,alt_phone', null, { 'Accept-Profile': 'slate' }) || [];
+      for (const p of ph) for (const c of spmPhoneCandidates(p)) _dncPhones.add(c.digits);
+    }
     _dncLoaded = true; _dncLoadErr = false;
   } catch (e) {
-    _dncSet = new Set(); _dncLoadErr = true;   // fail-safe: gate everything until a clean load
+    _dncSet = new Set(); _dncPhones = new Set(); _dncLoadErr = true;   // fail-safe: gate everything until a clean load
   }
 }
 async function dncRefresh() { _dncLoaded = false; await dncEnsure(); }
@@ -18614,6 +18648,46 @@ function dncIsBlocked(mn) {
   if (_dncLoadErr) return true;                // fail-closed while the list is unverified
   const k = dncKey(mn);
   return !!k && _dncSet.has(k);
+}
+/* Is this NUMBER on the no-contact list, whoever we think we are texting?
+
+   A household line reaches everyone in the household. dncIsBlocked cannot
+   see that, because it is keyed on the member we happen to be addressing.
+   Every send path checks BOTH: the member, and the line.
+
+   Fails closed on an unverified list, exactly like dncIsBlocked — an
+   unknown no-contact list must never read as "nobody is blocked". */
+function spmPhoneOnDncLine(digits) {
+  if (_dncLoadErr) return true;
+  const d = String(digits || '').replace(/\D/g, '');
+  return d.length === 10 && _dncPhones.has(d);
+}
+/* The one number a surface should offer for a member, or '' if there is none
+   it may use. Wraps spmPhoneCandidates with the no-contact line check so no
+   caller can pick a number the DNC list forbids by forgetting a step. */
+/* A read-only "Phone" table cell: the best number on file with a copy button,
+   labelled when it is not a cell.
+
+   Uses spmPhoneCandidates, NOT spmBestPhone — see the header of
+   patch-phones-display.mjs. Display shows what is on file; sending is what
+   honors the no-contact list. */
+function spmPhoneCell(p) {
+  const c = (spmPhoneCandidates(p) || [])[0];
+  if (!c) return '<span class="hint">—</span>';
+  const src = c.label !== 'Cell'
+    ? ' <span class="spm-phone-src" title="No cell on file — this is their '
+      + esc(c.label.toLowerCase()) + ' number, which may be a landline">'
+      + esc(c.label.toLowerCase()) + '</span>'
+    : '';
+  return esc(c.pretty)
+    + '<button class="copy-btn" data-copy="' + esc(c.pretty) + '" title="Copy phone">📋</button>'
+    + src;
+}
+
+function spmBestPhone(p) {
+  const c = spmPhoneCandidates(p) || [];
+  for (let i = 0; i < c.length; i++) if (!spmPhoneOnDncLine(c[i].digits)) return c[i];
+  return null;
 }
 /* The disabled "DNC" chip shown in place of a text/call/email control. */
 function dncChipHtml(kind) {
@@ -28579,9 +28653,7 @@ function rptRenderBucket(title, chipClass, rows, opts) {
       <td>${r.email
         ? `${esc(r.email)}<button class="copy-btn" data-copy="${esc(r.email)}" title="Copy email">📋</button>`
         : '<span class="hint">—</span>'}</td>
-      <td>${otIsRealPhone(r.cell_phone)
-        ? `${esc(r.cell_phone)}<button class="copy-btn" data-copy="${esc(r.cell_phone)}" title="Copy phone">📋</button>`
-        : '<span class="hint">—</span>'}</td>
+      <td>${spmPhoneCell(r)}</td>
     </tr>`;
   }).join('');
 
@@ -31121,6 +31193,8 @@ const SB_STYLE = `
   }
   #tab-switchboard .sb-team-name { font-weight:800; color:var(--text); }
   #tab-switchboard .sb-team-num  { color:var(--spm-accent); font-family:ui-monospace,monospace; font-weight:700; margin-right:4px; }
+  .spm-phone-src { font-size:0.7rem; font-weight:700; color:#92400e; background:#fef3c7; border-radius:4px; padding:1px 5px; margin-left:4px; }
+  .mf-phone-src { font-size:0.7rem; font-weight:700; color:#92400e; background:#fef3c7; border-radius:4px; padding:1px 5px; margin-left:4px; }
   #tab-switchboard .sb-phone-src { font-size:0.7rem; font-weight:700; color:#92400e; background:#fef3c7; border-radius:4px; padding:1px 5px; margin-left:4px; }
   #tab-switchboard .sb-hidden-note { font-size:0.72rem; color:#92400e; font-weight:600; margin-left:6px; }
   #tab-switchboard .sb-roster { display:flex; flex-direction:column; gap:4px; margin:10px 0; }
@@ -31349,10 +31423,10 @@ function sbVisible() {
              its name because every downstream reader already uses it; what
              changed is that it no longer means "the cell column is populated"
              but "we have a number we can text". */
-          phone_raw: (spmPhoneCandidates(p)[0] || {}).pretty || '',
-          phone_digits: (spmPhoneCandidates(p)[0] || {}).digits || '',
-          has_cell: spmPhoneCandidates(p).length > 0,
-          phone_src: (spmPhoneCandidates(p)[0] || {}).label || '',
+          phone_raw: (spmBestPhone(p) || {}).pretty || '',
+          phone_digits: (spmBestPhone(p) || {}).digits || '',
+          has_cell: !!spmBestPhone(p),
+          phone_src: (spmBestPhone(p) || {}).label || '',
           player: p
         };
       });
@@ -31402,7 +31476,10 @@ function sbRender() {
         if (!_sbState.selectedTeams.has(t.id)) continue;
         for (const m of (t.memberships || [])) {
           const p = m.player || {};
-          if (!otIsRealPhone(p.cell_phone)) continue;
+          /* Must ask the same question sbTextSelection asks, or the count the
+             operator reads before sending disagrees with what actually sends.
+             3.399 changed the roster row and left this behind. */
+          if (!spmBestPhone(p)) continue;
           allCells++;
           if (m.role === 'Captain' || m.role === 'Co-Captain') capCoCells++;
           if (m.role === 'Captain') capCells++;
@@ -31412,7 +31489,7 @@ function sbRender() {
     document.getElementById('sbSelectionLabel').textContent =
       selN + ' team' + (selN === 1 ? '' : 's') + ' selected — ' +
       capCells + ' captain · ' + capCoCells + ' cap+co · ' +
-      allCells + ' total cell' + (allCells === 1 ? '' : 's');
+      allCells + ' reachable';
   }
 
   if (!visible.length) {
@@ -31551,10 +31628,11 @@ function sbTextSelection(scope) {
       if (!_sbState.selectedTeams.has(t.id)) continue;
       for (const m of (t.memberships || [])) {
         const p = m.player || {};
-        if (!otIsRealPhone(p.cell_phone)) continue;
         if (!includeRole(m.role)) continue;
         if (dncIsBlocked(p.member_number)) continue;   /* DNC excluded from bulk send */
-        recipients.push({ phone_digits: otPhoneDigits(p.cell_phone), player: p });
+        const best = spmBestPhone(p);                  /* also refuses a no-contact household line */
+        if (!best) continue;
+        recipients.push({ phone_digits: best.digits, player: p });
         if (!firstPlayer) firstPlayer = p;
       }
     }
@@ -33703,7 +33781,7 @@ async function rolToggleRow(headerEl) {
               + '<td style="padding:4px 6px">' + esc(c.first_name + ' ' + c.last_name) + ' ' + matchWarn + '</td>'
               + '<td style="padding:4px 6px;font-family:ui-monospace,monospace;font-size:0.82rem">' + esc(c.member_number || '—') + '</td>'
               + '<td style="padding:4px 6px"><span style="font-size:0.82rem">' + esc(c.email || '—') + '</span></td>'
-              + '<td style="padding:4px 6px;font-family:ui-monospace,monospace;font-size:0.82rem">' + esc(otIsRealPhone(c.cell_phone) ? c.cell_phone : '—') + '</td>'
+              + '<td style="padding:4px 6px;font-family:ui-monospace,monospace;font-size:0.82rem">' + spmPhoneCell(c) + '</td>'
               + '</tr>';
           }).join('')
       + '</tbody></table>';
@@ -33737,7 +33815,9 @@ async function rolFetchDivisionCaptains(divisionNumber) {
     'and(first_name.ilike.' + encodeURIComponent(c.first_name)
     + ',last_name.ilike.' + encodeURIComponent(c.last_name) + ')'
   );
-  const pR = await fetch(SB_URL + '/rest/v1/players?select=member_number,first_name,last_name,email,cell_phone'
+    /* home/alt included or spmPhoneCell has nothing to fall back to — the
+     read-side column omission that caused this whole class of bug. */
+  const pR = await fetch(SB_URL + '/rest/v1/players?select=member_number,first_name,last_name,email,cell_phone,home_phone,alt_phone'
     + '&or=(' + orParts.join(',') + ')',
     { headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Accept-Profile': 'slate' } });
   const players = pR.ok ? await pR.json() : [];
@@ -35013,13 +35093,13 @@ async function tcqMakeCaptain(playerId) {
 function tcqCanTextCaptain(captain) {
   if (!captain) return false;
   if (dncIsBlocked(captain.member_number)) return false;
-  return !!tcqNormalizePhone(captain.cell_phone);
+  return !!spmBestPhone(captain);
 }
 /* Mirrors tcqTextTeam's recipient loop: a no-contact player is skipped, and a
    player without a normalisable number is skipped. If nobody survives, there is
    nobody to text and the button must be disabled. */
 function tcqCanTextTeam(players) {
-  return (players || []).some(p => !dncIsBlocked(p.member_number) && !!tcqNormalizePhone(p.cell_phone));
+  return (players || []).some(p => !dncIsBlocked(p.member_number) && !!spmBestPhone(p));
 }
 function tcqNormalizePhone(raw) {
   if (!raw) return null;
@@ -35108,8 +35188,9 @@ async function tcqTextCaptain(teamId) {
   const captain = players.find(p => p.is_captain);
   if (!captain) { alert('No captain on this team yet.'); return; }
   if (dncIsBlocked(captain.member_number)) { alert('🚫 ' + (captain.name || 'This captain') + ' is on the no-contact (DNC) list — not texting.'); return; }
-  const phone = tcqNormalizePhone(captain.cell_phone);
-  if (!phone) { alert('No usable cell phone on file for ' + captain.name + '.'); return; }
+  const best = spmBestPhone(captain);
+  if (!best) { alert('No usable phone number on file for ' + captain.name + '.'); return; }
+  const phone = '+1' + best.digits;
   const lineup = tcqLineupCheck(players);
   const tpl = await tcqLoadTemplates();
   const body = tcqSubstitute(tpl.body, tcqBuildVars(team, players, captain, lineup, tpl));
@@ -35131,8 +35212,8 @@ async function tcqTextTeam(teamId) {
   const noPhone = [];
   for (const p of players) {
     if (dncIsBlocked(p.member_number)) continue;   /* DNC excluded from the group text */
-    const ph = tcqNormalizePhone(p.cell_phone);
-    if (ph) phones.push(ph);
+    const best = spmBestPhone(p);
+    if (best) phones.push('+1' + best.digits);
     else noPhone.push(p.name);
   }
   if (!phones.length) { alert('No usable cell phones on file for this team (no-contact players are excluded).'); return; }
@@ -36507,14 +36588,14 @@ function tcqOrRowHtml(r) {
     +       '<span>Confirmed</span>'
     +     '</label>'
     +     '<button class="btn btn-primary btn-sm" onclick="tcqOrTextOne(\'' + esc(r.member_number) + '\')"'
-    /* tcqOrTextOne texts via SMS to r.cell_phone specifically (not any
-       of the other phones), so disable the button only when cell_phone
-       is unusable. The phone-pill row above shows H/W/A links so the
-       admin can still call those numbers manually. DNC disables it outright. */
+    /* tcqOrTextOne texts the best usable number (cell, else home, else alt —
+       never work, which is a third party's line), so the button is disabled
+       only when there is no such number. The phone-pill row above still shows
+       every number including work for manual calling. DNC disables it
+       outright, and so does a number that rings a no-contact household. */
     +       (dncIsBlocked(r.member_number)
               ? ' disabled title="On the no-contact (DNC) list"'
-              : (r.cell_phone && String(r.cell_phone).replace(/[^0-9]/g, '').length >= 10
-              ? '' : ' disabled title="No cell phone on file"')) + '>'
+              : (spmBestPhone(r) ? '' : ' disabled title="No usable number on file"')) + '>'
     +       (dncIsBlocked(r.member_number) ? '🚫 DNC' : 'Text') + '</button>'
     +   '</div>'
     + '</div>';
@@ -36668,8 +36749,9 @@ async function tcqOrTextOne(memberNumber) {
   if (dncIsBlocked(memberNumber)) { alert('🚫 On the no-contact (DNC) list — not texting.'); return; }
   const r = _tcqOrAll.find(x => x.member_number === memberNumber);
   if (!r) { alert('Candidate not loaded.'); return; }
-  const phone = tcqNormalizePhone(r.cell_phone);
-  if (!phone) { alert('No usable cell phone on file for ' + r.name + '.'); return; }
+  const best = spmBestPhone(r);
+  if (!best) { alert('No usable phone number on file for ' + r.name + '.'); return; }
+  const phone = '+1' + best.digits;
   const tpl = await tcqOrLoadTemplate();
   const body = tcqSubstitute(tpl, tcqOrBuildVars(r));
   window.location.href = 'sms:' + phone + '?&body=' + encodeURIComponent(body);
