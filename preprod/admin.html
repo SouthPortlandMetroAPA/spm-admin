@@ -5678,7 +5678,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.404';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.405';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -6543,30 +6543,53 @@ async function runTeamScreenImport(file, pdf, opts) {
           const ids = orphans.map(o => o.id);
           const label = o => o.team_number + (o.team_name ? ' "' + o.team_name + '"' : '');
           /* The screen is the single source of truth for who is in the league,
-             so a departed team's FIXTURES go with it. Match Fees already reads
+             so a departed team's UNPLAYED fixtures go with it. Match Fees reads
              an absent match row as a bye, so the remaining teams correctly show
-             a bye that week. Re-importing the schedule regenerates everything,
-             so this is recoverable, not destructive. */
-          let fixturesRemoved = 0;
+             a bye that week, and re-importing the schedule rebuilds them.
+
+             A PLAYED match is different and is never removed. Its scoresheets
+             are league records that no re-import can rebuild -- the photos
+             would be gone, and the rebuilt match rows carry new ids anyway.
+             This used to read "re-importing regenerates everything, so this is
+             recoverable", which was simply untrue once a cascade had destroyed
+             the photos. The database now refuses these deletes outright; this
+             code asks first so the operator gets an explanation instead of a
+             foreign key error. */
+          let fixturesRemoved = 0, fixturesKept = 0, teamsKept = [];
+          const allDoomed = [];
           for (let i = 0; i < ids.length; i += 100) {
             const chunk = ids.slice(i, i + 100).join(',');
             const doomed = await sb('GET', 'matches?or=(home_team_id.in.(' + chunk
               + '),away_team_id.in.(' + chunk + '))&select=id') || [];
-            for (let j = 0; j < doomed.length; j += 100) {
-              const mIds = doomed.slice(j, j + 100).map(m => m.id);
-              await sb('DELETE', 'matches?id=in.(' + mIds.join(',') + ')');
-            }
-            fixturesRemoved += doomed.length;
+            doomed.forEach(m => allDoomed.push(m.id));
           }
+          const prot = await ptPhotoProtected(allDoomed, ids);
+          const deletable = allDoomed.filter(id => !prot.matches.has(id));
+          fixturesKept = allDoomed.length - deletable.length;
+          for (let j = 0; j < deletable.length; j += 100) {
+            await sb('DELETE', 'matches?id=in.(' + deletable.slice(j, j + 100).join(',') + ')');
+          }
+          fixturesRemoved = deletable.length;
+          /* A team that played cannot be removed either, or the match-side
+             guard is bypassable straight through the team. */
+          const keepTeam = new Set([...prot.teams]);
+          orphans = orphans.filter(o => {
+            if (!keepTeam.has(o.id)) return true;
+            teamsKept.push(label(o)); return false;
+          });
           for (let i = 0; i < orphans.length; i += 100) {
             const chunk = orphans.slice(i, i + 100).map(o => o.id);
             await sb('DELETE', 'team_memberships?team_id=in.(' + chunk.join(',') + ')');
             await sb('DELETE', 'teams?id=in.(' + chunk.join(',') + ')');
           }
           setStatus(stId, 'Removed ' + orphans.length + ' team(s) no longer on the screen: '
-            + orphans.map(label).join(', ')
-            + (fixturesRemoved ? ' — ' + fixturesRemoved + ' fixtures removed with them, so their '
-                + 'former opponents now show a bye those weeks. Re-import the schedule to rebuild it.' : ''), 'ok');
+            + (orphans.length ? orphans.map(label).join(', ') : '(none)')
+            + (fixturesRemoved ? ' — ' + fixturesRemoved + ' unplayed fixtures removed with them, so their '
+                + 'former opponents now show a bye those weeks. Re-import the schedule to rebuild it.' : '')
+            + (fixturesKept ? ' — KEPT ' + fixturesKept + ' already-played match(es): they hold scoresheets, '
+                + 'which are league records and are never deleted.' : '')
+            + (teamsKept.length ? ' — KEPT team(s) ' + teamsKept.join(', ')
+                + ' because they have scoresheets on file. Remove those first if you really mean to erase them.' : ''), 'ok');
           console.log('[Slate] team screen sweep — removed', orphans.length, 'team(s):',
             orphans.map(label).join(', '), '| fixtures deleted:', fixturesRemoved);
         }
@@ -16888,8 +16911,20 @@ window.commitTeamData = async function(headers, rows) {
         'teams?division_id=in.(' + allDivIds.join(',') + ')'
         + '&select=id,division_id,team_number,team_name');
       const pasteKeys = new Set(teamWork.map(w => w.divId + ':' + w.tn));
-      const orphans = (allExistingTeams || []).filter(t =>
+      let orphans = (allExistingTeams || []).filter(t =>
         !pasteKeys.has(t.division_id + ':' + t.team_number));
+      /* A team with scoresheets on file played, and its record stays. Without
+         this the delete simply fails on the foreign key and takes the whole
+         paste down with it. */
+      if (orphans.length) {
+        const protectedTeams = (await ptPhotoProtected([], orphans.map(t => t.id))).teams;
+        const kept = orphans.filter(t => protectedTeams.has(t.id));
+        orphans = orphans.filter(t => !protectedTeams.has(t.id));
+        if (kept.length) {
+          orphanDetail.push('kept (has scoresheets): '
+            + kept.map(t => t.team_number + (t.team_name ? ' "' + t.team_name + '"' : '')).join(', '));
+        }
+      }
       if (orphans.length) {
         const orphanIds = orphans.map(t => t.id);
         for (let i = 0; i < orphanIds.length; i += 100) {
@@ -17339,6 +17374,29 @@ let _sch = { plan: null, scanning: false };
        write is regenerable from the PDF that was just read.
    Effective date, not scheduled_date: a match moved to next week has NOT
    happened yet, and a match moved out of the past has. */
+/* Which of these match ids carry a scoresheet, and which of these team ids do?
+   A photo means the match was played, and a played match is now protected by
+   the database itself (papertrail.photos FKs are RESTRICT as of 2026-09-07).
+   Callers ask FIRST so they can skip and explain, rather than discovering it
+   as a foreign key violation halfway through an import. */
+async function ptPhotoProtected(matchIds, teamIds) {
+  const out = { matches: new Set(), teams: new Set() };
+  const chunk = (arr, n) => { const o = []; for (let i = 0; i < arr.length; i += n) o.push(arr.slice(i, i + n)); return o; };
+  for (const c of chunk(matchIds || [], 100)) {
+    if (!c.length) continue;
+    const rows = await sb('GET', 'photos?match_id=in.(' + c.join(',') + ')&select=match_id',
+      null, { 'Accept-Profile': 'papertrail' }) || [];
+    rows.forEach(r => out.matches.add(r.match_id));
+  }
+  for (const c of chunk(teamIds || [], 100)) {
+    if (!c.length) continue;
+    const rows = await sb('GET', 'photos?team_id=in.(' + c.join(',') + ')&select=team_id',
+      null, { 'Accept-Profile': 'papertrail' }) || [];
+    rows.forEach(r => out.teams.add(r.team_id));
+  }
+  return out;
+}
+
 function schIsFrozen(m, todayISO, photoMatchIds) {
   if (photoMatchIds.has(m.id)) return true;             // scoresheet ⇒ played
   const eff = m.rescheduled ? (m.rescheduled_to || null) : m.scheduled_date;
