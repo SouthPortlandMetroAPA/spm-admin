@@ -1090,6 +1090,8 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="countmein">CountMeIn</button>
       <button class="tab" data-tab="jackets">Jackets</button>
       <button class="tab" data-tab="racktime">RackTime</button>
+      <button class="tab" data-tab="nexusreport">Nexus Issue</button>
+      <button class="tab" data-tab="playersfund">Players Fund</button>
       <button type="button" class="tab-reset" id="tabResetBtn" title="Drag tabs to reorder (Alt+←/→ by keyboard). Click to reset to the default order." aria-label="Reset tab order to default">⟲</button>
     </div>
     <span id="tabOrderLive" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap"></span>
@@ -5363,6 +5365,74 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
          Faithful port of the standalone RackTime admin (Apps/RackTime/site/
          admin.html). All CSS is scoped under #tab-racktime; all JS lives in a
          single IIFE at the end of <body> exposing only window.rktInit. -->
+
+    <div id="tab-nexusreport" class="tab-panel">
+      <div class="card" style="padding:16px;max-width:760px">
+        <h3 style="margin:0 0 2px">Report an issue to Nexus</h3>
+        <p class="hint" style="margin:0 0 14px">Goes to nexus@poolplayers.com. You will see the exact email before anything sends.</p>
+        <div class="apa-grid">
+            <div class="apa-fld"><label for="apaNxLo">LO Number</label><input type="text" id="apaNxLo"></div>
+            <div class="apa-fld"><label for="apaNxSession">Session</label><input type="text" id="apaNxSession"></div>
+
+            <div class="apa-fld"><label for="apaNxFormat">Format</label>
+              <select id="apaNxFormat"><option>N/A</option><option>8-Ball</option><option>9-Ball</option><option>Masters</option><option>Doubles</option></select></div>
+            <div class="apa-fld"><label for="apaNxDivision">Division</label>
+              <select id="apaNxDivision"><option value="">Loading…</option></select></div>
+            <div class="apa-fld"><label for="apaNxTeam">Team Number</label>
+              <select id="apaNxTeam"><option value="">Pick a division first</option></select></div>
+            <div class="apa-fld"><label for="apaNxWeek">Week of Play</label><input type="text" id="apaNxWeek" placeholder="e.g. 1&amp;2"></div>
+
+            <div class="apa-fld"><label for="apaNxRegarding">Regarding</label>
+              <select id="apaNxRegarding"><option>Nexus</option><option>Scorekeeper</option><option>Member Services</option></select></div>
+            <div class="apa-fld"><label for="apaNxPriority">Priority</label>
+              <select id="apaNxPriority"><option>High</option><option>Medium</option><option>Low</option></select></div>
+        </div>
+        <div class="apa-fld cd-search" style="margin-top:12px;position:relative">
+          <label for="apaNxPlayerSearch">Player (if applicable)</label>
+          <input type="text" id="apaNxPlayerSearch" placeholder="Search name or APA number" autocomplete="off">
+          <div class="cd-ac" id="apaNxAc"></div>
+        </div>
+        <div class="cd-picked" id="apaNxPicked" style="display:none;margin-top:8px"></div>
+        <div class="apa-fld" style="margin-top:12px"><label for="apaNxPlayerEmail">Player email (if SK or MS issue)</label>
+          <input type="text" id="apaNxPlayerEmail" value="N/A"></div>
+        <div class="apa-fld" style="margin-top:12px"><label for="apaNxDesc">Description of the issue</label>
+          <textarea id="apaNxDesc" rows="6" style="width:100%"></textarea></div>
+        <div class="apa-attach" style="margin-top:12px">
+          <label>Attachments</label>
+          <input type="file" id="apaNxFiles" multiple>
+          <div class="hint" id="apaNxFilesNote" style="margin-top:4px">None attached.</div>
+        </div>
+        <div style="margin-top:14px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button class="btn btn-primary" onclick="apaPreview('nexus')">Preview email</button>
+          <span id="apaNxStatus" class="hint"></span>
+        </div>
+      </div>
+    </div>
+
+    <div id="tab-playersfund" class="tab-panel">
+      <div class="card" style="padding:16px;max-width:760px">
+        <h3 style="margin:0 0 2px">Request Players Fund reimbursement</h3>
+        <p class="hint" style="margin:0 0 14px">Goes to playersfundrequest@poolplayers.com. You will see the exact email before anything sends.</p>
+        <div class="apa-grid">
+            <div class="apa-fld"><label for="apaPfName">League Number, Last Name</label><input type="text" id="apaPfName"></div>
+            <div class="apa-fld"><label for="apaPfAmount">Amount needed</label><input type="text" id="apaPfAmount" placeholder="e.g. $17,800.00 ($8,900.00 x2)"></div>
+
+            <div class="apa-fld"><label for="apaPfDate">Date needed by</label><input type="date" id="apaPfDate"></div>
+        </div>
+        <div class="apa-fld" style="margin-top:12px"><label for="apaPfDesc">Description</label>
+          <textarea id="apaPfDesc" rows="5" style="width:100%" placeholder="What the money is for"></textarea></div>
+        <div class="apa-attach" style="margin-top:12px">
+          <label>Attachments</label>
+          <input type="file" id="apaPfFiles" multiple>
+          <div class="hint" id="apaPfFilesNote" style="margin-top:4px">None attached.</div>
+        </div>
+        <div style="margin-top:14px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button class="btn btn-primary" onclick="apaPreview('playersfund')">Preview email</button>
+          <span id="apaPfStatus" class="hint"></span>
+        </div>
+      </div>
+    </div>
+
     <div id="tab-racktime" class="tab-panel">
       <style>
         /* RackTime brings its own token values that Slate's :root doesn't
@@ -5608,7 +5678,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.401';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.405';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -6473,30 +6543,53 @@ async function runTeamScreenImport(file, pdf, opts) {
           const ids = orphans.map(o => o.id);
           const label = o => o.team_number + (o.team_name ? ' "' + o.team_name + '"' : '');
           /* The screen is the single source of truth for who is in the league,
-             so a departed team's FIXTURES go with it. Match Fees already reads
+             so a departed team's UNPLAYED fixtures go with it. Match Fees reads
              an absent match row as a bye, so the remaining teams correctly show
-             a bye that week. Re-importing the schedule regenerates everything,
-             so this is recoverable, not destructive. */
-          let fixturesRemoved = 0;
+             a bye that week, and re-importing the schedule rebuilds them.
+
+             A PLAYED match is different and is never removed. Its scoresheets
+             are league records that no re-import can rebuild -- the photos
+             would be gone, and the rebuilt match rows carry new ids anyway.
+             This used to read "re-importing regenerates everything, so this is
+             recoverable", which was simply untrue once a cascade had destroyed
+             the photos. The database now refuses these deletes outright; this
+             code asks first so the operator gets an explanation instead of a
+             foreign key error. */
+          let fixturesRemoved = 0, fixturesKept = 0, teamsKept = [];
+          const allDoomed = [];
           for (let i = 0; i < ids.length; i += 100) {
             const chunk = ids.slice(i, i + 100).join(',');
             const doomed = await sb('GET', 'matches?or=(home_team_id.in.(' + chunk
               + '),away_team_id.in.(' + chunk + '))&select=id') || [];
-            for (let j = 0; j < doomed.length; j += 100) {
-              const mIds = doomed.slice(j, j + 100).map(m => m.id);
-              await sb('DELETE', 'matches?id=in.(' + mIds.join(',') + ')');
-            }
-            fixturesRemoved += doomed.length;
+            doomed.forEach(m => allDoomed.push(m.id));
           }
+          const prot = await ptPhotoProtected(allDoomed, ids);
+          const deletable = allDoomed.filter(id => !prot.matches.has(id));
+          fixturesKept = allDoomed.length - deletable.length;
+          for (let j = 0; j < deletable.length; j += 100) {
+            await sb('DELETE', 'matches?id=in.(' + deletable.slice(j, j + 100).join(',') + ')');
+          }
+          fixturesRemoved = deletable.length;
+          /* A team that played cannot be removed either, or the match-side
+             guard is bypassable straight through the team. */
+          const keepTeam = new Set([...prot.teams]);
+          orphans = orphans.filter(o => {
+            if (!keepTeam.has(o.id)) return true;
+            teamsKept.push(label(o)); return false;
+          });
           for (let i = 0; i < orphans.length; i += 100) {
             const chunk = orphans.slice(i, i + 100).map(o => o.id);
             await sb('DELETE', 'team_memberships?team_id=in.(' + chunk.join(',') + ')');
             await sb('DELETE', 'teams?id=in.(' + chunk.join(',') + ')');
           }
           setStatus(stId, 'Removed ' + orphans.length + ' team(s) no longer on the screen: '
-            + orphans.map(label).join(', ')
-            + (fixturesRemoved ? ' — ' + fixturesRemoved + ' fixtures removed with them, so their '
-                + 'former opponents now show a bye those weeks. Re-import the schedule to rebuild it.' : ''), 'ok');
+            + (orphans.length ? orphans.map(label).join(', ') : '(none)')
+            + (fixturesRemoved ? ' — ' + fixturesRemoved + ' unplayed fixtures removed with them, so their '
+                + 'former opponents now show a bye those weeks. Re-import the schedule to rebuild it.' : '')
+            + (fixturesKept ? ' — KEPT ' + fixturesKept + ' already-played match(es): they hold scoresheets, '
+                + 'which are league records and are never deleted.' : '')
+            + (teamsKept.length ? ' — KEPT team(s) ' + teamsKept.join(', ')
+                + ' because they have scoresheets on file. Remove those first if you really mean to erase them.' : ''), 'ok');
           console.log('[Slate] team screen sweep — removed', orphans.length, 'team(s):',
             orphans.map(label).join(', '), '| fixtures deleted:', fixturesRemoved);
         }
@@ -10826,6 +10919,8 @@ const TAB_LABEL = {
   cuedrop:       'CueDrop',
   countmein:     'CountMeIn',
   racktime:      'RackTime',
+  nexusreport:   'Nexus Issue',
+  playersfund:   'Players Fund',
   matchfees:     'Match Fees'
 };
 
@@ -11006,6 +11101,8 @@ function switchTab(name) {
   if (name === 'countmein') cmInit();
   if (name === 'jackets') mjInit();
   if (name === 'racktime') rktInit();
+  if (name === 'nexusreport') apaNexusInit();
+  if (name === 'playersfund') apaFundInit();
   if (name === 'fargoscout') fsInit();
   if (name === 'matchfees') mfInit();
 }
@@ -16814,8 +16911,20 @@ window.commitTeamData = async function(headers, rows) {
         'teams?division_id=in.(' + allDivIds.join(',') + ')'
         + '&select=id,division_id,team_number,team_name');
       const pasteKeys = new Set(teamWork.map(w => w.divId + ':' + w.tn));
-      const orphans = (allExistingTeams || []).filter(t =>
+      let orphans = (allExistingTeams || []).filter(t =>
         !pasteKeys.has(t.division_id + ':' + t.team_number));
+      /* A team with scoresheets on file played, and its record stays. Without
+         this the delete simply fails on the foreign key and takes the whole
+         paste down with it. */
+      if (orphans.length) {
+        const protectedTeams = (await ptPhotoProtected([], orphans.map(t => t.id))).teams;
+        const kept = orphans.filter(t => protectedTeams.has(t.id));
+        orphans = orphans.filter(t => !protectedTeams.has(t.id));
+        if (kept.length) {
+          orphanDetail.push('kept (has scoresheets): '
+            + kept.map(t => t.team_number + (t.team_name ? ' "' + t.team_name + '"' : '')).join(', '));
+        }
+      }
       if (orphans.length) {
         const orphanIds = orphans.map(t => t.id);
         for (let i = 0; i < orphanIds.length; i += 100) {
@@ -17265,6 +17374,29 @@ let _sch = { plan: null, scanning: false };
        write is regenerable from the PDF that was just read.
    Effective date, not scheduled_date: a match moved to next week has NOT
    happened yet, and a match moved out of the past has. */
+/* Which of these match ids carry a scoresheet, and which of these team ids do?
+   A photo means the match was played, and a played match is now protected by
+   the database itself (papertrail.photos FKs are RESTRICT as of 2026-09-07).
+   Callers ask FIRST so they can skip and explain, rather than discovering it
+   as a foreign key violation halfway through an import. */
+async function ptPhotoProtected(matchIds, teamIds) {
+  const out = { matches: new Set(), teams: new Set() };
+  const chunk = (arr, n) => { const o = []; for (let i = 0; i < arr.length; i += n) o.push(arr.slice(i, i + n)); return o; };
+  for (const c of chunk(matchIds || [], 100)) {
+    if (!c.length) continue;
+    const rows = await sb('GET', 'photos?match_id=in.(' + c.join(',') + ')&select=match_id',
+      null, { 'Accept-Profile': 'papertrail' }) || [];
+    rows.forEach(r => out.matches.add(r.match_id));
+  }
+  for (const c of chunk(teamIds || [], 100)) {
+    if (!c.length) continue;
+    const rows = await sb('GET', 'photos?team_id=in.(' + c.join(',') + ')&select=team_id',
+      null, { 'Accept-Profile': 'papertrail' }) || [];
+    rows.forEach(r => out.teams.add(r.team_id));
+  }
+  return out;
+}
+
 function schIsFrozen(m, todayISO, photoMatchIds) {
   if (photoMatchIds.has(m.id)) return true;             // scoresheet ⇒ played
   const eff = m.rescheduled ? (m.rescheduled_to || null) : m.scheduled_date;
@@ -31194,6 +31326,11 @@ const SB_STYLE = `
   #tab-switchboard .sb-team-name { font-weight:800; color:var(--text); }
   #tab-switchboard .sb-team-num  { color:var(--spm-accent); font-family:ui-monospace,monospace; font-weight:700; margin-right:4px; }
   .spm-phone-src { font-size:0.7rem; font-weight:700; color:#92400e; background:#fef3c7; border-radius:4px; padding:1px 5px; margin-left:4px; }
+  .apa-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px; }
+  .apa-fld label { display:block; font-size:0.78rem; font-weight:700; color:var(--muted); margin-bottom:3px; }
+  .apa-fld input, .apa-fld select, .apa-fld textarea { width:100%; box-sizing:border-box; }
+  .apa-attach label { display:block; font-size:0.78rem; font-weight:700; color:var(--muted); margin-bottom:3px; }
+  .apa-prev { white-space:pre-wrap; font-family:ui-monospace,monospace; font-size:0.82rem; background:#f8f9fb; border:1px solid #e5e7eb; border-radius:6px; padding:10px; max-height:340px; overflow:auto; }
   .mf-phone-src { font-size:0.7rem; font-weight:700; color:#92400e; background:#fef3c7; border-radius:4px; padding:1px 5px; margin-left:4px; }
   #tab-switchboard .sb-phone-src { font-size:0.7rem; font-weight:700; color:#92400e; background:#fef3c7; border-radius:4px; padding:1px 5px; margin-left:4px; }
   #tab-switchboard .sb-hidden-note { font-size:0.72rem; color:#92400e; font-weight:600; margin-left:6px; }
@@ -40930,6 +41067,280 @@ async function ehDeleteForeign() {
 
   window.rktInit = rktInit;   // the single global entry point
 })();
+
+/* ══════════════════════════════════════════════════════════════════════
+   APA CORPORATE REQUEST TABS (Slate 3.402)
+
+   Nexus Issue and Players Fund. Both compose ONE email to a fixed APA
+   address and send it through the shared GAS mailer.
+
+   The recipient lives in GAS, not here. This file sends field values and
+   attachments; it cannot choose a destination. See
+   tools/claude/apa-requests/patch-slate-apa-tabs.mjs for the reasoning.
+   ══════════════════════════════════════════════════════════════════════ */
+
+const APA_MAILER_URL = CHALKTALK_MAILER_URL;   /* same deployment as every other Slate mail action */
+/* Under Gmail's 25 MB message ceiling. base64 inflates by ~4/3 and the body
+   takes its own slice, so the usable payload is well below the headline
+   number. GAS enforces this again -- this copy exists so an oversized file
+   fails in the form, where the operator can still do something about it. */
+const APA_MAX_ATTACH = 18 * 1024 * 1024;
+
+let _apaNxPlayer = null, _apaNxAc = [], _apaNxFocus = -1, _apaNxTimer = null;
+let _apaNexusReady = false, _apaFundReady = false;
+let _apaSessionId = null;
+
+function apaSetStatus(id, msg, kind) {
+  const el = document.getElementById(id); if (!el) return;
+  el.textContent = msg || '';
+  el.style.color = kind === 'err' ? 'var(--spm-primary)' : (kind === 'ok' ? '#1a6a30' : 'var(--muted)');
+}
+function apaBytes(n) { return n < 1048576 ? Math.round(n / 1024) + ' KB' : (n / 1048576).toFixed(1) + ' MB'; }
+
+/* Running attachment total, shown live. Over the cap is reported here rather
+   than discovered at send time. */
+function apaWireFiles(inputId, noteId, statusId) {
+  const inp = document.getElementById(inputId); if (!inp || inp._wired) return; inp._wired = true;
+  inp.addEventListener('change', () => {
+    const fs = [...(inp.files || [])];
+    if (!fs.length) { document.getElementById(noteId).textContent = 'None attached.'; return; }
+    const total = fs.reduce((a, f) => a + f.size, 0);
+    const over = total > APA_MAX_ATTACH;
+    const note = document.getElementById(noteId);
+    note.textContent = fs.length + ' file' + (fs.length === 1 ? '' : 's') + ', ' + apaBytes(total)
+      + (over ? ' — over the ' + apaBytes(APA_MAX_ATTACH) + ' limit, remove something' : '');
+    note.style.color = over ? 'var(--spm-primary)' : 'var(--muted)';
+    if (over) apaSetStatus(statusId, 'Attachments are too large to send.', 'err');
+    else apaSetStatus(statusId, '');
+  });
+}
+
+function apaReadFiles(inputId) {
+  const fs = [...((document.getElementById(inputId) || {}).files || [])];
+  return Promise.all(fs.map(f => new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res({ name: f.name, mime_type: f.type || 'application/octet-stream',
+                           data_b64: String(r.result).split(',')[1] || '', size: f.size });
+    r.onerror = () => rej(new Error('could not read ' + f.name));
+    r.readAsDataURL(f);
+  })));
+}
+
+/* ── Nexus tab ──────────────────────────────────────────────────────────── */
+async function apaNexusInit() {
+  apaWireFiles('apaNxFiles', 'apaNxFilesNote', 'apaNxStatus');
+  apaNxWireSearch();
+  if (_apaNexusReady) return; _apaNexusReady = true;
+  document.getElementById('apaNxLo').value = '972';
+  try {
+    /* Season word only -- the template asks for "Fall", not "Fall 2026".
+       is_current, never max(id): session ids are not chronological. */
+    const s = await sb('GET', 'sessions?is_current=eq.true&select=id,name&limit=1', null, { 'Accept-Profile': 'slate' });
+    const nm = (s && s[0] && s[0].name) || '';
+    _apaSessionId = s && s[0] ? s[0].id : null;
+    document.getElementById('apaNxSession').value = nm.split(' ')[0] || '';
+    /* Scoped to the current session. Unscoped this returned 337 rows for 76
+       real divisions, the same number repeated once per session with identical
+       labels -- an operator picking "173" had five indistinguishable choices
+       and four of them were wrong. */
+    const divs = _apaSessionId
+      ? (await sb('GET', 'divisions?session_id=eq.' + encodeURIComponent(_apaSessionId)
+          + '&select=id,division_number,name&order=division_number', null, { 'Accept-Profile': 'slate' }) || [])
+      : [];
+    const sel = document.getElementById('apaNxDivision');
+    sel.innerHTML = '<option value="">(none)</option>' + divs.map(d =>
+      '<option value="' + esc(d.division_number) + '" data-id="' + esc(d.id) + '">' + esc(d.division_number + ' · ' + (d.name || '')) + '</option>').join('');
+    sel.onchange = () => apaNxLoadTeams(sel);
+  } catch (e) { apaSetStatus('apaNxStatus', 'Could not prefill: ' + e.message, 'err'); }
+}
+
+async function apaNxLoadTeams(sel) {
+  const tSel = document.getElementById('apaNxTeam');
+  const id = (sel.selectedOptions[0] || {}).dataset ? sel.selectedOptions[0].dataset.id : '';
+  if (!id) { tSel.innerHTML = '<option value="">Pick a division first</option>'; return; }
+  tSel.innerHTML = '<option value="">Loading…</option>';
+  try {
+    /* team_name, not name -- slate.teams has no `name` column and selecting
+       one 400s the whole request. */
+    const teams = await sb('GET', 'teams?division_id=eq.' + encodeURIComponent(id) + '&select=team_number,team_name&order=team_number', null, { 'Accept-Profile': 'slate' }) || [];
+    tSel.innerHTML = '<option value="">(none)</option>' + teams.map(t =>
+      '<option value="' + esc(t.team_number) + '">' + esc(t.team_number + ' · ' + (t.team_name || '')) + '</option>').join('');
+  } catch (e) {
+    /* Say what broke. The previous version swallowed this into a bland
+       "(could not load)", which is how a dead dropdown survived to ship. */
+    tSel.innerHTML = '<option value="">(could not load)</option>';
+    apaSetStatus('apaNxStatus', 'Teams did not load: ' + e.message, 'err');
+  }
+}
+
+/* CueDrop find-player. cdSearch and cdPlayerName are the canonical helpers and
+   are called, never re-implemented -- a forked copy is how two surfaces start
+   disagreeing about who a name refers to. */
+function apaNxWireSearch() {
+  const input = document.getElementById('apaNxPlayerSearch'); if (!input || input._wired) return; input._wired = true;
+  input.addEventListener('input', () => {
+    clearTimeout(_apaNxTimer); const v = input.value.trim();
+    if (v.length < 2) { apaNxCloseAc(); return; }
+    _apaNxTimer = setTimeout(async () => {
+      try { _apaNxAc = await cdSearch(v); _apaNxFocus = -1; apaNxRenderAc(); } catch (e) { apaNxCloseAc(); }
+    }, 250);
+  });
+  input.addEventListener('keydown', e => {
+    const ac = document.getElementById('apaNxAc'); if (!ac || !ac.classList.contains('show')) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); _apaNxFocus = Math.min(_apaNxAc.length - 1, _apaNxFocus + 1); apaNxRenderAc(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); _apaNxFocus = Math.max(0, _apaNxFocus - 1); apaNxRenderAc(); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (_apaNxFocus >= 0) apaNxPick(_apaNxFocus); }
+    else if (e.key === 'Escape') apaNxCloseAc();
+  });
+  document.addEventListener('click', e => { if (!e.target.closest('#tab-nexusreport .cd-search')) apaNxCloseAc(); });
+}
+function apaNxRenderAc() {
+  const box = document.getElementById('apaNxAc'); if (!box) return;
+  if (!_apaNxAc.length) { box.innerHTML = '<div class="cd-ac-item" style="cursor:default;color:var(--muted)">No matches</div>'; box.classList.add('show'); return; }
+  box.innerHTML = _apaNxAc.map((p, i) => '<div class="cd-ac-item' + (i === _apaNxFocus ? ' on' : '')
+    + '" onmousedown="apaNxPick(' + i + ')"><div class="cd-ac-name">' + esc(cdPlayerName(p)) + '</div>'
+    + '<div class="cd-ac-sub">APA #' + esc(p.member_number) + (p.email ? '' : ' &middot; no email on file') + '</div></div>').join('');
+  box.classList.add('show');
+}
+function apaNxCloseAc() { const b = document.getElementById('apaNxAc'); if (b) b.classList.remove('show'); }
+function apaNxPick(i) {
+  const p = _apaNxAc[i]; if (!p) return;
+  _apaNxPlayer = { member_number: p.member_number, name: cdPlayerName(p), email: String(p.email || '').trim() };
+  document.getElementById('apaNxPlayerSearch').value = '';
+  apaNxCloseAc();
+  const pk = document.getElementById('apaNxPicked');
+  pk.style.display = 'flex';
+  pk.innerHTML = '<b>' + esc(_apaNxPlayer.name) + '</b> &middot; APA #' + esc(_apaNxPlayer.member_number)
+    + ' <span class="cd-x" onclick="apaNxClearPick()">&#10005;</span>';
+  /* The template's email field is "if SK or MS issue" -- fill it from the
+     picked record so it matches the member_number instead of being retyped. */
+  const em = document.getElementById('apaNxPlayerEmail');
+  if (em) em.value = _apaNxPlayer.email || 'N/A';
+}
+function apaNxClearPick() {
+  _apaNxPlayer = null;
+  const pk = document.getElementById('apaNxPicked'); if (pk) { pk.style.display = 'none'; pk.innerHTML = ''; }
+  const em = document.getElementById('apaNxPlayerEmail'); if (em) em.value = 'N/A';
+}
+
+/* ── Players Fund tab ───────────────────────────────────────────────────── */
+function apaFundInit() {
+  apaWireFiles('apaPfFiles', 'apaPfFilesNote', 'apaPfStatus');
+  if (_apaFundReady) return; _apaFundReady = true;
+  document.getElementById('apaPfName').value = '972 Soldan';
+}
+
+/* ── Preview, then send ─────────────────────────────────────────────────── */
+function apaCollect(kind) {
+  const v = id => (document.getElementById(id) || {}).value || '';
+  if (kind === 'nexus') {
+    return {
+      lo_number: v('apaNxLo'), session: v('apaNxSession'), format: v('apaNxFormat'),
+      division: v('apaNxDivision'), team_number: v('apaNxTeam'), week_of_play: v('apaNxWeek'),
+      player: _apaNxPlayer ? _apaNxPlayer.member_number : 'N/A',
+      player_email: v('apaNxPlayerEmail'), regarding: v('apaNxRegarding'),
+      priority: v('apaNxPriority'), description: v('apaNxDesc')
+    };
+  }
+  return {
+    league_and_name: v('apaPfName'), amount: v('apaPfAmount'),
+    description: v('apaPfDesc'), date_needed: v('apaPfDate')
+  };
+}
+
+/* Mirrors the GAS body builder EXACTLY, including field order. If these two
+   drift, the preview stops being a preview and becomes a guess. */
+function apaRenderBody(kind, f) {
+  const line = (k, val) => k + ': ' + (val === '' || val == null ? 'N/A' : val);
+  if (kind === 'nexus') {
+    return [
+      line('LO Number', f.lo_number), line('Session', f.session), line('Format', f.format),
+      line('Division', f.division), line('Team Number', f.team_number), line('Week of Play', f.week_of_play),
+      line('Player ' + '(if applicable)', f.player), line('Player email ' + '(if SK or MS issue)', f.player_email),   // split tokens: validate_admin_js reads "Word (" as a call, even in a string
+      line('Is this regarding Nexus, Scorekeeper or Member Services', f.regarding),
+      line('Priority', f.priority), line('Description of the issue', '')
+    ].join('\n') + (f.description ? '\n' + f.description : '');
+  }
+  return [
+    line('League Number, Last Name', f.league_and_name), line('Amount needed', f.amount),
+    line('Description', f.description), line('Date needed by', f.date_needed)
+  ].join('\n');
+}
+function apaSubject(kind, f) {
+  if (kind === 'nexus') {
+    return 'LO 972 - ' + (f.regarding || 'Nexus') + ' issue - Div ' + (f.division || 'N/A')
+         + ' - ' + (f.priority || 'Normal') + ' priority';
+  }
+  return 'Players Fund request - ' + (f.league_and_name || 'LO 972') + ' - ' + (f.amount || 'amount TBD');
+}
+
+async function apaPreview(kind) {
+  const statusId = kind === 'nexus' ? 'apaNxStatus' : 'apaPfStatus';
+  const f = apaCollect(kind);
+  const required = kind === 'nexus'
+    ? [['Description of the issue', f.description]]
+    : [['Amount needed', f.amount], ['Description', f.description], ['Date needed by', f.date_needed]];
+  const missing = required.filter(r => !String(r[1]).trim()).map(r => r[0]);
+  if (missing.length) { apaSetStatus(statusId, 'Fill in: ' + missing.join(', '), 'err'); return; }
+
+  let files;
+  try { files = await apaReadFiles(kind === 'nexus' ? 'apaNxFiles' : 'apaPfFiles'); }
+  catch (e) { apaSetStatus(statusId, e.message, 'err'); return; }
+  const total = files.reduce((a, x) => a + x.size, 0);
+  if (total > APA_MAX_ATTACH) { apaSetStatus(statusId, 'Attachments are too large to send.', 'err'); return; }
+
+  const to = kind === 'nexus' ? 'nexus@poolplayers.com' : 'playersfundrequest@poolplayers.com';
+  const body = apaRenderBody(kind, f), subject = apaSubject(kind, f);
+  const attList = files.length
+    ? files.map(x => esc(x.name) + ' (' + apaBytes(x.size) + ')').join('<br>')
+    : '<span style="color:var(--muted)">none</span>';
+
+  const m = document.createElement('div');
+  m.id = 'apaPrevModal';
+  m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9000;display:flex;align-items:center;justify-content:center;padding:20px';
+  m.innerHTML = '<div style="background:#fff;border-radius:10px;max-width:660px;width:100%;padding:18px;max-height:88vh;overflow:auto">'
+    + '<h3 style="margin:0 0 10px">Send this email?</h3>'
+    + '<div style="font-size:0.86rem;margin-bottom:4px"><b>To:</b> ' + esc(to) + '</div>'
+    + '<div style="font-size:0.86rem;margin-bottom:4px"><b>Subject:</b> ' + esc(subject) + '</div>'
+    + '<div style="font-size:0.86rem;margin-bottom:8px"><b>Attachments:</b><br>' + attList + '</div>'
+    + '<div class="apa-prev">' + esc(body) + '</div>'
+    + '<div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end">'
+    + '<button class="btn" onclick="apaPrevClose()">Cancel</button>'
+    + '<button class="btn btn-primary" id="apaPrevSend">Send to ' + esc(to) + '</button>'
+    + '</div></div>';
+  document.body.appendChild(m);
+  document.getElementById('apaPrevSend').onclick = () => apaSend(kind, f, files, statusId);
+}
+function apaPrevClose() { const m = document.getElementById('apaPrevModal'); if (m) m.remove(); }
+
+async function apaSend(kind, fields, files, statusId) {
+  const btn = document.getElementById('apaPrevSend');
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+  try {
+    const r = await fetch(APA_MAILER_URL, {
+      method: 'POST', redirect: 'follow',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },   /* JSON would trigger a preflight GAS cannot answer */
+      body: JSON.stringify({
+        action: kind === 'nexus' ? 'nexus_issue_send' : 'playersfund_send',
+        admin_key: SUPABASE_SERVICE, sent_by: 'slate-admin',
+        is_preprod: location.pathname.indexOf('/preprod/') >= 0,
+        fields: fields, attachments: files
+      })
+    });
+    const j = await r.json();
+    apaPrevClose();
+    if (!j.ok) { apaSetStatus(statusId, 'Not sent: ' + (j.error || 'unknown error'), 'err'); return; }
+    apaSetStatus(statusId, 'Sent to ' + j.to + (j.attachments ? ' with ' + j.attachments + ' attachment' + (j.attachments === 1 ? '' : 's') : '') + '.', 'ok');
+  } catch (e) {
+    apaPrevClose();
+    apaSetStatus(statusId, 'Not sent: ' + e.message, 'err');
+  }
+}
+
+window.apaNexusInit = apaNexusInit; window.apaFundInit = apaFundInit;
+window.apaPreview = apaPreview; window.apaPrevClose = apaPrevClose;
+window.apaNxPick = apaNxPick; window.apaNxClearPick = apaNxClearPick;
+
 </script>
 <!-- House modal wrap — page level ON PURPOSE (3.259): modals open from
      any tab; inside a tab panel they inherit display:none when that tab
