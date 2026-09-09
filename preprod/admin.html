@@ -1084,7 +1084,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="chalktalk">ChalkTalk</button>
       <button class="tab" data-tab="nickpick">NickPick</button>
       <button class="tab" data-tab="crewcall">Shipmate</button>
-      <button class="tab" data-tab="ourrack">OurRack</button>
+      <button class="tab" data-tab="ourrack">To-Do</button>
       <button class="tab" data-tab="preshot">PreShot</button>
       <button class="tab" data-tab="cuedrop">CueDrop</button>
       <button class="tab" data-tab="countmein">CountMeIn</button>
@@ -4268,7 +4268,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       </style>
       <div class="card">
         <div class="or-head">
-          <h2 style="margin:0">OurRack &mdash; Task Tracker</h2>
+          <h2 style="margin:0">To-Do &mdash; Task Tracker</h2>
           <button class="btn btn-sm" onclick="orOpenNew()">+ New task</button>
           <button class="btn btn-outline btn-sm" onclick="orLoad()">Refresh</button>
           <span class="or-sub" id="orStatus" style="margin-left:0"></span>
@@ -5679,7 +5679,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.409';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.410';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -10915,7 +10915,7 @@ const TAB_LABEL = {
   chalktalk:     'ChalkTalk',
   nickpick:      'NickPick',
   crewcall:      'CrewCall',
-  ourrack:       'OurRack',
+  ourrack:       'To-Do',
   preshot:       'PreShot',
   cuedrop:       'CueDrop',
   countmein:     'CountMeIn',
