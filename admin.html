@@ -4222,6 +4222,18 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <button class="cc-fbtn" id="ccFilTeam" data-f="team" onclick="ccSetFilter('team')">Wants team</button>
           <button class="cc-fbtn" id="ccFilPlayer" data-f="player" onclick="ccSetFilter('player')">Wants player</button>
         </div>
+        <!-- Selects rather than button rows: 76 divisions this session would be
+             an unusable pill row, and a select is already Slate's canonical
+             filter control (mfDivFilter / mfShowFilter). Options are built from
+             the rows present, so a choice can never match nothing. -->
+        <div class="cc-filters" style="margin-top:8px">
+          <select id="ccDayFilter" aria-label="Filter by day of play" onchange="ccSetDay(this.value)"><option value="">All days</option></select>
+          <select id="ccDivFilter" aria-label="Filter by division" onchange="ccSetDiv(this.value)"><option value="">All divisions</option></select>
+          <select id="ccSlFilter" aria-label="Filter by skill level" onchange="ccSetSl(this.value)"><option value="">Any skill level</option></select>
+          <button class="cc-fbtn" onclick="ccClearFilters()" title="Clear day, division and skill level">Clear filters</button>
+          <button class="cc-fbtn" onclick="ccCopyOpenings()" title="Copy the openings shown, formatted for a text message">Copy openings</button>
+          <span id="ccCopyStatus" class="cc-sub"></span>
+        </div>
         <div class="cc-list" id="ccList"><div class="cc-empty">Loading&hellip;</div></div>
       </div>
     </div>
@@ -5695,7 +5707,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.412';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.413';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -13489,7 +13501,10 @@ async function ccInit() {
 }
 async function ccFetch() {
   return await sb('GET',
-    'requests?select=id,kind,member_number,email,requester_name,status,days,max_teams,formats,areas,preferred_area,about,team_name,team_number,sl8_min,sl8_max,sl9_min,sl9_max,looking_for,cancel_reason,created_at&order=created_at.desc&limit=500',
+    /* night_of_play, team_id and session_id were always on the row; the old
+       select simply omitted them, so the card could not show a day and the
+       division could not be derived. */
+    'requests?select=id,kind,member_number,email,requester_name,status,days,max_teams,formats,areas,preferred_area,about,team_id,team_name,team_number,session_id,night_of_play,team_format,sl8_min,sl8_max,sl9_min,sl9_max,looking_for,cancel_reason,created_at&order=created_at.desc&limit=500',
     null, CC_R) || [];
 }
 function ccSig(rows) { return rows.length + ':' + rows.map(r => r.id + (r.status || '')).join(','); }
@@ -13509,11 +13524,157 @@ async function ccResolveMembers(mns) {
   if (!uniq.length) return {};
   const map = {};
   try {
-    const ps = await sb('GET', 'players?member_number=in.(' + uniq.map(encodeURIComponent).join(',') + ')&select=member_number,first_name,last_name') || [];
+    /* Phones included or spmBestPhone sees undefined and the text button
+       never renders -- the read-side omission this tab already had once. */
+    const ps = await sb('GET', 'players?member_number=in.(' + uniq.map(encodeURIComponent).join(',') + ')&select=member_number,first_name,last_name,cell_phone,home_phone,alt_phone') || [];
     ps.forEach(p => { map[String(p.member_number)] = p; });
   } catch { /* names best-effort */ }
   return map;
 }
+/* team_id -> { division_number, division_name }.
+   Cross-schema (crewcall.requests -> slate.teams -> slate.divisions), which
+   PostgREST cannot embed in one call, so it is resolved here and cached for
+   the render. Live rather than snapshotted: a team that moves division fixes
+   itself, where a stored copy would silently disagree with the schedule. */
+let _ccDivMap = {};
+async function ccLoadDivisions(rows) {
+  const ids = [...new Set((rows || []).map(r => r.team_id).filter(Boolean))];
+  _ccDivMap = {};
+  if (!ids.length) return;
+  try {
+    const teams = await sb('GET', 'teams?id=in.(' + ids.join(',') + ')&select=id,division_id',
+      null, { 'Accept-Profile': 'slate' }) || [];
+    const divIds = [...new Set(teams.map(t => t.division_id).filter(Boolean))];
+    if (!divIds.length) return;
+    const divs = await sb('GET', 'divisions?id=in.(' + divIds.join(',') + ')&select=id,division_number,name',
+      null, { 'Accept-Profile': 'slate' }) || [];
+    const byId = {};
+    divs.forEach(d => { byId[d.id] = d; });
+    teams.forEach(t => { if (byId[t.division_id]) _ccDivMap[t.id] = byId[t.division_id]; });
+  } catch (e) { /* division is an enrichment; the list still renders without it */ }
+}
+function ccDivOf(r) { return (r && r.team_id && _ccDivMap[r.team_id]) || null; }
+function ccDivLabel(r) {
+  const d = ccDivOf(r);
+  return d ? (d.division_number + ' · ' + (d.name || '')) : '';
+}
+
+/* Does this request's skill range CONTAIN the chosen level, in either format?
+   A captain wanting SL 3-5 must appear when filtering for 4 — matching only on
+   an exact min or max would hide almost every row. */
+function ccMatchesSl(r, sl) {
+  if (!sl) return true;
+  const n = parseInt(sl, 10);
+  const inRange = (lo, hi) => (lo != null || hi != null)
+    && (lo == null || n >= lo) && (hi == null || n <= hi);
+  return inRange(r.sl8_min, r.sl8_max) || inRange(r.sl9_min, r.sl9_max);
+}
+
+let _ccDay = '', _ccDiv = '', _ccSl = '', _ccMembers = {}, _ccVisible = [];
+
+/* Build the openings as a message you can paste to a player.
+   Copies exactly what the filters are SHOWING — filter to Tuesday and SL 4,
+   copy, and the player gets only teams they could actually join. Copying the
+   unfiltered list would make the filters decorative.
+
+   Format is tuned for SMS, not for the screen: no bullet glyphs (they arrive
+   as boxes on some Android clients), no table alignment (proportional fonts
+   destroy it), a blank line between teams so it stays scannable when the
+   client reflows it, and the skill ranges compressed to "8B 3-5" because
+   "8-Ball: SL 3–5" three times over is most of a message segment. */
+function ccOpeningsText() {
+  const rows = (_ccVisible || []).filter(r => r.kind === 'seeking_player');
+  if (!rows.length) return '';
+  const rng = (lo, hi) => (lo == null && hi == null) ? '' : (lo == null ? '≤' + hi : (hi == null ? '≥' + lo : lo + '-' + hi));
+  const lines = rows.map(r => {
+    const d = ccDivOf(r);
+    const where = [r.night_of_play || null, d ? 'div ' + d.division_number : null].filter(Boolean).join(', ');
+    const sl = [rng(r.sl8_min, r.sl8_max) ? '8B ' + rng(r.sl8_min, r.sl8_max) : '',
+                rng(r.sl9_min, r.sl9_max) ? '9B ' + rng(r.sl9_min, r.sl9_max) : ''].filter(Boolean).join(', ');
+    let head = (r.team_name || ('Team ' + (r.team_number || '?')));
+    if (where) head += ' (' + where + ')';
+    if (sl) head += ' ' + sl;
+    /* The looking-for note is the whole point of sending this, so it always
+       rides along — collapsed to one line and trimmed, never dropped. */
+    const note = String(r.looking_for || '').replace(/\s+/g, ' ').trim();
+    return head + (note ? '\n  ' + note : '');
+  });
+  const n = rows.length;
+  return 'SPM openings — ' + n + ' team' + (n === 1 ? '' : 's') + ' looking for a player\n\n'
+    + lines.join('\n\n')
+    + '\n\nInterested? Reply and I will connect you.';
+}
+
+async function ccCopyOpenings() {
+  const txt = ccOpeningsText();
+  if (!txt) { ccCopyStatus('Nothing to copy — no captain requests in the current filter.'); return; }
+  try {
+    await navigator.clipboard.writeText(txt);
+    const n = (_ccVisible || []).filter(r => r.kind === 'seeking_player').length;
+    ccCopyStatus('Copied ' + n + ' opening' + (n === 1 ? '' : 's') + ' — paste into a text.');
+  } catch (e) { ccCopyStatus('Copy failed: ' + (e.message || e)); }
+}
+function ccCopyStatus(m) {
+  const el = document.getElementById('ccCopyStatus');
+  if (!el) return;
+  el.textContent = m || '';
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.textContent = ''; }, 5000);
+}
+
+/* Options are built from the rows ACTUALLY PRESENT, never a static list, so a
+   filter can never offer a value that matches nothing. Rebuilt each paint but
+   only written when the option set changed — replacing innerHTML every 20s
+   poll would blow away the operator's open dropdown mid-selection. */
+function ccBuildFilterOptions(rows) {
+  const days = [...new Set((rows || []).map(r => r.night_of_play).filter(Boolean))];
+  const DAY_ORDER = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+  days.sort((a, b) => DAY_ORDER.indexOf(a) - DAY_ORDER.indexOf(b));
+  const divs = [...new Set((rows || []).map(r => { const d = ccDivOf(r); return d ? String(d.division_number) : null; }).filter(Boolean))].sort();
+  const fill = (id, vals, label, cur) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const want = '<option value="">' + label + '</option>'
+      + vals.map(v => '<option value="' + esc(v) + '">' + esc(v) + '</option>').join('');
+    if (el.innerHTML !== want) { el.innerHTML = want; el.value = cur || ''; }
+  };
+  fill('ccDayFilter', days, 'All days', _ccDay);
+  fill('ccDivFilter', divs, 'All divisions', _ccDiv);
+  fill('ccSlFilter', ['2','3','4','5','6','7'], 'Any skill level', _ccSl);
+}
+function ccSetDay(v) { _ccDay = v; ccPaint(); }
+function ccSetDiv(v) { _ccDiv = v; ccPaint(); }
+function ccSetSl(v)  { _ccSl  = v; ccPaint(); }
+function ccClearFilters() {
+  _ccDay = ''; _ccDiv = ''; _ccSl = '';
+  ['ccDayFilter', 'ccDivFilter', 'ccSlFilter'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.value = '';
+  });
+  ccPaint();
+}
+
+/* Text the captain who raised this request.
+   The requester IS the captain by construction — crewMyTeams_ only returns
+   teams the member leads — so no separate captain lookup is needed.
+   Re-checks the no-contact list here as well as at render: the list can change
+   while this tab sits open. */
+function ccTextCaptain(id) {
+  const r = (_ccRows || []).find(x => x.id === id);
+  if (!r) return;
+  if (typeof dncIsBlocked === 'function' && dncIsBlocked(r.member_number)) {
+    alert('That captain is on the no-contact list.');
+    return;
+  }
+  const p = _ccMembers[String(r.member_number)];
+  const best = (typeof spmBestPhone === 'function') ? spmBestPhone(p) : null;
+  if (!best) { alert('No usable phone number on file for that captain.'); return; }
+  const team = r.team_name || ('Team ' + (r.team_number || '?'));
+  const night = r.night_of_play ? ' (' + r.night_of_play + ')' : '';
+  const body = 'Hi ' + (p && p.first_name ? p.first_name : 'there') + ' — about your Shipmate request for '
+    + team + night + (r.looking_for ? ': ' + r.looking_for : '') + '. ';
+  window.location.href = otBuildSmsUrl(best.digits, body);
+}
+
 function ccCard(r, mmap) {
   const p = mmap[String(r.member_number)] || null;
   const nm = r.requester_name || (p ? [p.first_name, p.last_name].filter(Boolean).join(' ').trim() : '') || '(no name on file)';
@@ -13529,14 +13690,36 @@ function ccCard(r, mmap) {
       + '<div class="cc-kv"><b>Areas:</b> ' + esc(ccArr(r.areas) || '—') + (r.preferred_area ? '<span class="cc-fav">★ ' + esc(r.preferred_area) + '</span>' : '') + '</div>'
       + (r.about ? '<div class="cc-kv"><b>About:</b> ' + esc(r.about) + '</div>' : '');
   } else {
+    const divLbl = ccDivLabel(r);
     body = '<div class="cc-kv"><b>Team:</b> ' + esc(r.team_name || ('Team ' + (r.team_number || '?'))) + '</div>'
+      + '<div class="cc-kv"><b>Day:</b> ' + esc(r.night_of_play || '—')
+        + ' &middot; <b>Division:</b> ' + esc(divLbl || '—') + '</div>'
       + '<div class="cc-kv"><b>8-Ball:</b> ' + esc(ccRange(r.sl8_min, r.sl8_max)) + ' &middot; <b>9-Ball:</b> ' + esc(ccRange(r.sl9_min, r.sl9_max)) + '</div>'
       + (r.looking_for ? '<div class="cc-kv"><b>Looking for:</b> ' + esc(r.looking_for) + '</div>' : '');
   }
   if (cancelled) body += '<div class="cc-kv" style="color:#b3021f"><b>Cancelled by player:</b> ' + esc(r.cancel_reason || '(no reason given)') + '</div>';
   const meta = '<span class="cc-who">' + esc(nm) + '</span> <span class="cc-sub">&middot; APA #' + esc(r.member_number || '?')
     + ' &middot; <a class="cc-mail" href="mailto:' + esc(r.email) + '">' + esc(r.email) + '</a> &middot; ' + esc(ccRel(r.created_at)) + '</span>';
-  const act = (closed
+  /* Text is offered only for a captain request, and only when the no-contact
+     list allows it. A blocked captain gets the standard chip rather than a
+     button that would refuse on click. */
+  let txt = '';
+  if (!isTeam) {
+    if (typeof dncIsBlocked === 'function' && dncIsBlocked(r.member_number)) {
+      txt = (typeof dncChipHtml === 'function') ? dncChipHtml('text')
+          : '<span class="cc-sub">no contact</span>';
+    } else {
+      const best = (typeof spmBestPhone === 'function') ? spmBestPhone(p) : null;
+      txt = best
+        ? '<button class="btn btn-outline btn-sm" title="Text ' + esc(best.pretty)
+            + (best.label !== 'Cell' ? ' (' + esc(best.label.toLowerCase()) + ' — may be a landline)' : '')
+            + '" onclick="ccTextCaptain(' + r.id + ')">Text captain'
+            + (best.label !== 'Cell' ? ' <span class="mf-phone-src">' + esc(best.label.toLowerCase()) + '</span>' : '')
+            + '</button>'
+        : '<span class="cc-sub" title="No usable number on file">no number</span>';
+    }
+  }
+  const act = txt + (closed
     ? '<button class="btn btn-outline btn-sm" onclick="ccSetStatus(' + r.id + ',\'open\')">Reopen</button>'
     : '<button class="btn btn-sm" onclick="ccSetStatus(' + r.id + ',\'closed\')">Mark handled</button>')
     + '<button class="btn btn-danger btn-sm cc-del" title="Permanently delete this request" onclick="ccDelete(' + r.id + ',this)">Delete</button>';
@@ -13551,12 +13734,24 @@ async function ccPaint() {
   let vis = all.filter(r => _ccShowClosed ? true : (r.status !== 'closed' && r.status !== 'cancelled'));
   if (_ccFilter === 'team') vis = vis.filter(r => r.kind === 'seeking_team');
   if (_ccFilter === 'player') vis = vis.filter(r => r.kind === 'seeking_player');
+  /* Divisions resolve before filtering, or a division filter would match
+     nothing on the first paint and look broken. */
+  await ccLoadDivisions(all);
+  ccBuildFilterOptions(all);
+  if (_ccDay) vis = vis.filter(r => (r.night_of_play || '') === _ccDay);
+  if (_ccDiv) vis = vis.filter(r => { const d = ccDivOf(r); return d && String(d.division_number) === _ccDiv; });
+  if (_ccSl)  vis = vis.filter(r => ccMatchesSl(r, _ccSl));
   const openCt = all.filter(r => (r.status !== 'closed' && r.status !== 'cancelled')).length, closedCt = all.length - openCt;
   if (count) count.textContent = openCt ? (openCt + ' open') : 'No open requests';
   if (doneBtn) doneBtn.textContent = (_ccShowClosed ? 'Hide handled' : 'Show handled') + (closedCt ? ' (' + closedCt + ')' : '');
   if (!list) return;
   if (!vis.length) { list.innerHTML = '<div class="cc-empty">' + (_ccShowClosed ? 'Nothing here yet.' : 'All caught up &mdash; no open requests. &#127881;') + '</div>'; return; }
   const mmap = await ccResolveMembers(vis.map(r => r.member_number));
+  /* Cached for ccTextCaptain, which runs from an onclick long after this
+     render and has no other way back to the phone columns. */
+  _ccMembers = mmap;
+  /* What the operator can SEE is what Copy openings copies. */
+  _ccVisible = vis;
   const sc = list.scrollTop; list.innerHTML = vis.map(r => ccCard(r, mmap)).join(''); list.scrollTop = sc;
 }
 function ccToggleClosed() { _ccShowClosed = !_ccShowClosed; ccPaint(); }
