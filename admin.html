@@ -5678,7 +5678,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.407';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.408';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -25887,6 +25887,15 @@ async function ssgSwapWeek(matchId, teamId, otherMatchId) {
  * both panes render from the same {scale,x,y}, which is what makes zooming
  * one sheet move the other to the same place.                              */
 let _ssCmp = null;
+/* Drag state and its window listener live at module scope and are bound ONCE.
+   See the note in ssgCompareWire: that function re-runs on every render, so a
+   window listener bound inside it accumulates forever. */
+let _ssCmpDrag = false;
+window.addEventListener('mouseup', function () {
+  if (!_ssCmpDrag) return;
+  _ssCmpDrag = false;
+  document.querySelectorAll('.sscmp-vp.drag').forEach(function (v) { v.classList.remove('drag'); });
+});
 
 function ssgCompareOpen(matchId, teamId) {
   const match = _ssgState.matches.find(m => m.id === matchId);
@@ -25906,7 +25915,18 @@ function ssgCompareOpen(matchId, teamId) {
   };
   ssgCompareRender();
   const el = document.getElementById('ssCmp');
-  if (el) { el.classList.add('on'); el.focus(); }
+  if (el) {
+    el.classList.add('on');
+    el.focus();
+    /* Fit AFTER the overlay is displayed. .sscmp is display:none until .on, so
+       every vp.clientWidth read during render is 0 and the fit guard
+       (&& vp.clientWidth) silently declines to fit -- leaving scale at 0.
+       Whether a sheet got fitted therefore depended on whether its image was
+       CACHED: an uncached one fits later via img.onload, once .on is already
+       there, while a cached one never fits at all and cannot be panned or
+       zoomed. That coin-flip is why one division worked and another did not. */
+    ssgCompareApply();
+  }
 }
 
 function ssgCompareClose() {
@@ -26011,11 +26031,15 @@ async function ssgCompareRotate(paneIndex) {
 
 /* Swap this team's sheet for this week with one of the adjacent weeks, then
    reload the overlay in place so the result is visible without reopening. */
-async function ssgCompareSwap(otherMatchId) {
+async function ssgCompareSwap(otherMatchId, teamId) {
   if (!_ssCmp) return;
+  /* teamId says WHICH pane's sheet moves. Defaulted for older callers, but the
+     pane buttons always pass it — swapping the opponent's sheet when the
+     operator clicked the opponent's pane is the whole point. */
+  const moveTeam = (teamId == null) ? _ssCmp.teamId : teamId;
   const keep = { matchId: _ssCmp.matchId, teamId: _ssCmp.teamId, side: _ssCmp.side, flip: _ssCmp.flip };
   try {
-    await ssgSwapWeek(keep.matchId, keep.teamId, otherMatchId);
+    await ssgSwapWeek(keep.matchId, moveTeam, otherMatchId);
   } catch (e) {
     alert('Swap failed: ' + e.message);
     return;
@@ -26066,8 +26090,12 @@ function ssgCompareRender() {
       ? '<button class="sscmp-btn sscmp-rot" title="Rotate this sheet 90&deg;" onclick="ssgCompareRotate(' + i + ')">&#8635;'
         + ((p.rotation || 0) ? ' ' + (p.rotation || 0) + '&deg;' : '') + '</button>'
       : '';
+    /* Swap lives on the pane whose sheet it moves. Offered even when the pane
+       is empty, because moving a sheet INTO an empty week is exactly the case
+       an operator reaches for after an upload landed on the wrong week. */
+    const swp = ssgCompareSwapBtns(tid);
     return '<div class="sscmp-pane' + (_ssCmp.which === i ? ' active' : '') + '">'
-      + head.replace('</div>', rot + '</div>') + body + '</div>';
+      + head.replace('</div>', rot + swp + '</div>') + body + '</div>';
   };
   const sideBtns = _ssCmp.sides.length > 1
     ? _ssCmp.sides.map(s => '<button class="sscmp-btn' + (s === _ssCmp.side ? ' on' : '') +
@@ -26088,7 +26116,8 @@ function ssgCompareRender() {
           '<span class="sscmp-keys">' + (ssgCompareWeekMatches().findIndex(m => m.id === _ssCmp.matchId) + 1)
             + ' of ' + ssgCompareWeekMatches().length + ' this week</span>'
         : '') +
-      ssgCompareSwapBtns() +
+      /* Swap moved out of the bar and onto each pane — a bar control could
+         only act on the left team, leaving the opponent's sheet unswappable. */
       sideBtns +
       '<button class="sscmp-btn' + (_ssCmp.flip ? ' on' : '') + '" onclick="ssgCompareFlip()">Flip · F</button>' +
       '<button class="sscmp-btn" onclick="ssgCompareReset()">Fit · 0</button>' +
@@ -26103,12 +26132,20 @@ function ssgCompareRender() {
 /* Adjacent-week swap targets for the team on the left. Rendered as explicit
    per-week buttons rather than a select, so the destination week is visible
    before the click rather than after it -- this moves a real photo. */
-function ssgCompareSwapBtns() {
+/* Swap controls for ONE pane's team.
+   Per pane, not in the top bar. The bar version could only ever act on the
+   left-hand team, so the opponent's sheet had no way to be swapped at all,
+   and on a division where the left team had no adjacent-week fixture the
+   control simply vanished with no explanation. Rotate is already per pane;
+   swap belongs in the same place for the same reason — the control has to say
+   WHICH sheet it moves. */
+function ssgCompareSwapBtns(teamId) {
   if (!_ssCmp) return '';
+  if (teamId == null) teamId = _ssCmp.teamId;
   const match = _ssgState.matches.find(m => m.id === _ssCmp.matchId);
   if (!match) return '';
   let targets = [];
-  try { targets = ssgSwapTargets(match, _ssCmp.teamId) || []; } catch (e) { return ''; }
+  try { targets = ssgSwapTargets(match, teamId) || []; } catch (e) { return ''; }
   if (!targets.length) return '';
   /* ssgSwapTargets yields { match, photos } -- the week and id live on .match,
      and the photo count is what tells the operator whether this is a move into
@@ -26117,7 +26154,7 @@ function ssgCompareSwapBtns() {
     '<button class="sscmp-btn sscmp-swap" title="' + (t.photos.length ? 'Swap' : 'Move')
       + ' this team\'s sheet with week ' + t.match.week_number + ' ('
       + (t.photos.length ? t.photos.length + ' photo(s) there' : 'empty') + ')"'
-      + ' onclick="ssgCompareSwap(' + t.match.id + ')">'
+      + ' onclick="ssgCompareSwap(' + t.match.id + ',' + teamId + ')">'
       + '&#8646; ' + (t.photos.length ? 'Swap' : 'Move') + ' wk' + t.match.week_number + '</button>').join('');
 }
 
@@ -26161,10 +26198,27 @@ function ssgCompareApply() {
       _ssCmp.t.x = (vp.clientWidth  - effW * _ssCmp.t.scale) / 2;
       _ssCmp.t.y = (vp.clientHeight - effH * _ssCmp.t.scale) / 2;
     }
-    /* rotate LAST in the string so it is applied FIRST to the image, turning
-       the sheet about its own centre before it is scaled and placed. */
-    img.style.transformOrigin = 'center center';
-    img.style.transform = 'translate(' + _ssCmp.t.x + 'px,' + _ssCmp.t.y + 'px) scale(' + _ssCmp.t.scale + ')'
+    /* transform-origin stays 0 0 -- the CSS sets it and the fit math depends on
+       it: t.x/t.y position the image's TOP-LEFT so the scaled sheet lands
+       centred in the pane. 3.406 overrode this with 'center center' for
+       rotation, which made every scale happen about the image's middle and
+       displaced the sheet by roughly (1 - scale) * naturalWidth / 2. On a
+       ~1500px scoresheet that is hundreds of pixels, and it reads exactly like
+       the sheet being centred on the whole window instead of its half.
+
+       Rotation is expressed instead as an explicit per-quarter-turn offset, so
+       the rotated bounding box's top-left still lands on t.x/t.y and pan/zoom
+       arithmetic is untouched. Rotating about origin 0 0 maps (a,b) -> (-b,a)
+       for 90 degrees, so the sheet swings out of view unless pushed back by its
+       own height (and symmetrically for 180/270). */
+    const nW = img.naturalWidth * _ssCmp.t.scale;
+    const nH = img.naturalHeight * _ssCmp.t.scale;
+    let ox = 0, oy = 0;
+    if (rotDeg === 90)  { ox = nH; }
+    else if (rotDeg === 180) { ox = nW; oy = nH; }
+    else if (rotDeg === 270) { oy = nW; }
+    img.style.transformOrigin = '0 0';
+    img.style.transform = 'translate(' + (_ssCmp.t.x + ox) + 'px,' + (_ssCmp.t.y + oy) + 'px) scale(' + _ssCmp.t.scale + ')'
       + (rotDeg ? ' rotate(' + rotDeg + 'deg)' : '');
   }
 }
@@ -26189,11 +26243,16 @@ function ssgCompareWire() {
       _ssCmp.t.scale = s1;
       ssgCompareApply();
     }, { passive: false });
-    let dragging = false, lx = 0, ly = 0;
-    vp.addEventListener('mousedown', function (e) { dragging = true; lx = e.clientX; ly = e.clientY; vp.classList.add('drag'); e.preventDefault(); });
-    window.addEventListener('mouseup', function () { dragging = false; vp.classList.remove('drag'); });
+    let lx = 0, ly = 0;
+    vp.addEventListener('mousedown', function (e) { _ssCmpDrag = true; lx = e.clientX; ly = e.clientY; vp.classList.add('drag'); e.preventDefault(); });
+    /* The window mouseup is bound ONCE, module-level, not here. ssgCompareWire
+       runs on every render — every rotate, every step, every side switch — and
+       an anonymous listener on window can never be removed, so binding it here
+       leaked one dead handler per render for the life of the page. The vp
+       elements themselves are replaced by innerHTML each render, so THEIR
+       listeners die with them; window's do not. */
     vp.addEventListener('mousemove', function (e) {
-      if (!dragging || !_ssCmp) return;
+      if (!_ssCmpDrag || !_ssCmp) return;
       _ssCmp.t.x += e.clientX - lx; _ssCmp.t.y += e.clientY - ly;
       lx = e.clientX; ly = e.clientY;
       ssgCompareApply();
