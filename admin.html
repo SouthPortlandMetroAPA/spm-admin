@@ -5695,7 +5695,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.411';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.412';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11184,6 +11184,33 @@ function slTabMove(slug, delta) {
   slTabsManagerRender();
 }
 
+/* Send a tab to one end of the bar in a single move.
+   dir < 0 = far left, dir > 0 = far right. "Far right" means the rightmost
+   NON-pinned slot: the Tabs manager is always last, so pushing a tab past it
+   would silently be undone by slTabResolvedOrder on the next render and read
+   as the click doing nothing. */
+function slTabSendToEnd(slug, dir) {
+  if (!slug || slug === SL_TABS_PINNED) return;
+  const prefs = slTabPrefsLoad();
+  const order = slTabResolvedOrder(prefs).filter(s => s !== SL_TABS_PINNED);
+  const i = order.indexOf(slug);
+  if (i < 0) return;
+  order.splice(i, 1);
+  if (dir < 0) order.unshift(slug); else order.push(slug);
+  prefs.order = order;
+  slTabPrefsSave(prefs);
+  slTabsApply();
+  slTabsManagerRender();
+}
+
+/* Where does this tab sit among the non-pinned tabs? Used to grey out a
+   send-to-end that would do nothing. */
+function slTabEndState(slug) {
+  const order = slTabResolvedOrder(slTabPrefsLoad()).filter(s => s !== SL_TABS_PINNED);
+  const i = order.indexOf(slug);
+  return { atLeft: i <= 0, atRight: i >= order.length - 1 };
+}
+
 function slTabsShowAll() {
   const prefs = slTabPrefsLoad();
   prefs.hidden = [];
@@ -11220,10 +11247,19 @@ function slTabsCtxOpen(ev, slug) {
   m.style.left = Math.min(ev.clientX, window.innerWidth - 190) + 'px';
   m.style.top  = ev.clientY + 'px';
   const canHide = slug !== SL_TABS_PINNED;
+  const ends = slTabEndState(slug);
+  /* A send-to-end that is already at that end is greyed out rather than
+     hidden: a menu whose items move between renders is harder to use than one
+     whose items sit still and dim. */
+  const endBtn = (dir, text, disabled) => disabled
+    ? '<button disabled style="opacity:.4;cursor:default">' + text + '</button>'
+    : '<button onclick="slTabSendToEnd(\'' + slug + '\',' + dir + ');slTabsCtxClose()">' + text + '</button>';
   m.innerHTML =
     (canHide
       ? '<button onclick="slTabHide(\'' + slug + '\');slTabsCtxClose()">Hide &ldquo;' + esc(label) + '&rdquo;</button>'
       : '<button disabled style="opacity:.5;cursor:default">Tabs cannot be hidden</button>') +
+    (canHide ? endBtn(-1, '&#8676; Send to far left',  ends.atLeft)  : '') +
+    (canHide ? endBtn(1,  '&#8677; Send to far right', ends.atRight) : '') +
     '<button onclick="switchTab(\'tabsmgr\');slTabsCtxClose()">Manage tabs&hellip;</button>';
   document.body.appendChild(m);
 }
@@ -11268,6 +11304,7 @@ function slTabsManagerRender() {
 }
 
 window.slTabHide = slTabHide; window.slTabShow = slTabShow; window.slTabToggle = slTabToggle;
+window.slTabSendToEnd = slTabSendToEnd;
 window.slTabMove = slTabMove; window.slTabsShowAll = slTabsShowAll;
 window.slTabsResetOrder = slTabsResetOrder; window.slTabsCtxClose = slTabsCtxClose;
 window.slTabsManagerRender = slTabsManagerRender; window.slTabsApply = slTabsApply;
