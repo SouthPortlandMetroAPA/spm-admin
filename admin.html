@@ -1084,7 +1084,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="chalktalk">ChalkTalk</button>
       <button class="tab" data-tab="nickpick">NickPick</button>
       <button class="tab" data-tab="crewcall">Shipmate</button>
-      <button class="tab" data-tab="ourrack">OurRack</button>
+      <button class="tab" data-tab="ourrack">To-Do</button>
       <button class="tab" data-tab="preshot">PreShot</button>
       <button class="tab" data-tab="cuedrop">CueDrop</button>
       <button class="tab" data-tab="countmein">CountMeIn</button>
@@ -1092,6 +1092,9 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="racktime">RackTime</button>
       <button class="tab" data-tab="nexusreport">Nexus Issue</button>
       <button class="tab" data-tab="playersfund">Players Fund</button>
+      <!-- Pinned last and never hideable: it is the only route back to a
+           hidden tab. slTabsApply enforces both. -->
+      <button class="tab" data-tab="tabsmgr" title="Show, hide and reorder tabs">&#9776; Tabs</button>
       <button type="button" class="tab-reset" id="tabResetBtn" title="Drag tabs to reorder (Alt+←/→ by keyboard). Click to reset to the default order." aria-label="Reset tab order to default">⟲</button>
     </div>
     <span id="tabOrderLive" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap"></span>
@@ -1416,8 +1419,8 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
     <div id="tab-spreports" class="tab-panel">
 
       <!-- Upload card -->
-      <div class="card" style="margin-bottom:14px;">
-        <h2 style="margin:0 0 6px;">Upload SP report</h2>
+      <details class="card" data-spcollapse style="margin-bottom:14px;">
+        <summary style="cursor:pointer; display:flex; align-items:center; gap:10px; flex-wrap:wrap;"><h2 style="margin:0 0 6px;">Upload SP report</h2></summary>
         <p class="hint" style="margin:0 0 12px;">
           Drop the All-League / By-Division / 8-Ball Skunk PDF. Type is auto-detected.
           Reports are tagged to <strong id="spCurSessionLabel">the current session</strong>.
@@ -1433,7 +1436,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <input type="file" accept="application/pdf" multiple id="spDropInput" style="display:none;">
         </label>
         <div id="spDropStatus" class="status-line"></div>
-      </div>
+      </details>
 
       <!-- Manual SP — the OTHER way SP data gets in, so it lives next to the
            report drop zone rather than buried under the patch list (it was at
@@ -1474,17 +1477,18 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       </details>
 
       <!-- Expected reports — status checklist for the patch workflow -->
-      <div class="card" style="margin-bottom:14px;">
-        <h2 style="margin:0 0 6px;">Expected reports</h2>
+      <details class="card" data-spcollapse style="margin-bottom:14px;">
+        <summary style="cursor:pointer; display:flex; align-items:center; gap:10px; flex-wrap:wrap;"><h2 style="margin:0 0 6px;">Expected reports</h2></summary>
         <p class="hint" style="margin:0 0 10px;">
           The reports the patch workflow needs each cycle. Drop them in the zone above &mdash;
           each is auto-detected and auto-saved, no confirmation step.
         </p>
         <div id="spExpectedPanel"><p class="hint">Pick a current session to see status.</p></div>
-      </div>
+      </details>
 
       <!-- Operator filter -->
-      <div class="card" style="margin-bottom:14px;">
+      <details class="card" data-spcollapse style="margin-bottom:14px;">
+        <summary style="cursor:pointer; display:flex; align-items:center; gap:10px; flex-wrap:wrap;"><h2 style="margin:0 0 6px;">Division filter</h2></summary>
         <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
           <div style="font-weight:700;">Show divisions for:</div>
           <div class="seg" id="spOperatorSeg" style="display:inline-flex; gap:0;">
@@ -1495,27 +1499,27 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <div style="flex:1;"></div>
           <button type="button" class="btn btn-outline" onclick="spLoadAll()">Refresh</button>
         </div>
-      </div>
+      </details>
 
       <!-- Mailing labels -->
-      <div class="card" style="margin-bottom:14px;">
-        <h2 style="margin:0 0 6px;">Mailing labels</h2>
+      <details class="card" data-spcollapse style="margin-bottom:14px;">
+        <summary style="cursor:pointer; display:flex; align-items:center; gap:10px; flex-wrap:wrap;"><h2 style="margin:0 0 6px;">Mailing labels</h2></summary>
         <p class="hint" style="margin:0 0 12px;">
           Captain mailing addresses. Drop APA's Labels report into the upload zone above &mdash;
           it&rsquo;s auto-detected. Each upload replaces the current set for the selected operator.
         </p>
         <div id="spLabelsPanel"><p class="hint">No labels uploaded yet.</p></div>
-      </div>
+      </details>
 
       <!-- Loaded reports -->
-      <div class="card" style="margin-bottom:14px;">
-        <h2 style="margin:0 0 6px;">Reports loaded this session</h2>
+      <details class="card" data-spcollapse style="margin-bottom:14px;">
+        <summary style="cursor:pointer; display:flex; align-items:center; gap:10px; flex-wrap:wrap;"><h2 style="margin:0 0 6px;">Reports loaded this session</h2></summary>
         <div id="spReportsList"><p class="hint">No reports loaded yet.</p></div>
-      </div>
+      </details>
 
       <!-- Operator profile (return address used on printed envelopes) -->
-      <div class="card" style="margin-bottom:14px;">
-        <h2 style="margin:0 0 6px;">Operator profile</h2>
+      <details class="card" data-spcollapse style="margin-bottom:14px;">
+        <summary style="cursor:pointer; display:flex; align-items:center; gap:10px; flex-wrap:wrap;"><h2 style="margin:0 0 6px;">Operator profile</h2></summary>
         <p class="hint" style="margin:0 0 10px;">
           Return address printed in the upper-left of every envelope for the selected operator.
           Stored on <code>slate.operators</code>.
@@ -1539,11 +1543,11 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <button type="button" class="btn btn-primary" id="opProfileSaveBtn">Save</button>
           <div id="opProfileStatus" class="status-line" style="flex:1;"></div>
         </div>
-      </div>
+      </details>
 
       <!-- Patch opt-outs — members who don't want patches mailed -->
-      <div class="card" style="margin-bottom:14px;">
-        <h2 style="margin:0 0 6px;">Patch opt-outs</h2>
+      <details class="card" data-spcollapse style="margin-bottom:14px;">
+        <summary style="cursor:pointer; display:flex; align-items:center; gap:10px; flex-wrap:wrap;"><h2 style="margin:0 0 6px;">Patch opt-outs</h2></summary>
         <p class="hint" style="margin:0 0 10px;">
           Member numbers (5- or 8-digit, one per line) of players who&rsquo;ve asked not
           to receive patches. Each entry defaults to <strong>all 13 patch types</strong>
@@ -1558,16 +1562,16 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <span class="status-line" id="spOptoutStatus" style="flex:1;"></span>
         </div>
         <div id="spOptoutList" style="margin-top:10px;"><p class="hint" style="margin:0;">No opt-outs.</p></div>
-      </div>
+      </details>
 
       <!-- ── Opt-out confirmation email template (3.174+) ─────────────
            PatchCheck sends this to a player each time their opt-out
            choices actually change. Template lives here because it sits
            next to the data it describes; sends log to
            slate.optout_confirm_log. -->
-      <div class="card" style="margin-bottom:14px;" id="spOptoutEmailCard">
+      <details class="card" data-spcollapse style="margin-bottom:14px;" id="spOptoutEmailCard">
+        <summary style="cursor:pointer; display:flex; align-items:center; gap:10px; flex-wrap:wrap;"><h2 style="margin:0">Opt-out confirmation email</h2></summary>
         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:6px">
-          <h2 style="margin:0">Opt-out confirmation email</h2>
           <div style="display:flex;align-items:center;gap:8px">
             <button class="btn btn-outline btn-sm" onclick="mailerQuotaCheck()" title="Check remaining Gmail daily send quota">📊 Check mailer quota</button>
             <span id="mailerQuotaResult" class="hint" style="font-size:0.82rem" role="status" aria-live="polite"></span>
@@ -1619,12 +1623,12 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <summary style="cursor:pointer;font-weight:700">Recent sends</summary>
           <div id="optoutConfirmLog" style="padding:8px 0;font-size:0.86rem;color:#333"></div>
         </details>
-      </div>
+      </details>
 
       <!-- Patches — computation, envelope-grouped list, mail batch, undo -->
-      <div class="card" style="margin-bottom:14px;">
+      <details class="card" data-spcollapse style="margin-bottom:14px;">
+        <summary style="cursor:pointer; display:flex; align-items:center; gap:10px; flex-wrap:wrap;"><h2 style="margin:0;">Patches</h2></summary>
         <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
-          <h2 style="margin:0;">Patches</h2>
           <div style="display:flex; gap:8px; flex-wrap:wrap;">
             <button type="button" class="btn btn-outline" id="spComputePatchesBtn">
               Compute from latest By-Division
@@ -1687,7 +1691,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <div id="spRemailStatus" class="status-line"></div>
           <div id="spRemailResults"></div>
         </div>
-      </div>
+      </details>
 
       <!-- ── Mailing notification emails (3.191) ─────────────────────────
            Emails everyone in the LAST ACTIVE MAIL BATCH after the operator
@@ -1702,8 +1706,8 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
            rosters (never a global name lookup). Sends log to
            patch_notify_log per (batch, kind, member) so a re-click
            resumes, never double-sends. -->
-      <div class="card" style="margin-bottom:14px;">
-        <h2 style="margin:0 0 6px;">Mailing notification emails</h2>
+      <details class="card" data-spcollapse style="margin-bottom:14px;">
+        <summary style="cursor:pointer; display:flex; align-items:center; gap:10px; flex-wrap:wrap;"><h2 style="margin:0 0 6px;">Mailing notification emails</h2></summary>
         <p class="hint" style="margin:0 0 10px;">
           After you print and mail a patch run, notify everyone in it:
           <strong>mailing contacts</strong> (the person each envelope is addressed to)
@@ -1761,11 +1765,11 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <div id="spNotifySub" class="hint" style="font-size:0.78rem;margin-top:4px;text-align:center"></div>
         </div>
         <div id="spNotifyResults" style="display:none;margin-top:10px;padding:12px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:0.88rem"></div>
-      </div>
+      </details>
 
       <!-- Ad-hoc envelope printing — pull addresses from slate.players -->
-      <div class="card" style="margin-bottom:14px;">
-        <h2 style="margin:0 0 6px;">Print envelopes by player number</h2>
+      <details class="card" data-spcollapse style="margin-bottom:14px;">
+        <summary style="cursor:pointer; display:flex; align-items:center; gap:10px; flex-wrap:wrap;"><h2 style="margin:0 0 6px;">Print envelopes by player number</h2></summary>
         <p class="hint" style="margin:0 0 10px;">
           Paste APA player numbers (5- or 8-digit, one per line). One envelope
           per player, using the mailing address on file in <code>slate.players</code>.
@@ -1780,14 +1784,14 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <button type="button" class="btn btn-primary" onclick="spAdhocEnvelopes()">Print envelopes</button>
         </div>
         <div class="status-line" id="spAdhocStatus" style="margin-top:6px;"></div>
-      </div>
+      </details>
 
       <!-- ── OOPS Coin — certificates + envelopes (3.207) ─────────────
            Commemorates the 8-on-the-break-with-a-scratch: instant win
            turned instant loss. Tone: mock-formal, dry, respectful — the
            joke is the situation, never the player. -->
-      <div class="card" style="margin-bottom:14px;" id="spOopsCard">
-        <h2 style="margin:0 0 6px;">OOPS Coin — certificates, envelopes &amp; email</h2>
+      <details class="card" data-spcollapse style="margin-bottom:14px;" id="spOopsCard">
+        <summary style="cursor:pointer; display:flex; align-items:center; gap:10px; flex-wrap:wrap;"><h2 style="margin:0 0 6px;">OOPS Coin — certificates, envelopes &amp; email</h2></summary>
         <p class="hint" style="margin:0 0 10px;">
           For players who legally pocketed the 8 on the break&hellip; and scratched.
           Paste APA player numbers (5- or 8-digit, one per line). Certificates
@@ -1830,15 +1834,15 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         </div>
         <div class="status-line" id="spOopsNotifyStatus" style="margin-top:6px;"></div>
         <div id="spOopsNotifyPreflight"></div>
-      </div>
+      </details>
 
       <!-- ── Opt-out slip printer (3.170+) ────────────────────────────
            Prints N "Too Awesome for More Patches?" QR-code slips, 3 per
            US Letter sheet, ready to cut and drop into envelopes. Lives
            next to the SP Reports envelope-print flow because that's the
            workflow that consumes them. -->
-      <div class="card" style="margin-top:0" id="spSlipsCard">
-        <h2 style="margin:0 0 6px;">Print opt-out slips</h2>
+      <details class="card" data-spcollapse style="margin-top:0" id="spSlipsCard">
+        <summary style="cursor:pointer; display:flex; align-items:center; gap:10px; flex-wrap:wrap;"><h2 style="margin:0 0 6px;">Print opt-out slips</h2></summary>
         <p class="hint" style="margin:0 0 10px;">
           Prints "Too Awesome for More Patches?" QR-code slips (3 per
           Letter page). Drop one in each envelope so players know they can
@@ -1860,7 +1864,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         <p class="hint" style="margin:8px 0 0; font-size:0.78rem; color:#888;">
           Print at 100% scale with no margins, then cut the sheet into thirds.
         </p>
-      </div>
+      </details>
     </div>
     <!-- ════════════════ /SP Reports ════════════════ -->
 
@@ -4267,7 +4271,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       </style>
       <div class="card">
         <div class="or-head">
-          <h2 style="margin:0">OurRack &mdash; Task Tracker</h2>
+          <h2 style="margin:0">To-Do &mdash; Task Tracker</h2>
           <button class="btn btn-sm" onclick="orOpenNew()">+ New task</button>
           <button class="btn btn-outline btn-sm" onclick="orLoad()">Refresh</button>
           <span class="or-sub" id="orStatus" style="margin-left:0"></span>
@@ -5433,6 +5437,19 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       </div>
     </div>
 
+    <div id="tab-tabsmgr" class="tab-panel">
+      <div class="card" style="padding:16px;max-width:640px">
+        <h3 style="margin:0 0 2px">Tabs</h3>
+        <p class="hint" style="margin:0 0 12px">Saved in this browser only. Right-click any tab to hide it.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+          <button class="btn btn-outline btn-sm" onclick="slTabsShowAll()">Show all</button>
+          <button class="btn btn-outline btn-sm" onclick="slTabsResetOrder()">Reset order</button>
+          <span id="slTabsStatus" class="hint"></span>
+        </div>
+        <div id="slTabsList"></div>
+      </div>
+    </div>
+
     <div id="tab-racktime" class="tab-panel">
       <style>
         /* RackTime brings its own token values that Slate's :root doesn't
@@ -5678,7 +5695,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.408';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.411';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -7506,7 +7523,13 @@ async function init() {
   // tab's data load, so we route startup through it.
   let savedTab = null;
   try { savedTab = localStorage.getItem('slateLastTab'); } catch (e) {}
-  if (savedTab && /^[a-z]+$/.test(savedTab) && document.querySelector('.tab[data-tab="' + savedTab + '"]')) {
+  /* Layout prefs first: restoring a tab the operator has hidden would show
+     a panel with no tab above it. */
+  slTabsWire();
+  slTabsApply();
+  const savedBtn = savedTab ? document.querySelector('.tab[data-tab="' + savedTab + '"]') : null;
+  const savedVisible = savedBtn && !savedBtn.classList.contains('sl-tab-hidden');
+  if (savedTab && /^[a-z]+$/.test(savedTab) && savedVisible) {
     switchTab(savedTab);
   } else if (document.querySelector('.tab.active')?.dataset.tab === 'emailhq') {
     // Email HQ is the default tab (its static `active` class is set, but the
@@ -10914,13 +10937,14 @@ const TAB_LABEL = {
   chalktalk:     'ChalkTalk',
   nickpick:      'NickPick',
   crewcall:      'CrewCall',
-  ourrack:       'OurRack',
+  ourrack:       'To-Do',
   preshot:       'PreShot',
   cuedrop:       'CueDrop',
   countmein:     'CountMeIn',
   racktime:      'RackTime',
   nexusreport:   'Nexus Issue',
   playersfund:   'Players Fund',
+  tabsmgr:       'Tabs',
   matchfees:     'Match Fees'
 };
 
@@ -11061,6 +11085,193 @@ function slInitTabReorder() {
   });
 }
 
+/* ══════════════════════════════════════════════════════════════════════
+   TAB MANAGER (3.411)
+   Per-browser tab visibility + order. localStorage only; see the header of
+   tools/claude/slate/patch-tab-manager.mjs for the reasoning.
+   ══════════════════════════════════════════════════════════════════════ */
+
+const SL_TABS_KEY = 'slateTabPrefs';
+const SL_TABS_PINNED = 'tabsmgr';   /* never hideable: the only route back */
+
+function slTabPrefsLoad() {
+  let p = null;
+  try { p = JSON.parse(localStorage.getItem(SL_TABS_KEY) || 'null'); } catch (e) {}
+  if (!p || typeof p !== 'object') p = {};
+  return {
+    hidden: Array.isArray(p.hidden) ? p.hidden.filter(x => typeof x === 'string') : [],
+    order:  Array.isArray(p.order)  ? p.order.filter(x => typeof x === 'string')  : []
+  };
+}
+function slTabPrefsSave(p) {
+  try { localStorage.setItem(SL_TABS_KEY, JSON.stringify(p)); } catch (e) {}
+}
+
+/* Every tab slug in the bar, in the order the DOM currently has them. */
+function slTabAllSlugs() {
+  return [...document.querySelectorAll('.tabs .tab')].map(b => b.dataset.tab);
+}
+
+/* The saved order, with any UNKNOWN slug appended rather than dropped.
+   This is what keeps a newly-shipped tab from being invisible to anyone who
+   has ever opened this manager. */
+function slTabResolvedOrder(prefs) {
+  const all = slTabAllSlugs();
+  const known = prefs.order.filter(s => all.indexOf(s) >= 0);
+  const rest = all.filter(s => known.indexOf(s) < 0);
+  const ordered = known.concat(rest);
+  /* the manager is always last, wherever it ended up */
+  return ordered.filter(s => s !== SL_TABS_PINNED).concat([SL_TABS_PINNED]);
+}
+
+/* Apply prefs to the DOM: reorder the buttons, hide what should be hidden. */
+function slTabsApply() {
+  const bar = document.querySelector('.tabs');
+  if (!bar) return;
+  const prefs = slTabPrefsLoad();
+  const order = slTabResolvedOrder(prefs);
+  const byslug = {};
+  [...bar.querySelectorAll('.tab')].forEach(b => { byslug[b.dataset.tab] = b; });
+  for (const slug of order) if (byslug[slug]) bar.appendChild(byslug[slug]);
+  for (const slug of Object.keys(byslug)) {
+    const hide = slug !== SL_TABS_PINNED && prefs.hidden.indexOf(slug) >= 0;
+    byslug[slug].classList.toggle('sl-tab-hidden', hide);
+  }
+  /* Never leave the operator looking at a panel whose tab just vanished. */
+  const active = document.querySelector('.tab.active');
+  if (active && active.classList.contains('sl-tab-hidden')) {
+    /* ':not' + '(' — validate_admin_js reads "word (" as a call even inside a
+       string, and this selector cannot be reworded. Same split the PostgREST
+       'or' + '(' token uses in cdNameFilter. */
+    const first = [...bar.querySelectorAll('.tab:not' + '(.sl-tab-hidden)')][0];
+    if (first) switchTab(first.dataset.tab);
+  }
+}
+
+function slTabHide(slug) {
+  if (!slug || slug === SL_TABS_PINNED) return;
+  const prefs = slTabPrefsLoad();
+  if (prefs.hidden.indexOf(slug) < 0) prefs.hidden.push(slug);
+  slTabPrefsSave(prefs);
+  slTabsApply();
+  slTabsManagerRender();
+}
+function slTabShow(slug) {
+  const prefs = slTabPrefsLoad();
+  prefs.hidden = prefs.hidden.filter(s => s !== slug);
+  slTabPrefsSave(prefs);
+  slTabsApply();
+  slTabsManagerRender();
+}
+function slTabToggle(slug) {
+  const prefs = slTabPrefsLoad();
+  (prefs.hidden.indexOf(slug) >= 0) ? slTabShow(slug) : slTabHide(slug);
+}
+
+/* Move a tab one place in the RESOLVED order, then persist that whole order.
+   Persisting the resolved list (not a sparse diff) is what makes the saved
+   order stable once the operator has touched it. */
+function slTabMove(slug, delta) {
+  const prefs = slTabPrefsLoad();
+  const order = slTabResolvedOrder(prefs).filter(s => s !== SL_TABS_PINNED);
+  const i = order.indexOf(slug);
+  const j = i + delta;
+  if (i < 0 || j < 0 || j >= order.length) return;
+  order.splice(j, 0, order.splice(i, 1)[0]);
+  prefs.order = order;
+  slTabPrefsSave(prefs);
+  slTabsApply();
+  slTabsManagerRender();
+}
+
+function slTabsShowAll() {
+  const prefs = slTabPrefsLoad();
+  prefs.hidden = [];
+  slTabPrefsSave(prefs);
+  slTabsApply(); slTabsManagerRender();
+  slTabsSetStatus('All tabs shown.');
+}
+function slTabsResetOrder() {
+  const prefs = slTabPrefsLoad();
+  prefs.order = [];
+  slTabPrefsSave(prefs);
+  slTabsApply(); slTabsManagerRender();
+  slTabsSetStatus('Order reset to the app default.');
+}
+function slTabsSetStatus(m) {
+  const el = document.getElementById('slTabsStatus');
+  if (!el) return;
+  el.textContent = m || '';
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.textContent = ''; }, 4000);
+}
+
+/* ── right-click menu ───────────────────────────────────────────────────── */
+function slTabsCtxClose() {
+  const m = document.getElementById('slTabsCtx');
+  if (m) m.remove();
+}
+function slTabsCtxOpen(ev, slug) {
+  ev.preventDefault();
+  slTabsCtxClose();
+  const label = (TAB_LABEL && TAB_LABEL[slug]) || slug;
+  const m = document.createElement('div');
+  m.id = 'slTabsCtx';
+  m.style.left = Math.min(ev.clientX, window.innerWidth - 190) + 'px';
+  m.style.top  = ev.clientY + 'px';
+  const canHide = slug !== SL_TABS_PINNED;
+  m.innerHTML =
+    (canHide
+      ? '<button onclick="slTabHide(\'' + slug + '\');slTabsCtxClose()">Hide &ldquo;' + esc(label) + '&rdquo;</button>'
+      : '<button disabled style="opacity:.5;cursor:default">Tabs cannot be hidden</button>') +
+    '<button onclick="switchTab(\'tabsmgr\');slTabsCtxClose()">Manage tabs&hellip;</button>';
+  document.body.appendChild(m);
+}
+
+function slTabsWire() {
+  const bar = document.querySelector('.tabs');
+  if (!bar || bar._slWired) return;
+  bar._slWired = true;
+  bar.addEventListener('contextmenu', function (e) {
+    const btn = e.target.closest('.tab');
+    if (!btn) return;
+    slTabsCtxOpen(e, btn.dataset.tab);
+  });
+  document.addEventListener('click', slTabsCtxClose);
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') slTabsCtxClose(); });
+}
+
+/* ── the manager panel ──────────────────────────────────────────────────── */
+function slTabsManagerRender() {
+  const box = document.getElementById('slTabsList');
+  if (!box) return;
+  const prefs = slTabPrefsLoad();
+  const order = slTabResolvedOrder(prefs);
+  const rows = order.map((slug, i) => {
+    const label = (TAB_LABEL && TAB_LABEL[slug]) || slug;
+    const pinned = slug === SL_TABS_PINNED;
+    const off = !pinned && prefs.hidden.indexOf(slug) >= 0;
+    const last = i >= order.length - 2;   /* the manager itself sits at the end */
+    return '<div class="sl-trow' + (off ? ' off' : '') + '">'
+      + '<span class="nm">' + esc(label) + '</span>'
+      + (pinned
+          ? '<span class="pin">always shown &middot; pinned last</span>'
+          : '<button onclick="slTabMove(\'' + slug + '\',-1)"' + (i === 0 ? ' disabled' : '') + ' title="Move up">&uarr;</button>'
+            + '<button onclick="slTabMove(\'' + slug + '\',1)"' + (last ? ' disabled' : '') + ' title="Move down">&darr;</button>'
+            + '<button onclick="slTabToggle(\'' + slug + '\')">' + (off ? 'Show' : 'Hide') + '</button>')
+      + '</div>';
+  }).join('');
+  const hiddenCount = prefs.hidden.length;
+  box.innerHTML = rows
+    + '<p class="hint" style="margin:10px 0 0">' + order.length + ' tabs &middot; '
+    + (hiddenCount ? hiddenCount + ' hidden' : 'none hidden') + '</p>';
+}
+
+window.slTabHide = slTabHide; window.slTabShow = slTabShow; window.slTabToggle = slTabToggle;
+window.slTabMove = slTabMove; window.slTabsShowAll = slTabsShowAll;
+window.slTabsResetOrder = slTabsResetOrder; window.slTabsCtxClose = slTabsCtxClose;
+window.slTabsManagerRender = slTabsManagerRender; window.slTabsApply = slTabsApply;
+
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + name));
@@ -11103,6 +11314,7 @@ function switchTab(name) {
   if (name === 'racktime') rktInit();
   if (name === 'nexusreport') apaNexusInit();
   if (name === 'playersfund') apaFundInit();
+  if (name === 'tabsmgr')     slTabsManagerRender();
   if (name === 'fargoscout') fsInit();
   if (name === 'matchfees') mfInit();
 }
@@ -31521,6 +31733,16 @@ const SB_STYLE = `
   #tab-switchboard .sb-team-name { font-weight:800; color:var(--text); }
   #tab-switchboard .sb-team-num  { color:var(--spm-accent); font-family:ui-monospace,monospace; font-weight:700; margin-right:4px; }
   .spm-phone-src { font-size:0.7rem; font-weight:700; color:#92400e; background:#fef3c7; border-radius:4px; padding:1px 5px; margin-left:4px; }
+  .tab.sl-tab-hidden { display:none !important; }
+  #slTabsCtx { position:fixed; z-index:13000; background:#fff; border:1px solid var(--border); border-radius:8px; box-shadow:0 6px 20px rgba(0,0,0,.18); padding:4px; min-width:170px; }
+  #slTabsCtx button { display:block; width:100%; text-align:left; padding:7px 10px; border:0; background:none; cursor:pointer; font-size:.86rem; border-radius:5px; color:var(--text); }
+  #slTabsCtx button:hover { background:var(--bg); }
+  .sl-trow { display:flex; align-items:center; gap:8px; padding:6px 8px; border:1px solid var(--border); border-radius:8px; margin-bottom:6px; background:var(--card); }
+  .sl-trow.off { opacity:.55; }
+  .sl-trow .nm { flex:1; font-size:.9rem; }
+  .sl-trow .pin { font-size:.72rem; color:var(--muted); }
+  .sl-trow button { padding:3px 8px; font-size:.78rem; border:1px solid var(--border); background:var(--bg); border-radius:6px; cursor:pointer; color:var(--text); }
+  .sl-trow button:disabled { opacity:.35; cursor:default; }
   .apa-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px; }
   .apa-fld label { display:block; font-size:0.78rem; font-weight:700; color:var(--muted); margin-bottom:3px; }
   .apa-fld input, .apa-fld select, .apa-fld textarea { width:100%; box-sizing:border-box; }
