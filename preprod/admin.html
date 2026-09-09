@@ -1092,6 +1092,9 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="racktime">RackTime</button>
       <button class="tab" data-tab="nexusreport">Nexus Issue</button>
       <button class="tab" data-tab="playersfund">Players Fund</button>
+      <!-- Pinned last and never hideable: it is the only route back to a
+           hidden tab. slTabsApply enforces both. -->
+      <button class="tab" data-tab="tabsmgr" title="Show, hide and reorder tabs">&#9776; Tabs</button>
       <button type="button" class="tab-reset" id="tabResetBtn" title="Drag tabs to reorder (Alt+←/→ by keyboard). Click to reset to the default order." aria-label="Reset tab order to default">⟲</button>
     </div>
     <span id="tabOrderLive" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap"></span>
@@ -5434,6 +5437,19 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       </div>
     </div>
 
+    <div id="tab-tabsmgr" class="tab-panel">
+      <div class="card" style="padding:16px;max-width:640px">
+        <h3 style="margin:0 0 2px">Tabs</h3>
+        <p class="hint" style="margin:0 0 12px">Saved in this browser only. Right-click any tab to hide it.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+          <button class="btn btn-outline btn-sm" onclick="slTabsShowAll()">Show all</button>
+          <button class="btn btn-outline btn-sm" onclick="slTabsResetOrder()">Reset order</button>
+          <span id="slTabsStatus" class="hint"></span>
+        </div>
+        <div id="slTabsList"></div>
+      </div>
+    </div>
+
     <div id="tab-racktime" class="tab-panel">
       <style>
         /* RackTime brings its own token values that Slate's :root doesn't
@@ -5679,7 +5695,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.410';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.411';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -7507,7 +7523,13 @@ async function init() {
   // tab's data load, so we route startup through it.
   let savedTab = null;
   try { savedTab = localStorage.getItem('slateLastTab'); } catch (e) {}
-  if (savedTab && /^[a-z]+$/.test(savedTab) && document.querySelector('.tab[data-tab="' + savedTab + '"]')) {
+  /* Layout prefs first: restoring a tab the operator has hidden would show
+     a panel with no tab above it. */
+  slTabsWire();
+  slTabsApply();
+  const savedBtn = savedTab ? document.querySelector('.tab[data-tab="' + savedTab + '"]') : null;
+  const savedVisible = savedBtn && !savedBtn.classList.contains('sl-tab-hidden');
+  if (savedTab && /^[a-z]+$/.test(savedTab) && savedVisible) {
     switchTab(savedTab);
   } else if (document.querySelector('.tab.active')?.dataset.tab === 'emailhq') {
     // Email HQ is the default tab (its static `active` class is set, but the
@@ -10922,6 +10944,7 @@ const TAB_LABEL = {
   racktime:      'RackTime',
   nexusreport:   'Nexus Issue',
   playersfund:   'Players Fund',
+  tabsmgr:       'Tabs',
   matchfees:     'Match Fees'
 };
 
@@ -11062,6 +11085,193 @@ function slInitTabReorder() {
   });
 }
 
+/* ══════════════════════════════════════════════════════════════════════
+   TAB MANAGER (3.411)
+   Per-browser tab visibility + order. localStorage only; see the header of
+   tools/claude/slate/patch-tab-manager.mjs for the reasoning.
+   ══════════════════════════════════════════════════════════════════════ */
+
+const SL_TABS_KEY = 'slateTabPrefs';
+const SL_TABS_PINNED = 'tabsmgr';   /* never hideable: the only route back */
+
+function slTabPrefsLoad() {
+  let p = null;
+  try { p = JSON.parse(localStorage.getItem(SL_TABS_KEY) || 'null'); } catch (e) {}
+  if (!p || typeof p !== 'object') p = {};
+  return {
+    hidden: Array.isArray(p.hidden) ? p.hidden.filter(x => typeof x === 'string') : [],
+    order:  Array.isArray(p.order)  ? p.order.filter(x => typeof x === 'string')  : []
+  };
+}
+function slTabPrefsSave(p) {
+  try { localStorage.setItem(SL_TABS_KEY, JSON.stringify(p)); } catch (e) {}
+}
+
+/* Every tab slug in the bar, in the order the DOM currently has them. */
+function slTabAllSlugs() {
+  return [...document.querySelectorAll('.tabs .tab')].map(b => b.dataset.tab);
+}
+
+/* The saved order, with any UNKNOWN slug appended rather than dropped.
+   This is what keeps a newly-shipped tab from being invisible to anyone who
+   has ever opened this manager. */
+function slTabResolvedOrder(prefs) {
+  const all = slTabAllSlugs();
+  const known = prefs.order.filter(s => all.indexOf(s) >= 0);
+  const rest = all.filter(s => known.indexOf(s) < 0);
+  const ordered = known.concat(rest);
+  /* the manager is always last, wherever it ended up */
+  return ordered.filter(s => s !== SL_TABS_PINNED).concat([SL_TABS_PINNED]);
+}
+
+/* Apply prefs to the DOM: reorder the buttons, hide what should be hidden. */
+function slTabsApply() {
+  const bar = document.querySelector('.tabs');
+  if (!bar) return;
+  const prefs = slTabPrefsLoad();
+  const order = slTabResolvedOrder(prefs);
+  const byslug = {};
+  [...bar.querySelectorAll('.tab')].forEach(b => { byslug[b.dataset.tab] = b; });
+  for (const slug of order) if (byslug[slug]) bar.appendChild(byslug[slug]);
+  for (const slug of Object.keys(byslug)) {
+    const hide = slug !== SL_TABS_PINNED && prefs.hidden.indexOf(slug) >= 0;
+    byslug[slug].classList.toggle('sl-tab-hidden', hide);
+  }
+  /* Never leave the operator looking at a panel whose tab just vanished. */
+  const active = document.querySelector('.tab.active');
+  if (active && active.classList.contains('sl-tab-hidden')) {
+    /* ':not' + '(' — validate_admin_js reads "word (" as a call even inside a
+       string, and this selector cannot be reworded. Same split the PostgREST
+       'or' + '(' token uses in cdNameFilter. */
+    const first = [...bar.querySelectorAll('.tab:not' + '(.sl-tab-hidden)')][0];
+    if (first) switchTab(first.dataset.tab);
+  }
+}
+
+function slTabHide(slug) {
+  if (!slug || slug === SL_TABS_PINNED) return;
+  const prefs = slTabPrefsLoad();
+  if (prefs.hidden.indexOf(slug) < 0) prefs.hidden.push(slug);
+  slTabPrefsSave(prefs);
+  slTabsApply();
+  slTabsManagerRender();
+}
+function slTabShow(slug) {
+  const prefs = slTabPrefsLoad();
+  prefs.hidden = prefs.hidden.filter(s => s !== slug);
+  slTabPrefsSave(prefs);
+  slTabsApply();
+  slTabsManagerRender();
+}
+function slTabToggle(slug) {
+  const prefs = slTabPrefsLoad();
+  (prefs.hidden.indexOf(slug) >= 0) ? slTabShow(slug) : slTabHide(slug);
+}
+
+/* Move a tab one place in the RESOLVED order, then persist that whole order.
+   Persisting the resolved list (not a sparse diff) is what makes the saved
+   order stable once the operator has touched it. */
+function slTabMove(slug, delta) {
+  const prefs = slTabPrefsLoad();
+  const order = slTabResolvedOrder(prefs).filter(s => s !== SL_TABS_PINNED);
+  const i = order.indexOf(slug);
+  const j = i + delta;
+  if (i < 0 || j < 0 || j >= order.length) return;
+  order.splice(j, 0, order.splice(i, 1)[0]);
+  prefs.order = order;
+  slTabPrefsSave(prefs);
+  slTabsApply();
+  slTabsManagerRender();
+}
+
+function slTabsShowAll() {
+  const prefs = slTabPrefsLoad();
+  prefs.hidden = [];
+  slTabPrefsSave(prefs);
+  slTabsApply(); slTabsManagerRender();
+  slTabsSetStatus('All tabs shown.');
+}
+function slTabsResetOrder() {
+  const prefs = slTabPrefsLoad();
+  prefs.order = [];
+  slTabPrefsSave(prefs);
+  slTabsApply(); slTabsManagerRender();
+  slTabsSetStatus('Order reset to the app default.');
+}
+function slTabsSetStatus(m) {
+  const el = document.getElementById('slTabsStatus');
+  if (!el) return;
+  el.textContent = m || '';
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.textContent = ''; }, 4000);
+}
+
+/* ── right-click menu ───────────────────────────────────────────────────── */
+function slTabsCtxClose() {
+  const m = document.getElementById('slTabsCtx');
+  if (m) m.remove();
+}
+function slTabsCtxOpen(ev, slug) {
+  ev.preventDefault();
+  slTabsCtxClose();
+  const label = (TAB_LABEL && TAB_LABEL[slug]) || slug;
+  const m = document.createElement('div');
+  m.id = 'slTabsCtx';
+  m.style.left = Math.min(ev.clientX, window.innerWidth - 190) + 'px';
+  m.style.top  = ev.clientY + 'px';
+  const canHide = slug !== SL_TABS_PINNED;
+  m.innerHTML =
+    (canHide
+      ? '<button onclick="slTabHide(\'' + slug + '\');slTabsCtxClose()">Hide &ldquo;' + esc(label) + '&rdquo;</button>'
+      : '<button disabled style="opacity:.5;cursor:default">Tabs cannot be hidden</button>') +
+    '<button onclick="switchTab(\'tabsmgr\');slTabsCtxClose()">Manage tabs&hellip;</button>';
+  document.body.appendChild(m);
+}
+
+function slTabsWire() {
+  const bar = document.querySelector('.tabs');
+  if (!bar || bar._slWired) return;
+  bar._slWired = true;
+  bar.addEventListener('contextmenu', function (e) {
+    const btn = e.target.closest('.tab');
+    if (!btn) return;
+    slTabsCtxOpen(e, btn.dataset.tab);
+  });
+  document.addEventListener('click', slTabsCtxClose);
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') slTabsCtxClose(); });
+}
+
+/* ── the manager panel ──────────────────────────────────────────────────── */
+function slTabsManagerRender() {
+  const box = document.getElementById('slTabsList');
+  if (!box) return;
+  const prefs = slTabPrefsLoad();
+  const order = slTabResolvedOrder(prefs);
+  const rows = order.map((slug, i) => {
+    const label = (TAB_LABEL && TAB_LABEL[slug]) || slug;
+    const pinned = slug === SL_TABS_PINNED;
+    const off = !pinned && prefs.hidden.indexOf(slug) >= 0;
+    const last = i >= order.length - 2;   /* the manager itself sits at the end */
+    return '<div class="sl-trow' + (off ? ' off' : '') + '">'
+      + '<span class="nm">' + esc(label) + '</span>'
+      + (pinned
+          ? '<span class="pin">always shown &middot; pinned last</span>'
+          : '<button onclick="slTabMove(\'' + slug + '\',-1)"' + (i === 0 ? ' disabled' : '') + ' title="Move up">&uarr;</button>'
+            + '<button onclick="slTabMove(\'' + slug + '\',1)"' + (last ? ' disabled' : '') + ' title="Move down">&darr;</button>'
+            + '<button onclick="slTabToggle(\'' + slug + '\')">' + (off ? 'Show' : 'Hide') + '</button>')
+      + '</div>';
+  }).join('');
+  const hiddenCount = prefs.hidden.length;
+  box.innerHTML = rows
+    + '<p class="hint" style="margin:10px 0 0">' + order.length + ' tabs &middot; '
+    + (hiddenCount ? hiddenCount + ' hidden' : 'none hidden') + '</p>';
+}
+
+window.slTabHide = slTabHide; window.slTabShow = slTabShow; window.slTabToggle = slTabToggle;
+window.slTabMove = slTabMove; window.slTabsShowAll = slTabsShowAll;
+window.slTabsResetOrder = slTabsResetOrder; window.slTabsCtxClose = slTabsCtxClose;
+window.slTabsManagerRender = slTabsManagerRender; window.slTabsApply = slTabsApply;
+
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + name));
@@ -11104,6 +11314,7 @@ function switchTab(name) {
   if (name === 'racktime') rktInit();
   if (name === 'nexusreport') apaNexusInit();
   if (name === 'playersfund') apaFundInit();
+  if (name === 'tabsmgr')     slTabsManagerRender();
   if (name === 'fargoscout') fsInit();
   if (name === 'matchfees') mfInit();
 }
@@ -31522,6 +31733,16 @@ const SB_STYLE = `
   #tab-switchboard .sb-team-name { font-weight:800; color:var(--text); }
   #tab-switchboard .sb-team-num  { color:var(--spm-accent); font-family:ui-monospace,monospace; font-weight:700; margin-right:4px; }
   .spm-phone-src { font-size:0.7rem; font-weight:700; color:#92400e; background:#fef3c7; border-radius:4px; padding:1px 5px; margin-left:4px; }
+  .tab.sl-tab-hidden { display:none !important; }
+  #slTabsCtx { position:fixed; z-index:13000; background:#fff; border:1px solid var(--border); border-radius:8px; box-shadow:0 6px 20px rgba(0,0,0,.18); padding:4px; min-width:170px; }
+  #slTabsCtx button { display:block; width:100%; text-align:left; padding:7px 10px; border:0; background:none; cursor:pointer; font-size:.86rem; border-radius:5px; color:var(--text); }
+  #slTabsCtx button:hover { background:var(--bg); }
+  .sl-trow { display:flex; align-items:center; gap:8px; padding:6px 8px; border:1px solid var(--border); border-radius:8px; margin-bottom:6px; background:var(--card); }
+  .sl-trow.off { opacity:.55; }
+  .sl-trow .nm { flex:1; font-size:.9rem; }
+  .sl-trow .pin { font-size:.72rem; color:var(--muted); }
+  .sl-trow button { padding:3px 8px; font-size:.78rem; border:1px solid var(--border); background:var(--bg); border-radius:6px; cursor:pointer; color:var(--text); }
+  .sl-trow button:disabled { opacity:.35; cursor:default; }
   .apa-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px; }
   .apa-fld label { display:block; font-size:0.78rem; font-weight:700; color:var(--muted); margin-bottom:3px; }
   .apa-fld input, .apa-fld select, .apa-fld textarea { width:100%; box-sizing:border-box; }
