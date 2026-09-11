@@ -5707,7 +5707,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.413';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.414';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -20415,11 +20415,82 @@ async function spPdfLabelGrid(file) {
   return labels;
 }
 
+/* ─── Label-import sanity signals ────────────────────────────────────
+   Escape 0910-spring-labels-wrong-session: on 2026-08-22 the SUMMER label
+   PDF was dropped while the session selector still said SPRING. This
+   function deleted Spring's 644 real labels, inserted Summer's 524, wrote
+   "previous_row_count 644 -> row_count 524" into the audit log, and
+   reported success in green. Spring's labels are gone for good — no PITR,
+   no backups, no PDF kept server-side. ~2/3 of Spring's addressees then
+   showed the WRONG PERSON on PatchCheck for nineteen days.
+
+   validate-sp-labels.mjs catches that shape after the fact. For a table
+   with no restore path, after is too late — hence a gate here.
+
+   TWO CHEAP SIGNALS, not one clever one. Both fired on the real incident:
+     1. the incoming set keeps < 95% of what it replaces (644 -> 524 = 81%)
+     2. the filename names a season/year that is not the selected session
+        ("mailing labels summer 26.pdf" dropped onto Spring 2026)
+
+   DELIBERATELY NOT a confirm on every upload. v3.4 removed that modal on
+   purpose; prompting every time would train the operator to click through,
+   which is how a gate becomes decoration. This fires only on a signal.
+
+   The filename check SUGGESTS, it never decides — the house rule that a
+   classifier must not be the source of truth. It raises a question a human
+   answers. It also has no opinion unless it is sure: a filename with no
+   recognisable season (`labels.pdf`, which is Spring's REAL file) produces
+   nothing, and so does a missing session name. Fail open, never block on
+   the checker's own uncertainty. */
+function spLabelsSeasonOf(text) {
+  const t = String(text || '').toLowerCase();
+  const m = t.match(/\b(spring|summer|fall|autumn|winter)\b/);
+  const season = m ? (m[1] === 'autumn' ? 'fall' : m[1]) : null;
+  /* 4-digit year, or a loose 2-digit one ("summer 26"). Anchored to 20xx so
+     a team number or a row count can't be mistaken for a year. */
+  const y4 = t.match(/\b(20\d{2})\b/);
+  let year = y4 ? parseInt(y4[1], 10) : null;
+  if (!year) {
+    const y2 = t.match(/\b(spring|summer|fall|autumn|winter)\s*'?(\d{2})\b/);
+    if (y2) year = 2000 + parseInt(y2[2], 10);
+  }
+  return (season || year) ? { season, year } : null;
+}
+
+/* Returns a list of plain-language concerns. Empty list = save silently. */
+function spLabelsSanityIssues(newCount, previousCount, filename, sessionName) {
+  const issues = [];
+
+  if (previousCount > 0 && newCount === 0) {
+    issues.push('This would DELETE all ' + previousCount
+      + ' existing labels and add none. The PDF may not have parsed.');
+  } else if (previousCount > 0 && newCount < previousCount * 0.95) {
+    const pct = Math.round(100 * (previousCount - newCount) / previousCount);
+    issues.push('This replaces ' + previousCount + ' labels with ' + newCount
+      + ' — ' + pct + '% fewer. A drop that size is usually the wrong file'
+      + ' or the wrong session.');
+  }
+
+  const f = spLabelsSeasonOf(filename);
+  const s = spLabelsSeasonOf(sessionName);
+  if (f && s) {
+    if (f.season && s.season && f.season !== s.season) {
+      issues.push('The file name says "' + f.season + '" but you are writing to '
+        + sessionName + '.');
+    } else if (f.year && s.year && f.year !== s.year) {
+      issues.push('The file name says ' + f.year + ' but you are writing to '
+        + sessionName + '.');
+    }
+  }
+  return issues;
+}
+
 /* ─── Labels auto-save ───────────────────────────────────────────────
-   Drops straight to the DB — no confirmation modal. Replaces the
-   selected operator's entire label set in one transaction (audit row →
-   delete old → insert new). Requires a specific operator (SPM or CRA);
-   "Both" can't disambiguate which operator the labels belong to. */
+   Drops straight to the DB — no confirmation modal on the happy path.
+   Replaces the selected operator's entire label set (audit row → delete
+   old → insert new). Requires a specific operator (SPM or CRA); "Both"
+   can't disambiguate which operator the labels belong to.
+   Gated by spLabelsSanityIssues — see above. */
 async function spSaveLabels(labels, filename) {
   if (_spOperatorFilter === 'ALL') {
     setStatus('spDropStatus',
@@ -20441,6 +20512,28 @@ async function spSaveLabels(labels, filename) {
         'sp_labels?operator_id=eq.' + opId + '&session_id=eq.' + sessId + '&select=id');
     } catch (e) { /* table may be empty */ }
     const previousCount = prev.length || 0;
+
+    /* GATE. Nothing below this point is reversible, so it runs BEFORE the
+       audit row as well as before the delete — a cancelled import must leave
+       no trace at all, not an orphan upload row implying something happened. */
+    const issues = spLabelsSanityIssues(
+      labels.length, previousCount, filename,
+      (currentSession && currentSession.name) || '');
+    if (issues.length) {
+      const ok = confirm(
+        'Hold on — this replaces every mailing label for '
+        + ((currentSession && currentSession.name) || 'this session')
+        + ' (' + opShort + ').\n\n'
+        + issues.map(s => '• ' + s).join('\n\n')
+        + '\n\nFile: ' + filename
+        + '\n\nThe labels being replaced CANNOT be recovered.'
+        + '\n\nOK to replace them anyway?');
+      if (!ok) {
+        setStatus('spDropStatus',
+          'Cancelled — nothing was changed. ' + previousCount + ' labels left as they were.', 'warn');
+        return;
+      }
+    }
 
     // 1) Audit row first — its PK is the FK target on sp_labels.
     const auditCreated = await sb('POST', 'sp_label_uploads', {
