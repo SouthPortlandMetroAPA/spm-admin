@@ -1093,6 +1093,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="nexusreport">Nexus Issue</button>
       <button class="tab" data-tab="playersfund">Players Fund</button>
       <button class="tab" data-tab="mvp">MVP Winners</button>
+      <button class="tab" data-tab="stripe">Stripe Customers</button>
       <!-- Pinned last and never hideable: it is the only route back to a
            hidden tab. slTabsApply enforces both. -->
       <button class="tab" data-tab="tabsmgr" title="Show, hide and reorder tabs">&#9776; Tabs</button>
@@ -5589,6 +5590,77 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       </div>
     </div>
 
+    <!-- ═══════════════ Stripe Customers (3.416) ═══════════════
+         Read-first, then write: "Preview" asks the Worker for a plan (it sweeps
+         every Stripe customer once and diffs against the roster); "Sync" sends
+         the SAME request with dry_run=false. Existing customers are OVERWRITTEN
+         from slate (name, email, every metadata key). The Stripe key lives only
+         in the Worker. -->
+    <div id="tab-stripe" class="tab-panel">
+      <style>
+        #tab-stripe .stc-sum{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+        #tab-stripe .stc-pill{border:1px solid var(--border);border-radius:999px;padding:6px 12px;font-size:.85rem;background:var(--card);cursor:pointer;min-height:32px}
+        #tab-stripe .stc-pill b{font-variant-numeric:tabular-nums}
+        #tab-stripe .stc-pill.on{background:var(--spm-accent);color:#fff;border-color:var(--spm-accent)}
+        #tab-stripe .stc-pill.create b{color:var(--spm-accent)} #tab-stripe .stc-pill.on.create b{color:#fff}
+        #tab-stripe .stc-pill.error b{color:var(--spm-primary)} #tab-stripe .stc-pill.on.error b{color:#fff}
+        #tab-stripe .stc-board-head{background:linear-gradient(135deg,var(--spm-primary),var(--spm-accent));color:#fff;border-radius:12px 12px 0 0;padding:14px 18px;display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap}
+        #tab-stripe .stc-board-head h3{margin:0;font-size:1.15rem;font-weight:900;letter-spacing:-.01em}
+        #tab-stripe .stc-board-head .sub{opacity:.9;font-size:.85rem}
+        #tab-stripe .stc-board-wrap{border:1px solid var(--border);border-top:none;border-radius:0 0 12px 12px;overflow:auto;background:var(--card);max-height:70svh}
+        #tab-stripe table.stc-board{width:100%;border-collapse:separate;border-spacing:0;font-size:.95rem}
+        #tab-stripe table.stc-board th{position:sticky;top:0;background:var(--card);text-align:left;padding:10px 14px;font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);border-bottom:2px solid var(--border);z-index:1}
+        #tab-stripe table.stc-board td{padding:9px 14px;border-bottom:1px solid var(--border);vertical-align:middle}
+        #tab-stripe table.stc-board tr:hover td{background:rgba(0,49,161,.04)}
+        #tab-stripe table.stc-board td.num{font-variant-numeric:tabular-nums;text-align:right}
+        #tab-stripe .stc-act{display:inline-block;border-radius:6px;padding:2px 8px;font-size:.78rem;font-weight:700;letter-spacing:.02em}
+        #tab-stripe .stc-act.create{background:rgba(0,49,161,.1);color:var(--spm-accent)}
+        #tab-stripe .stc-act.update,#tab-stripe .stc-act.adopt{background:rgba(234,0,42,.08);color:var(--spm-primary)}
+        #tab-stripe .stc-act.unchanged{background:rgba(0,0,0,.06);color:var(--muted)}
+        #tab-stripe .stc-act.skip{background:#fff3cd;color:#7a5a00}
+        #tab-stripe .stc-act.error{background:var(--spm-primary);color:#fff}
+        #tab-stripe .stc-act.created,#tab-stripe .stc-act.updated,#tab-stripe .stc-act.adopted{background:#dcfce7;color:#14532d}
+        #tab-stripe code.stc-id{font-size:.8rem;color:var(--muted)}
+        #tab-stripe .stc-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:12px 18px}
+        #tab-stripe .stc-tools input{min-width:220px}
+      </style>
+
+      <div class="card">
+        <h2>Stripe Customers</h2>
+        <p class="hint">Every player on an SPM team in the chosen session becomes a Stripe customer — name, email, APA number, and every team they are on with their role. Preview first; nothing is written until you confirm. Existing customers are overwritten with what slate has now.</p>
+        <div class="form-row" style="display:flex;gap:12px;align-items:end;flex-wrap:wrap">
+          <div class="form-field">
+            <label for="stcSession">Session</label>
+            <select id="stcSession" class="form-input"></select>
+          </div>
+          <button class="btn btn-outline" id="stcPlanBtn" onclick="stcPlan()">Preview sync</button>
+          <button class="btn btn-primary" id="stcSyncBtn" onclick="stcSync()" disabled>Sync to Stripe</button>
+          <span class="hint" id="stcWorkerNote"></span>
+        </div>
+        <div id="stcStatus" class="status-line"></div>
+        <div class="stc-sum" id="stcSummary" style="display:none"></div>
+      </div>
+
+      <div class="card" style="padding:0;overflow:hidden">
+        <div class="stc-board-head">
+          <h3 id="stcBoardTitle">Players</h3>
+          <span class="sub" id="stcBoardSub">Run a preview to see the plan.</span>
+        </div>
+        <div class="stc-tools">
+          <input type="search" id="stcFind" class="form-input" placeholder="Find a player, APA #, email, team…" oninput="stcRender()">
+          <span style="flex:1"></span>
+          <button class="btn btn-outline btn-sm" onclick="stcCopy()">📋 Copy Stripe IDs</button>
+          <span id="stcCopyStatus" class="hint"></span>
+        </div>
+        <div class="stc-board-wrap">
+          <table class="stc-board">
+            <thead><tr><th>Player</th><th>APA #</th><th>Email</th><th class="num">Teams</th><th>Captain</th><th>Plan</th><th>Result</th><th>Stripe</th></tr></thead>
+            <tbody id="stcBody"><tr><td colspan="8" class="hint" style="padding:18px">No plan yet.</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <div id="tab-tabsmgr" class="tab-panel">
       <div class="card" style="padding:16px;max-width:640px">
         <h3 style="margin:0 0 2px">Tabs</h3>
@@ -5847,7 +5919,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.415';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.416';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11097,6 +11169,7 @@ const TAB_LABEL = {
   nexusreport:   'Nexus Issue',
   playersfund:   'Players Fund',
   mvp:           'MVP Winners',
+  stripe:        'Stripe Customers',
   tabsmgr:       'Tabs',
   matchfees:     'Match Fees'
 };
@@ -11505,6 +11578,7 @@ function switchTab(name) {
   if (name === 'nexusreport') apaNexusInit();
   if (name === 'playersfund') apaFundInit();
   if (name === 'mvp') mvpInit();
+  if (name === 'stripe') stcInit();
   if (name === 'tabsmgr')     slTabsManagerRender();
   if (name === 'fargoscout') fsInit();
   if (name === 'matchfees') mfInit();
@@ -12049,6 +12123,147 @@ async function mvpCopyEmails(which) {
 window.mvpInit = mvpInit; window.mvpSave = mvpSave; window.mvpDiscard = mvpDiscard;
 window.mvpPickDivision = mvpPickDivision; window.mvpPickPlayer = mvpPickPlayer; window.mvpFindPick = mvpFindPick;
 window.mvpFilter = mvpFilter; window.mvpCopyEmails = mvpCopyEmails;
+
+
+/* ═══════════════════════════════════════════════════════════════════════
+   STRIPE CUSTOMERS (3.416)
+   ───────────────────────────────────────────────────────────────────────
+   Backend: Apps/shared/stripe-customers-worker (stripe-customers.spmapa.workers.dev)
+     POST /sync { session_id, dry_run }  auth = Bearer SB_KEY (service key)
+   The Worker does ALL the reading (roster from Supabase, every Stripe
+   customer in one paginated sweep, our mirror slate.stripe_customers) and
+   returns a per-player plan. dry_run=true → plan only. dry_run=false → the
+   Worker creates missing customers and OVERWRITES existing ones from slate.
+   The browser never holds the Stripe key and never sends player PII.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+const STC_WORKER_URL = 'https://stripe-customers.spmapa.workers.dev';
+
+let _stcInited = false;
+let _stcPlan   = null;        /* last Worker response (dry or real) */
+let _stcFilter = 'all';
+
+async function stcInit() {
+  if (_stcInited) return;
+  _stcInited = true;
+  const sel = document.getElementById('stcSession');
+  sel.innerHTML = '<option>Loading…</option>';
+  try {
+    const rows = await sb('GET', 'sessions?select=id,name,is_current,start_date&order=start_date.desc.nullslast', null, { 'Accept-Profile': 'slate' });
+    sel.innerHTML = rows.map(s => '<option value="' + s.id + '"' + (s.is_current ? ' selected' : '') + '>' + esc(s.name) + (s.is_current ? ' (current)' : '') + '</option>').join('');
+  } catch (e) { sel.innerHTML = '<option value="">Could not load sessions</option>'; }
+  try {
+    const h = await (await fetch(STC_WORKER_URL + '/health')).json();
+    document.getElementById('stcWorkerNote').textContent = h.ok ? ('Worker OK · ' + (h.livemode ? 'LIVE Stripe' : 'sandbox') + ' · API ' + h.version) : 'Worker unhealthy';
+  } catch (e) { document.getElementById('stcWorkerNote').textContent = 'Worker unreachable'; }
+}
+
+async function stcCall(dryRun) {
+  const sid = Number(document.getElementById('stcSession').value);
+  if (!sid) { setStatus('stcStatus', 'Pick a session first.', 'warn'); return null; }
+  const r = await fetch(STC_WORKER_URL + '/sync', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + SB_KEY },
+    body: JSON.stringify({ session_id: sid, dry_run: dryRun }),
+  });
+  const j = await r.json().catch(() => ({ ok: false, error: 'HTTP ' + r.status }));
+  if (!r.ok || !j.ok) throw new Error(j.error || ('HTTP ' + r.status));
+  return j;
+}
+
+async function stcPlan() {
+  const btnP = document.getElementById('stcPlanBtn'), btnS = document.getElementById('stcSyncBtn');
+  btnP.disabled = true; btnS.disabled = true;
+  setStatus('stcStatus', 'Reading the roster and every Stripe customer…', 'progress');
+  try {
+    _stcPlan = await stcCall(true);
+    const p = _stcPlan.plan;
+    const writes = p.create + p.update + p.adopt;
+    setStatus('stcStatus', 'Plan ready — ' + _stcPlan.roster + ' players on the roster, ' + _stcPlan.stripe_scanned + ' customers scanned in Stripe. ' + (writes ? writes + ' write' + (writes === 1 ? '' : 's') + ' would happen.' : 'Nothing to write.'), 'ok');
+    btnS.disabled = writes === 0;
+  } catch (e) { _stcPlan = null; setStatus('stcStatus', 'Preview failed: ' + esc(e.message), 'err'); }
+  btnP.disabled = false;
+  stcRenderSummary(); stcRender();
+}
+
+async function stcSync() {
+  if (!_stcPlan || !_stcPlan.dry_run) { setStatus('stcStatus', 'Run a preview first.', 'warn'); return; }
+  const p = _stcPlan.plan;
+  const msg = 'Write to Stripe — LIVE account?\n\n' +
+    '  create ' + p.create + ' new customer' + (p.create === 1 ? '' : 's') + '\n' +
+    '  overwrite ' + (p.update + p.adopt) + ' existing\n' +
+    '  leave ' + p.unchanged + ' unchanged, skip ' + p.skip + '\n\n' +
+    'Session: ' + _stcPlan.session.name + '. Existing customers are overwritten with slate data.';
+  if (!confirm(msg)) { setStatus('stcStatus', 'Cancelled — nothing was written.', 'warn'); return; }
+  const btnP = document.getElementById('stcPlanBtn'), btnS = document.getElementById('stcSyncBtn');
+  btnP.disabled = true; btnS.disabled = true;
+  setStatus('stcStatus', 'Writing to Stripe… (about ' + Math.ceil((p.create + p.update + p.adopt) / 10) + ' s)', 'progress');
+  try {
+    _stcPlan = await stcCall(false);
+    const w = _stcPlan.writes;
+    setStatus('stcStatus', 'Done — created ' + w.created + ' · overwrote ' + (w.updated + w.adopted) + ' · unchanged ' + w.unchanged + ' · skipped ' + w.skipped + (w.errors ? ' · <b>' + w.errors + ' error' + (w.errors === 1 ? '' : 's') + '</b>' : ''), w.errors ? 'err' : 'ok');
+  } catch (e) { setStatus('stcStatus', 'Sync failed: ' + esc(e.message) + ' — run Preview again to see the current state.', 'err'); }
+  btnP.disabled = false;
+  stcRenderSummary(); stcRender();
+}
+
+function stcRenderSummary() {
+  const el = document.getElementById('stcSummary');
+  if (!_stcPlan) { el.style.display = 'none'; return; }
+  const rows = _stcPlan.rows;
+  const n = k => rows.filter(r => stcKind(r) === k).length;
+  const kinds = [['all', 'All', rows.length], ['create', 'Create', n('create')], ['update', 'Overwrite', n('update') + n('adopt')], ['unchanged', 'Unchanged', n('unchanged')], ['skip', 'Skipped', n('skip')], ['done', 'Written', n('done')], ['error', 'Errors', n('error')]];
+  el.innerHTML = kinds.filter(k => k[0] === 'all' || k[2] > 0).map(k =>
+    '<button class="stc-pill ' + k[0] + (_stcFilter === k[0] ? ' on' : '') + '" onclick="stcFilter(\'' + k[0] + '\')">' + k[1] + ' <b>' + k[2] + '</b></button>').join('');
+  el.style.display = '';
+  document.getElementById('stcBoardTitle').textContent = _stcPlan.session.name + ' — ' + rows.length + ' players';
+  document.getElementById('stcBoardSub').textContent = _stcPlan.dry_run ? 'Preview — nothing written yet' : 'Synced ' + new Date().toLocaleTimeString();
+}
+
+/* The kind a row is shown as: after a real sync the RESULT wins over the plan. */
+function stcKind(r) {
+  if (r.result === 'error') return 'error';
+  if (r.result === 'created' || r.result === 'updated' || r.result === 'adopted') return 'done';
+  if (r.action === 'adopt') return 'update';
+  return r.action;
+}
+
+function stcFilter(k) { _stcFilter = k; stcRenderSummary(); stcRender(); }
+
+function stcRender() {
+  const body = document.getElementById('stcBody');
+  if (!_stcPlan) { body.innerHTML = '<tr><td colspan="8" class="hint" style="padding:18px">No plan yet.</td></tr>'; return; }
+  const q = (document.getElementById('stcFind').value || '').trim().toLowerCase();
+  const rows = _stcPlan.rows.filter(r => (_stcFilter === 'all' || stcKind(r) === _stcFilter) &&
+    (!q || (r.name + ' ' + r.apa + ' ' + (r.email || '') + ' ' + (r.customer_id || '')).toLowerCase().includes(q)));
+  if (!rows.length) { body.innerHTML = '<tr><td colspan="8" class="hint" style="padding:18px">No players match.</td></tr>'; return; }
+  body.innerHTML = rows.map(r => {
+    const kind = stcKind(r);
+    const plan = '<span class="stc-act ' + r.action + '">' + (r.action === 'update' || r.action === 'adopt' ? 'overwrite' : r.action) + '</span>' + (r.reason ? ' <span class="hint">' + esc(r.reason) + '</span>' : '');
+    const res = r.result ? '<span class="stc-act ' + (r.result === 'error' ? 'error' : r.result) + '">' + esc(r.result) + '</span>' + (r.error ? ' <span class="hint">' + esc(r.error) + '</span>' : '') : '';
+    return '<tr' + (kind === 'error' ? ' style="background:rgba(234,0,42,.05)"' : '') + '>' +
+      '<td>' + esc(r.name) + '</td>' +
+      '<td>' + esc(r.apa) + '</td>' +
+      '<td>' + esc(r.email || '—') + '</td>' +
+      '<td class="num">' + r.teams + '</td>' +
+      '<td>' + (r.captain ? '✔' : '') + '</td>' +
+      '<td>' + plan + (r.changes && r.changes.length && r.action !== 'create' ? ' <span class="hint" title="' + esc(r.changes.join(', ')) + '">' + r.changes.length + ' field' + (r.changes.length === 1 ? '' : 's') + '</span>' : '') + '</td>' +
+      '<td>' + res + '</td>' +
+      '<td>' + (r.customer_id ? '<code class="stc-id">' + esc(r.customer_id) + '</code>' : '') + '</td>' +
+      '</tr>';
+  }).join('');
+}
+
+async function stcCopy() {
+  if (!_stcPlan) { setStatus('stcCopyStatus', 'No plan yet.', 'warn'); return; }
+  const ids = _stcPlan.rows.filter(r => r.customer_id).map(r => r.apa + '\t' + r.customer_id);
+  if (!ids.length) { document.getElementById('stcCopyStatus').textContent = 'No Stripe IDs yet.'; return; }
+  try { await navigator.clipboard.writeText('apa_number\tstripe_customer_id\n' + ids.join('\n')); document.getElementById('stcCopyStatus').textContent = 'Copied ' + ids.length + ' IDs, tab-separated.'; }
+  catch (e) { document.getElementById('stcCopyStatus').textContent = 'Copy failed: ' + e.message; }
+}
+
+window.stcInit = stcInit; window.stcPlan = stcPlan; window.stcSync = stcSync;
+window.stcFilter = stcFilter; window.stcRender = stcRender; window.stcCopy = stcCopy;
 
 /* ═══════════════ New Joiners — recent APA joins not on a current team ═══════════════
    Read-only outreach list. Source = slate.new_unrostered_players() RPC (service_role
