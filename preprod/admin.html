@@ -11568,7 +11568,10 @@ function mvpNormDivision(s, loose) {
   return t.replace(/[^a-z0-9]/g, '');
 }
 function mvpNormName(s) {
-  return String(s || '').toLowerCase().replace(/[^a-z]/g, '');
+  /* Fold accents FIRST: "Villaseñor" on the roster vs "Villasenor" on the
+     sheet must be the same key. Stripping non-letters without folding threw
+     the ñ away and turned an exact match into a near-miss on the real run. */
+  return String(s || '').normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z]/g, '');
 }
 /* Is this OCR line a division line, a winner line, or sheet noise? */
 function mvpLineKind(line) {
@@ -11576,6 +11579,13 @@ function mvpLineKind(line) {
   if (!t) return 'blank';
   if (/^page\s*\d/i.test(t)) return 'noise';
   if (/trophies|plates should read|individual name|division name|^\(|mvp\s*-?\s*\d{4}|session$/i.test(t)) return 'noise';
+  /* The centred header block straddles the column split, so each half sees a
+     FRAGMENT of it: "Male MVP", "Female MVI", "dividual name)", "ivision
+     name)". Real OCR of the Summer 26 sheet produced exactly these. A
+     fragment that mentions MVP or ends in "name)" is header debris.
+     NOT "starts lowercase": the scan renders "Ian" as "lan", and a rule
+     that broad ate a real winner on the first real run. */
+  if (/\bmv[pi]\b/i.test(t) || /name\)\s*$/i.test(t) || /^(male|female)\b/i.test(t)) return 'noise';
   if (/divisio\w*$/i.test(t) || /\b[89]\s*ball\b/i.test(t) || /\bdoubles\b/i.test(t) || /\bdivision\b/i.test(t)) return 'division';
   if (/\bleague of our own\b|\bladies\b/i.test(t)) return 'division';
   if (/^[A-Za-z][A-Za-z'.-]+( [A-Za-z][A-Za-z'.-]+){1,3}$/.test(t)) return 'name';
@@ -11681,7 +11691,12 @@ async function mvpLoadSessionData(sessionId) {
     const rows = await sb('GET', 'players?member_number=in.(' + chunk.map(encodeURIComponent).join(',') + ')&select=member_number,first_name,last_name,nickname,email,gender') || [];
     players.push(...rows);
   }
-  players.forEach(p => { p.norm = mvpNormName(p.first_name + p.last_name); _mvpPlayersByMn.set(String(p.member_number), p); });
+  players.forEach(p => {
+    p.norm = mvpNormName(p.first_name + p.last_name);
+    p.normLast = mvpNormName(p.last_name);
+    p.normNick = p.nickname ? mvpNormName(p.nickname + p.last_name) : '';
+    _mvpPlayersByMn.set(String(p.member_number), p);
+  });
   for (const m of tms) {
     const div = teamDiv.get(m.team_id); const p = _mvpPlayersByMn.get(String(m.member_number));
     if (!div || !p) continue;
@@ -11712,6 +11727,42 @@ function mvpResolvePlayer(divisionId, rawName) {
   const hits = [...roster.values()].filter(p => p.norm === n);
   if (hits.length === 1) return { status: 'one', hits };
   return { status: hits.length ? 'many' : 'none', hits };
+}
+
+/* When the exact match fails, SUGGEST — never decide. On the real Summer 26
+   sheet 11 of 93 winners missed exact, and every one was the same class:
+   the sheet says "Sue", "Jim", "Barb", "Kirkpatrick" and the roster says
+   Susan, James, Barbara, Kirk — or OCR swapped a letter ("lan" for Ian,
+   "Correla" for Correia). Three narrowing passes, each accepted only if it
+   lands on EXACTLY ONE rostered player in this division:
+     1. nickname + last name
+     2. last name alone
+     3. last name within one edit (the OCR letter-swap)
+   The result is shown as "likely" with a Use button; the operator clicks it. */
+function mvpEdit1(a, b) {
+  if (a === b) return true;
+  if (Math.abs(a.length - b.length) > 1) return false;
+  let i = 0, j = 0, edits = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) { i++; j++; continue; }
+    if (++edits > 1) return false;
+    if (a.length > b.length) i++; else if (a.length < b.length) j++; else { i++; j++; }
+  }
+  return edits + (a.length - i) + (b.length - j) <= 1;
+}
+function mvpSuggestPlayer(divisionId, rawName) {
+  const roster = _mvpRosterByDiv.get(divisionId);
+  if (!roster) return null;
+  const base = String(rawName).replace(/\s+(jr|sr|ii|iii|iv)\.?$/i, '').trim();
+  const parts = base.split(/\s+/);
+  if (parts.length < 2) return null;
+  const first = mvpNormName(parts[0]), last = mvpNormName(parts.slice(1).join(' '));
+  const all = [...roster.values()];
+  const one = list => (list.length === 1 ? list[0] : null);
+  return one(all.filter(p => p.normNick && p.normNick === first + p.normLast))
+      || one(all.filter(p => p.normLast === last))
+      || one(all.filter(p => mvpEdit1(p.normLast, last)))
+      || null;
 }
 
 /* ── tab state ───────────────────────────────────────────────────────── */
@@ -11768,8 +11819,9 @@ async function mvpHandleFile(file) {
       const dr = mvpResolveDivision(e.division);
       const div = dr && dr.div;
       const pr = div ? mvpResolvePlayer(div.id, e.name) : { status: 'none', hits: [] };
+      const sg = (div && pr.status === 'none') ? mvpSuggestPlayer(div.id, e.name) : null;
       return { i, gender: e.gender, page: e.page, rawDivision: e.division, rawName: e.name,
-               divisionId: div ? div.id : null, divisionAuto: !!div, divisionLoose: !!(dr && dr.loose),
+               divisionId: div ? div.id : null, divisionAuto: !!div, divisionLoose: !!(dr && dr.loose), suggest: sg,
                memberNumber: pr.status === 'one' ? pr.hits[0].member_number : null,
                playerStatus: pr.status, playerHits: pr.hits, resolution: (div && pr.status === 'one') ? 'auto' : 'unresolved' };
     });
@@ -11817,7 +11869,9 @@ function mvpRenderReview() {
             + (genderOdd ? ' <span class="mvp-chip warn" title="players.gender disagrees with the sheet — check">gender?</span>' : '')
           : (r.playerStatus === 'many'
               ? '<span class="mvp-chip bad">' + r.playerHits.length + ' namesakes</span> ' + r.playerHits.map(h => '<button class="btn btn-outline mvp-fix" onclick="mvpPickPlayer(' + r.i + ',\'' + esc(h.member_number) + '\')">' + esc(cdPlayerName(h)) + ' #' + esc(h.member_number) + '</button>').join(' ')
-              : '<span class="mvp-chip bad">' + (r.divisionId ? 'not on a roster in this division' : 'pick the division first') + '</span>'))
+              : (r.suggest
+                  ? '<span class="mvp-chip warn">likely</span> ' + esc(cdPlayerName(r.suggest)) + ' <span class="mvp-raw">#' + esc(r.suggest.member_number) + '</span> <button class="btn btn-primary mvp-fix" onclick="mvpPickPlayer(' + r.i + ',\'' + esc(r.suggest.member_number) + '\')">Use</button>'
+                  : '<span class="mvp-chip bad">' + (r.divisionId ? 'not on a roster in this division' : 'pick the division first') + '</span>')))
       + '</td>'
       + '<td><div class="cd-search" style="min-width:220px"><input id="mvpFind' + r.i + '" autocomplete="off" placeholder="Find player…" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:8px;font:inherit;font-size:.82rem"><div class="cd-ac" id="mvpAc' + r.i + '"></div></div></td>'
       + '</tr>';
@@ -11836,6 +11890,7 @@ function mvpPickDivision(i, val) {
   const pr = r.divisionId ? mvpResolvePlayer(r.divisionId, r.rawName) : { status: 'none', hits: [] };
   r.memberNumber = pr.status === 'one' ? pr.hits[0].member_number : null;
   r.playerStatus = pr.status; r.playerHits = pr.hits;
+  r.suggest = (r.divisionId && pr.status === 'none') ? mvpSuggestPlayer(r.divisionId, r.rawName) : null;
   r.resolution = r.memberNumber ? 'manual' : 'unresolved';
   mvpRenderReview();
 }
