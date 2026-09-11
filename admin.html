@@ -5779,7 +5779,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.415';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.416';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11516,11 +11516,28 @@ async function stcSync() {
   const btnP = document.getElementById('stcPlanBtn'), btnS = document.getElementById('stcSyncBtn');
   btnP.disabled = true; btnS.disabled = true;
   setStatus('stcStatus', 'Writing to Stripe… (about ' + Math.ceil((p.create + p.update + p.adopt) / 10) + ' s)', 'progress');
+  /* Batched: a Worker invocation may make ~50 outbound fetches (free plan), so
+     the Worker writes what its budget allows and reports `remaining`. Loop until
+     nothing remains, accumulating counts. Each call re-sweeps Stripe, so a
+     customer created in an earlier batch is found, never created twice. */
+  const total = p.create + p.update + p.adopt;
+  const acc = { created: 0, updated: 0, adopted: 0, errors: 0 };
   try {
-    _stcPlan = await stcCall(false);
+    let batches = 0;
+    for (;;) {
+      _stcPlan = await stcCall(false);
+      const w = _stcPlan.writes;
+      acc.created += w.created; acc.updated += w.updated; acc.adopted += w.adopted; acc.errors += w.errors;
+      batches++;
+      const done = acc.created + acc.updated + acc.adopted + acc.errors;
+      if (!_stcPlan.remaining) break;
+      if (batches > 200) throw new Error('stopped after 200 batches with ' + _stcPlan.remaining + ' remaining');
+      setStatus('stcStatus', 'Writing to Stripe… ' + done + ' of ' + total + ' (' + _stcPlan.remaining + ' remaining, batch ' + batches + ')', 'progress');
+      stcRenderSummary(); stcRender();
+    }
     const w = _stcPlan.writes;
-    setStatus('stcStatus', 'Done — created ' + w.created + ' · overwrote ' + (w.updated + w.adopted) + ' · unchanged ' + w.unchanged + ' · skipped ' + w.skipped + (w.errors ? ' · <b>' + w.errors + ' error' + (w.errors === 1 ? '' : 's') + '</b>' : ''), w.errors ? 'err' : 'ok');
-  } catch (e) { setStatus('stcStatus', 'Sync failed: ' + esc(e.message) + ' — run Preview again to see the current state.', 'err'); }
+    setStatus('stcStatus', 'Done — created ' + acc.created + ' · overwrote ' + (acc.updated + acc.adopted) + ' · unchanged ' + w.unchanged + ' · skipped ' + w.skipped + (acc.errors ? ' · <b>' + acc.errors + ' error' + (acc.errors === 1 ? '' : 's') + '</b>' : '') + ' · ' + batches + ' batch' + (batches === 1 ? '' : 'es'), acc.errors ? 'err' : 'ok');
+  } catch (e) { setStatus('stcStatus', 'Sync stopped: ' + esc(e.message) + ' — written so far: ' + (acc.created + acc.updated + acc.adopted) + ' of ' + total + '. Run Preview again; a re-sync continues where it left off.', 'err'); }
   btnP.disabled = false;
   stcRenderSummary(); stcRender();
 }
