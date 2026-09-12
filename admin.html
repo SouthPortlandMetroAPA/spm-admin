@@ -1084,6 +1084,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="chalktalk">ChalkTalk</button>
       <button class="tab" data-tab="nickpick">NickPick</button>
       <button class="tab" data-tab="crewcall">Shipmate</button>
+      <button class="tab" data-tab="teamchanges">Team Changes</button>
       <button class="tab" data-tab="ourrack">To-Do</button>
       <button class="tab" data-tab="preshot">PreShot</button>
       <button class="tab" data-tab="cuedrop">CueDrop</button>
@@ -5521,6 +5522,70 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       </div>
     </div>
 
+    <!-- ═══════════════ Team Changes — captain request queue ═══════════════
+         Requests come from the public Team Changes app (captains/co-captains).
+         The league is the only writer to APA Member Services; this tab is the
+         review + bookkeeping surface. Mark applied ALSO writes slate so Slate's
+         own tools reflect the change immediately. -->
+    <div id="tab-teamchanges" class="tab-panel">
+      <style>
+        #tab-teamchanges .tc-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+        #tab-teamchanges .tc-count{color:var(--muted);font-size:.9rem;font-weight:600}
+        #tab-teamchanges .tc-filters{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;align-items:center}
+        #tab-teamchanges .tc-fbtn{padding:6px 12px;border:1px solid var(--border);border-radius:999px;background:var(--card);cursor:pointer;font-size:.9rem;color:var(--text);min-height:32px}
+        #tab-teamchanges .tc-fbtn.active{background:var(--spm-accent);color:#fff;border-color:var(--spm-accent)}
+        #tab-teamchanges .tc-fbtn b{font-variant-numeric:tabular-nums}
+        #tab-teamchanges .tc-list{display:flex;flex-direction:column;gap:10px}
+        #tab-teamchanges .tc-r{border:1px solid var(--border);border-left:4px solid var(--border);border-radius:10px;background:var(--card);padding:12px 14px}
+        #tab-teamchanges .tc-r.pending{border-left-color:#d97706}
+        #tab-teamchanges .tc-r.approved{border-left-color:#0031a1}
+        #tab-teamchanges .tc-r.applied{border-left-color:#0a7d33;opacity:.85}
+        #tab-teamchanges .tc-r.rejected,#tab-teamchanges .tc-r.withdrawn{border-left-color:#9ca3af;opacity:.7}
+        #tab-teamchanges .tc-top{display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap}
+        #tab-teamchanges .tc-main{flex:1;min-width:260px}
+        #tab-teamchanges .tc-tag{display:inline-block;font-size:.66rem;font-weight:800;letter-spacing:.04em;padding:2px 8px;border-radius:999px;text-transform:uppercase;margin-right:6px}
+        #tab-teamchanges .tc-tag.pending{background:#fff3cd;color:#7a5a00}
+        #tab-teamchanges .tc-tag.approved{background:#e7edfb;color:#0031a1}
+        #tab-teamchanges .tc-tag.applied{background:#e6f7ec;color:#0a7d33}
+        #tab-teamchanges .tc-tag.rejected{background:#fde7ec;color:#b3021f}
+        #tab-teamchanges .tc-tag.withdrawn{background:#f1f1f1;color:#666}
+        #tab-teamchanges .tc-team{font-weight:800;font-size:1.02rem}
+        #tab-teamchanges .tc-sub{color:var(--muted);font-size:.85rem}
+        #tab-teamchanges table.tc-items{border-collapse:collapse;margin:8px 0 4px;font-size:.92rem}
+        #tab-teamchanges table.tc-items td{padding:4px 10px 4px 0;vertical-align:top}
+        #tab-teamchanges table.tc-items td.k{color:var(--muted);white-space:nowrap;font-size:.78rem;letter-spacing:.06em;text-transform:uppercase;padding-top:6px}
+        #tab-teamchanges .tc-was{color:var(--muted)}
+        #tab-teamchanges .tc-actions{display:flex;gap:8px;flex-wrap:wrap;margin-left:auto;align-items:flex-start}
+        #tab-teamchanges .tc-reason{margin-top:6px;font-style:italic}
+        #tab-teamchanges .tc-note{margin-top:6px;color:#7a5a00}
+        #tab-teamchanges .tc-empty{color:var(--muted);padding:28px;text-align:center}
+        #tab-teamchanges table.tc-gates{width:100%;border-collapse:collapse;font-size:.9rem}
+        #tab-teamchanges table.tc-gates th{text-align:left;font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:6px 8px;border-bottom:2px solid var(--border)}
+        #tab-teamchanges table.tc-gates td{padding:6px 8px;border-bottom:1px solid var(--border)}
+        #tab-teamchanges table.tc-gates select{font:inherit;padding:4px 8px;border:1px solid var(--border);border-radius:8px;min-height:32px}
+        #tab-teamchanges .tc-open{color:#0a7d33;font-weight:700} #tab-teamchanges .tc-closed{color:var(--muted)}
+      </style>
+      <div class="card">
+        <div class="tc-head">
+          <h2 style="margin:0">Team Changes &mdash; captain requests</h2>
+          <button class="btn btn-outline btn-sm" onclick="tcInit(true)">Refresh</button>
+          <span class="tc-count" id="tcCount"></span>
+          <a class="btn btn-outline btn-sm" style="margin-left:auto;text-decoration:none" href="https://southportlandmetroapa.github.io/team-changes/" target="_blank" rel="noopener">View public app &#8599;</a>
+        </div>
+        <p class="tc-sub" style="margin:0 0 12px">Captains and co-captains send captain / co-captain / mailing-contact / roster changes here. <b>Approve</b> it, make the change in <b>APA Member Services</b>, then click <b>Mark applied</b> &mdash; Slate writes the same change into its own roster so every tab agrees until the next import. Each step emails the captain.</p>
+        <div class="tc-filters">
+          <select id="tcSession" class="form-input" style="max-width:220px" onchange="tcInit(true)"></select>
+          <span id="tcPills"></span>
+        </div>
+        <div class="tc-list" id="tcList"><div class="tc-empty">Loading&hellip;</div></div>
+      </div>
+      <div class="card" style="margin-top:16px">
+        <h2 style="margin:0 0 4px">Roster add/drop gate</h2>
+        <p class="tc-sub" style="margin:0 0 10px">A division's add/drop opens the day <b>after</b> its week-4 match (from the schedule). Override per division when the schedule is off or you want it open early / kept closed.</p>
+        <div style="overflow:auto"><table class="tc-gates"><thead><tr><th>Division</th><th>Week 4</th><th>Add/drop</th><th>Override</th></tr></thead><tbody id="tcGates"><tr><td colspan="4" class="tc-empty">Loading&hellip;</td></tr></tbody></table></div>
+      </div>
+    </div>
+
     <div id="tab-tabsmgr" class="tab-panel">
       <div class="card" style="padding:16px;max-width:640px">
         <h3 style="margin:0 0 2px">Tabs</h3>
@@ -5779,7 +5844,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.417';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.418';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11021,6 +11086,7 @@ const TAB_LABEL = {
   chalktalk:     'ChalkTalk',
   nickpick:      'NickPick',
   crewcall:      'CrewCall',
+  teamchanges:   'Team Changes',
   ourrack:       'To-Do',
   preshot:       'PreShot',
   cuedrop:       'CueDrop',
@@ -11428,6 +11494,7 @@ function switchTab(name) {
   if (name === 'chalktalk') ctInit();
   if (name === 'nickpick') npInit();
   if (name === 'crewcall') ccInit();
+  if (name === 'teamchanges') tcInit();
   if (name === 'ourrack') orInit();
   if (name === 'preshot') psInit();
   if (name === 'cuedrop') cdInit();
@@ -11599,6 +11666,190 @@ async function stcCopy() {
 
 window.stcInit = stcInit; window.stcPlan = stcPlan; window.stcSync = stcSync;
 window.stcFilter = stcFilter; window.stcRender = stcRender; window.stcCopy = stcCopy;
+
+
+/* ═══════════════════════════════════════════════════════════════════════
+   TEAM CHANGES — operator queue (brief 2026-09-12, T1)
+   ───────────────────────────────────────────────────────────────────────
+   DATA  teamchanges.requests / request_items / gate_overrides / audit
+         (service_role only; the public app writes via GAS tc_* actions)
+   FLOW  pending → Approve | Reject (note) → approved → Mark applied → applied
+         Mark applied = the operator already made the change in APA; Slate
+         then writes the SAME diff to slate.team_memberships (roles, add, drop)
+         and slate.sp_labels (mailing contact) so PatchCheck / labels / Stripe /
+         Match Fees see it before the next import reconciles to the same state.
+   MAIL  every decision calls the GAS mailer tc_notify (admin_key = SB_KEY);
+         Slate never sends email itself.
+   ═══════════════════════════════════════════════════════════════════════ */
+const TC_R = { 'Accept-Profile': 'teamchanges' }, TC_W = { 'Content-Profile': 'teamchanges' };
+/* TCQ_MAILER_URL is declared far below this block — resolve it at CALL time (a top-level
+   alias here would hit the temporal dead zone and throw on page load). */
+function tcMailerUrl() { return TCQ_MAILER_URL; }
+const TC_KIND = { captain: 'New captain', cocaptain: 'New co-captain', mailing: 'Mailing contact', add: 'Add', drop: 'Drop' };
+let _tcRows = [], _tcFilter = 'pending', _tcInited = false, _tcSessions = [];
+
+async function tcInit(force) {
+  const list = document.getElementById('tcList');
+  if (!SB_KEY) { list.innerHTML = '<div class="tc-empty">Add <code>?key=&lt;service-role JWT&gt;</code> to the URL to review requests.</div>'; return; }
+  const sel = document.getElementById('tcSession');
+  if (!_tcInited || force === 'sessions') {
+    _tcSessions = await sb('GET', 'sessions?select=id,name,is_current,start_date&order=start_date.desc.nullslast') || [];
+    sel.innerHTML = _tcSessions.map(s => '<option value="' + s.id + '"' + (s.is_current ? ' selected' : '') + '>' + esc(s.name) + (s.is_current ? ' (current)' : '') + '</option>').join('');
+    _tcInited = true;
+  }
+  const sid = Number(sel.value);
+  try {
+    _tcRows = await sb('GET', 'requests?select=*&session_id=eq.' + sid + '&order=created_at.desc&limit=500', null, TC_R) || [];
+    /* items fetched separately (the embed syntax reads as a call to the JS guard) */
+    const ids = _tcRows.map(r => r.id);
+    const items = ids.length ? (await sb('GET', 'request_items?select=id,request_id,kind,member_number,player_name,before,after,note&request_id=in.(' + ids.join(',') + ')&order=id.asc', null, TC_R) || []) : [];
+    const byReq = new Map(); for (const it of items) { if (!byReq.has(it.request_id)) byReq.set(it.request_id, []); byReq.get(it.request_id).push(it); }
+    for (const r of _tcRows) r.request_items = byReq.get(r.id) || [];
+    tcRender();
+    tcRenderGates(sid);
+  } catch (e) { list.innerHTML = '<div class="tc-empty">Could not load: ' + esc(e.message || String(e)) + '</div>'; }
+}
+function tcFilter(f) { _tcFilter = f; tcRender(); }
+function tcMailing(a) { if (!a) return '—'; return [a.contact_name, a.address_line1, a.address_line2, [a.city, a.state, a.zip].filter(Boolean).join(' ')].filter(Boolean).join(', '); }
+function tcItemsTable(items) {
+  return '<table class="tc-items">' + (items || []).map(it => {
+    let v;
+    if (it.kind === 'mailing') v = esc(tcMailing(it.after)) + (it.before ? ' <span class="tc-was">(was ' + esc(tcMailing(it.before)) + ')</span>' : '');
+    else v = esc(it.player_name || '') + ' <span class="tc-sub">#' + esc(it.member_number || '') + '</span>' + (it.before && (it.kind === 'captain' || it.kind === 'cocaptain') ? ' <span class="tc-was">(was ' + esc(it.before.name || '') + ')</span>' : '') + (it.note ? ' <span class="tc-was">— ' + esc(it.note) + '</span>' : '');
+    return '<tr><td class="k">' + esc(TC_KIND[it.kind] || it.kind) + '</td><td>' + v + '</td></tr>';
+  }).join('') + '</table>';
+}
+function tcRender() {
+  const list = document.getElementById('tcList'), pills = document.getElementById('tcPills'), count = document.getElementById('tcCount');
+  const n = k => _tcRows.filter(r => k === 'all' || r.status === k).length;
+  const kinds = [['pending', 'Pending'], ['approved', 'Approved'], ['applied', 'Applied'], ['rejected', 'Rejected'], ['withdrawn', 'Withdrawn'], ['all', 'All']];
+  pills.innerHTML = kinds.map(k => '<button class="tc-fbtn' + (_tcFilter === k[0] ? ' active' : '') + '" onclick="tcFilter(\'' + k[0] + '\')">' + k[1] + ' <b>' + n(k[0]) + '</b></button>').join('');
+  count.textContent = n('pending') ? n('pending') + ' waiting' : '';
+  const rows = _tcRows.filter(r => _tcFilter === 'all' || r.status === _tcFilter);
+  if (!rows.length) { list.innerHTML = '<div class="tc-empty">No ' + (_tcFilter === 'all' ? '' : _tcFilter + ' ') + 'requests for this session.</div>'; return; }
+  list.innerHTML = rows.map(r => {
+    const items = (r.request_items || []).slice().sort((a, b) => a.id - b.id);
+    const act = r.status === 'pending'
+      ? '<button class="btn btn-primary btn-sm" onclick="tcDecide(' + r.id + ',\'approved\')">Approve</button><button class="btn btn-outline btn-sm" onclick="tcDecide(' + r.id + ',\'rejected\')">Reject</button>'
+      : r.status === 'approved'
+      ? '<button class="btn btn-primary btn-sm" onclick="tcApply(' + r.id + ')">Mark applied</button><button class="btn btn-outline btn-sm" onclick="tcDecide(' + r.id + ',\'rejected\')">Reject</button>'
+      : '';
+    return '<div class="tc-r ' + esc(r.status) + '"><div class="tc-top"><div class="tc-main">' +
+      '<span class="tc-tag ' + esc(r.status) + '">' + esc(r.status) + '</span><span class="tc-team">' + esc(r.team_name || ('Team ' + r.team_number)) + ' <span class="tc-sub">#' + esc(r.team_number) + '</span></span>' +
+      '<div class="tc-sub">' + esc(r.division_number || '') + ' ' + esc(r.division_name || '') + ' · from <b>' + esc(r.requester_name || ('#' + r.requester_member)) + '</b> (' + esc(r.requester_role) + ', #' + esc(r.requester_member) + ') · <a class="cc-mail" href="mailto:' + esc(r.requester_email) + '">' + esc(r.requester_email) + '</a></div>' +
+      tcItemsTable(items) +
+      '<div class="tc-reason">“' + esc(r.reason) + '”</div>' +
+      (r.operator_note ? '<div class="tc-note">League note: ' + esc(r.operator_note) + '</div>' : '') +
+      '<div class="tc-sub" style="margin-top:6px">sent ' + esc(mfStamp(r.created_at)) + (r.decided_at ? ' · decided ' + esc(mfStamp(r.decided_at)) : '') + (r.applied_at ? ' · applied ' + esc(mfStamp(r.applied_at)) : '') + (r.withdrawn_at ? ' · withdrawn ' + esc(mfStamp(r.withdrawn_at)) : '') + (r.requester_notified_at ? ' · captain emailed' : '') + '</div>' +
+      '</div><div class="tc-actions">' + act + '</div></div></div>';
+  }).join('');
+}
+async function tcAudit(requestId, action, detail) {
+  try { await sb('POST', 'audit', { request_id: requestId, actor: 'operator', action, detail: detail || null }, { ...TC_W, Prefer: 'return=minimal' }); } catch (e) { console.warn('[teamchanges] audit failed', e); }
+}
+async function tcNotify(id, kind, note) {
+  try {
+    const r = await fetch(tcMailerUrl(), { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'tc_notify', admin_key: SB_KEY, id, kind, note: note || '', is_preprod: IS_PREPROD }), redirect: 'follow' });
+    const j = await r.json().catch(() => ({}));
+    return !!(j && j.ok && j.sent);
+  } catch (e) { return false; }
+}
+async function tcDecide(id, decision) {
+  const r = _tcRows.find(x => x.id === id); if (!r) return;
+  const res = await mfDialog({
+    title: (decision === 'approved' ? 'Approve' : 'Reject') + ' — ' + (r.team_name || r.team_number),
+    body: decision === 'approved' ? 'The captain gets an email saying it is approved and being entered in APA. Make the change in APA Member Services, then come back and click Mark applied.' : 'Tell the captain why. This goes in the email.',
+    okText: decision === 'approved' ? 'Approve + email' : 'Reject + email', danger: decision === 'rejected',
+    fields: [{ name: 'note', label: decision === 'approved' ? 'Note to the captain — optional' : 'Reason — required', type: 'textarea', required: decision === 'rejected' }]
+  });
+  if (!res) return;
+  const patch = { status: decision, decided_at: new Date().toISOString(), operator_note: (res.note || '').trim() || null };
+  try { await sb('PATCH', 'requests?id=eq.' + id + '&status=in.(pending,approved)', patch, { ...TC_W, Prefer: 'return=minimal' }); }
+  catch (e) { mfToast('Could not save: ' + e.message, true); return; }
+  await tcAudit(id, decision, { note: patch.operator_note });
+  const sent = await tcNotify(id, decision, patch.operator_note);
+  mfToast((decision === 'approved' ? 'Approved' : 'Rejected') + (sent ? ' — captain emailed.' : ' — saved, but the email did not send.'), !sent);
+  tcInit(true);
+}
+/* Mark applied: the operator has entered it in APA. Write the SAME diff into slate. */
+async function tcApply(id) {
+  const r = _tcRows.find(x => x.id === id); if (!r) return;
+  const items = (r.request_items || []).slice().sort((a, b) => a.id - b.id);
+  const summary = items.map(it => TC_KIND[it.kind] + ': ' + (it.kind === 'mailing' ? tcMailing(it.after) : it.player_name)).join('\n');
+  if (!confirm('Mark applied — ' + (r.team_name || r.team_number) + '?\n\nOnly click this AFTER the change is entered in APA Member Services. Slate will write the same change to its roster:\n\n' + summary)) return;
+  try {
+    const mem = await sb('GET', 'team_memberships?team_id=eq.' + r.team_id + '&select=id,member_number,role') || [];
+    const byNum = new Map(mem.map(m => [String(m.member_number), m]));
+    const writes = [];
+    /* adds first (so a new captain can be one of them) */
+    for (const it of items) if (it.kind === 'add' && !byNum.has(it.member_number)) {
+      await sb('POST', 'team_memberships', { team_id: r.team_id, member_number: it.member_number, role: 'Member', name_raw: it.player_name || null }, { Prefer: 'return=minimal' });
+      byNum.set(it.member_number, { member_number: it.member_number, role: 'Member', _new: true }); writes.push('add ' + it.member_number);
+    }
+    /* final roles: start from the roster, demote the replaced leaders, then promote */
+    const role = new Map([...byNum.values()].map(m => [String(m.member_number), m.role]));
+    const cap = items.find(it => it.kind === 'captain'), co = items.find(it => it.kind === 'cocaptain');
+    if (cap) { for (const [mn, rl] of role) if (rl === 'Captain') role.set(mn, 'Member'); }
+    if (co)  { for (const [mn, rl] of role) if (rl === 'Co-Captain') role.set(mn, 'Member'); }
+    if (co)  role.set(co.member_number, 'Co-Captain');
+    if (cap) role.set(cap.member_number, 'Captain');
+    for (const [mn, rl] of role) {
+      const was = byNum.get(mn); if (!was || was.role === rl) continue;
+      await sb('PATCH', 'team_memberships?team_id=eq.' + r.team_id + '&member_number=eq.' + encodeURIComponent(mn), { role: rl }, { Prefer: 'return=minimal' });
+      writes.push('role ' + mn + ' ' + was.role + '→' + rl);
+    }
+    /* drops last */
+    for (const it of items) if (it.kind === 'drop' && byNum.has(it.member_number)) {
+      await sb('DELETE', 'team_memberships?team_id=eq.' + r.team_id + '&member_number=eq.' + encodeURIComponent(it.member_number), null, { Prefer: 'return=minimal' });
+      writes.push('drop ' + it.member_number);
+    }
+    /* mailing contact → slate.sp_labels for this session + team (padded + unpadded spellings) */
+    const ml = items.find(it => it.kind === 'mailing');
+    if (ml && ml.after) {
+      const tn = String(parseInt(String(r.team_number).replace(/\D/g, ''), 10)), padded = ('00000' + tn).slice(-5);
+      const a = ml.after;
+      const patch = { contact_name: a.contact_name, address_line1: a.address_line1, address_line2: a.address_line2 || null, city: a.city, state: a.state, zip: a.zip };
+      const ex = await sb('GET', 'sp_labels?session_id=eq.' + r.session_id + '&operator_id=eq.1&team_number=in.(' + tn + ',' + padded + ')&select=id&limit=1') || [];
+      if (ex.length) await sb('PATCH', 'sp_labels?id=eq.' + ex[0].id, patch, { Prefer: 'return=minimal' });
+      else await sb('POST', 'sp_labels', { ...patch, session_id: r.session_id, operator_id: 1, team_number: padded }, { Prefer: 'return=minimal' });
+      writes.push('mailing ' + (ex.length ? 'updated' : 'inserted'));
+    }
+    await sb('PATCH', 'requests?id=eq.' + id + '&status=eq.approved', { status: 'applied', applied_at: new Date().toISOString() }, { ...TC_W, Prefer: 'return=minimal' });
+    await tcAudit(id, 'applied', { writes });
+    const sent = await tcNotify(id, 'applied', '');
+    mfToast('Applied — ' + writes.length + ' slate write' + (writes.length === 1 ? '' : 's') + (sent ? ', captain emailed.' : '; the email did not send.') + ' Re-run Stripe Customers ▸ Sync when convenient.', !sent);
+  } catch (e) { mfToast('Apply failed: ' + e.message + ' — check the roster before retrying.', true); }
+  tcInit(true);
+}
+/* Gate table: every SPM division this session, week-4 date, computed state, override. */
+async function tcRenderGates(sid) {
+  const body = document.getElementById('tcGates');
+  try {
+    const divs = await sb('GET', 'divisions?select=id,division_number,name,night_of_play&session_id=eq.' + sid + '&operator_id=eq.1&order=division_number.asc') || [];
+    const wk4 = await sb('GET', 'matches?select=division_id,scheduled_date&week_number=eq.4&division_id=in.(' + divs.map(d => d.id).join(',') + ')&order=scheduled_date.asc') || [];
+    const first = new Map(); for (const m of wk4) if (!first.has(m.division_id)) first.set(m.division_id, m.scheduled_date);
+    const ov = await sb('GET', 'gate_overrides?select=division_id,open,note', null, TC_R) || [];
+    const ovMap = new Map(ov.map(o => [o.division_id, o]));
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+    body.innerHTML = divs.map(d => {
+      const w = first.get(d.id) || null, o = ovMap.get(d.id);
+      const byDate = !!(w && today > w);
+      const open = o ? !!o.open : byDate;
+      return '<tr><td><b>' + esc(d.division_number) + '</b> ' + esc(d.name) + ' <span class="tc-sub">' + esc(d.night_of_play || '') + '</span></td><td>' + (w ? esc(w) : '<span class="tc-sub">no schedule</span>') + '</td>' +
+        '<td class="' + (open ? 'tc-open' : 'tc-closed') + '">' + (open ? 'open' : 'closed') + (o ? ' (override)' : '') + '</td>' +
+        '<td><select onchange="tcSetGate(' + d.id + ', this.value)"><option value="auto"' + (!o ? ' selected' : '') + '>Auto — day after week 4</option><option value="open"' + (o && o.open ? ' selected' : '') + '>Force open</option><option value="closed"' + (o && !o.open ? ' selected' : '') + '>Force closed</option></select></td></tr>';
+    }).join('') || '<tr><td colspan="4" class="tc-empty">No SPM divisions in this session.</td></tr>';
+  } catch (e) { body.innerHTML = '<tr><td colspan="4" class="tc-empty">' + esc(e.message) + '</td></tr>'; }
+}
+async function tcSetGate(divisionId, v) {
+  try {
+    if (v === 'auto') await sb('DELETE', 'gate_overrides?division_id=eq.' + divisionId, null, { ...TC_W, Prefer: 'return=minimal' });
+    else await sb('POST', 'gate_overrides?on_conflict=division_id', { division_id: divisionId, open: v === 'open', updated_at: new Date().toISOString() }, { ...TC_W, Prefer: 'resolution=merge-duplicates,return=minimal' });
+    mfToast('Gate ' + (v === 'auto' ? 'back to automatic' : 'forced ' + v) + '.');
+  } catch (e) { mfToast('Could not save the gate: ' + e.message, true); }
+  tcRenderGates(Number(document.getElementById('tcSession').value));
+}
+window.tcInit = tcInit; window.tcFilter = tcFilter; window.tcDecide = tcDecide; window.tcApply = tcApply; window.tcSetGate = tcSetGate;
 
 /* ═══════════════ New Joiners — recent APA joins not on a current team ═══════════════
    Read-only outreach list. Source = slate.new_unrostered_players() RPC (service_role
