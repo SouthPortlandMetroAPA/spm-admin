@@ -5779,7 +5779,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.416';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.417';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -12105,7 +12105,7 @@ function mfCell(div, team, wk, today) {
   const dl = mfDeadlineFor(div, sched);
   const key = dn + '|' + teamNorm + '|' + wk;
   // Operator adjustments. A RESCHEDULE replaces the effective due moment
-  // (day after the new match date, 11:00 — stored, not re-derived here so the
+  // (two days after the new match date, 11:00 — stored, not re-derived here so the
   // validator can check the client and the row against each other).
   const adj = (_mf.adjIndex || {})[key] || {};
   const resched = adj.reschedule || null;
@@ -12359,10 +12359,15 @@ function mfToast(msg, bad) {
 function mfStamp(iso) { return iso ? String(iso).replace('T', ' ').slice(0, 16) : '?'; }
 
 // due date after a reschedule = the day AFTER the new match date, at 11:00.
+/* Rescheduled matches are due TWO days after the new match date at 11:00
+   (operator rule 2026-09-11; was +1). Regular nights already run +2
+   (Mon→Wed, Tue→Thu…), so a make-up match is held to the same grace, not a
+   stricter one. The value is STORED on the adjustment row — mfCell never
+   re-derives it — so the validator can check row and client against each other. */
 function mfReschedDue(dateISO) {
   const d = new Date(dateISO + 'T00:00:00Z');
   if (isNaN(d.getTime())) return null;
-  return new Date(d.getTime() + 86400000).toISOString().slice(0, 10);
+  return new Date(d.getTime() + 2 * 86400000).toISOString().slice(0, 10);
 }
 
 /* ══ multi-select ═══════════════════════════════════════════════════════════
@@ -12581,7 +12586,7 @@ async function mfBulkReschedule() {
   const res = await mfDialog({
     title: 'Mark ' + cells.length + ' week' + (cells.length === 1 ? '' : 's') + ' rescheduled',
     body: 'The same date and reason are applied to every selected week. ' +
-          'Payment becomes due the day after the new match date, at 11:00. ' +
+          'Payment becomes due two days after the new match date, at 11:00. ' +
           'Leave the date blank if the make-up date is not agreed yet — those weeks show a yellow ?.',
     okText: 'Apply to ' + cells.length,
     fields: [
@@ -12722,7 +12727,7 @@ async function mfAskReschedule(dn, tn, wk) {
   // remove the format-typo class entirely.
   const res = await mfDialog({
     title: 'Mark week ' + wk + ' rescheduled',
-    body: 'Payment becomes due the day after the new match date, at 11:00. ' +
+    body: 'Payment becomes due two days after the new match date, at 11:00. ' +
           'Leave the date blank if the make-up date is not agreed yet — the week shows a yellow ? ' +
           'and is not counted as owed until you come back and set it.',
     okText: 'Save reschedule',
