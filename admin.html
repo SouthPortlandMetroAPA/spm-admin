@@ -5872,7 +5872,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.421';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.422';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11713,7 +11713,7 @@ const TC_R = { 'Accept-Profile': 'teamchanges' }, TC_W = { 'Content-Profile': 't
 /* TCQ_MAILER_URL is declared far below this block — resolve it at CALL time (a top-level
    alias here would hit the temporal dead zone and throw on page load). */
 function tcMailerUrl() { return TCQ_MAILER_URL; }
-const TC_KIND = { captain: 'New captain', cocaptain: 'New co-captain', mailing: 'Mailing contact', add: 'Add', drop: 'Drop' };
+const TC_KIND = { captain: 'New captain', cocaptain: 'New co-captain', mailing: 'Mailing contact', add: 'Add', drop: 'Drop', name: 'Team name' };
 let _tcRows = [], _tcFilter = 'pending', _tcInited = false, _tcSessions = [];
 
 async function tcInit(force) {
@@ -11744,7 +11744,8 @@ function tcMailing(a) { if (!a) return '—'; return a.name || a.contact_name ||
 function tcItemsTable(items) {
   return '<table class="tc-items">' + (items || []).map(it => {
     let v;
-    if (it.kind === 'mailing') v = esc(it.player_name || tcMailing(it.after)) + ' <span class="tc-sub">#' + esc(it.member_number || '') + '</span>' + (it.before && it.before.contact_name ? ' <span class="tc-was">(was ' + esc(it.before.contact_name) + ')</span>' : '') + ' <span class="tc-was">— address from their APA record</span>';
+    if (it.kind === 'name') v = '<b>' + esc((it.after && it.after.name) || '') + '</b>' + (it.before && it.before.name ? ' <span class="tc-was">(was ' + esc(it.before.name) + ')</span>' : '');
+    else if (it.kind === 'mailing') v = esc(it.player_name || tcMailing(it.after)) + ' <span class="tc-sub">#' + esc(it.member_number || '') + '</span>' + (it.before && it.before.contact_name ? ' <span class="tc-was">(was ' + esc(it.before.contact_name) + ')</span>' : '') + ' <span class="tc-was">— address from their APA record</span>';
     else v = esc(it.player_name || '') + ' <span class="tc-sub">#' + esc(it.member_number || '') + '</span>' + (it.before && (it.kind === 'captain' || it.kind === 'cocaptain') ? ' <span class="tc-was">(was ' + esc(it.before.name || '') + ')</span>' : '') + (it.note ? ' <span class="tc-was">— ' + esc(it.note) + '</span>' : '');
     return '<tr><td class="k">' + esc(TC_KIND[it.kind] || it.kind) + '</td><td>' + v + '</td></tr>';
   }).join('') + '</table>';
@@ -11805,7 +11806,7 @@ async function tcDecide(id, decision) {
 async function tcApply(id) {
   const r = _tcRows.find(x => x.id === id); if (!r) return;
   const items = (r.request_items || []).slice().sort((a, b) => a.id - b.id);
-  const summary = items.map(it => TC_KIND[it.kind] + ': ' + (it.player_name || tcMailing(it.after))).join('\n');
+  const summary = items.map(it => TC_KIND[it.kind] + ': ' + (it.kind === 'name' ? (it.after && it.after.name) : (it.player_name || tcMailing(it.after)))).join('\n');
   if (!confirm('Mark applied — ' + (r.team_name || r.team_number) + '?\n\nOnly click this AFTER the change is entered in APA Member Services. Slate will write the same change to its roster:\n\n' + summary)) return;
   try {
     const mem = await sb('GET', 'team_memberships?team_id=eq.' + r.team_id + '&select=id,member_number,role') || [];
@@ -11832,6 +11833,12 @@ async function tcApply(id) {
     for (const it of items) if (it.kind === 'drop' && byNum.has(it.member_number)) {
       await sb('DELETE', 'team_memberships?team_id=eq.' + r.team_id + '&member_number=eq.' + encodeURIComponent(it.member_number), null, { Prefer: 'return=minimal' });
       writes.push('drop ' + it.member_number);
+    }
+    /* team name → slate.teams.team_name (the league has already renamed it in APA) */
+    const nm = items.find(it => it.kind === 'name');
+    if (nm && nm.after && nm.after.name) {
+      await sb('PATCH', 'teams?id=eq.' + r.team_id, { team_name: nm.after.name }, { Prefer: 'return=minimal' });
+      writes.push('name → ' + nm.after.name);
     }
     /* mailing contact → slate.sp_labels for this session + team (padded + unpadded spellings);
        the address is the chosen PLAYER's APA record, read now so it is current */
