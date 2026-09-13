@@ -5844,7 +5844,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.419';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.420';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -24354,8 +24354,13 @@ async function spMailPatches() {
       setStatus('spPatchesBlocker', 'Stamping… ' + done + '/' + ids.length, '');
     }
     setStatus('spPatchesBlocker',
-      'Mailed batch of ' + unmailed.length + ' patches (' + envCount + ' envelopes). Print Slips / Print Envelopes coming in Phase 5.',
+      'Mailed batch of ' + unmailed.length + ' patches (' + envCount + ' envelopes). Print Slips / Print Envelopes now act on this batch.',
       'ok');
+    /* The picker keeps the operator's selection across refreshes — right for a
+       plain reload, WRONG right after a mailing: it stayed on the previous batch
+       and Print Slips printed that one (escape 0913-sp-slips-old-batch). A new
+       mailing is always the batch you want to print next. */
+    _spNotifyBatch = null;   // a NEW mailing exists → follow the newest batch
     await spLoadPatches();
   } catch (e) {
     console.error('[patches] mail failed:', e);
@@ -24383,6 +24388,7 @@ async function spUndoLastMailing() {
       undone_at: new Date().toISOString()
     });
     setStatus('spPatchesBlocker', 'Undone. ' + _spLastBatch.patch_count + ' patches are back in the queue.', 'ok');
+    _spNotifyBatch = null;   // the selected batch may be the one just undone → follow the newest
     await spLoadPatches();
   } catch (e) {
     console.error('[patches] undo failed:', e);
