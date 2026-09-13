@@ -1085,6 +1085,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="nickpick">NickPick</button>
       <button class="tab" data-tab="crewcall">Shipmate</button>
       <button class="tab" data-tab="teamchanges">Team Changes</button>
+      <button class="tab" data-tab="bounces">Bounces</button>
       <button class="tab" data-tab="ourrack">To-Do</button>
       <button class="tab" data-tab="preshot">PreShot</button>
       <button class="tab" data-tab="cuedrop">CueDrop</button>
@@ -5614,6 +5615,43 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       </div>
     </div>
 
+    <!-- ═══════════════ Bounces — addresses that bounced in the office Gmail ═══════════════ -->
+    <div id="tab-bounces" class="tab-panel">
+      <style>
+        #tab-bounces .bn-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+        #tab-bounces .bn-filters{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px;align-items:center}
+        #tab-bounces .bn-fbtn{padding:6px 12px;border:1px solid var(--border);border-radius:999px;background:var(--card);cursor:pointer;font-size:.9rem;color:var(--text);min-height:32px}
+        #tab-bounces .bn-fbtn.active{background:var(--spm-accent);color:#fff;border-color:var(--spm-accent)}
+        #tab-bounces table.bn{width:100%;border-collapse:collapse;font-size:.9rem}
+        #tab-bounces table.bn th{text-align:left;font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:6px 8px;border-bottom:2px solid var(--border);white-space:nowrap}
+        #tab-bounces table.bn td{padding:6px 8px;border-bottom:1px solid var(--border);vertical-align:top}
+        #tab-bounces tr.handled td{opacity:.5}
+        #tab-bounces .bn-tag{display:inline-block;font-size:.66rem;font-weight:800;letter-spacing:.04em;padding:2px 8px;border-radius:999px;text-transform:uppercase;white-space:nowrap}
+        #tab-bounces .bn-tag.bad_address{background:#fde7ec;color:#b3021f}
+        #tab-bounces .bn-tag.full{background:#fff3cd;color:#7a5a00}
+        #tab-bounces .bn-tag.blocked{background:#ede9fe;color:#5b21b6}
+        #tab-bounces .bn-tag.sender{background:#e7edfb;color:#0031a1}
+        #tab-bounces .bn-tag.other{background:#f1f1f1;color:#666}
+        #tab-bounces .bn-tag.delay{background:#f1f1f1;color:#666}
+        #tab-bounces .bn-tag.dnc{background:#111;color:#fff}
+        #tab-bounces .bn-sub{color:var(--muted);font-size:.82rem}
+        #tab-bounces .bn-empty{color:var(--muted);padding:28px;text-align:center}
+      </style>
+      <div class="card">
+        <div class="bn-head">
+          <h2 style="margin:0">Bounces &mdash; email addresses that came back</h2>
+          <button class="btn btn-primary btn-sm" id="bnRescanBtn" onclick="bnRescan()">Rescan Gmail</button>
+          <span class="bn-sub" id="bnStatus"></span>
+        </div>
+        <p class="bn-sub" style="margin:0 0 10px">Reads the office Gmail for delivery-failure notices (last 12 months) and lists each address that bounced, matched to the player whose record carries that email. <b>Bad address</b> = it does not exist &mdash; fix the email in APA. <b>Inbox full</b> and <b>Blocked</b> may clear on their own. <b>Sender</b> = our side (rate limit), the address is fine. Nothing here changes the No-Contact list.</p>
+        <div class="bn-filters">
+          <span id="bnPills"></span>
+          <input type="search" id="bnFilter" class="form-input" placeholder="Filter by address, name or team…" style="max-width:260px;margin-left:auto" oninput="bnRender()">
+        </div>
+        <div style="overflow:auto"><table class="bn"><thead><tr><th></th><th>Address</th><th>Player</th><th>Current team</th><th>Why</th><th>Times</th><th>Last bounce</th><th>Last message</th><th></th></tr></thead><tbody id="bnBody"><tr><td colspan="9" class="bn-empty">Loading&hellip;</td></tr></tbody></table></div>
+      </div>
+    </div>
+
     <div id="tab-tabsmgr" class="tab-panel">
       <div class="card" style="padding:16px;max-width:640px">
         <h3 style="margin:0 0 2px">Tabs</h3>
@@ -5872,7 +5910,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.422';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.423';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11115,6 +11153,7 @@ const TAB_LABEL = {
   nickpick:      'NickPick',
   crewcall:      'CrewCall',
   teamchanges:   'Team Changes',
+  bounces:       'Bounces',
   ourrack:       'To-Do',
   preshot:       'PreShot',
   cuedrop:       'CueDrop',
@@ -11523,6 +11562,7 @@ function switchTab(name) {
   if (name === 'nickpick') npInit();
   if (name === 'crewcall') ccInit();
   if (name === 'teamchanges') tcInit();
+  if (name === 'bounces') bnInit();
   if (name === 'ourrack') orInit();
   if (name === 'preshot') psInit();
   if (name === 'cuedrop') cdInit();
@@ -11890,6 +11930,96 @@ async function tcSetGate(divisionId, v) {
   tcRenderGates(Number(document.getElementById('tcSession').value));
 }
 window.tcInit = tcInit; window.tcFilter = tcFilter; window.tcDecide = tcDecide; window.tcApply = tcApply; window.tcSetGate = tcSetGate;
+/* ═══════════════════════════════════════════════════════════════════════
+   BOUNCES — addresses that bounced in the office Gmail (2026-09-13, T2)
+   ───────────────────────────────────────────────────────────────────────
+   DATA  slate.email_bounces (one row per address, aggregated) + email_bounces_v
+   SCAN  GAS apa-mailer action bounce_scan (admin_key = service key) reads Gmail
+         AS the office account and returns one row per notice; this tab folds
+         them per address (kind: failure beats delay; category from the latest
+         failure) and upserts. handled_at = the operator dealt with it.
+   NEVER writes the DNC list, never emails, never edits a player.
+   ═══════════════════════════════════════════════════════════════════════ */
+let _bnRows = [], _bnFilter = 'failure';
+const BN_CAT = { bad_address: 'Bad address', full: 'Inbox full', blocked: 'Blocked', sender: 'Sender — our side', other: 'Other' };
+function bnMailerUrl() { return TCQ_MAILER_URL; }
+async function bnInit() {
+  const body = document.getElementById('bnBody');
+  try {
+    _bnRows = await sb('GET', 'email_bounces_v?select=*&order=last_bounced_at.desc') || [];
+    bnRender();
+    const last = _bnRows.reduce((m, r) => r.scanned_at > m ? r.scanned_at : m, '');
+    document.getElementById('bnStatus').textContent = _bnRows.length ? ('Last scan ' + (last ? new Date(last).toLocaleString() : '—')) : 'Never scanned — click Rescan Gmail.';
+  } catch (e) { body.innerHTML = '<tr><td colspan="9" class="bn-empty">Load failed: ' + esc(e.message) + '</td></tr>'; }
+}
+async function bnRescan() {
+  const btn = document.getElementById('bnRescanBtn'), st = document.getElementById('bnStatus');
+  btn.disabled = true; st.textContent = 'Reading Gmail… (can take a minute)';
+  try {
+    const r = await fetch(bnMailerUrl(), { method: 'POST', body: JSON.stringify({ action: 'bounce_scan', admin_key: SB_KEY, days: 365, max: 2000 }) });
+    const j = JSON.parse(await r.text());
+    if (!j.ok) throw new Error(j.error || 'scan failed');
+    /* fold per address: failure beats delay; latest failure decides category/reason */
+    const agg = new Map();
+    for (const x of j.rows) {
+      const a = agg.get(x.address) || { address: x.address, kind: 'delay', category: 'other', bounce_count: 0, first_bounced_at: x.bounced_at, last_bounced_at: x.bounced_at, last_reason: '', last_subject: '', last_thread_id: '' };
+      a.bounce_count++;
+      if (x.bounced_at < a.first_bounced_at) a.first_bounced_at = x.bounced_at;
+      const newer = x.bounced_at >= a.last_bounced_at;
+      if (x.kind === 'failure' && (a.kind !== 'failure' || newer)) { a.kind = 'failure'; a.category = x.category || 'other'; a.last_reason = x.reason || ''; a.last_subject = x.original_subject || ''; a.last_thread_id = x.thread_id || ''; }
+      else if (a.kind !== 'failure' && newer) { a.category = x.category || 'other'; a.last_reason = x.reason || ''; a.last_subject = x.original_subject || ''; a.last_thread_id = x.thread_id || ''; }
+      if (newer) a.last_bounced_at = x.bounced_at;
+      agg.set(x.address, a);
+    }
+    const rows = [...agg.values()].map(a => ({ ...a, scanned_at: new Date().toISOString() }));
+    for (let i = 0; i < rows.length; i += 200) {
+      await sb('POST', 'email_bounces?on_conflict=address', rows.slice(i, i + 200), { Prefer: 'resolution=merge-duplicates,return=minimal' });
+    }
+    st.textContent = 'Scanned ' + j.scanned + ' notices → ' + rows.length + ' addresses.';
+    await bnInit();
+  } catch (e) { st.textContent = 'Rescan failed: ' + e.message; }
+  finally { btn.disabled = false; }
+}
+function bnSetFilter(f) { _bnFilter = f; bnRender(); }
+function bnRender() {
+  const q = (document.getElementById('bnFilter').value || '').trim().toLowerCase();
+  const counts = { failure: 0, delay: 0, handled: 0 };
+  for (const r of _bnRows) { if (r.handled_at) counts.handled++; else counts[r.kind]++; }
+  document.getElementById('bnPills').innerHTML = [['failure', 'Bounced'], ['delay', 'Delayed only'], ['handled', 'Handled'], ['all', 'All']].map(([k, l]) =>
+    '<button class="bn-fbtn' + (_bnFilter === k ? ' active' : '') + '" onclick="bnSetFilter(\'' + k + '\')">' + l + (k !== 'all' ? ' <b>' + counts[k] + '</b>' : '') + '</button>').join('');
+  const list = _bnRows.filter(r => {
+    if (_bnFilter === 'handled') { if (!r.handled_at) return false; }
+    else if (_bnFilter !== 'all') { if (r.handled_at || r.kind !== _bnFilter) return false; }
+    if (!q) return true;
+    return (r.address + ' ' + (r.first_name || '') + ' ' + (r.last_name || '') + ' ' + (r.member_number || '') + ' ' + (r.current_teams || '')).toLowerCase().includes(q);
+  });
+  const body = document.getElementById('bnBody');
+  if (!list.length) { body.innerHTML = '<tr><td colspan="9" class="bn-empty">' + (_bnRows.length ? 'Nothing here.' : 'No scan yet.') + '</td></tr>'; return; }
+  body.innerHTML = list.map(r => {
+    const who = r.member_number ? esc((r.first_name || '') + ' ' + (r.last_name || '')).trim() + ' <span class="bn-sub">#' + esc(r.member_number) + '</span>' + (r.on_dnc ? ' <span class="bn-tag dnc">No-contact</span>' : '') : '<span class="bn-sub">no player has this email</span>';
+    const why = r.kind === 'delay' ? '<span class="bn-tag delay">Delayed</span>' : '<span class="bn-tag ' + esc(r.category) + '">' + esc(BN_CAT[r.category] || r.category) + '</span>';
+    return '<tr class="' + (r.handled_at ? 'handled' : '') + '">'
+      + '<td><input type="checkbox" title="Handled" ' + (r.handled_at ? 'checked' : '') + ' onchange="bnHandled(\'' + esc(r.address) + '\', this.checked)"></td>'
+      + '<td><code>' + esc(r.address) + '</code></td>'
+      + '<td>' + who + '</td>'
+      + '<td class="bn-sub">' + esc(r.current_teams || '') + '</td>'
+      + '<td>' + why + (r.last_reason ? '<div class="bn-sub" title="' + esc(r.last_reason) + '">' + esc(r.last_reason.slice(0, 70)) + (r.last_reason.length > 70 ? '…' : '') + '</div>' : '') + '</td>'
+      + '<td>' + r.bounce_count + '</td>'
+      + '<td class="bn-sub">' + new Date(r.last_bounced_at).toLocaleDateString() + '</td>'
+      + '<td class="bn-sub">' + esc((r.last_subject || '').slice(0, 50)) + '</td>'
+      + '<td>' + (r.last_thread_id ? '<a class="btn-link" href="https://mail.google.com/mail/u/0/#all/' + esc(r.last_thread_id) + '" target="_blank" rel="noopener">Open ↗</a>' : '') + '</td>'
+      + '</tr>';
+  }).join('');
+}
+async function bnHandled(address, on) {
+  try {
+    await sb('PATCH', 'email_bounces?address=eq.' + encodeURIComponent(address), { handled_at: on ? new Date().toISOString() : null }, { Prefer: 'return=minimal' });
+    const r = _bnRows.find(x => x.address === address); if (r) r.handled_at = on ? new Date().toISOString() : null;
+    bnRender();
+  } catch (e) { alert('Could not save: ' + e.message); }
+}
+window.bnInit = bnInit;
+
 
 /* ═══════════════ New Joiners — recent APA joins not on a current team ═══════════════
    Read-only outreach list. Source = slate.new_unrostered_players() RPC (service_role
