@@ -4610,6 +4610,14 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
               <code>tools/claude/countmein/make-event-pages.mjs</code> or the preview will be stale or missing.
             </div>
           </div>
+          <!-- HandsUp — the event coordinator's volunteer list (brief 2026-09-13) -->
+          <div class="cm-link" style="margin-top:10px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:#fafafa;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <span><b>Coordinator link</b> (volunteers + phone numbers, all events):
+              <a id="cmCoordLink" href="#" target="_blank" rel="noopener">…</a></span>
+            <button class="btn" type="button" onclick="cmCopyCoordLink()">Copy</button>
+            <button class="btn btn-outline" type="button" onclick="cmRegenCoordLink()" title="The old link stops working immediately">Regenerate</button>
+            <span class="muted" style="font-size:0.74rem;flex-basis:100%" id="cmCoordMeta">Give this to the event coordinator only — it opens everyone’s volunteer comment and phone numbers. Regenerate if it leaks.</span>
+          </div>
 
           <hr>
           <div class="ps-row" style="margin-bottom:8px"><h3 style="margin:0;font-size:1rem">Responses</h3>
@@ -5910,7 +5918,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.423';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.424';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -15726,9 +15734,34 @@ async function mjUnmark(id) {
   await mjLoad();
 }
 
+/* ── HandsUp coordinator link (countmein.coordinator_keys, service_role only) ── */
+const CM_HANDSUP_URL = 'https://southportlandmetroapa.github.io/handsup/';
+async function cmLoadCoordLink() {
+  const a = document.getElementById('cmCoordLink'), meta = document.getElementById('cmCoordMeta');
+  if (!a) return;
+  try {
+    const rows = await sb('GET', 'coordinator_keys?select=token,created_at,last_used_at&revoked_at=is.null&order=created_at.desc&limit=1', null, CM_WP) || [];
+    if (!rows.length) { a.textContent = 'none yet — click Regenerate'; a.href = '#'; return; }
+    a.href = CM_HANDSUP_URL + '?t=' + rows[0].token; a.textContent = a.href;
+    meta.textContent = 'Made ' + new Date(rows[0].created_at).toLocaleDateString() + (rows[0].last_used_at ? ' · last opened ' + new Date(rows[0].last_used_at).toLocaleString() : ' · not opened yet') + '. Give this to the event coordinator only — it opens everyone’s volunteer comment and phone numbers.';
+  } catch (e) { a.textContent = 'could not load (' + e.message + ')'; }
+}
+async function cmCopyCoordLink() {
+  const a = document.getElementById('cmCoordLink'); if (!a || a.href.endsWith('#')) return;
+  try { await navigator.clipboard.writeText(a.href); toast('Coordinator link copied'); } catch (e) { prompt('Copy this link:', a.href); }
+}
+async function cmRegenCoordLink() {
+  if (!confirm('Regenerate the coordinator link?\n\nThe current link stops working immediately; you will need to send her the new one.')) return;
+  try {
+    await sb('PATCH', 'coordinator_keys?revoked_at=is.null', { revoked_at: new Date().toISOString() }, { ...CM_WP, Prefer: 'return=minimal' });
+    await sb('POST', 'coordinator_keys', { label: 'Event coordinator' }, { ...CM_WP, Prefer: 'return=minimal' });
+    await cmLoadCoordLink(); toast('New coordinator link made — the old one is dead');
+  } catch (e) { alert('Could not regenerate: ' + e.message); }
+}
 async function cmInit() {
   if (!SB_KEY) { document.getElementById('cmGate').style.display = 'block'; document.getElementById('cmMain').style.display = 'none'; return; }
   await cmLoadEvent(); await cmLoad(); cmStartPoll();
+  cmLoadCoordLink();
   cmFillInviteTpl();
   cmRenderSessionPicker();
   try { await cmLoadAudience(); } catch (e) { /* panel shows its own error */ }
