@@ -1650,6 +1650,9 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             <button type="button" class="btn btn-outline" id="spPrintEnvBtn2" disabled>
               Print Envelopes (2nd half)
             </button>
+            <button type="button" class="btn btn-outline" id="spEnvListBtn" disabled title="List every envelope this mailing needs, tick the ones you already have, print the rest">
+              Envelopes…
+            </button>
             <button type="button" class="btn btn-outline" id="spUndoMailBtn" disabled>
               Undo Last Mailing
             </button>
@@ -3007,6 +3010,31 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
          MODAL: list of all mailing overrides — opened from the
          "Mailing overrides" button at the top of the Patches section.
          ══════════════════════════════════════════════════════════════ -->
+    <div class="modal-backdrop" id="spEnvListModal" style="display:none">
+      <div class="modal" style="max-width:760px;max-height:85vh;display:flex;flex-direction:column">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px">
+          <h3 style="margin:0">Envelopes for this mailing</h3>
+          <span class="hint" id="spEnvListMeta" style="margin:0"></span>
+        </div>
+        <div class="hint" style="margin-bottom:10px">
+          One row per envelope, in the same order the print buttons use. Tick the ones you already
+          <strong>have</strong>; <strong>Print the rest</strong> prints only the un-ticked ones. Ticks are remembered on this device for this mailing.
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-sm" onclick="spEnvListSetAll(true)">Tick all</button>
+          <button class="btn btn-outline btn-sm" onclick="spEnvListSetAll(false)">Clear all</button>
+          <input type="search" id="spEnvListFilter" placeholder="Filter by name or team…" style="flex:1;min-width:160px" oninput="spEnvListRender()">
+        </div>
+        <div id="spEnvListBody" style="overflow-y:auto;flex:1;min-height:120px"></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap">
+          <span class="hint" id="spEnvListCount" style="margin:0"></span>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-outline" onclick="spCloseEnvList()">Close</button>
+            <button class="btn btn-primary" id="spEnvListPrintBtn" onclick="spEnvListPrintRest()">Print the rest</button>
+          </div>
+        </div>
+      </div>
+    </div>
     <div class="modal-backdrop" id="spOvrListModal" style="display:none">
       <div class="modal" style="max-width:680px;max-height:80vh;display:flex;flex-direction:column">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px">
@@ -5844,7 +5872,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.420';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.421';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -22021,6 +22049,7 @@ function spOnEnterTab() {
     document.getElementById('spPrintSlipsBtn').addEventListener('click', spPrintSlips);
     document.getElementById('spPrintEnvBtn1').addEventListener('click', () => spPrintEnvelopes(1));
     document.getElementById('spPrintEnvBtn2').addEventListener('click', () => spPrintEnvelopes(2));
+    document.getElementById('spEnvListBtn').addEventListener('click', spOpenEnvList);
     // Patch-list view filter
     document.querySelectorAll('#spPatchFilterSeg .seg-btn-slate').forEach(b =>
       b.addEventListener('click', () => spSetPatchFilter(b.dataset.pf)));
@@ -25425,6 +25454,111 @@ async function spPrintEnvelopes(half) {
   spOpenPrintWindow(html, 'Print envelopes — batch ' + spSelectedBatch().id.slice(0, 8) + suffix);
 }
 
+/* ── Envelope LIST with have-it ticks (T3, 2026-09-13) ──────────────────────
+   The operator mails in more than one sitting and sometimes already holds a
+   printed envelope (an earlier half-run, a re-print, a spare). This lists every
+   envelope spBatchEnvelopes produces for the SELECTED batch — same grouping,
+   same order as the half-run buttons — with a checkbox per envelope meaning
+   "I have this one". "Print the rest" feeds the UN-ticked envelopes into the
+   very same spBuildEnvelopesHTML, so what prints is identical to the normal
+   run. Ticks live in localStorage keyed by batch id (regenerable, per device)
+   — never in the DB, and they never affect which patches are mailed. */
+let _spEnvList = [];          // envelopes for the open modal, in print order
+let _spEnvListBatchId = null;
+function spEnvListKey(e) {
+  /* Stable per envelope across reopen: contact + teams + first patch id
+     (weight-split envelopes share contact+teams; the first patch id
+     separates them). */
+  return spContactKey(e.patches[0]) + '|' + e.teams.join(',') + '|' + e.patches[0].id;
+}
+function spEnvListHave() {
+  try { return JSON.parse(localStorage.getItem('spEnvHave:' + _spEnvListBatchId) || '{}'); } catch (e) { return {}; }
+}
+function spEnvListSave(h) {
+  try { localStorage.setItem('spEnvHave:' + _spEnvListBatchId, JSON.stringify(h)); } catch (e) { /* private mode */ }
+}
+async function spOpenEnvList() {
+  const _b = spSelectedBatch();
+  if (!_b) return;
+  const m = document.getElementById('spEnvListModal');
+  const body = document.getElementById('spEnvListBody');
+  m.style.display = 'flex';
+  body.innerHTML = '<p class="hint">Loading…</p>';
+  document.getElementById('spEnvListMeta').textContent =
+    new Date(_b.created_at).toLocaleDateString() + ' · ' + _b.patch_count + ' patches';
+  try {
+    const patches = await spPatchesForBatch(_b.id);
+    _spEnvListBatchId = _b.id;
+    _spEnvList = spBatchEnvelopes(patches);
+    document.getElementById('spEnvListFilter').value = '';
+    spEnvListRender();
+  } catch (err) {
+    body.innerHTML = '<p style="color:#b91c1c">Load failed: ' + esc(err.message) + '</p>';
+  }
+}
+function spCloseEnvList() {
+  const m = document.getElementById('spEnvListModal');
+  if (m) m.style.display = 'none';
+}
+function spEnvListRender() {
+  const body = document.getElementById('spEnvListBody');
+  const have = spEnvListHave();
+  const q = (document.getElementById('spEnvListFilter').value || '').trim().toLowerCase();
+  /* "2 of 3" numbering for a captain whose patches split across envelopes,
+     so the operator can tell WHICH of that captain's envelopes they hold. */
+  const perContact = new Map();
+  for (const e of _spEnvList) { const k = spContactKey(e.patches[0]); perContact.set(k, (perContact.get(k) || 0) + 1); }
+  const seen = new Map();
+  let shown = 0, haveCount = 0;
+  const rows = _spEnvList.map((e, i) => {
+    const k = spContactKey(e.patches[0]);
+    seen.set(k, (seen.get(k) || 0) + 1);
+    const key = spEnvListKey(e);
+    const has = !!have[key];
+    if (has) haveCount++;
+    const teamLabel = (e.teams.length > 1 ? 'Teams ' : 'Team ') + e.teams.join(', ');
+    const hay = (e.contact_name + ' ' + (e.co_name || '') + ' ' + e.teams.join(' ')).toLowerCase();
+    if (q && !hay.includes(q)) return '';
+    shown++;
+    const part = perContact.get(k) > 1 ? ' <span style="color:#6b7280">(' + seen.get(k) + ' of ' + perContact.get(k) + ')</span>' : '';
+    return '<label style="display:grid;grid-template-columns:auto 2fr 1.6fr 1fr;gap:10px;align-items:center;padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:0.9rem;cursor:pointer' + (has ? ';opacity:.55' : '') + '">'
+      + '<input type="checkbox" data-i="' + i + '"' + (has ? ' checked' : '') + ' onchange="spEnvListToggle(this)">'
+      + '<div><strong>' + (i + 1) + '.</strong> ' + esc(e.contact_name) + part + (e.co_name ? ' <span style="color:#6b7280">c/o ' + esc(e.co_name) + '</span>' : '') + '</div>'
+      + '<div style="color:#6b7280">' + esc(teamLabel) + '</div>'
+      + '<div style="color:#6b7280">' + e.patches.length + ' patch' + (e.patches.length === 1 ? '' : 'es') + '</div>'
+      + '</label>';
+  }).join('');
+  body.innerHTML = rows || '<p class="hint" style="margin:0">' + (_spEnvList.length ? 'Nothing matches that filter.' : 'This mailing has no envelopes.') + '</p>';
+  const rest = _spEnvList.length - haveCount;
+  document.getElementById('spEnvListCount').textContent =
+    _spEnvList.length + ' envelope' + (_spEnvList.length === 1 ? '' : 's') + ' · ' + haveCount + ' ticked as on hand · ' + rest + ' to print' + (q ? ' · showing ' + shown : '');
+  const pb = document.getElementById('spEnvListPrintBtn');
+  pb.disabled = rest === 0;
+  pb.textContent = rest === 0 ? 'Nothing left to print' : 'Print the rest (' + rest + ')';
+}
+function spEnvListToggle(cb) {
+  const e = _spEnvList[parseInt(cb.dataset.i, 10)];
+  if (!e) return;
+  const have = spEnvListHave();
+  if (cb.checked) have[spEnvListKey(e)] = 1; else delete have[spEnvListKey(e)];
+  spEnvListSave(have);
+  spEnvListRender();
+}
+function spEnvListSetAll(on) {
+  const have = {};
+  if (on) for (const e of _spEnvList) have[spEnvListKey(e)] = 1;
+  spEnvListSave(have);
+  spEnvListRender();
+}
+async function spEnvListPrintRest() {
+  const have = spEnvListHave();
+  const rest = _spEnvList.filter(e => !have[spEnvListKey(e)]);
+  if (!rest.length) return;
+  await spLoadOperatorProfile();
+  const html = spBuildEnvelopesHTML(rest, _spOperatorProfile || {});
+  spOpenPrintWindow(html, 'Print envelopes — batch ' + String(_spEnvListBatchId).slice(0, 8) + ' — the rest (' + rest.length + ' of ' + _spEnvList.length + ')');
+}
+
 /* Envelope graphics — copied verbatim from the legacy SP Admin
    (Apps/SpmAdmin/SPCheck.html). Patches logo prints on the right,
    the cat accent bottom-left. */
@@ -25539,6 +25673,8 @@ function spRefreshPrintButtonsState() {
   if (slips) slips.disabled = !enable;
   if (env1)  env1.disabled  = !enable;
   if (env2)  env2.disabled  = !enable;
+  const envList = document.getElementById('spEnvListBtn');
+  if (envList) envList.disabled = !enable;
   const note = document.getElementById('spPrintTargetNote');
   if (note) {
     note.textContent = _b
