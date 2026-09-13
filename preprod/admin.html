@@ -11941,7 +11941,7 @@ window.tcInit = tcInit; window.tcFilter = tcFilter; window.tcDecide = tcDecide; 
    NEVER writes the DNC list, never emails, never edits a player.
    ═══════════════════════════════════════════════════════════════════════ */
 let _bnRows = [], _bnFilter = 'failure';
-const BN_CAT = { bad_address: 'Bad address', full: 'Inbox full', blocked: 'Blocked', sender: 'Sender (us)', other: 'Other' };
+const BN_CAT = { bad_address: 'Bad address', full: 'Inbox full', blocked: 'Blocked', sender: 'Sender — our side', other: 'Other' };
 function bnMailerUrl() { return TCQ_MAILER_URL; }
 async function bnInit() {
   const body = document.getElementById('bnBody');
