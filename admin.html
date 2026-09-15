@@ -247,6 +247,32 @@ html,body {
 .tab:hover:not(.active) { color: var(--text); }
 .tab-panel { display: none; }
 .tab-panel.active { display: block; }
+/* auto-hidden by the usage rule (14 days idle) — reachable through "More ▾" */
+.tab.sl-tab-idle { display: none; }
+.tab-more { position: relative; flex: 0 0 auto; }
+.tab-more > button { font: inherit; font-size: .8rem; font-weight: 700; color: var(--muted); background: none; border: none; cursor: pointer; padding: 12px 10px; text-transform: uppercase; letter-spacing: .04em; min-height: 44px; }
+.tab-more > button:hover { color: var(--text); }
+.tab-more-menu { display: none; position: absolute; z-index: 60; background: var(--card, #fff); border: 1px solid var(--border, #e5e7eb); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.14); padding: 6px; min-width: 200px; max-height: 60vh; overflow: auto; }
+.tab-more.open .tab-more-menu { display: block; }
+.tab-more-menu button { display: block; width: 100%; text-align: left; font: inherit; font-size: .85rem; font-weight: 600; color: var(--text); background: none; border: none; border-radius: 6px; padding: 9px 10px; cursor: pointer; min-height: 40px; }
+.tab-more-menu button:hover { background: #f3f4f6; }
+.tab-more-menu .tab-more-note { color: var(--muted); font-size: .72rem; padding: 4px 10px 6px; }
+/* Desktop: vertical sidebar. #adminMain's direct children are .tabs, #globalStatus, the tab
+   panels and a few modals; a grid puts the bar in column 1 for the full height and everything
+   else in column 2 (panels share one cell — only the active one displays). */
+@media (min-width: 1100px) {
+  #adminMain { display: grid; grid-template-columns: 200px minmax(0, 1fr); column-gap: 18px; align-items: start; }
+  #adminMain > .tabs { grid-column: 1; grid-row: 1 / span 60; position: sticky; top: 8px; flex-direction: column; border-bottom: none; border-right: 2px solid #e8e8e8; margin-bottom: 0; overflow-x: visible; overflow-y: auto; max-height: calc(100vh - 16px); padding-right: 6px; }
+  #adminMain > .tabs .tab { flex: 0 0 auto; text-align: left; min-width: 0; padding: 10px 12px; border-bottom: none; border-left: 3px solid transparent; margin-bottom: 0; }
+  #adminMain > .tabs .tab.active { border-left-color: var(--spm-accent); background: #eef2ff; border-radius: 0 8px 8px 0; }
+  #adminMain > .tabs .tab-reset { align-self: flex-start; padding: 8px 12px; margin: 4px 0 0; }
+  #adminMain > .tabs .tab-more { align-self: stretch; }
+  #adminMain > .tabs .tab-more > button { width: 100%; text-align: left; }
+  #adminMain > .tabs .tab-more-menu { left: 0; right: 0; }
+  #adminMain > #globalStatus, #adminMain > .tab-panel { grid-column: 2; }
+  #adminMain > #globalStatus { grid-row: 1; }
+  #adminMain > .tab-panel { grid-row: 2; }
+}
 
 /* ── Cards ── */
 .card {
@@ -5728,7 +5754,8 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
     <div id="tab-tabsmgr" class="tab-panel">
       <div class="card" style="padding:16px;max-width:640px">
         <h3 style="margin:0 0 2px">Tabs</h3>
-        <p class="hint" style="margin:0 0 12px">Saved in this browser only. Right-click any tab to hide it.</p>
+        <p class="hint" style="margin:0 0 12px">Saved in this browser only. Right-click any tab to hide it. Tabs are ordered by how much you actually use them (last 30 days); anything untouched for 14 days tucks under <b>More ▾</b> until you use it again. On a wide screen the bar sits on the left.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"><button class="btn btn-outline btn-sm" onclick="localStorage.removeItem('slateTabUsage'); slTabsApply(); slTabsSetStatus('Usage history cleared — every tab is visible and in default order.')">Clear usage history</button></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
           <button class="btn btn-outline btn-sm" onclick="slTabsShowAll()">Show all</button>
           <button class="btn btn-outline btn-sm" onclick="slTabsResetOrder()">Reset order</button>
@@ -5983,7 +6010,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.426';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.427';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -7814,6 +7841,7 @@ async function init() {
   /* Layout prefs first: restoring a tab the operator has hidden would show
      a panel with no tab above it. */
   slTabsWire();
+  slUsageWire();
   slTabsApply();
   const savedBtn = savedTab ? document.querySelector('.tab[data-tab="' + savedTab + '"]') : null;
   const savedVisible = savedBtn && !savedBtn.classList.contains('sl-tab-hidden');
@@ -11383,6 +11411,82 @@ function slInitTabReorder() {
    tools/claude/slate/patch-tab-manager.mjs for the reasoning.
    ══════════════════════════════════════════════════════════════════════ */
 
+/* ═══════════════ Tab usage: frequency order + 14-day auto-hide (3.427) ═══════════════
+   slateTabUsage = { slug: { d: { 'YYYY-MM-DD': bursts }, last: ms, first: ms } }.
+   A burst = real activity inside the tab's panel (click / keydown / input / change),
+   at most one per 2 s, so typing a paragraph is one burst, not sixty. Switching tabs
+   counts nothing — "actual interaction, not just clicks" (operator, 2026-09-15). */
+const SL_USAGE_KEY = 'slateTabUsage';
+const SL_USAGE_WINDOW_DAYS = 30, SL_USAGE_IDLE_DAYS = 14, SL_USAGE_BURST_MS = 2000;
+let _slUsageLastBurst = {};
+function slUsageLoad() {
+  let u = null; try { u = JSON.parse(localStorage.getItem(SL_USAGE_KEY) || 'null'); } catch (e) {}
+  return (u && typeof u === 'object') ? u : {};
+}
+function slUsageSave(u) { try { localStorage.setItem(SL_USAGE_KEY, JSON.stringify(u)); } catch (e) {} }
+function slUsageDay(ms) { return new Date(ms).toISOString().slice(0, 10); }
+/* every tab gets a first-seen stamp the first time this browser shows it, so the 14-day
+   clock starts from "could have been used", never from the dawn of time */
+function slUsageStamp() {
+  const u = slUsageLoad(); const now = Date.now(); let changed = false;
+  for (const slug of slTabAllSlugs()) { if (!u[slug]) { u[slug] = { d: {}, last: 0, first: now }; changed = true; } }
+  if (changed) slUsageSave(u);
+  return u;
+}
+function slUsageRecord(slug) {
+  if (!slug || slug === SL_TABS_PINNED) return;
+  const now = Date.now();
+  if (now - (_slUsageLastBurst[slug] || 0) < SL_USAGE_BURST_MS) return;
+  _slUsageLastBurst[slug] = now;
+  const u = slUsageLoad(); const e = u[slug] || (u[slug] = { d: {}, last: 0, first: now });
+  const day = slUsageDay(now); e.d[day] = (e.d[day] || 0) + 1; e.last = now;
+  /* prune beyond the window so the store stays tiny */
+  const cutoff = slUsageDay(now - SL_USAGE_WINDOW_DAYS * 864e5);
+  for (const k of Object.keys(e.d)) if (k < cutoff) delete e.d[k];
+  slUsageSave(u);
+}
+function slUsageScore(u, slug) {
+  const e = u[slug]; if (!e) return 0;
+  const cutoff = slUsageDay(Date.now() - SL_USAGE_WINDOW_DAYS * 864e5);
+  let n = 0; for (const k of Object.keys(e.d || {})) if (k >= cutoff) n += e.d[k];
+  return n;
+}
+function slUsageIdle(u, slug) {
+  const e = u[slug]; if (!e) return false;
+  const ref = e.last || e.first || Date.now();
+  return Date.now() - ref > SL_USAGE_IDLE_DAYS * 864e5;
+}
+/* one delegated listener: attribute activity to the panel it happened in */
+function slUsageWire() {
+  if (document.body.dataset.usageWired) return; document.body.dataset.usageWired = '1';
+  const handler = ev => { const panel = ev.target && ev.target.closest ? ev.target.closest('.tab-panel.active') : null; if (panel) slUsageRecord(panel.id.replace(/^tab-/, '')); };
+  for (const type of ['click', 'keydown', 'input', 'change']) document.addEventListener(type, handler, true);
+  /* re-rank once a minute so a tab you have been working in climbs without a reload */
+  setInterval(() => { if (!document.hidden) slTabsApply(); }, 60000);
+}
+/* "More ▾" — the idle tabs, so nothing is ever unreachable */
+function slMoreControl() {
+  const bar = document.querySelector('.tabs'); if (!bar) return null;
+  let more = document.getElementById('tabMore');
+  if (!more) {
+    more = document.createElement('div'); more.className = 'tab-more'; more.id = 'tabMore';
+    more.innerHTML = '<button type="button" aria-haspopup="true" aria-expanded="false" id="tabMoreBtn">More ▾</button><div class="tab-more-menu" id="tabMoreMenu" role="menu"></div>';
+    bar.appendChild(more);
+    document.getElementById('tabMoreBtn').addEventListener('click', e => { e.stopPropagation(); const open = !more.classList.contains('open'); more.classList.toggle('open', open); document.getElementById('tabMoreBtn').setAttribute('aria-expanded', open ? 'true' : 'false'); });
+    document.addEventListener('click', e => { if (!more.contains(e.target)) { more.classList.remove('open'); document.getElementById('tabMoreBtn').setAttribute('aria-expanded', 'false'); } });
+  }
+  return more;
+}
+function slMoreRender(idleSlugs) {
+  const more = slMoreControl(); if (!more) return;
+  const bar = document.querySelector('.tabs'); bar.appendChild(more);   /* always last */
+  const rb = document.getElementById('tabResetBtn'); if (rb) bar.insertBefore(rb, more);
+  more.style.display = idleSlugs.length ? '' : 'none';
+  document.getElementById('tabMoreBtn').textContent = 'More ▾ (' + idleSlugs.length + ')';
+  document.getElementById('tabMoreMenu').innerHTML = '<div class="tab-more-note">Not used in ' + SL_USAGE_IDLE_DAYS + ' days — pick one to bring it back</div>' + idleSlugs.map(s => '<button type="button" role="menuitem" data-slug="' + s + '">' + (TAB_LABEL[s] || s) + '</button>').join('');
+  document.getElementById('tabMoreMenu').querySelectorAll('button').forEach(b => b.addEventListener('click', () => { const u = slUsageLoad(); (u[b.dataset.slug] || (u[b.dataset.slug] = { d: {}, last: 0, first: Date.now() })).last = Date.now(); slUsageSave(u); more.classList.remove('open'); slTabsApply(); switchTab(b.dataset.slug); }));
+}
+
 const SL_TABS_KEY = 'slateTabPrefs';
 const SL_TABS_PINNED = 'tabsmgr';   /* never hideable: the only route back */
 
@@ -11412,6 +11516,10 @@ function slTabResolvedOrder(prefs) {
   const known = prefs.order.filter(s => all.indexOf(s) >= 0);
   const rest = all.filter(s => known.indexOf(s) < 0);
   const ordered = known.concat(rest);
+  /* usage frequency (30-day bursts) decides; the manual/default order only breaks ties */
+  const u = slUsageStamp();
+  const rank = {}; ordered.forEach((s, i) => { rank[s] = i; });
+  ordered.sort((a, b) => (slUsageScore(u, b) - slUsageScore(u, a)) || (rank[a] - rank[b]));
   /* the manager is always last, wherever it ended up */
   return ordered.filter(s => s !== SL_TABS_PINNED).concat([SL_TABS_PINNED]);
 }
@@ -11429,6 +11537,15 @@ function slTabsApply() {
     const hide = slug !== SL_TABS_PINNED && prefs.hidden.indexOf(slug) >= 0;
     byslug[slug].classList.toggle('sl-tab-hidden', hide);
   }
+  /* 14-day idle → tucked under "More ▾" (never the manager, never the tab you are on) */
+  const u = slUsageStamp(); const activeSlug = (document.querySelector('.tab.active') || {}).dataset ? document.querySelector('.tab.active').dataset.tab : null;
+  const idle = [];
+  for (const slug of order) {
+    const isIdle = slug !== SL_TABS_PINNED && slug !== activeSlug && prefs.hidden.indexOf(slug) < 0 && slUsageIdle(u, slug);
+    if (byslug[slug]) byslug[slug].classList.toggle('sl-tab-idle', isIdle);
+    if (isIdle) idle.push(slug);
+  }
+  slMoreRender(idle);
   /* Never leave the operator looking at a panel whose tab just vanished. */
   const active = document.querySelector('.tab.active');
   if (active && active.classList.contains('sl-tab-hidden')) {
