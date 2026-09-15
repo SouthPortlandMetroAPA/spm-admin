@@ -6012,7 +6012,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.429';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.430';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -12140,6 +12140,7 @@ function bnMailerUrl() { return TCQ_MAILER_URL; }
 async function bnInit() {
   const body = document.getElementById('bnBody');
   try {
+    await dncEnsure();   /* no-contact set loaded before any Call/Text gate can be asked */
     _bnRows = await sb('GET', 'email_bounces_v?select=*&order=last_bounced_at.desc') || [];
     bnRender();
     const last = _bnRows.reduce((m, r) => r.scanned_at > m ? r.scanned_at : m, '');
@@ -12201,9 +12202,40 @@ function bnRender() {
       + '<td>' + r.bounce_count + '</td>'
       + '<td class="bn-sub">' + new Date(r.last_bounced_at).toLocaleDateString() + '</td>'
       + '<td class="bn-sub">' + esc((r.last_subject || '').slice(0, 50)) + '</td>'
-      + '<td>' + (r.last_thread_id ? '<a class="btn-link" href="https://mail.google.com/mail/u/0/#all/' + esc(r.last_thread_id) + '" target="_blank" rel="noopener">Open ↗</a>' : '') + '</td>'
+      + '<td style="white-space:nowrap">' + (r.member_number ? '<button class="btn btn-outline btn-sm" onclick="bnOpenPhoneMenu(this, \'' + esc(r.address) + '\', \'call\')">📞 Call</button> <button class="btn btn-outline btn-sm" onclick="bnOpenPhoneMenu(this, \'' + esc(r.address) + '\', \'text\')">💬 Text</button> ' : '') + (r.last_thread_id ? '<a class="btn-link" href="https://mail.google.com/mail/u/0/#all/' + esc(r.last_thread_id) + '" target="_blank" rel="noopener">Open ↗</a>' : '') + '</td>'
       + '</tr>';
   }).join('');
+}
+/* Call / Text a bounced player. Which-number picker (cell/home/alt through spmPhoneCandidates);
+   DNC: the member AND the line are checked, fail-closed like every other surface. */
+let _bnPhoneMenuEl = null;
+function bnClosePhoneMenu() { if (_bnPhoneMenuEl) { _bnPhoneMenuEl.remove(); _bnPhoneMenuEl = null; } }
+/* The text, in the operator's voice: short, plain, no dashes. Tells them which address bounced
+   and the exact taps to fix it (verified against APA's help center 2026-09-15). */
+function bnSmsBody(r) {
+  const first = (r.first_name || '').trim();
+  return (first ? 'Hi ' + first + ', ' : 'Hi, ') + "it's Paul with South Portland Metro APA. Emails to " + r.address + ' are bouncing back to us, so you are missing league email. If that address is wrong, open the APA Pool League app, tap your initials in the top right, Edit Profile, then Change Email. Or just text me the right one and I will fix it. Thanks.';
+}
+async function bnOpenPhoneMenu(btn, address, act) {
+  bnClosePhoneMenu();
+  const r = _bnRows.find(x => x.address === address); if (!r || !r.member_number) return;
+  /* the no-contact set must be LOADED before the gate is asked — an empty set reads as "nobody
+     blocked" (found in VERIFY: the view said on_dnc, dncIsBlocked said false). Fail-closed on error. */
+  try { await dncEnsure(); } catch (e) { toast('Could not verify the no-contact list — not contacting.'); return; }
+  if (dncIsBlocked(r.member_number)) { toast('🚫 On the no-contact (DNC) list — not contacting.'); return; }
+  const nums = spmPhoneCandidates(r).filter(n => !spmPhoneOnDncLine(n.digits));
+  if (!nums.length) { toast('No usable phone number on file for ' + ((r.first_name || '') + ' ' + (r.last_name || '')).trim()); return; }
+  const body = act === 'text' ? bnSmsBody(r) : '';
+  const menu = document.createElement('div');
+  menu.style.cssText = 'position:absolute; background:#fff; border:1px solid var(--border); border-radius:10px; box-shadow:0 4px 16px rgba(0,0,0,0.16); z-index:1000; padding:6px; min-width:240px;';
+  menu.innerHTML = '<div style="padding:6px 10px 8px; color:var(--muted); font-size:0.74rem; font-weight:700; border-bottom:1px solid #f3f4f6; margin-bottom:4px;">' + (act === 'text' ? 'Text' : 'Call') + ' ' + esc(((r.first_name || '') + ' ' + (r.last_name || '')).trim()) + ' — which number?</div>'
+    + nums.map(n => '<a href="' + esc(act === 'text' ? otBuildSmsUrl(n.digits, body) : 'tel:' + n.digits) + '" style="display:flex; justify-content:space-between; gap:12px; padding:10px 12px; text-decoration:none; color:var(--text); font-weight:600; border-radius:6px; min-height:40px; align-items:center;"><span>' + esc(n.pretty) + '</span><span style="color:var(--muted); font-size:.74rem; text-transform:uppercase; letter-spacing:.04em">' + esc(n.label) + '</span></a>').join('')
+    + (act === 'text' ? '<div style="padding:8px 10px 6px; color:var(--muted); font-size:0.72rem; border-top:1px solid #f3f4f6; margin-top:4px;">Message is pre-filled: "' + esc(body.slice(0, 90)) + '…"</div>' : '');
+  const rect = btn.getBoundingClientRect();
+  menu.style.left = (window.scrollX + rect.left) + 'px'; menu.style.top = (window.scrollY + rect.bottom + 4) + 'px';
+  document.body.appendChild(menu); _bnPhoneMenuEl = menu;
+  menu.querySelectorAll('a').forEach(el => { el.addEventListener('mouseenter', () => el.style.background = '#f3f4f6'); el.addEventListener('mouseleave', () => el.style.background = ''); el.addEventListener('click', () => setTimeout(bnClosePhoneMenu, 200)); });
+  setTimeout(() => document.addEventListener('click', function off(e) { if (!menu.contains(e.target)) { bnClosePhoneMenu(); document.removeEventListener('click', off); } }), 0);
 }
 async function bnHandled(address, on) {
   try {
