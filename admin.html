@@ -1086,6 +1086,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="crewcall">Shipmate</button>
       <button class="tab" data-tab="teamchanges">Team Changes</button>
       <button class="tab" data-tab="bounces">Bounces</button>
+      <button class="tab" data-tab="venuevoice">VenueVoice</button>
       <button class="tab" data-tab="ourrack">To-Do</button>
       <button class="tab" data-tab="preshot">PreShot</button>
       <button class="tab" data-tab="cuedrop">CueDrop</button>
@@ -5660,6 +5661,69 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       </div>
     </div>
 
+    <!-- ═══════════════ VenueVoice — anonymous host-location feedback ═══════════════ -->
+    <div id="tab-venuevoice" class="tab-panel">
+      <style>
+        #tab-venuevoice .vv-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+        #tab-venuevoice .vv-sub{color:var(--muted);font-size:.85rem}
+        #tab-venuevoice .vv-stats{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 14px}
+        #tab-venuevoice .vv-stat{border:1px solid var(--border);border-radius:12px;padding:10px 16px;background:var(--card);text-align:center;min-width:90px}
+        #tab-venuevoice .vv-stat .n{font-size:1.5rem;font-weight:800;line-height:1}
+        #tab-venuevoice .vv-stat .l{font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-top:4px}
+        #tab-venuevoice table.vv{width:100%;border-collapse:collapse;font-size:.9rem}
+        #tab-venuevoice table.vv th{text-align:left;font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:6px 8px;border-bottom:2px solid var(--border);white-space:nowrap}
+        #tab-venuevoice table.vv td{padding:6px 8px;border-bottom:1px solid var(--border);vertical-align:top}
+        #tab-venuevoice table.vv tr.pick{cursor:pointer} #tab-venuevoice table.vv tr.pick:hover td{background:#f7f9ff}
+        #tab-venuevoice .vv-filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 10px}
+        #tab-venuevoice .vv-filters select,#tab-venuevoice .vv-filters input{font:inherit;padding:6px 10px;border:1px solid var(--border);border-radius:8px;min-height:34px}
+        #tab-venuevoice .vv-r{border:1px solid var(--border);border-radius:12px;background:var(--card);padding:12px 14px;margin-bottom:10px}
+        #tab-venuevoice .vv-r.hidden{opacity:.5}
+        #tab-venuevoice .vv-top{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+        #tab-venuevoice .vv-venue{font-weight:800}
+        #tab-venuevoice .vv-tag{display:inline-block;font-size:.66rem;font-weight:800;letter-spacing:.04em;padding:2px 8px;border-radius:999px;text-transform:uppercase;white-space:nowrap;background:#f1f1f1;color:#555}
+        #tab-venuevoice .vv-tag.contact{background:#e7edfb;color:#0031a1}
+        #tab-venuevoice .vv-q{margin:6px 0 0;font-size:.92rem;white-space:pre-wrap}
+        #tab-venuevoice .vv-q b{display:block;font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700}
+        #tab-venuevoice .vv-actions{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;align-items:center}
+        #tab-venuevoice .vv-empty{color:var(--muted);padding:28px;text-align:center}
+        #tab-venuevoice code.vv-url{display:block;font-size:.78rem;word-break:break-all;background:#f7f7f9;border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-top:6px}
+      </style>
+      <div class="card">
+        <div class="vv-head">
+          <h2 style="margin:0">VenueVoice &mdash; what players say about host locations</h2>
+          <button class="btn btn-outline btn-sm" onclick="vvInit(true)">Refresh</button>
+          <button class="btn btn-outline btn-sm" onclick="vvExportCsv()">Export CSV</button>
+          <a class="btn btn-outline btn-sm" style="margin-left:auto;text-decoration:none" href="https://southportlandmetroapa.github.io/venuevoice/" target="_blank" rel="noopener">Open the form &#8599;</a>
+        </div>
+        <p class="vv-sub" style="margin:0 0 12px">Anonymous by design: a row carries an APA number <b>only</b> when the player ticked "OK to contact me". Share the form link, or add <code>?host=&lt;slug&gt;</code> to pre-pick a bar (good for a QR code at the venue).</p>
+        <div class="vv-stats" id="vvStats"></div>
+        <h3 style="margin:8px 0 6px">By venue</h3>
+        <div style="overflow:auto;margin-bottom:16px"><table class="vv"><thead><tr><th>Venue</th><th>Responses</th><th>Avg rating</th><th>Rated</th><th>Contactable</th><th>Top themes</th><th>Last</th></tr></thead><tbody id="vvByVenue"><tr><td colspan="7" class="vv-empty">Loading&hellip;</td></tr></tbody></table></div>
+        <h3 style="margin:8px 0 6px">Responses</h3>
+        <div class="vv-filters">
+          <select id="vvVenue" onchange="vvRender()"><option value="">All venues</option></select>
+          <select id="vvTheme" onchange="vvRender()"><option value="">Any theme</option><option value="tables">Tables</option><option value="lighting">Lighting</option><option value="staff">Staff</option><option value="food">Food &amp; drink</option><option value="parking">Parking</option><option value="space">Noise/space</option><option value="safety">Safety</option><option value="prices">Prices</option></select>
+          <select id="vvRating" onchange="vvRender()"><option value="">Any rating</option><option value="low">1–2</option><option value="mid">3</option><option value="high">4–5</option></select>
+          <label style="display:flex;gap:6px;align-items:center;font-size:.9rem"><input type="checkbox" id="vvContact" onchange="vvRender()"> contactable only</label>
+          <label style="display:flex;gap:6px;align-items:center;font-size:.9rem"><input type="checkbox" id="vvShowHidden" onchange="vvRender()"> show hidden</label>
+          <input type="search" id="vvQ" placeholder="Search text…" oninput="vvRender()" style="margin-left:auto;min-width:180px">
+        </div>
+        <div id="vvList"><div class="vv-empty">Loading&hellip;</div></div>
+      </div>
+      <div class="card" style="margin-top:16px">
+        <h2 style="margin:0 0 4px">Assistant API</h2>
+        <p class="vv-sub" style="margin:0 0 8px">Give Claude or ChatGPT these links to pull every response. The key is a secret — Regenerate if it leaks. OpenAPI file for ChatGPT Actions: <a href="https://southportlandmetroapa.github.io/venuevoice/openapi.yaml" target="_blank" rel="noopener">openapi.yaml</a> (auth: custom header <code>apikey</code> = the public anon key, plus <code>p_key</code> below).</p>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span class="vv-sub">Access key: <code id="vvKey">…</code></span>
+          <button class="btn btn-outline btn-sm" onclick="vvCopyKey()">Copy key</button>
+          <button class="btn btn-outline btn-sm" onclick="vvRegenKey()" title="The old key stops working immediately">Regenerate</button>
+          <span class="vv-sub" id="vvKeyMeta"></span>
+        </div>
+        <code class="vv-url" id="vvUrlAll"></code>
+        <code class="vv-url" id="vvUrlSum"></code>
+      </div>
+    </div>
+
     <div id="tab-tabsmgr" class="tab-panel">
       <div class="card" style="padding:16px;max-width:640px">
         <h3 style="margin:0 0 2px">Tabs</h3>
@@ -5918,7 +5982,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.424';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.425';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11162,6 +11226,7 @@ const TAB_LABEL = {
   crewcall:      'CrewCall',
   teamchanges:   'Team Changes',
   bounces:       'Bounces',
+  venuevoice:    'VenueVoice',
   ourrack:       'To-Do',
   preshot:       'PreShot',
   cuedrop:       'CueDrop',
@@ -11571,6 +11636,7 @@ function switchTab(name) {
   if (name === 'crewcall') ccInit();
   if (name === 'teamchanges') tcInit();
   if (name === 'bounces') bnInit();
+  if (name === 'venuevoice') vvInit();
   if (name === 'ourrack') orInit();
   if (name === 'preshot') psInit();
   if (name === 'cuedrop') cdInit();
@@ -12027,6 +12093,105 @@ async function bnHandled(address, on) {
   } catch (e) { alert('Could not save: ' + e.message); }
 }
 window.bnInit = bnInit;
+/* ═══════════════════════════════════════════════════════════════════════
+   VENUEVOICE — anonymous host-location feedback (2026-09-15, T2)
+   DATA  venuevoice.feedback / api_keys (service_role only; the public form
+         writes through rpc venuevoice.submit). Assistant API = apa_core
+         venuevoice_feedback / venuevoice_summary (GET, key-gated).
+   PRIVACY a row shows an APA number ONLY when contact_ok; nothing else about
+         the author exists to show. Hide = hidden_at (kept, excluded from API).
+   ═══════════════════════════════════════════════════════════════════════ */
+const VV_WP = { 'Accept-Profile': 'venuevoice', 'Content-Profile': 'venuevoice' };
+const VV_THEME = { tables: 'Tables', lighting: 'Lighting', staff: 'Staff', food: 'Food & drink', parking: 'Parking', space: 'Noise/space', safety: 'Safety', prices: 'Prices' };
+const VV_FACE = { 1: '😖 1', 2: '😕 2', 3: '😐 3', 4: '🙂 4', 5: '🤩 5' };
+let _vvRows = [], _vvKey = null;
+async function vvInit() {
+  try {
+    _vvRows = await sb('GET', 'feedback?select=*&order=created_at.desc', null, VV_WP) || [];
+    vvRenderSummary(); vvRender(); await vvLoadKey();
+  } catch (e) { document.getElementById('vvList').innerHTML = '<div class="vv-empty">Load failed: ' + esc(e.message) + '</div>'; }
+}
+function vvVisible() { return _vvRows.filter(r => !r.hidden_at); }
+function vvRenderSummary() {
+  const vis = vvVisible();
+  const rated = vis.filter(r => r.rating != null);
+  document.getElementById('vvStats').innerHTML = [
+    ['<div class="n">' + vis.length + '</div><div class="l">responses</div>'],
+    ['<div class="n">' + new Set(vis.map(r => r.venue_name)).size + '</div><div class="l">venues</div>'],
+    ['<div class="n">' + (rated.length ? (rated.reduce((s, r) => s + r.rating, 0) / rated.length).toFixed(1) : '—') + '</div><div class="l">avg rating</div>'],
+    ['<div class="n">' + vis.filter(r => r.contact_ok).length + '</div><div class="l">contactable</div>'],
+    ['<div class="n">' + vis.filter(r => r.created_at > new Date(Date.now() - 7 * 864e5).toISOString()).length + '</div><div class="l">last 7 days</div>']
+  ].map(h => '<div class="vv-stat">' + h + '</div>').join('');
+  const by = new Map();
+  for (const r of vis) { const k = r.venue_name; const b = by.get(k) || { venue: k, n: 0, rated: 0, sum: 0, contact: 0, themes: {}, last: '' }; b.n++; if (r.rating != null) { b.rated++; b.sum += r.rating; } if (r.contact_ok) b.contact++; for (const t of (r.themes || [])) b.themes[t] = (b.themes[t] || 0) + 1; if (r.created_at > b.last) b.last = r.created_at; by.set(k, b); }
+  const rows = [...by.values()].sort((a, b) => b.n - a.n || a.venue.localeCompare(b.venue));
+  document.getElementById('vvByVenue').innerHTML = rows.length ? rows.map(b => '<tr class="pick" onclick="vvPickVenue(' + JSON.stringify(b.venue).replace(/"/g, '&quot;') + ')"><td><b>' + esc(b.venue) + '</b></td><td>' + b.n + '</td><td>' + (b.rated ? (b.sum / b.rated).toFixed(1) : '—') + '</td><td>' + b.rated + '</td><td>' + b.contact + '</td><td class="vv-sub">' + Object.entries(b.themes).sort((x, y) => y[1] - x[1]).slice(0, 3).map(([t, c]) => esc(VV_THEME[t] || t) + ' ' + c).join(' · ') + '</td><td class="vv-sub">' + new Date(b.last).toLocaleDateString() + '</td></tr>').join('') : '<tr><td colspan="7" class="vv-empty">No feedback yet — share the form.</td></tr>';
+  const sel = document.getElementById('vvVenue'); const cur = sel.value;
+  sel.innerHTML = '<option value="">All venues</option>' + rows.map(b => '<option value="' + esc(b.venue) + '">' + esc(b.venue) + ' (' + b.n + ')</option>').join('');
+  sel.value = cur;
+}
+function vvPickVenue(v) { document.getElementById('vvVenue').value = v; vvRender(); document.getElementById('vvList').scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+function vvRender() {
+  const venue = document.getElementById('vvVenue').value, theme = document.getElementById('vvTheme').value, rating = document.getElementById('vvRating').value;
+  const contact = document.getElementById('vvContact').checked, showHidden = document.getElementById('vvShowHidden').checked, q = (document.getElementById('vvQ').value || '').trim().toLowerCase();
+  const list = _vvRows.filter(r => {
+    if (!showHidden && r.hidden_at) return false;
+    if (venue && r.venue_name !== venue) return false;
+    if (theme && !(r.themes || []).includes(theme)) return false;
+    if (rating === 'low' && !(r.rating >= 1 && r.rating <= 2)) return false;
+    if (rating === 'mid' && r.rating !== 3) return false;
+    if (rating === 'high' && !(r.rating >= 4)) return false;
+    if (contact && !r.contact_ok) return false;
+    if (q && !((r.q_good || '') + ' ' + (r.q_bad || '') + ' ' + (r.q_change || '') + ' ' + r.venue_name).toLowerCase().includes(q)) return false;
+    return true;
+  });
+  const el = document.getElementById('vvList');
+  if (!list.length) { el.innerHTML = '<div class="vv-empty">' + (_vvRows.length ? 'Nothing matches.' : 'No feedback yet.') + '</div>'; return; }
+  el.innerHTML = list.map(r => '<div class="vv-r' + (r.hidden_at ? ' hidden' : '') + '">'
+    + '<div class="vv-top"><span class="vv-venue">' + esc(r.venue_name) + '</span>' + (r.rating != null ? '<span class="vv-tag">' + VV_FACE[r.rating] + '</span>' : '') + (r.contact_ok ? '<span class="vv-tag contact">OK to contact · #' + esc(r.member_number || '') + '</span>' : '<span class="vv-tag">anonymous</span>') + (r.hidden_at ? '<span class="vv-tag">hidden</span>' : '') + '<span class="vv-sub" style="margin-left:auto">' + new Date(r.created_at).toLocaleString() + '</span></div>'
+    + (r.q_good ? '<p class="vv-q"><b>What\'s good</b>' + esc(r.q_good) + '</p>' : '') + (r.q_bad ? '<p class="vv-q"><b>What\'s not</b>' + esc(r.q_bad) + '</p>' : '') + (r.q_change ? '<p class="vv-q"><b>Change one thing</b>' + esc(r.q_change) + '</p>' : '')
+    + ((r.themes || []).length ? '<div class="vv-sub" style="margin-top:6px">' + r.themes.map(t => esc(VV_THEME[t] || t)).join(' · ') + '</div>' : '')
+    + '<div class="vv-actions"><button class="btn btn-outline btn-sm" onclick="vvHide(' + r.id + ',' + (r.hidden_at ? 'false' : 'true') + ')">' + (r.hidden_at ? 'Unhide' : 'Hide') + '</button><button class="btn btn-outline btn-sm" onclick="vvNote(' + r.id + ')">' + (r.operator_note ? 'Edit note' : 'Add note') + '</button>' + (r.operator_note ? '<span class="vv-sub">Note: ' + esc(r.operator_note) + '</span>' : '') + '</div>'
+    + '</div>').join('');
+}
+async function vvHide(id, hide) {
+  try { await sb('PATCH', 'feedback?id=eq.' + id, { hidden_at: hide ? new Date().toISOString() : null }, { ...VV_WP, Prefer: 'return=minimal' }); const r = _vvRows.find(x => x.id === id); if (r) r.hidden_at = hide ? new Date().toISOString() : null; vvRenderSummary(); vvRender(); }
+  catch (e) { alert('Could not save: ' + e.message); }
+}
+async function vvNote(id) {
+  const r = _vvRows.find(x => x.id === id); if (!r) return;
+  const v = prompt('Operator note (what you did about it):', r.operator_note || ''); if (v === null) return;
+  try { await sb('PATCH', 'feedback?id=eq.' + id, { operator_note: v.trim() || null }, { ...VV_WP, Prefer: 'return=minimal' }); r.operator_note = v.trim() || null; vvRender(); }
+  catch (e) { alert('Could not save: ' + e.message); }
+}
+function vvExportCsv() {
+  const cols = ['id', 'created_at', 'venue_name', 'rating', 'q_good', 'q_bad', 'q_change', 'themes', 'contact_ok', 'member_number', 'operator_note'];
+  const q = v => '"' + String(v == null ? '' : Array.isArray(v) ? v.join('|') : v).replace(/"/g, '""') + '"';
+  const csv = '﻿' + cols.join(',') + '\n' + vvVisible().map(r => cols.map(c => q(r[c])).join(',')).join('\n');
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = 'venuevoice-feedback.csv'; a.click();
+}
+async function vvLoadKey() {
+  try {
+    const rows = await sb('GET', 'api_keys?select=key,created_at&revoked_at=is.null&order=created_at.desc&limit=1', null, VV_WP) || [];
+    _vvKey = rows.length ? rows[0].key : null;
+    document.getElementById('vvKey').textContent = _vvKey || 'none — click Regenerate';
+    document.getElementById('vvKeyMeta').textContent = rows.length ? 'made ' + new Date(rows[0].created_at).toLocaleDateString() : '';
+    const base = SB_URL + '/rest/v1/rpc/';
+    document.getElementById('vvUrlAll').textContent = _vvKey ? base + 'venuevoice_feedback?p_key=' + _vvKey + '&apikey=' + SB_ANON : '';
+    document.getElementById('vvUrlSum').textContent = _vvKey ? base + 'venuevoice_summary?p_key=' + _vvKey + '&apikey=' + SB_ANON : '';
+  } catch (e) { document.getElementById('vvKey').textContent = 'could not load'; }
+}
+async function vvCopyKey() { if (!_vvKey) return; try { await navigator.clipboard.writeText(_vvKey); toast('Access key copied'); } catch (e) { prompt('Copy this key:', _vvKey); } }
+async function vvRegenKey() {
+  if (!confirm('Regenerate the VenueVoice access key?\n\nAny assistant using the old key stops working immediately.')) return;
+  try {
+    await sb('PATCH', 'api_keys?revoked_at=is.null', { revoked_at: new Date().toISOString() }, { ...VV_WP, Prefer: 'return=minimal' });
+    await sb('POST', 'api_keys', { label: 'assistant' }, { ...VV_WP, Prefer: 'return=minimal' });
+    await vvLoadKey(); toast('New access key made — the old one is dead');
+  } catch (e) { alert('Could not regenerate: ' + e.message); }
+}
+window.vvInit = vvInit;
+
 
 
 /* ═══════════════ New Joiners — recent APA joins not on a current team ═══════════════
