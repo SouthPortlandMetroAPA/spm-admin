@@ -12182,7 +12182,52 @@ async function vvLoadKey() {
     document.getElementById('vvUrlSum').textContent = _vvKey ? base + 'venuevoice_summary?p_key=' + _vvKey + '&apikey=' + SB_ANON : '';
   } catch (e) { document.getElementById('vvKey').textContent = 'could not load'; }
 }
-undefined if (!_vvKey) return; try { await navigator.clipboard.writeText(_vvKey); toast('Access key copied'); } catch (e) { prompt('Copy this key:', _vvKey); } }
+/* A paste-anywhere brief for Claude / ChatGPT / any assistant: the two GET URLs with BOTH keys
+   filled in, what each field means, a curl line, and the caveats that matter (anonymity, hidden
+   rows, key rotation). Contains the access key — the operator is choosing to hand it over. */
+function vvAiBrief() {
+  const base = SB_URL + '/rest/v1/rpc/';
+  const all = base + 'venuevoice_feedback?p_key=' + _vvKey + '&apikey=' + SB_ANON;
+  const sum = base + 'venuevoice_summary?p_key=' + _vvKey + '&apikey=' + SB_ANON;
+  return [
+    'VENUEVOICE — South Portland Metro APA player feedback about host bars',
+    'Use these two read-only endpoints to pull the data. Plain HTTP GET, no login, JSON back.',
+    '',
+    '1) Every response, newest first:',
+    '   ' + all,
+    '2) Per-venue summary — count, average rating, theme counts:',
+    '   ' + sum,
+    '',
+    'Auth: everything needed is already in the URLs — p_key is the VenueVoice access key, apikey is the public Supabase anon key.',
+    'If you must use headers instead: send header "apikey: ' + SB_ANON + '" and keep p_key in the query string.',
+    'A wrong or rotated p_key returns an empty array [] — not an error.',
+    '',
+    'curl example:',
+    '   curl -s "' + all + '"',
+    '',
+    'Fields in 1: id · submitted_at · venue · host_id · rating — 1 terrible … 5 love it, may be null ·',
+    '   whats_good · whats_not_good · change_one_thing — free text, may be null ·',
+    '   themes — any of tables, lighting, staff, food, parking, space, safety, prices ·',
+    '   contact_ok — true only when the player agreed to be contacted · apa_number — present ONLY when contact_ok · operator_note.',
+    'Fields in 2: venue · host_id · responses · avg_rating · rated · contactable · themes {theme: count} · last_submitted_at.',
+    '',
+    'How the data was collected: an anonymous public form (' + 'https://southportlandmetroapa.github.io/venuevoice/' + '). Players pick their bar,',
+    'tap a 1–5 rating, answer "What\'s good here?", "What\'s not so good?", "If you could change one thing?", and may tag themes.',
+    'Anonymous by default: no name, login or IP is stored. Rows the league hid are excluded from the API.',
+    '',
+    'What is usually wanted: per-venue strengths and problems, recurring themes, low-rated venues with their reasons,',
+    'concrete change requests, and — only for contact_ok rows — who could be asked a follow-up question.',
+    'Treat the free text as player opinions, not facts, and never publish it with identifying details.',
+    '',
+    'Generated ' + new Date().toLocaleString() + ' from Slate. Keys rotate: if you get [], ask the league for a fresh copy.'
+  ].join('\n');
+}
+async function vvCopyAiBrief() {
+  if (!_vvKey) { alert('No access key yet — click Regenerate first.'); return; }
+  const text = vvAiBrief();
+  try { await navigator.clipboard.writeText(text); toast('AI instructions copied — paste them into Claude or ChatGPT'); } catch (e) { prompt('Copy this:', text); }
+}
+async function vvCopyKey() { if (!_vvKey) return; try { await navigator.clipboard.writeText(_vvKey); toast('Access key copied'); } catch (e) { prompt('Copy this key:', _vvKey); } }
 async function vvRegenKey() {
   if (!confirm('Regenerate the VenueVoice access key?\n\nAny assistant using the old key stops working immediately.')) return;
   try {
