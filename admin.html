@@ -74,6 +74,8 @@ html,body {
   -webkit-text-size-adjust: 100%;
 }
 .page { max-width: 1200px; margin: 0 auto; padding: 12px; }
+/* desktop: Slate uses the whole screen (operator directive 2026-09-15) — the 1200px cap stays for narrower windows */
+@media (min-width: 1100px) { .page { max-width: none; margin: 0; padding: 12px 18px; } }
 .hidden { display: none !important; }
 
 /* ── Header ── red→blue gradient with pill badges */
@@ -6010,7 +6012,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.427';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.429';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -15444,10 +15446,22 @@ async function cdLoadCatalog() {
   try {
     _cdCues = await sb('GET', 'cues?active=eq.true&order=sort.asc', null, CD_RP) || [];
     _cdCases = await sb('GET', 'cases?active=eq.true&order=sort.asc', null, CD_RP) || [];
-    const opt = a => '<option value="">Choose…</option>' + a.map(x => '<option value="' + esc(x.code) + '">' + esc(x.friendly || x.description) + '</option>').join('');
-    const cue = document.getElementById('cdCue'), kase = document.getElementById('cdCase');
-    if (cue) cue.innerHTML = opt(_cdCues); if (kase) kase.innerHTML = opt(_cdCases);
+    cdRenderCatalogOptions();
   } catch (e) { cdSetStatus('Catalog load failed: ' + (e.message || e), true); }
+}
+/* stock left = stock − every request that took one (any status; a delivered cue is gone) */
+function cdStockLeft(item, kind) {
+  const field = kind === 'cue' ? 'cue_code' : 'case_code';
+  return (item ? (item.stock || 0) : 0) - (_cdReqs || []).filter(r => r[field] === item.code).length;
+}
+/* Out-of-stock items stay visible (so the operator sees WHY) but cannot be chosen. Re-run
+   after every requests reload — stock left changes with each request. */
+function cdRenderCatalogOptions() {
+  const opt = (a, kind) => '<option value="">Choose…</option>' + a.map(x => { const left = cdStockLeft(x, kind); const out = left <= 0;
+    return '<option value="' + esc(x.code) + '"' + (out ? ' disabled' : '') + '>' + esc(x.friendly || x.description) + (out ? ' — out of stock' : ' (' + left + ' left)') + '</option>'; }).join('');
+  const cue = document.getElementById('cdCue'), kase = document.getElementById('cdCase');
+  if (cue) { const v = cue.value; cue.innerHTML = opt(_cdCues, 'cue'); if (v && !cue.querySelector('option[value="' + v + '"]:disabled')) cue.value = v; }
+  if (kase) { const v = kase.value; kase.innerHTML = opt(_cdCases, 'case'); if (v && !kase.querySelector('option[value="' + v + '"]:disabled')) kase.value = v; }
 }
 async function cdLoad() {
   const list = document.getElementById('cdList');
@@ -15456,6 +15470,7 @@ async function cdLoad() {
     _cdReqs = await sb('GET', 'requests?select=*&order=created_at.desc&limit=500', null, CD_RP) || [];
     _cdSig = cdSig(_cdReqs);
     cdRender();
+    cdRenderCatalogOptions();
   } catch (e) { if (list) list.innerHTML = '<div class="cd-empty">Couldn\'t load: ' + esc(e.message || String(e)) + '</div>'; }
 }
 
@@ -15507,13 +15522,13 @@ async function cdAdd() {
   const cueCode = document.getElementById('cdCue').value, caseCode = document.getElementById('cdCase').value;
   if (!cueCode || !caseCode) { cdSetStatus('Pick a cue and a case.', true); return; }
   const cue = _cdCues.find(c => c.code === cueCode), kase = _cdCases.find(c => c.code === caseCode);
-  // Inventory guard: warn (don't hard-block — the operator decides) when out of stock.
-  const cueLeft = (cue ? (cue.stock || 0) : 0) - _cdReqs.filter(r => r.cue_code === cueCode).length;
-  const caseLeft = (kase ? (kase.stock || 0) : 0) - _cdReqs.filter(r => r.case_code === caseCode).length;
+  // Inventory guard: HARD block (operator directive 2026-09-15) — an out-of-stock item cannot be
+  // requested; the dropdown already disables it, this catches a stale dropdown.
+  const cueLeft = cdStockLeft(cue, 'cue'), caseLeft = cdStockLeft(kase, 'case');
   const outItems = [];
   if (cueLeft <= 0) outItems.push('cue "' + (cue ? (cue.friendly || cue.description) : cueCode) + '"');
   if (caseLeft <= 0) outItems.push('case "' + (kase ? (kase.friendly || kase.description) : caseCode) + '"');
-  if (outItems.length && !confirm('Heads up — you are out of that ' + outItems.join(' and ') + '. Add this request anyway?')) return;
+  if (outItems.length) { cdSetStatus('Out of stock: ' + outItems.join(' and ') + '. Add stock in Inventory first, or pick another item.', true); cdRenderCatalogOptions(); return; }
   const btn = document.getElementById('cdAddBtn'); btn.disabled = true;
   try {
     await sb('POST', 'requests', { member_number: _cdPicked.member_number, player_name: _cdPicked.name, player_email: _cdPicked.email || null, cue_code: cueCode, cue_desc: cue ? cue.description : null, cue_friendly: cue ? (cue.friendly || cue.description) : null, case_code: caseCode, case_desc: kase ? kase.description : null, case_friendly: kase ? (kase.friendly || kase.description) : null, source: 'cuedrop-slate' }, CD_WP);
