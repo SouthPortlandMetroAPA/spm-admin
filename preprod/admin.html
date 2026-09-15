@@ -12140,6 +12140,7 @@ function bnMailerUrl() { return TCQ_MAILER_URL; }
 async function bnInit() {
   const body = document.getElementById('bnBody');
   try {
+    await dncEnsure();   /* no-contact set loaded before any Call/Text gate can be asked */
     _bnRows = await sb('GET', 'email_bounces_v?select=*&order=last_bounced_at.desc') || [];
     bnRender();
     const last = _bnRows.reduce((m, r) => r.scanned_at > m ? r.scanned_at : m, '');
@@ -12215,9 +12216,12 @@ function bnSmsBody(r) {
   const first = (r.first_name || '').trim();
   return (first ? 'Hi ' + first + ', ' : 'Hi, ') + "it's Paul with South Portland Metro APA. Emails to " + r.address + ' are bouncing back to us, so you are missing league email. If that address is wrong, open the APA Pool League app, tap your initials in the top right, Edit Profile, then Change Email. Or just text me the right one and I will fix it. Thanks.';
 }
-function bnOpenPhoneMenu(btn, address, act) {
+async function bnOpenPhoneMenu(btn, address, act) {
   bnClosePhoneMenu();
   const r = _bnRows.find(x => x.address === address); if (!r || !r.member_number) return;
+  /* the no-contact set must be LOADED before the gate is asked — an empty set reads as "nobody
+     blocked" (found in VERIFY: the view said on_dnc, dncIsBlocked said false). Fail-closed on error. */
+  try { await dncEnsure(); } catch (e) { toast('Could not verify the no-contact list — not contacting.'); return; }
   if (dncIsBlocked(r.member_number)) { toast('🚫 On the no-contact (DNC) list — not contacting.'); return; }
   const nums = spmPhoneCandidates(r).filter(n => !spmPhoneOnDncLine(n.digits));
   if (!nums.length) { toast('No usable phone number on file for ' + ((r.first_name || '') + ' ' + (r.last_name || '')).trim()); return; }
