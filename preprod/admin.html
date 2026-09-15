@@ -74,6 +74,8 @@ html,body {
   -webkit-text-size-adjust: 100%;
 }
 .page { max-width: 1200px; margin: 0 auto; padding: 12px; }
+/* desktop: Slate uses the whole screen (operator directive 2026-09-15) — the 1200px cap stays for narrower windows */
+@media (min-width: 1100px) { .page { max-width: none; margin: 0; padding: 12px 18px; } }
 .hidden { display: none !important; }
 
 /* ── Header ── red→blue gradient with pill badges */
@@ -6010,7 +6012,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.428';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.429';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
