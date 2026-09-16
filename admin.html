@@ -6084,7 +6084,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.435';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.436';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -12336,10 +12336,22 @@ let _vvRows = [], _vvKey = null;
 async function vvInit() {
   try {
     _vvRows = await sb('GET', 'feedback?select=*&order=created_at.desc', null, VV_WP) || [];
+    await vvLoadNames();
     vvRenderSummary(); vvRender(); await vvLoadKey();
   } catch (e) { document.getElementById('vvList').innerHTML = '<div class="vv-empty">Load failed: ' + esc(e.message) + '</div>'; }
 }
 function vvVisible() { return _vvRows.filter(r => !r.hidden_at); }
+/* names for the opted-in rows only (the only rows that carry a member number) — slate.players, service key */
+let _vvNames = {};
+async function vvLoadNames() {
+  const nums = [...new Set(_vvRows.map(r => r.member_number).filter(Boolean))];
+  _vvNames = {};
+  for (let i = 0; i < nums.length; i += 200) {
+    const chunk = nums.slice(i, i + 200);
+    try { const ps = await sb('GET', 'players?member_number=in.(' + chunk.map(encodeURIComponent).join(',') + ')&select=member_number,first_name,last_name,nickname') || []; for (const p of ps) _vvNames[p.member_number] = p; } catch (e) { console.warn('[vv] names', e.message); }
+  }
+}
+function vvName(mn) { const p = _vvNames[mn]; if (!p) return ''; const nk = (p.nickname || '').trim(); return [p.first_name, nk && nk !== p.first_name ? '"' + nk + '"' : '', p.last_name].filter(Boolean).join(' ').trim(); }
 function vvRenderSummary() {
   const vis = vvVisible();
   const rated = vis.filter(r => r.rating != null), om = vvOwnerMetrics(vis);
@@ -12392,7 +12404,7 @@ function vvRender() {
   const el = document.getElementById('vvList');
   if (!list.length) { el.innerHTML = '<div class="vv-empty">' + (_vvRows.length ? 'Nothing matches.' : 'No feedback yet.') + '</div>'; return; }
   el.innerHTML = list.map(r => '<div class="vv-r' + (r.hidden_at ? ' hidden' : '') + '">'
-    + '<div class="vv-top"><span class="vv-venue">' + esc(r.venue_name) + '</span>' + (r.rating != null ? '<span class="vv-tag">' + VV_FACE[r.rating] + '</span>' : '') + (r.contact_ok ? '<span class="vv-tag contact">OK to contact · #' + esc(r.member_number || '') + '</span>' : '<span class="vv-tag">anonymous</span>') + (r.plays_here ? '<span class="vv-tag">' + VV_PLAYS[r.plays_here] + '</span>' : '') + (r.hidden_at ? '<span class="vv-tag">hidden</span>' : '') + '<span class="vv-sub" style="margin-left:auto">' + new Date(r.created_at).toLocaleString() + '</span></div>'
+    + '<div class="vv-top"><span class="vv-venue">' + esc(r.venue_name) + '</span>' + (r.rating != null ? '<span class="vv-tag">' + VV_FACE[r.rating] + '</span>' : '') + (r.contact_ok ? '<span class="vv-tag contact">OK to contact · ' + (vvName(r.member_number) ? esc(vvName(r.member_number)) + ' · ' : '') + '#' + esc(r.member_number || '') + '</span>' : '<span class="vv-tag">anonymous</span>') + (r.plays_here ? '<span class="vv-tag">' + VV_PLAYS[r.plays_here] + '</span>' : '') + (r.hidden_at ? '<span class="vv-tag">hidden</span>' : '') + '<span class="vv-sub" style="margin-left:auto">' + new Date(r.created_at).toLocaleString() + '</span></div>'
     + vvMetricLine(r)
     + (r.q_good ? '<p class="vv-q"><b>What\'s good</b>' + esc(r.q_good) + '</p>' : '') + (r.q_bad ? '<p class="vv-q"><b>What\'s not</b>' + esc(r.q_bad) + '</p>' : '') + (r.q_change ? '<p class="vv-q"><b>Change one thing</b>' + esc(r.q_change) + '</p>' : '')
     + ((r.themes || []).length ? '<div class="vv-sub" style="margin-top:6px">' + r.themes.map(t => esc(VV_THEME[t] || t)).join(' · ') + '</div>' : '')
@@ -12410,9 +12422,9 @@ async function vvNote(id) {
   catch (e) { alert('Could not save: ' + e.message); }
 }
 function vvExportCsv() {
-  const cols = ['id', 'created_at', 'venue_name', 'rating', 'q_good', 'q_bad', 'q_change', 'themes', 'contact_ok', 'member_number', 'operator_note', 'plays_here', 'stay_p', 'freq_now', 'changes', 'freq_if', 'sure_p'];
+  const cols = ['id', 'created_at', 'venue_name', 'rating', 'q_good', 'q_bad', 'q_change', 'themes', 'contact_ok', 'member_number', 'player_name', 'operator_note', 'plays_here', 'stay_p', 'freq_now', 'changes', 'freq_if', 'sure_p'];
   const q = v => '"' + String(v == null ? '' : Array.isArray(v) ? v.join('|') : v).replace(/"/g, '""') + '"';
-  const csv = '﻿' + cols.join(',') + '\n' + vvVisible().map(r => cols.map(c => q(r[c])).join(',')).join('\n');
+  const csv = '﻿' + cols.join(',') + '\n' + vvVisible().map(r => cols.map(c => q(c === 'player_name' ? (r.contact_ok ? vvName(r.member_number) : '') : r[c])).join(',')).join('\n');
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = 'venuevoice-feedback.csv'; a.click();
 }
 async function vvLoadKey() {
