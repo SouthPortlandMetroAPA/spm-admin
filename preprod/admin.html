@@ -12491,18 +12491,18 @@ function vvOwnerMetrics(rows) {
 }
 function vvOwnerBrief(venue) {
   const rows = vvVisible().filter(r => r.venue_name === venue), m = vvOwnerMetrics(rows);
-  const L = [];
-  L.push(venue + ' — what South Portland Metro APA players told us', 'Anonymous survey, ' + m.responses + ' responses: ' + m.play_now + ' play league here now, ' + m.used_to + ' used to, ' + m.prospects + ' play elsewhere. Counts are of the people who answered, not the league.', '');
+  const L = [], pl = (n, one, many) => n + ' ' + (n === 1 ? one : (many || one + 's')), are = n => (n === 1 ? 'is' : 'are');
+  L.push(venue + ' — what South Portland Metro APA players told us', 'Anonymous survey, ' + pl(m.responses, 'response') + ': ' + m.play_now + ' play league here now, ' + m.used_to + ' used to, ' + m.prospects + ' play elsewhere. Counts are of the people who answered, not the league.', '');
   L.push('MORE VISITS OUTSIDE LEAGUE NIGHT');
-  L.push(m.come_more + ' of ' + m.asked_freq + ' say they would come more often outside league night if what they asked for changed; ' + m.come_more_sure + ' are sure of it (7+ out of 10).');
+  L.push(m.come_more + ' of ' + m.asked_freq + ' say they would come more often outside league night if what they asked for changed; ' + m.come_more_sure + ' ' + are(m.come_more_sure) + ' sure of it (7+ out of 10).');
   L.push('Planning number: about ' + m.extra_visits.toFixed(1) + ' extra visits a month across those people (each person weighted by how sure they were). Today they report about ' + m.visits_now.toFixed(1) + ' off-night visits a month between them.');
   L.push('  Current players: ' + m.segments.current.come_more + ' would come more (' + m.segments.current.come_more_sure + ' sure), ~' + m.segments.current.extra_visits.toFixed(1) + ' visits/mo.');
   L.push('  Not playing here now: ' + m.segments.prospects.come_more + ' would come (' + m.segments.prospects.come_more_sure + ' sure), ~' + m.segments.prospects.extra_visits.toFixed(1) + ' visits/mo — new faces, and the least certain number here.');
   const bc = Object.entries(m.by_change).sort((a, b) => b[1].extra_visits - a[1].extra_visits);
-  if (bc.length) { L.push('', 'WHAT WOULD BRING THEM IN — most people named more than one change, so these overlap and do not add up'); for (const [t, v] of bc) L.push('  ' + (VV_CHANGE[t] || t) + ': ' + v.n + ' people, ~' + v.extra_visits.toFixed(1) + ' visits/mo' + (v.alone_n ? ' — ' + v.alone_n + ' named only this (~' + v.alone_extra_visits.toFixed(1) + ' visits/mo on its own)' : '')); L.push('  If everything above were done: ' + m.come_more + ' people, ~' + m.extra_visits.toFixed(1) + ' visits/mo (each person counted once).'); }
+  if (bc.length) { L.push('', 'WHAT WOULD BRING THEM IN — most people named more than one change, so these overlap and do not add up'); for (const [t, v] of bc) L.push('  ' + (VV_CHANGE[t] || t) + ': ' + pl(v.n, 'person', 'people') + ', ~' + v.extra_visits.toFixed(1) + ' visits/mo' + (v.alone_n ? ' — ' + v.alone_n + ' named only this (~' + v.alone_extra_visits.toFixed(1) + ' visits/mo on its own)' : '')); L.push('  If everything above were done: ' + pl(m.come_more, 'person', 'people') + ', ~' + m.extra_visits.toFixed(1) + ' visits/mo (each person counted once).'); }
   if (m.nothing_would) L.push('  ' + m.nothing_would + ' said nothing would change how often they come.');
   L.push('', 'KEEPING THE PLAYERS YOU HAVE');
-  if (m.asked_stay >= 5) L.push(m.leaving + ' of ' + m.asked_stay + ' current players say they are unlikely to keep playing here next session, answering 4 or less out of 10; ' + m.fence + ' are on the fence at 5–6. Expected loss: about ' + m.expected_loss.toFixed(1) + ' players.');
+  if (m.asked_stay >= 5) L.push(m.leaving + ' of ' + m.asked_stay + ' current players say they are unlikely to keep playing here next session, answering 4 or less out of 10; ' + m.fence + ' ' + are(m.fence) + ' on the fence at 5–6. Expected loss: about ' + m.expected_loss.toFixed(1) + ' players.');
   else L.push('Fewer than 5 current players answered this, so it is not shown — small numbers would point at individuals.');
   const themes = {}; for (const r of rows) for (const t of (r.themes || [])) themes[t] = (themes[t] || 0) + 1;
   const top = Object.entries(themes).sort((a, b) => b[1] - a[1]).slice(0, 4);
