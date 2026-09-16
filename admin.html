@@ -1117,6 +1117,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="venuevoice">VenueVoice</button>
       <button class="tab" data-tab="oopsreq">OOPS Requests</button>
       <button class="tab" data-tab="fixit">Fix-It Requests</button>
+      <button class="tab" data-tab="hostroster">Host Rosters</button>
       <button class="tab" data-tab="ourrack">To-Do</button>
       <button class="tab" data-tab="preshot">PreShot</button>
       <button class="tab" data-tab="cuedrop">CueDrop</button>
@@ -5825,6 +5826,31 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       </div>
     </div>
 
+    <!-- ═══════════════ Host Rosters — who plays at each host location ═══════════════ -->
+    <div id="tab-hostroster" class="tab-panel">
+      <style>
+        #tab-hostroster .hr-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+        #tab-hostroster .hr-sub{color:var(--muted);font-size:.85rem}
+        #tab-hostroster select{padding:8px 10px;border:1px solid var(--border);border-radius:8px;font:inherit;min-height:36px;background:var(--card);color:var(--text)}
+        #tab-hostroster .hr-out{width:100%;min-height:420px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.9rem;line-height:1.45;padding:14px;border:1px solid var(--border);border-radius:10px;background:#fbfbfd;white-space:pre;overflow:auto}
+        #tab-hostroster .hr-empty{color:var(--muted);padding:28px;text-align:center}
+      </style>
+      <div class="card">
+        <div class="hr-head">
+          <h2 style="margin:0">Host Rosters &mdash; everyone who plays at a location</h2>
+          <button class="btn btn-outline btn-sm" onclick="hrInit(true)">Refresh</button>
+        </div>
+        <p class="hr-sub" style="margin:0 0 12px">Teams come from that session's Team Screen upload in Host Plan; rosters from the current league data. Pick a bar, then <b>Copy</b> drops the whole block, ready to paste into an email.</p>
+        <div class="hr-head">
+          <label class="hr-sub" for="hrSession">Session</label><select id="hrSession" onchange="hrLoadSession()"></select>
+          <label class="hr-sub" for="hrHost">Host location</label><select id="hrHost" onchange="hrRender()"><option value="">Pick a bar…</option></select>
+          <span class="hr-sub" id="hrCount"></span>
+          <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="hrCopy()">Copy for email</button>
+        </div>
+        <div id="hrOut" class="hr-out"><span class="hr-empty">Pick a bar.</span></div>
+      </div>
+    </div>
+
     <div id="tab-tabsmgr" class="tab-panel">
       <div class="card" style="padding:16px;max-width:640px">
         <h3 style="margin:0 0 2px">Tabs</h3>
@@ -6084,7 +6110,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.436';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.437';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11332,6 +11358,7 @@ const TAB_LABEL = {
   venuevoice:    'VenueVoice',
   oopsreq:       'OOPS Requests',
   fixit:         'Fix-It Requests',
+  hostroster:    'Host Rosters',
   ourrack:       'To-Do',
   preshot:       'PreShot',
   cuedrop:       'CueDrop',
@@ -11833,6 +11860,7 @@ function switchTab(name) {
   if (name === 'venuevoice') vvInit();
   if (name === 'oopsreq') oqInit();
   if (name === 'fixit') fxInit();
+  if (name === 'hostroster') hrInit();
   if (name === 'ourrack') orInit();
   if (name === 'preshot') psInit();
   if (name === 'cuedrop') cdInit();
@@ -12659,6 +12687,71 @@ async function fxDecide(id, decision) {
   } catch (e) { alert('Could not save: ' + e.message); }
 }
 window.fxInit = fxInit;
+/* ═══════════════════════════════════════════════════════════════════════
+   HOST ROSTERS — players on the teams that play at a host (2026-09-16, T3)
+   DATA  slate.team_screen_uploads.parsed_json (team_number · team_name · venue) per session
+         slate.teams + divisions (session, operator 1) → team_memberships → players
+   OUT   monospace block: one team per section, players First "Nick" Last by last name
+   ═══════════════════════════════════════════════════════════════════════ */
+let _hrSessions = [], _hrMap = [], _hrTeams = [], _hrRoster = {}, _hrPlayers = {};
+async function hrInit(force) {
+  if (!_hrSessions.length || force) {
+    _hrSessions = await sb('GET', 'sessions?select=id,name,is_current,start_date&order=start_date.desc.nullslast') || [];
+    const sel = document.getElementById('hrSession');
+    sel.innerHTML = _hrSessions.map(s => '<option value="' + s.id + '"' + (s.is_current ? ' selected' : '') + '>' + esc(s.name) + (s.is_current ? ' (current)' : '') + '</option>').join('');
+  }
+  await hrLoadSession();
+}
+async function hrLoadSession() {
+  const sid = Number(document.getElementById('hrSession').value);
+  const out = document.getElementById('hrOut'), host = document.getElementById('hrHost');
+  out.innerHTML = '<span class="hr-empty">Loading…</span>'; host.innerHTML = '<option value="">Pick a bar…</option>';
+  try {
+    const up = (await sb('GET', 'team_screen_uploads?session_id=eq.' + sid + '&operator_id=eq.1&select=parsed_json,uploaded_at,source_filename&order=uploaded_at.desc&limit=1') || [])[0];
+    _hrMap = up ? (up.parsed_json || []) : [];
+    if (!_hrMap.length) { out.innerHTML = '<span class="hr-empty">No Team Screen uploaded for this session yet — load it in Host Plan, or run tools/claude/hostrosters/ingest-team-screen.mjs, and this fills in.</span>'; document.getElementById('hrCount').textContent = ''; return; }
+    _hrTeams = await sbGetAll('teams?select=id,team_number,team_name,division_id,divisions!inner(session_id,operator_id,division_number,name,format)&divisions.session_id=eq.' + sid + '&divisions.operator_id=eq.1');
+    const tm = await sbGetAll('team_memberships?select=team_id,member_number,role&team_id=in.(' + _hrTeams.map(t => t.id).join(',') + ')');
+    _hrRoster = {}; for (const m of tm) (_hrRoster[m.team_id] = _hrRoster[m.team_id] || []).push(m);
+    const nums = [...new Set(tm.map(m => m.member_number).filter(Boolean))]; _hrPlayers = {};
+    for (let i = 0; i < nums.length; i += 300) { const ps = await sb('GET', 'players?member_number=in.(' + nums.slice(i, i + 300).map(encodeURIComponent).join(',') + ')&select=member_number,first_name,last_name,nickname') || []; for (const p of ps) _hrPlayers[p.member_number] = p; }
+    const venues = [...new Set(_hrMap.map(r => r.venue).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+    host.innerHTML = '<option value="">Pick a bar…</option>' + venues.map(v => '<option value="' + esc(v) + '">' + esc(v) + ' (' + _hrMap.filter(r => r.venue === v).length + ' teams)</option>').join('');
+    document.getElementById('hrCount').textContent = venues.length + ' hosts · ' + _hrMap.length + ' teams on the screen · ' + (up.source_filename ? 'from ' + up.source_filename : '');
+    out.innerHTML = '<span class="hr-empty">Pick a bar.</span>';
+  } catch (e) { out.innerHTML = '<span class="hr-empty">Load failed: ' + esc(e.message) + '</span>'; }
+}
+function hrName(mn) { const p = _hrPlayers[mn]; if (!p) return '(unknown ' + mn + ')'; const nk = (p.nickname || '').trim(); return [p.first_name, nk && nk.toLowerCase() !== String(p.first_name || '').toLowerCase() ? '"' + nk + '"' : '', p.last_name].filter(Boolean).join(' ').trim(); }
+function hrText(venue) {
+  const sname = (_hrSessions.find(s => String(s.id) === document.getElementById('hrSession').value) || {}).name || '';
+  const teams = _hrMap.filter(r => r.venue === venue).map(r => { const t = _hrTeams.find(x => parseInt(x.team_number, 10) === parseInt(r.team_number, 10)); return { r, t }; })
+    .sort((a, b) => (a.t ? a.t.divisions.division_number : 'zzz').localeCompare(b.t ? b.t.divisions.division_number : 'zzz') || parseInt(a.r.team_number, 10) - parseInt(b.r.team_number, 10));
+  const L = [venue + ' — ' + sname + ' teams and players', ''];
+  let people = 0;
+  for (const { r, t } of teams) {
+    const d = t ? t.divisions : null;
+    L.push((d ? d.name + ' (' + d.division_number + ') · ' : '') + 'Team ' + parseInt(r.team_number, 10) + ' · ' + (t ? t.team_name : r.team_name));
+    const roster = (t ? (_hrRoster[t.id] || []) : []).map(m => ({ m, p: _hrPlayers[m.member_number] || {} }))
+      .sort((a, b) => String(a.p.last_name || '').localeCompare(String(b.p.last_name || '')) || String(a.p.first_name || '').localeCompare(String(b.p.first_name || '')));
+    if (!roster.length) L.push('  (no roster on file' + (t ? '' : ' — team not in this session\'s league data') + ')');
+    for (const { m } of roster) { L.push('  ' + hrName(m.member_number) + (m.role && /captain/i.test(m.role) ? '  — ' + m.role : '')); people++; }
+    L.push('');
+  }
+  L.push(teams.length + ' teams · ' + people + ' players');
+  return L.join('\n');
+}
+function hrRender() {
+  const venue = document.getElementById('hrHost').value, out = document.getElementById('hrOut');
+  if (!venue) { out.innerHTML = '<span class="hr-empty">Pick a bar.</span>'; return; }
+  out.textContent = hrText(venue);
+}
+async function hrCopy() {
+  const venue = document.getElementById('hrHost').value; if (!venue) { toast('Pick a bar first'); return; }
+  const text = hrText(venue);
+  try { await navigator.clipboard.writeText(text); toast('Roster copied — paste into your email'); } catch (e) { prompt('Copy this:', text); }
+}
+window.hrInit = hrInit;
+
 
 
 
