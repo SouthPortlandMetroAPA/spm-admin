@@ -5738,6 +5738,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         <div class="vv-filters">
           <select id="vvVenue" onchange="vvRender()"><option value="">All venues</option></select>
           <select id="vvTheme" onchange="vvRender()"><option value="">Any theme</option><option value="tables">Tables</option><option value="lighting">Lighting</option><option value="staff">Staff</option><option value="food">Food &amp; drink</option><option value="parking">Parking</option><option value="space">Noise/space</option><option value="safety">Safety</option><option value="prices">Prices</option></select>
+          <select id="vvPlays" onchange="vvRender()"><option value="">Plays here?</option><option value="now">Plays here now</option><option value="used_to">Used to</option><option value="no">Plays elsewhere</option></select>
           <select id="vvRating" onchange="vvRender()"><option value="">Any rating</option><option value="low">1–2</option><option value="mid">3</option><option value="high">4–5</option></select>
           <label style="display:flex;gap:6px;align-items:center;font-size:.9rem"><input type="checkbox" id="vvContact" onchange="vvRender()"> contactable only</label>
           <label style="display:flex;gap:6px;align-items:center;font-size:.9rem"><input type="checkbox" id="vvShowHidden" onchange="vvRender()"> show hidden</label>
@@ -6083,7 +6084,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.434';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.435';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -12341,13 +12342,17 @@ async function vvInit() {
 function vvVisible() { return _vvRows.filter(r => !r.hidden_at); }
 function vvRenderSummary() {
   const vis = vvVisible();
-  const rated = vis.filter(r => r.rating != null);
+  const rated = vis.filter(r => r.rating != null), om = vvOwnerMetrics(vis);
   document.getElementById('vvStats').innerHTML = [
     ['<div class="n">' + vis.length + '</div><div class="l">responses</div>'],
     ['<div class="n">' + new Set(vis.map(r => r.venue_name)).size + '</div><div class="l">venues</div>'],
     ['<div class="n">' + (rated.length ? (rated.reduce((s, r) => s + r.rating, 0) / rated.length).toFixed(1) : '—') + '</div><div class="l">avg rating</div>'],
     ['<div class="n">' + vis.filter(r => r.contact_ok).length + '</div><div class="l">contactable</div>'],
-    ['<div class="n">' + vis.filter(r => r.created_at > new Date(Date.now() - 7 * 864e5).toISOString()).length + '</div><div class="l">last 7 days</div>']
+    ['<div class="n">' + vis.filter(r => r.created_at > new Date(Date.now() - 7 * 864e5).toISOString()).length + '</div><div class="l">last 7 days</div>'],
+    ['<div class="n">' + om.play_now + '</div><div class="l">play here now</div>'],
+    ['<div class="n">' + (om.asked_stay ? om.leaving : '—') + '</div><div class="l">leaving, 0–4 of 10' + (om.asked_stay ? ' of ' + om.asked_stay : '') + '</div>'],
+    ['<div class="n">' + om.come_more + ' <span style="font-size:.7em;color:var(--muted)">(' + om.come_more_sure + ' sure)</span></div><div class="l">would come more off-night</div>'],
+    ['<div class="n">' + om.extra_visits.toFixed(1) + '</div><div class="l">extra visits / month</div>']
   ].map(h => '<div class="vv-stat">' + h + '</div>').join('');
   const by = new Map();
   for (const r of vis) { const k = r.venue_name; const b = by.get(k) || { venue: k, n: 0, rated: 0, sum: 0, contact: 0, themes: {}, last: '' }; b.n++; if (r.rating != null) { b.rated++; b.sum += r.rating; } if (r.contact_ok) b.contact++; for (const t of (r.themes || [])) b.themes[t] = (b.themes[t] || 0) + 1; if (r.created_at > b.last) b.last = r.created_at; by.set(k, b); }
@@ -12359,9 +12364,19 @@ function vvRenderSummary() {
   sel.value = cur;
 }
 function vvPickVenue(v) { document.getElementById('vvVenue').value = v; vvRender(); document.getElementById('vvList').scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+const VV_PLAYS = { now: 'plays here now', used_to: 'used to play here', no: 'plays elsewhere' };
+const VV_FREQ = { never: 'never', rare: 'once or twice a session', monthly: 'about monthly', weekly: 'most weeks' };
+/* one line per response with the 0.5 answers; nothing when the row predates them */
+function vvMetricLine(r) {
+  const bits = [];
+  if (r.stay_p != null) bits.push('<b>Keep playing here:</b> ' + r.stay_p + '/10' + (r.stay_p <= 4 ? ' <span class="vv-tag" style="background:#fde8e8;color:#b91c1c">leaving?</span>' : ''));
+  if (r.freq_now) bits.push('<b>Off-night now:</b> ' + VV_FREQ[r.freq_now]);
+  if ((r.changes || []).length) bits.push('<b>Would come more if:</b> ' + r.changes.map(c => esc(VV_CHANGE[c] || c)).join(', ') + (r.freq_if ? ' → ' + VV_FREQ[r.freq_if] + (r.sure_p != null ? ' (' + r.sure_p + '/10 sure)' : '') : ''));
+  return bits.length ? '<p class="vv-q" style="margin-top:6px">' + bits.join(' · ') + '</p>' : '';
+}
 function vvRender() {
   const venue = document.getElementById('vvVenue').value, theme = document.getElementById('vvTheme').value, rating = document.getElementById('vvRating').value;
-  const contact = document.getElementById('vvContact').checked, showHidden = document.getElementById('vvShowHidden').checked, q = (document.getElementById('vvQ').value || '').trim().toLowerCase();
+  const plays = document.getElementById('vvPlays').value, contact = document.getElementById('vvContact').checked, showHidden = document.getElementById('vvShowHidden').checked, q = (document.getElementById('vvQ').value || '').trim().toLowerCase();
   const list = _vvRows.filter(r => {
     if (!showHidden && r.hidden_at) return false;
     if (venue && r.venue_name !== venue) return false;
@@ -12370,13 +12385,15 @@ function vvRender() {
     if (rating === 'mid' && r.rating !== 3) return false;
     if (rating === 'high' && !(r.rating >= 4)) return false;
     if (contact && !r.contact_ok) return false;
+    if (plays && r.plays_here !== plays) return false;
     if (q && !((r.q_good || '') + ' ' + (r.q_bad || '') + ' ' + (r.q_change || '') + ' ' + r.venue_name).toLowerCase().includes(q)) return false;
     return true;
   });
   const el = document.getElementById('vvList');
   if (!list.length) { el.innerHTML = '<div class="vv-empty">' + (_vvRows.length ? 'Nothing matches.' : 'No feedback yet.') + '</div>'; return; }
   el.innerHTML = list.map(r => '<div class="vv-r' + (r.hidden_at ? ' hidden' : '') + '">'
-    + '<div class="vv-top"><span class="vv-venue">' + esc(r.venue_name) + '</span>' + (r.rating != null ? '<span class="vv-tag">' + VV_FACE[r.rating] + '</span>' : '') + (r.contact_ok ? '<span class="vv-tag contact">OK to contact · #' + esc(r.member_number || '') + '</span>' : '<span class="vv-tag">anonymous</span>') + (r.hidden_at ? '<span class="vv-tag">hidden</span>' : '') + '<span class="vv-sub" style="margin-left:auto">' + new Date(r.created_at).toLocaleString() + '</span></div>'
+    + '<div class="vv-top"><span class="vv-venue">' + esc(r.venue_name) + '</span>' + (r.rating != null ? '<span class="vv-tag">' + VV_FACE[r.rating] + '</span>' : '') + (r.contact_ok ? '<span class="vv-tag contact">OK to contact · #' + esc(r.member_number || '') + '</span>' : '<span class="vv-tag">anonymous</span>') + (r.plays_here ? '<span class="vv-tag">' + VV_PLAYS[r.plays_here] + '</span>' : '') + (r.hidden_at ? '<span class="vv-tag">hidden</span>' : '') + '<span class="vv-sub" style="margin-left:auto">' + new Date(r.created_at).toLocaleString() + '</span></div>'
+    + vvMetricLine(r)
     + (r.q_good ? '<p class="vv-q"><b>What\'s good</b>' + esc(r.q_good) + '</p>' : '') + (r.q_bad ? '<p class="vv-q"><b>What\'s not</b>' + esc(r.q_bad) + '</p>' : '') + (r.q_change ? '<p class="vv-q"><b>Change one thing</b>' + esc(r.q_change) + '</p>' : '')
     + ((r.themes || []).length ? '<div class="vv-sub" style="margin-top:6px">' + r.themes.map(t => esc(VV_THEME[t] || t)).join(' · ') + '</div>' : '')
     + '<div class="vv-actions"><button class="btn btn-outline btn-sm" onclick="vvHide(' + r.id + ',' + (r.hidden_at ? 'false' : 'true') + ')">' + (r.hidden_at ? 'Unhide' : 'Hide') + '</button><button class="btn btn-outline btn-sm" onclick="vvNote(' + r.id + ')">' + (r.operator_note ? 'Edit note' : 'Add note') + '</button>' + (r.operator_note ? '<span class="vv-sub">Note: ' + esc(r.operator_note) + '</span>' : '') + '</div>'
@@ -12393,7 +12410,7 @@ async function vvNote(id) {
   catch (e) { alert('Could not save: ' + e.message); }
 }
 function vvExportCsv() {
-  const cols = ['id', 'created_at', 'venue_name', 'rating', 'q_good', 'q_bad', 'q_change', 'themes', 'contact_ok', 'member_number', 'operator_note'];
+  const cols = ['id', 'created_at', 'venue_name', 'rating', 'q_good', 'q_bad', 'q_change', 'themes', 'contact_ok', 'member_number', 'operator_note', 'plays_here', 'stay_p', 'freq_now', 'changes', 'freq_if', 'sure_p'];
   const q = v => '"' + String(v == null ? '' : Array.isArray(v) ? v.join('|') : v).replace(/"/g, '""') + '"';
   const csv = '﻿' + cols.join(',') + '\n' + vvVisible().map(r => cols.map(c => q(r[c])).join(',')).join('\n');
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = 'venuevoice-feedback.csv'; a.click();
