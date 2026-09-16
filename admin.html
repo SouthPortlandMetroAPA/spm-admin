@@ -1116,6 +1116,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="bounces">Bounces</button>
       <button class="tab" data-tab="venuevoice">VenueVoice</button>
       <button class="tab" data-tab="oopsreq">OOPS Requests</button>
+      <button class="tab" data-tab="fixit">Fix-It Requests</button>
       <button class="tab" data-tab="ourrack">To-Do</button>
       <button class="tab" data-tab="preshot">PreShot</button>
       <button class="tab" data-tab="cuedrop">CueDrop</button>
@@ -5780,9 +5781,41 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <span class="or-sub" id="oqCount"></span>
           <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="oqCopyApproved()" title="One APA number per line — paste into SP Reports ▸ OOPS Coin">Copy approved APA numbers</button>
         </div>
-        <p class="or-sub" style="margin:0 0 12px">A player claims the 8-on-the-break-and-scratch in PatchCheck. <b>Approve</b> (player emailed) or <b>Decline</b> with a reason (player emailed). Then <b>Copy approved APA numbers</b>, paste into SP Reports ▸ OOPS Coin to print the citations and envelopes and send the dispatch email as usual, and come back to <b>Mark mailed</b>.</p>
+        <p class="or-sub" style="margin:0 0 12px">A player claims the 8-on-the-break-and-scratch in PatchCheck, keyed to their team and the week (opponent from the schedule). <b>Approve</b> (player emailed) or <b>Decline</b> with a reason (player emailed). Then <b>Copy approved APA numbers</b>, paste into SP Reports ▸ OOPS Coin to print the citations and envelopes and send the dispatch email as usual, and come back to <b>Mark mailed</b>.</p>
         <div class="or-filters"><span id="oqPills"></span></div>
         <div id="oqList"><div class="or-empty">Loading&hellip;</div></div>
+      </div>
+    </div>
+
+    <!-- ═══════════════ Fix-It Requests — missed-patch reports from PatchCheck ═══════════════ -->
+    <div id="tab-fixit" class="tab-panel">
+      <style>
+        #tab-fixit .fx-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+        #tab-fixit .fx-sub{color:var(--muted);font-size:.85rem}
+        #tab-fixit .fx-filters{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px;align-items:center}
+        #tab-fixit .fx-fbtn{padding:6px 12px;border:1px solid var(--border);border-radius:999px;background:var(--card);cursor:pointer;font-size:.9rem;color:var(--text);min-height:32px}
+        #tab-fixit .fx-fbtn.active{background:var(--spm-accent);color:#fff;border-color:var(--spm-accent)}
+        #tab-fixit .fx-r{border:1px solid var(--border);border-left:4px solid var(--border);border-radius:10px;background:var(--card);padding:12px 14px;margin-bottom:10px}
+        #tab-fixit .fx-r.pending{border-left-color:#d97706} #tab-fixit .fx-r.fixed{border-left-color:#0a7d33;opacity:.9} #tab-fixit .fx-r.declined{border-left-color:#9ca3af;opacity:.7}
+        #tab-fixit .fx-top{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+        #tab-fixit .fx-who{font-weight:800;font-size:1.02rem}
+        #tab-fixit .fx-tag{display:inline-block;font-size:.66rem;font-weight:800;letter-spacing:.04em;padding:2px 8px;border-radius:999px;text-transform:uppercase}
+        #tab-fixit .fx-tag.pending{background:#fff3cd;color:#7a5a00} #tab-fixit .fx-tag.fixed{background:#e6f7ec;color:#0a7d33} #tab-fixit .fx-tag.declined{background:#f1f1f1;color:#666}
+        #tab-fixit .fx-facts{margin:6px 0 0;font-size:.92rem;display:grid;grid-template-columns:auto 1fr;gap:2px 12px}
+        #tab-fixit .fx-facts dt{color:var(--muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;padding-top:2px} #tab-fixit .fx-facts dd{margin:0}
+        #tab-fixit .fx-chip{display:inline-block;background:#e7edfb;color:#0031a1;border-radius:999px;padding:2px 10px;font-weight:700;font-size:.82rem;margin:0 6px 4px 0}
+        #tab-fixit .fx-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center}
+        #tab-fixit .fx-empty{color:var(--muted);padding:28px;text-align:center}
+      </style>
+      <div class="card">
+        <div class="fx-head">
+          <h2 style="margin:0">Fix-It Requests &mdash; missed patches reported in PatchCheck</h2>
+          <button class="btn btn-outline btn-sm" onclick="fxInit()">Refresh</button>
+          <span class="fx-sub" id="fxCount"></span>
+        </div>
+        <p class="fx-sub" style="margin:0 0 12px">A player says a patch is missing: team, week, opponent and the patch kinds, straight from the schedule. Pull that scoresheet. Enter the SP in the system as usual, then <b>Mark fixed</b> (player emailed: on the books, mails with the next batch) or <b>Decline</b> with a reason (player emailed).</p>
+        <div class="fx-filters"><span id="fxPills"></span></div>
+        <div id="fxList"><div class="fx-empty">Loading&hellip;</div></div>
       </div>
     </div>
 
@@ -6045,7 +6078,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.431';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.432';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11292,6 +11325,7 @@ const TAB_LABEL = {
   bounces:       'Bounces',
   venuevoice:    'VenueVoice',
   oopsreq:       'OOPS Requests',
+  fixit:         'Fix-It Requests',
   ourrack:       'To-Do',
   preshot:       'PreShot',
   cuedrop:       'CueDrop',
@@ -11792,6 +11826,7 @@ function switchTab(name) {
   if (name === 'bounces') bnInit();
   if (name === 'venuevoice') vvInit();
   if (name === 'oopsreq') oqInit();
+  if (name === 'fixit') fxInit();
   if (name === 'ourrack') orInit();
   if (name === 'preshot') psInit();
   if (name === 'cuedrop') cdInit();
@@ -12448,7 +12483,7 @@ function oqRender() {
   if (!list.length) { el.innerHTML = '<div class="or-empty">' + (_oqRows.length ? 'Nothing here.' : 'No claims yet.') + '</div>'; return; }
   el.innerHTML = list.map(r => '<div class="or-r ' + esc(r.status) + '">'
     + '<div class="or-top"><span class="or-who">' + esc(r.player_name || '') + '</span><span class="or-sub">#' + esc(r.member_number) + '</span><span class="or-tag ' + esc(r.status) + '">' + esc(r.status) + '</span><span class="or-sub" style="margin-left:auto">claimed ' + new Date(r.created_at).toLocaleString() + (r.notified_at ? '' : ' · <b>no email on file</b>') + '</span></div>'
-    + '<dl class="or-facts"><dt>When</dt><dd>' + esc(r.incident_date) + '</dd>' + (r.venue ? '<dt>Where</dt><dd>' + esc(r.venue) + '</dd>' : '') + (r.opponent ? '<dt>Against</dt><dd>' + esc(r.opponent) + '</dd>' : '') + (r.note ? '<dt>Note</dt><dd>' + esc(r.note) + '</dd>' : '') + (r.decision_note ? '<dt>Decision</dt><dd>' + esc(r.decision_note) + '</dd>' : '') + '</dl>'
+    + '<dl class="or-facts">' + (r.team_name ? '<dt>Team</dt><dd><b>' + esc(r.team_name) + '</b> (' + esc(r.team_number) + ') · ' + esc(r.division_name || '') + (r.division_number ? ' (' + esc(r.division_number) + ')' : '') + (r.session_name ? ' · ' + esc(r.session_name) : '') + '</dd><dt>Match</dt><dd>' + fxWhen({ week_number: r.week_number, match_date: r.incident_date, opponent_name: r.opponent_name, opponent_number: r.opponent_number, home: r.home, schedule_known: r.schedule_known }) + '</dd>' : '<dt>When</dt><dd>' + esc(r.incident_date || '') + '</dd>' + (r.venue ? '<dt>Where</dt><dd>' + esc(r.venue) + '</dd>' : '') + (r.opponent ? '<dt>Against</dt><dd>' + esc(r.opponent) + '</dd>' : '')) + (r.note ? '<dt>Note</dt><dd>' + esc(r.note) + '</dd>' : '') + (r.decision_note ? '<dt>Decision</dt><dd>' + esc(r.decision_note) + '</dd>' : '') + '</dl>'
     + '<div class="or-actions">'
     + (r.status === 'pending' ? '<button class="btn btn-primary btn-sm" onclick="oqDecide(' + r.id + ', \'approved\')">Approve</button><button class="btn btn-outline btn-sm" onclick="oqDecide(' + r.id + ', \'declined\')">Decline…</button>' : '')
     + (r.status === 'approved' ? '<button class="btn btn-primary btn-sm" onclick="oqMailed(' + r.id + ')">Mark mailed</button>' : '')
@@ -12481,6 +12516,63 @@ async function oqCopyApproved() {
   try { await navigator.clipboard.writeText(text); toast('Copied ' + nums.length + ' APA number' + (nums.length === 1 ? '' : 's') + ' — paste into SP Reports ▸ OOPS Coin'); } catch (e) { prompt('Copy these:', text); }
 }
 window.oqInit = oqInit;
+/* ═══════════════════════════════════════════════════════════════════════
+   FIX-IT REQUESTS — missed-patch reports (2026-09-16, T1 dormant)
+   DATA  fixit.requests (service_role only; PatchCheck writes via rpc submit)
+   FLOW  pending → fixed | declined (GAS fixit_decide emails the player)
+   ═══════════════════════════════════════════════════════════════════════ */
+const FX_WP = { 'Accept-Profile': 'fixit', 'Content-Profile': 'fixit' };
+const FX_LABEL = { r: '8 Ball Rackless', '8': '8 Ball On the Break', x: '8 Ball Break & Run', s: '8 Ball Shutout', '9': '9 Ball On the Snap', n: '9 Ball Break & Run', k: '9 Ball Skunk',
+  m8: '8 Ball On the Break (Masters)', mx: '8 Ball Break & Run (Masters)', m9: '9 Ball On the Snap (Masters)', mn: '9 Ball Break & Run (Masters)' };
+let _fxRows = [], _fxFilter = 'pending';
+function fxMailerUrl() { return TCQ_MAILER_URL; }
+async function fxInit() {
+  try { _fxRows = await sb('GET', 'requests?select=*&order=created_at.desc', null, FX_WP) || []; fxRender(); }
+  catch (e) { document.getElementById('fxList').innerHTML = '<div class="fx-empty">Load failed: ' + esc(e.message) + '</div>'; }
+}
+function fxSetFilter(f) { _fxFilter = f; fxRender(); }
+function fxWhen(r) {
+  let s = 'Week ' + r.week_number;
+  if (r.match_date) s += ' · ' + new Date(r.match_date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  if (r.opponent_name) s += ' · vs <b>' + esc(r.opponent_name) + '</b> (' + esc(r.opponent_number || '') + ')' + (r.home === true ? ' · home' : r.home === false ? ' · away' : '');
+  if (r.schedule_known === false) s += ' · <i>no schedule on file, week is the player\'s word</i>';
+  return s;
+}
+function fxRender() {
+  const counts = { pending: 0, fixed: 0, declined: 0 };
+  for (const r of _fxRows) counts[r.status] = (counts[r.status] || 0) + 1;
+  document.getElementById('fxPills').innerHTML = [['pending', 'Pending'], ['fixed', 'Fixed'], ['declined', 'Declined'], ['all', 'All']].map(([k, l]) =>
+    '<button class="fx-fbtn' + (_fxFilter === k ? ' active' : '') + '" onclick="fxSetFilter(\'' + k + '\')">' + l + (k !== 'all' ? ' <b>' + counts[k] + '</b>' : '') + '</button>').join('');
+  document.getElementById('fxCount').textContent = counts.pending + ' pending';
+  const list = _fxRows.filter(r => _fxFilter === 'all' || r.status === _fxFilter);
+  const el = document.getElementById('fxList');
+  if (!list.length) { el.innerHTML = '<div class="fx-empty">' + (_fxRows.length ? 'Nothing here.' : 'No reports yet.') + '</div>'; return; }
+  el.innerHTML = list.map(r => '<div class="fx-r ' + esc(r.status) + '">'
+    + '<div class="fx-top"><span class="fx-who">' + esc(r.player_name || '') + '</span><span class="fx-sub">#' + esc(r.member_number) + '</span><span class="fx-tag ' + esc(r.status) + '">' + esc(r.status) + '</span><span class="fx-sub" style="margin-left:auto">reported ' + new Date(r.created_at).toLocaleString() + (r.notified_at ? '' : ' · <b>no email on file</b>') + '</span></div>'
+    + '<dl class="fx-facts"><dt>Team</dt><dd><b>' + esc(r.team_name || '') + '</b> (' + esc(r.team_number) + ') · ' + esc(r.division_name || '') + ' ' + (r.division_number ? '(' + esc(r.division_number) + ')' : '') + ' · ' + esc(r.format || '') + (r.session_name ? ' · ' + esc(r.session_name) : '') + '</dd>'
+    + '<dt>Match</dt><dd>' + fxWhen(r) + '</dd>'
+    + '<dt>Missed</dt><dd>' + (r.patches || []).map(c => '<span class="fx-chip">' + esc(FX_LABEL[c] || c) + '</span>').join('') + '</dd>'
+    + (r.note ? '<dt>Note</dt><dd>' + esc(r.note) + '</dd>' : '') + (r.decision_note ? '<dt>Decision</dt><dd>' + esc(r.decision_note) + '</dd>' : '') + '</dl>'
+    + '<div class="fx-actions">'
+    + (r.status === 'pending' ? '<button class="btn btn-primary btn-sm" onclick="fxDecide(' + r.id + ', \'fixed\')">Mark fixed</button><button class="btn btn-outline btn-sm" onclick="fxDecide(' + r.id + ', \'declined\')">Decline…</button>' : '')
+    + (r.decided_at ? '<span class="fx-sub">decided ' + new Date(r.decided_at).toLocaleDateString() + (r.decision_notified_at ? ' · player emailed' : '') + '</span>' : '')
+    + '</div></div>').join('');
+}
+async function fxDecide(id, decision) {
+  const r = _fxRows.find(x => x.id === id); if (!r) return;
+  let note = '';
+  if (decision === 'declined') { note = prompt('Reason — the player sees this:', ''); if (note === null) return; note = note.trim(); if (!note) { alert('A reason is required to decline.'); return; } }
+  else { if (!confirm('Mark fixed? Do this AFTER the SP is entered in the system. The player gets an email saying it is on the books.')) return; note = prompt('Optional note to include in the email (blank = none):', ''); if (note === null) return; note = note.trim(); }
+  try {
+    const res = await fetch(fxMailerUrl(), { method: 'POST', body: JSON.stringify({ action: 'fixit_decide', admin_key: SB_KEY, id, decision, note }) });
+    const j = JSON.parse(await res.text());
+    if (!j.ok) throw new Error(j.error || 'decision failed');
+    toast((decision === 'fixed' ? 'Marked fixed' : 'Declined') + (j.sent ? ' — player emailed' : ' — no email on file, nothing sent'));
+    await fxInit();
+  } catch (e) { alert('Could not save: ' + e.message); }
+}
+window.fxInit = fxInit;
+
 
 
 
