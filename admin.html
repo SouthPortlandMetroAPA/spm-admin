@@ -6083,7 +6083,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.433';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.434';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -17734,6 +17734,9 @@ function _ppPopulateSelector(id, includeAll) {
   const allOpt = includeAll ? '<option value="">All events</option>' : '';
   sel.innerHTML = allOpt + _ppState.events.map(e => '<option value="' + e.id + '">' + esc(e.name) + '</option>').join('');
 }
+/* public deep link to one event (PoolPics honours ?event=<slug> over its auto-pick) */
+function ppEventUrl(slug) { return 'https://southportlandmetroapa.github.io/poolpics/?event=' + encodeURIComponent(slug); }
+async function ppCopyEventLink(slug) { const url = ppEventUrl(slug); try { await navigator.clipboard.writeText(url); toast('Event link copied'); } catch (e) { prompt('Copy this link:', url); } }
 async function ppRenderEventsTable() {
   const body = document.getElementById('ppEvBody');
   if (!body) return;
@@ -17755,6 +17758,8 @@ async function ppRenderEventsTable() {
       + '<td>' + (counts[e.id] || 0) + '</td>'
       + '<td>' + status + '</td>'
       + '<td style="white-space:nowrap">'
+        + '<a class="btn btn-outline btn-sm" href="' + ppEventUrl(e.slug) + '" target="_blank" rel="noopener" style="margin-right:4px;text-decoration:none" title="Open this event in PoolPics">Open &#8599;</a>'
+        + '<button class="btn btn-outline btn-sm" onclick="ppCopyEventLink(' + JSON.stringify(e.slug).replace(/"/g, '&quot;') + ')" style="margin-right:4px" title="Copy the public link to this event">Copy link</button>'
         + '<button class="btn btn-outline btn-sm" onclick="ppOpenEdit(' + e.id + ')" style="margin-right:4px">Edit</button>'
         + '<button class="btn ' + (e.posting_open ? 'pp-btn-warn' : 'pp-btn-success') + ' btn-sm" onclick="ppToggleEventPosting(' + e.id + ',' + (!e.posting_open) + ')">' + (e.posting_open ? 'Close posting' : 'Open posting') + '</button>'
       + '</td>'
