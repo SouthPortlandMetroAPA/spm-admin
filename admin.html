@@ -5728,7 +5728,12 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         <p class="vv-sub" style="margin:0 0 12px">Anonymous by design: a row carries an APA number <b>only</b> when the player ticked "OK to contact me". Share the form link, or add <code>?host=&lt;slug&gt;</code> to pre-pick a bar (good for a QR code at the venue).</p>
         <div class="vv-stats" id="vvStats"></div>
         <h3 style="margin:8px 0 6px">By venue</h3>
-        <div style="overflow:auto;margin-bottom:16px"><table class="vv"><thead><tr><th>Venue</th><th>Responses</th><th>Avg rating</th><th>Rated</th><th>Contactable</th><th>Top themes</th><th>Last</th></tr></thead><tbody id="vvByVenue"><tr><td colspan="7" class="vv-empty">Loading&hellip;</td></tr></tbody></table></div>
+        <div style="overflow:auto;margin-bottom:16px"><table class="vv"><thead><tr><th>Venue</th><th>Responses</th><th>Avg rating</th><th>Play here</th><th title="current players 0–4 of 10 on keeping playing here">Leaving</th><th title="would come more often outside league night (sure = 7+ of 10)">Would come more (sure)</th><th title="probability-weighted extra off-night visits per month">Extra visits/mo</th><th>Top themes</th><th>Last</th><th></th></tr></thead><tbody id="vvByVenue"><tr><td colspan="10" class="vv-empty">Loading&hellip;</td></tr></tbody></table></div>
+        <div class="card" id="vvBriefCard" hidden style="margin:0 0 16px;background:#fbfbfd">
+          <div class="vv-head"><h3 style="margin:0" id="vvBriefTitle">Owner brief</h3><button class="btn btn-primary btn-sm" onclick="vvCopyBrief()">Copy</button><button class="btn btn-outline btn-sm" onclick="document.getElementById('vvBriefCard').hidden = true">Close</button></div>
+          <p class="vv-sub" style="margin:4px 0 8px">Counts of the people who answered, never percentages. The "sure" and "extra visits" numbers are the ones to plan on; the raw count is a ceiling. The leaving line is shown only when at least 5 current players answered it.</p>
+          <textarea id="vvBriefText" readonly style="width:100%;min-height:320px;font-family:ui-monospace,Menlo,monospace;font-size:.86rem;padding:10px;border:1px solid var(--border);border-radius:8px"></textarea>
+        </div>
         <h3 style="margin:8px 0 6px">Responses</h3>
         <div class="vv-filters">
           <select id="vvVenue" onchange="vvRender()"><option value="">All venues</option></select>
@@ -6078,7 +6083,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.432';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.433';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -12347,7 +12352,8 @@ function vvRenderSummary() {
   const by = new Map();
   for (const r of vis) { const k = r.venue_name; const b = by.get(k) || { venue: k, n: 0, rated: 0, sum: 0, contact: 0, themes: {}, last: '' }; b.n++; if (r.rating != null) { b.rated++; b.sum += r.rating; } if (r.contact_ok) b.contact++; for (const t of (r.themes || [])) b.themes[t] = (b.themes[t] || 0) + 1; if (r.created_at > b.last) b.last = r.created_at; by.set(k, b); }
   const rows = [...by.values()].sort((a, b) => b.n - a.n || a.venue.localeCompare(b.venue));
-  document.getElementById('vvByVenue').innerHTML = rows.length ? rows.map(b => '<tr class="pick" onclick="vvPickVenue(' + JSON.stringify(b.venue).replace(/"/g, '&quot;') + ')"><td><b>' + esc(b.venue) + '</b></td><td>' + b.n + '</td><td>' + (b.rated ? (b.sum / b.rated).toFixed(1) : '—') + '</td><td>' + b.rated + '</td><td>' + b.contact + '</td><td class="vv-sub">' + Object.entries(b.themes).sort((x, y) => y[1] - x[1]).slice(0, 3).map(([t, c]) => esc(VV_THEME[t] || t) + ' ' + c).join(' · ') + '</td><td class="vv-sub">' + new Date(b.last).toLocaleDateString() + '</td></tr>').join('') : '<tr><td colspan="7" class="vv-empty">No feedback yet — share the form.</td></tr>';
+  document.getElementById('vvByVenue').innerHTML = rows.length ? rows.map(b => { const m = vvOwnerMetrics(vis.filter(r => r.venue_name === b.venue)); const ven = JSON.stringify(b.venue).replace(/"/g, '&quot;');
+    return '<tr class="pick" onclick="vvPickVenue(' + ven + ')"><td><b>' + esc(b.venue) + '</b></td><td>' + b.n + '</td><td>' + (b.rated ? (b.sum / b.rated).toFixed(1) : '—') + '</td><td>' + m.play_now + '</td><td>' + (m.asked_stay >= 5 ? m.leaving : (m.asked_stay ? '<span class="vv-sub" title="fewer than 5 current players answered">&lt;5 asked</span>' : '—')) + '</td><td>' + m.come_more + ' (' + m.come_more_sure + ')</td><td>' + m.extra_visits.toFixed(1) + '</td><td class="vv-sub">' + Object.entries(b.themes).sort((x, y) => y[1] - x[1]).slice(0, 3).map(([t, c]) => esc(VV_THEME[t] || t) + ' ' + c).join(' · ') + '</td><td class="vv-sub">' + new Date(b.last).toLocaleDateString() + '</td><td><button class="btn btn-outline btn-sm" onclick="event.stopPropagation(); vvShowBrief(' + ven + ')">Owner brief</button></td></tr>'; }).join('') : '<tr><td colspan="10" class="vv-empty">No feedback yet — share the form.</td></tr>';
   const sel = document.getElementById('vvVenue'); const cur = sel.value;
   sel.innerHTML = '<option value="">All venues</option>' + rows.map(b => '<option value="' + esc(b.venue) + '">' + esc(b.venue) + ' (' + b.n + ')</option>').join('');
   sel.value = cur;
@@ -12430,7 +12436,13 @@ function vvAiBrief() {
     '   whats_good · whats_not_good · change_one_thing — free text, may be null ·',
     '   themes — any of tables, lighting, staff, food, parking, space, safety, prices ·',
     '   contact_ok — true only when the player agreed to be contacted · apa_number — present ONLY when contact_ok · operator_note.',
-    'Fields in 2: venue · host_id · responses · avg_rating · rated · contactable · themes {theme: count} · last_submitted_at.',
+    '   plays_here — now | used_to | no — does the player play league at this bar · stay_p — 0–10 chance of keeping playing here next session, current players only ·',
+    '   offnight_now / offnight_if_changed — never | rare = 1–2 a session | monthly | weekly, visits OUTSIDE league night now and if their changes were made ·',
+    '   changes_wanted — themes that would need to change for them to come more (or "nothing") · sure_p — 0–10 how sure they are of offnight_if_changed.',
+    'Fields in 2: venue · host_id · responses · avg_rating · rated · contactable · themes {theme: count} · last_submitted_at · owner_metrics {play_now, used_to, prospects,',
+    '   leaving = current players with stay_p ≤ 4, fence = 5–6, expected_loss = Σ 1−p, come_more, come_more_sure = sure_p ≥ 7, extra_visits = Σ Δvisits × p with Δ from midpoints 0/0.4/1/3.5 per month,',
+    '   segments {current, prospects}, by_change {theme: {n, extra_visits, alone_n, alone_extra_visits}} — NOT additive across themes, nothing_would}.',
+    'When summarising for a bar owner: counts with n, never bare percentages; lead with come_more_sure and extra_visits; treat by_change as overlapping.',
     '',
     'How the data was collected: an anonymous public form (' + 'https://southportlandmetroapa.github.io/venuevoice/' + '). Players pick their bar,',
     'tap a 1–5 rating, answer "What\'s good here?", "What\'s not so good?", "If you could change one thing?", and may tag themes.',
@@ -12458,6 +12470,52 @@ async function vvRegenKey() {
   } catch (e) { alert('Could not regenerate: ' + e.message); }
 }
 window.vvInit = vvInit;
+/* ── Owner brief (brief 2026-09-16-venuevoice-owner-metrics) ──
+   vvOwnerMetrics re-derives venuevoice.owner_metrics client-side, same definitions:
+   midpoints never 0 · rare 0.4 · monthly 1 · weekly 3.5; missing certainty = 5 (even odds, never certain). */
+const VV_MID = { never: 0, rare: 0.4, monthly: 1, weekly: 3.5 };
+const VV_CHANGE = { ...VV_THEME, nothing: 'Nothing would' };
+function vvOwnerMetrics(rows) {
+  const r1 = n => Math.round(n * 10) / 10;
+  const rs = rows.filter(r => !r.hidden_at).map(r => ({ ...r, delta: (r.freq_if in VV_MID && r.freq_now in VV_MID) ? VV_MID[r.freq_if] - VV_MID[r.freq_now] : null, w: (r.sure_p == null ? 5 : r.sure_p) / 10 }));
+  const now = rs.filter(r => r.plays_here === 'now'), come = rs.filter(r => r.delta > 0);
+  const seg = k => { const s = rs.filter(r => (r.plays_here === 'now' ? 'current' : 'prospects') === k); const c = s.filter(r => r.delta > 0); return { n: s.length, come_more: c.length, come_more_sure: c.filter(r => r.sure_p >= 7).length, extra_visits: r1(c.reduce((a, r) => a + r.delta * r.w, 0)) }; };
+  const by = {};
+  for (const t of Object.keys(VV_THEME)) { const c = come.filter(r => (r.changes || []).includes(t)); if (!c.length) continue; const alone = c.filter(r => (r.changes || []).length === 1); by[t] = { n: c.length, extra_visits: r1(c.reduce((a, r) => a + r.delta * r.w, 0)), alone_n: alone.length, alone_extra_visits: r1(alone.reduce((a, r) => a + r.delta * r.w, 0)) }; }
+  const staying = now.filter(r => r.stay_p != null);
+  return { responses: rs.length, play_now: now.length, used_to: rs.filter(r => r.plays_here === 'used_to').length, prospects: rs.filter(r => r.plays_here === 'no').length,
+    asked_stay: staying.length, leaving: staying.filter(r => r.stay_p <= 4).length, fence: staying.filter(r => r.stay_p >= 5 && r.stay_p <= 6).length, expected_loss: r1(staying.reduce((a, r) => a + (1 - r.stay_p / 10), 0)),
+    asked_freq: rs.filter(r => r.freq_now in VV_MID).length, visits_now: r1(rs.reduce((a, r) => a + (VV_MID[r.freq_now] || 0), 0)),
+    come_more: come.length, come_more_sure: come.filter(r => r.sure_p >= 7).length, extra_visits: r1(come.reduce((a, r) => a + r.delta * r.w, 0)),
+    segments: { current: seg('current'), prospects: seg('prospects') }, by_change: by, nothing_would: rs.filter(r => (r.changes || []).includes('nothing')).length };
+}
+function vvOwnerBrief(venue) {
+  const rows = vvVisible().filter(r => r.venue_name === venue), m = vvOwnerMetrics(rows);
+  const L = [], pl = (n, one, many) => n + ' ' + (n === 1 ? one : (many || one + 's')), are = n => (n === 1 ? 'is' : 'are');
+  L.push(venue + ' — what South Portland Metro APA players told us', 'Anonymous survey, ' + pl(m.responses, 'response') + ': ' + m.play_now + ' play league here now, ' + m.used_to + ' used to, ' + m.prospects + ' play elsewhere. Counts are of the people who answered, not the league.', '');
+  L.push('MORE VISITS OUTSIDE LEAGUE NIGHT');
+  L.push(m.come_more + ' of ' + m.asked_freq + ' say they would come more often outside league night if what they asked for changed; ' + m.come_more_sure + ' ' + are(m.come_more_sure) + ' sure of it (7+ out of 10).');
+  L.push('Planning number: about ' + m.extra_visits.toFixed(1) + ' extra visits a month across those people (each person weighted by how sure they were). Today they report about ' + m.visits_now.toFixed(1) + ' off-night visits a month between them.');
+  L.push('  Current players: ' + m.segments.current.come_more + ' would come more (' + m.segments.current.come_more_sure + ' sure), ~' + m.segments.current.extra_visits.toFixed(1) + ' visits/mo.');
+  L.push('  Not playing here now: ' + m.segments.prospects.come_more + ' would come (' + m.segments.prospects.come_more_sure + ' sure), ~' + m.segments.prospects.extra_visits.toFixed(1) + ' visits/mo — new faces, and the least certain number here.');
+  const bc = Object.entries(m.by_change).sort((a, b) => b[1].extra_visits - a[1].extra_visits);
+  if (bc.length) { L.push('', 'WHAT WOULD BRING THEM IN — most people named more than one change, so these overlap and do not add up'); for (const [t, v] of bc) L.push('  ' + (VV_CHANGE[t] || t) + ': ' + pl(v.n, 'person', 'people') + ', ~' + v.extra_visits.toFixed(1) + ' visits/mo' + (v.alone_n ? ' — ' + v.alone_n + ' named only this (~' + v.alone_extra_visits.toFixed(1) + ' visits/mo on its own)' : '')); L.push('  If everything above were done: ' + pl(m.come_more, 'person', 'people') + ', ~' + m.extra_visits.toFixed(1) + ' visits/mo (each person counted once).'); }
+  if (m.nothing_would) L.push('  ' + m.nothing_would + ' said nothing would change how often they come.');
+  L.push('', 'KEEPING THE PLAYERS YOU HAVE');
+  if (m.asked_stay >= 5) L.push(m.leaving + ' of ' + m.asked_stay + ' current players say they are unlikely to keep playing here next session, answering 4 or less out of 10; ' + m.fence + ' ' + are(m.fence) + ' on the fence at 5–6. Expected loss: about ' + m.expected_loss.toFixed(1) + ' players.');
+  else L.push('Fewer than 5 current players answered this, so it is not shown — small numbers would point at individuals.');
+  const themes = {}; for (const r of rows) for (const t of (r.themes || [])) themes[t] = (themes[t] || 0) + 1;
+  const top = Object.entries(themes).sort((a, b) => b[1] - a[1]).slice(0, 4);
+  if (top.length) L.push('', 'WHAT THE COMMENTS ARE ABOUT: ' + top.map(([t, c]) => (VV_THEME[t] || t) + ' ' + c).join(' · '));
+  const changes = rows.map(r => r.q_change).filter(Boolean).slice(0, 8);
+  if (changes.length) { L.push('', 'IN THEIR WORDS — "if you could change one thing"'); for (const c of changes) L.push('  · ' + c.replace(/\s+/g, ' ').slice(0, 200)); }
+  L.push('', 'How to read this: people overstate what they will do; the "sure" count and the visits-a-month figure are the ones to plan on, the bigger count is the ceiling. Prepared by South Portland Metro APA, ' + new Date().toLocaleDateString() + '.');
+  return L.join('\n');
+}
+function vvShowBrief(venue) { document.getElementById('vvBriefTitle').textContent = 'Owner brief — ' + venue; document.getElementById('vvBriefText').value = vvOwnerBrief(venue); const c = document.getElementById('vvBriefCard'); c.hidden = false; c.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+async function vvCopyBrief() { const t = document.getElementById('vvBriefText').value; try { await navigator.clipboard.writeText(t); toast('Owner brief copied'); } catch (e) { prompt('Copy this:', t); } }
+window.vvOwnerMetrics = vvOwnerMetrics;
+
 /* ═══════════════════════════════════════════════════════════════════════
    OOPS REQUESTS — coin claims (2026-09-16, T1 dormant)
    DATA  oopscoin.requests (service_role only; PatchCheck writes via rpc submit)
