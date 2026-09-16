@@ -5776,13 +5776,13 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <div class="card">
         <div class="or-head">
           <h2 style="margin:0">OOPS Requests &mdash; coin claims from PatchCheck</h2>
-          <button class="btn btn-outline btn-sm" onclick="orInit()">Refresh</button>
-          <span class="or-sub" id="orCount"></span>
-          <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="orCopyApproved()" title="One APA number per line — paste into SP Reports ▸ OOPS Coin">Copy approved APA numbers</button>
+          <button class="btn btn-outline btn-sm" onclick="oqInit()">Refresh</button>
+          <span class="or-sub" id="oqCount"></span>
+          <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="oqCopyApproved()" title="One APA number per line — paste into SP Reports ▸ OOPS Coin">Copy approved APA numbers</button>
         </div>
         <p class="or-sub" style="margin:0 0 12px">A player claims the 8-on-the-break-and-scratch in PatchCheck. <b>Approve</b> (player emailed) or <b>Decline</b> with a reason (player emailed). Then <b>Copy approved APA numbers</b>, paste into SP Reports ▸ OOPS Coin to print the citations and envelopes and send the dispatch email as usual, and come back to <b>Mark mailed</b>.</p>
-        <div class="or-filters"><span id="orPills"></span></div>
-        <div id="orList"><div class="or-empty">Loading&hellip;</div></div>
+        <div class="or-filters"><span id="oqPills"></span></div>
+        <div id="oqList"><div class="or-empty">Loading&hellip;</div></div>
       </div>
     </div>
 
@@ -11791,7 +11791,7 @@ function switchTab(name) {
   if (name === 'teamchanges') tcInit();
   if (name === 'bounces') bnInit();
   if (name === 'venuevoice') vvInit();
-  if (name === 'oopsreq') orInit();
+  if (name === 'oopsreq') oqInit();
   if (name === 'ourrack') orInit();
   if (name === 'preshot') psInit();
   if (name === 'cuedrop') cdInit();
@@ -12430,57 +12430,57 @@ window.vvInit = vvInit;
          mailed (operator, after the OOPS card printed + emailed)
    ═══════════════════════════════════════════════════════════════════════ */
 const OQ_WP = { 'Accept-Profile': 'oopscoin', 'Content-Profile': 'oopscoin' };
-let _orRows = [], _orFilter = 'pending';
-function orMailerUrl() { return TCQ_MAILER_URL; }
-async function orInit() {
-  try { _orRows = await sb('GET', 'requests?select=*&order=created_at.desc', null, OQ_WP) || []; orRender(); }
-  catch (e) { document.getElementById('orList').innerHTML = '<div class="or-empty">Load failed: ' + esc(e.message) + '</div>'; }
+let _oqRows = [], _oqFilter = 'pending';
+function oqMailerUrl() { return TCQ_MAILER_URL; }
+async function oqInit() {
+  try { _oqRows = await sb('GET', 'requests?select=*&order=created_at.desc', null, OQ_WP) || []; oqRender(); }
+  catch (e) { document.getElementById('oqList').innerHTML = '<div class="or-empty">Load failed: ' + esc(e.message) + '</div>'; }
 }
-function orSetFilter(f) { _orFilter = f; orRender(); }
-function orRender() {
+function oqSetFilter(f) { _oqFilter = f; oqRender(); }
+function oqRender() {
   const counts = { pending: 0, approved: 0, mailed: 0, declined: 0 };
-  for (const r of _orRows) counts[r.status] = (counts[r.status] || 0) + 1;
-  document.getElementById('orPills').innerHTML = [['pending', 'Pending'], ['approved', 'Approved — to mail'], ['mailed', 'Mailed'], ['declined', 'Declined'], ['all', 'All']].map(([k, l]) =>
-    '<button class="or-fbtn' + (_orFilter === k ? ' active' : '') + '" onclick="orSetFilter(\'' + k + '\')">' + l + (k !== 'all' ? ' <b>' + counts[k] + '</b>' : '') + '</button>').join('');
-  document.getElementById('orCount').textContent = counts.pending + ' pending · ' + counts.approved + ' to mail';
-  const list = _orRows.filter(r => _orFilter === 'all' || r.status === _orFilter);
-  const el = document.getElementById('orList');
-  if (!list.length) { el.innerHTML = '<div class="or-empty">' + (_orRows.length ? 'Nothing here.' : 'No claims yet.') + '</div>'; return; }
+  for (const r of _oqRows) counts[r.status] = (counts[r.status] || 0) + 1;
+  document.getElementById('oqPills').innerHTML = [['pending', 'Pending'], ['approved', 'Approved — to mail'], ['mailed', 'Mailed'], ['declined', 'Declined'], ['all', 'All']].map(([k, l]) =>
+    '<button class="or-fbtn' + (_oqFilter === k ? ' active' : '') + '" onclick="oqSetFilter(\'' + k + '\')">' + l + (k !== 'all' ? ' <b>' + counts[k] + '</b>' : '') + '</button>').join('');
+  document.getElementById('oqCount').textContent = counts.pending + ' pending · ' + counts.approved + ' to mail';
+  const list = _oqRows.filter(r => _oqFilter === 'all' || r.status === _oqFilter);
+  const el = document.getElementById('oqList');
+  if (!list.length) { el.innerHTML = '<div class="or-empty">' + (_oqRows.length ? 'Nothing here.' : 'No claims yet.') + '</div>'; return; }
   el.innerHTML = list.map(r => '<div class="or-r ' + esc(r.status) + '">'
     + '<div class="or-top"><span class="or-who">' + esc(r.player_name || '') + '</span><span class="or-sub">#' + esc(r.member_number) + '</span><span class="or-tag ' + esc(r.status) + '">' + esc(r.status) + '</span><span class="or-sub" style="margin-left:auto">claimed ' + new Date(r.created_at).toLocaleString() + (r.notified_at ? '' : ' · <b>no email on file</b>') + '</span></div>'
     + '<dl class="or-facts"><dt>When</dt><dd>' + esc(r.incident_date) + '</dd>' + (r.venue ? '<dt>Where</dt><dd>' + esc(r.venue) + '</dd>' : '') + (r.opponent ? '<dt>Against</dt><dd>' + esc(r.opponent) + '</dd>' : '') + (r.note ? '<dt>Note</dt><dd>' + esc(r.note) + '</dd>' : '') + (r.decision_note ? '<dt>Decision</dt><dd>' + esc(r.decision_note) + '</dd>' : '') + '</dl>'
     + '<div class="or-actions">'
-    + (r.status === 'pending' ? '<button class="btn btn-primary btn-sm" onclick="orDecide(' + r.id + ', \'approved\')">Approve</button><button class="btn btn-outline btn-sm" onclick="orDecide(' + r.id + ', \'declined\')">Decline…</button>' : '')
-    + (r.status === 'approved' ? '<button class="btn btn-primary btn-sm" onclick="orMailed(' + r.id + ')">Mark mailed</button>' : '')
+    + (r.status === 'pending' ? '<button class="btn btn-primary btn-sm" onclick="oqDecide(' + r.id + ', \'approved\')">Approve</button><button class="btn btn-outline btn-sm" onclick="oqDecide(' + r.id + ', \'declined\')">Decline…</button>' : '')
+    + (r.status === 'approved' ? '<button class="btn btn-primary btn-sm" onclick="oqMailed(' + r.id + ')">Mark mailed</button>' : '')
     + (r.decided_at ? '<span class="or-sub">decided ' + new Date(r.decided_at).toLocaleDateString() + (r.decision_notified_at ? ' · player emailed' : '') + '</span>' : '')
     + (r.mailed_at ? '<span class="or-sub">mailed ' + new Date(r.mailed_at).toLocaleDateString() + '</span>' : '')
     + '</div></div>').join('');
 }
-async function orDecide(id, decision) {
-  const r = _orRows.find(x => x.id === id); if (!r) return;
+async function oqDecide(id, decision) {
+  const r = _oqRows.find(x => x.id === id); if (!r) return;
   let note = '';
   if (decision === 'declined') { note = prompt('Reason — the player sees this:', ''); if (note === null) return; note = note.trim(); if (!note) { alert('A reason is required to decline.'); return; } }
   else { note = prompt('Optional note to include in the approval email (blank = none):', ''); if (note === null) return; note = note.trim(); }
   try {
-    const res = await fetch(orMailerUrl(), { method: 'POST', body: JSON.stringify({ action: 'oops_decide', admin_key: SB_KEY, id, decision, note }) });
+    const res = await fetch(oqMailerUrl(), { method: 'POST', body: JSON.stringify({ action: 'oops_decide', admin_key: SB_KEY, id, decision, note }) });
     const j = JSON.parse(await res.text());
     if (!j.ok) throw new Error(j.error || 'decision failed');
     toast((decision === 'approved' ? 'Approved' : 'Declined') + (j.sent ? ' — player emailed' : ' — no email on file, nothing sent'));
-    await orInit();
+    await oqInit();
   } catch (e) { alert('Could not save: ' + e.message); }
 }
-async function orMailed(id) {
+async function oqMailed(id) {
   if (!confirm('Mark this coin as mailed? Do this after the OOPS card printed the citation and sent the dispatch email.')) return;
-  try { await sb('PATCH', 'requests?id=eq.' + id + '&status=eq.approved', { status: 'mailed', mailed_at: new Date().toISOString() }, { ...OQ_WP, Prefer: 'return=minimal' }); toast('Marked mailed'); await orInit(); }
+  try { await sb('PATCH', 'requests?id=eq.' + id + '&status=eq.approved', { status: 'mailed', mailed_at: new Date().toISOString() }, { ...OQ_WP, Prefer: 'return=minimal' }); toast('Marked mailed'); await oqInit(); }
   catch (e) { alert('Could not save: ' + e.message); }
 }
-async function orCopyApproved() {
-  const nums = [...new Set(_orRows.filter(r => r.status === 'approved').map(r => r.member_number))];
+async function oqCopyApproved() {
+  const nums = [...new Set(_oqRows.filter(r => r.status === 'approved').map(r => r.member_number))];
   if (!nums.length) { toast('No approved claims to copy.'); return; }
   const text = nums.join('\n');   /* one per line — what the OOPS card's resolver reads */
   try { await navigator.clipboard.writeText(text); toast('Copied ' + nums.length + ' APA number' + (nums.length === 1 ? '' : 's') + ' — paste into SP Reports ▸ OOPS Coin'); } catch (e) { prompt('Copy these:', text); }
 }
-window.orInit = orInit;
+window.oqInit = oqInit;
 
 
 
