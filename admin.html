@@ -1118,6 +1118,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="oopsreq">OOPS Requests</button>
       <button class="tab" data-tab="fixit">Fix-It Requests</button>
       <button class="tab" data-tab="hostroster">Host Rosters</button>
+      <button class="tab" data-tab="skillreviews">Skill Reviews</button>
       <button class="tab" data-tab="ourrack">To-Do</button>
       <button class="tab" data-tab="preshot">PreShot</button>
       <button class="tab" data-tab="cuedrop">CueDrop</button>
@@ -5851,6 +5852,40 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       </div>
     </div>
 
+    <!-- ═══════════════ Skill Reviews — skill-level review requests from SkillCheck ═══════════════ -->
+    <div id="tab-skillreviews" class="tab-panel">
+      <style>
+        #tab-skillreviews .sk-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+        #tab-skillreviews .sk-sub{color:var(--muted);font-size:.85rem}
+        #tab-skillreviews .sk-filters{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px;align-items:center}
+        #tab-skillreviews .sk-fbtn{padding:6px 12px;border:1px solid var(--border);border-radius:999px;background:var(--card);cursor:pointer;font-size:.9rem;color:var(--text);min-height:32px}
+        #tab-skillreviews .sk-fbtn.active{background:var(--spm-accent);color:#fff;border-color:var(--spm-accent)}
+        #tab-skillreviews .sk-r{border:1px solid var(--border);border-left:4px solid var(--border);border-radius:10px;background:var(--card);padding:12px 14px;margin-bottom:10px}
+        #tab-skillreviews .sk-r.pending{border-left-color:#d97706} #tab-skillreviews .sk-r.raised{border-left-color:#0a7d33;opacity:.9} #tab-skillreviews .sk-r.lowered{border-left-color:#0031a1;opacity:.9} #tab-skillreviews .sk-r.no_change{border-left-color:#9ca3af;opacity:.75}
+        #tab-skillreviews .sk-top{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+        #tab-skillreviews .sk-who{font-weight:800;font-size:1.02rem}
+        #tab-skillreviews .sk-tag{display:inline-block;font-size:.66rem;font-weight:800;letter-spacing:.04em;padding:2px 8px;border-radius:999px;text-transform:uppercase}
+        #tab-skillreviews .sk-tag.pending{background:#fff3cd;color:#7a5a00} #tab-skillreviews .sk-tag.raised{background:#e6f7ec;color:#0a7d33} #tab-skillreviews .sk-tag.lowered{background:#e7edfb;color:#0031a1} #tab-skillreviews .sk-tag.no_change{background:#f1f1f1;color:#666}
+        #tab-skillreviews .sk-tag.self{background:#fde8f1;color:#9d174d}
+        #tab-skillreviews .sk-lv{font-size:1.2rem;font-weight:900;color:var(--spm-accent)}
+        #tab-skillreviews .sk-facts{margin:6px 0 0;font-size:.92rem;display:grid;grid-template-columns:auto 1fr;gap:2px 12px}
+        #tab-skillreviews .sk-facts dt{color:var(--muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;padding-top:2px} #tab-skillreviews .sk-facts dd{margin:0;white-space:pre-wrap}
+        #tab-skillreviews .sk-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center}
+        #tab-skillreviews .sk-empty{color:var(--muted);padding:28px;text-align:center}
+      </style>
+      <div class="card">
+        <div class="sk-head">
+          <h2 style="margin:0">Skill Reviews &mdash; requests from SkillCheck</h2>
+          <button class="btn btn-outline btn-sm" onclick="skInit()">Refresh</button>
+          <span class="sk-sub" id="skCount"></span>
+          <a class="btn btn-outline btn-sm" style="margin-left:auto;text-decoration:none" href="https://southportlandmetroapa.github.io/skillcheck/" target="_blank" rel="noopener">Open the app &#8599;</a>
+        </div>
+        <p class="sk-sub" style="margin:0 0 12px">A signed-in player asks for a skill level review, for themselves or another player. Who asked stays in this tab (Team Manual &sect;22: in writing, confidential). Change the level in the APA system as usual, then <b>Raised</b> / <b>Lowered</b> / <b>No change</b> emails the requester. The player being reviewed is never emailed.</p>
+        <div class="sk-filters"><span id="skPills"></span></div>
+        <div id="skList"><div class="sk-empty">Loading&hellip;</div></div>
+      </div>
+    </div>
+
     <div id="tab-tabsmgr" class="tab-panel">
       <div class="card" style="padding:16px;max-width:640px">
         <h3 style="margin:0 0 2px">Tabs</h3>
@@ -6110,7 +6145,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.438';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.439';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11359,6 +11394,7 @@ const TAB_LABEL = {
   oopsreq:       'OOPS Requests',
   fixit:         'Fix-It Requests',
   hostroster:    'Host Rosters',
+  skillreviews:  'Skill Reviews',
   ourrack:       'To-Do',
   preshot:       'PreShot',
   cuedrop:       'CueDrop',
@@ -11861,6 +11897,7 @@ function switchTab(name) {
   if (name === 'oopsreq') oqInit();
   if (name === 'fixit') fxInit();
   if (name === 'hostroster') hrInit();
+  if (name === 'skillreviews') skInit();
   if (name === 'ourrack') orInit();
   if (name === 'preshot') psInit();
   if (name === 'cuedrop') cdInit();
@@ -12751,6 +12788,63 @@ async function hrCopy() {
   try { await navigator.clipboard.writeText(text); toast('Roster copied — paste into your email'); } catch (e) { prompt('Copy this:', text); }
 }
 window.hrInit = hrInit;
+/* ═══════════════════════════════════════════════════════════════════════
+   SKILL REVIEWS — skill-level review requests (2026-09-18, T1)
+   DATA  skillcheck.requests (service_role only; the app writes via GAS)
+         slate.players (read) — the subject's CURRENT levels, live
+   FLOW  pending → raised | lowered | no_change (GAS sl_decide emails the requester)
+   ═══════════════════════════════════════════════════════════════════════ */
+const SK_WP = { 'Accept-Profile': 'skillcheck', 'Content-Profile': 'skillcheck' };
+let _skRows = [], _skFilter = 'pending', _skLevels = {};
+function skMailerUrl() { return TCQ_MAILER_URL; }
+async function skInit() {
+  try {
+    _skRows = await sb('GET', 'requests?select=*&order=created_at.desc', null, SK_WP) || [];
+    const nums = [...new Set(_skRows.map(r => r.subject_number).filter(Boolean))]; _skLevels = {};
+    for (let i = 0; i < nums.length; i += 200) { const ps = await sb('GET', 'players?member_number=in.(' + nums.slice(i, i + 200).map(encodeURIComponent).join(',') + ')&select=member_number,sl_8ball,sl_9ball') || []; for (const p of ps) _skLevels[p.member_number] = p; }
+    skRender();
+  } catch (e) { document.getElementById('skList').innerHTML = '<div class="sk-empty">Load failed: ' + esc(e.message) + '</div>'; }
+}
+function skSetFilter(f) { _skFilter = f; skRender(); }
+function skLevelNow(r) { const p = _skLevels[r.subject_number]; if (!p) return null; const v = r.format === '8' ? p.sl_8ball : p.sl_9ball; return v || null; }
+function skRender() {
+  const counts = { pending: 0, raised: 0, lowered: 0, no_change: 0 };
+  for (const r of _skRows) counts[r.status] = (counts[r.status] || 0) + 1;
+  document.getElementById('skPills').innerHTML = [['pending', 'Pending'], ['raised', 'Raised'], ['lowered', 'Lowered'], ['no_change', 'No change'], ['all', 'All']].map(([k, l]) =>
+    '<button class="sk-fbtn' + (_skFilter === k ? ' active' : '') + '" onclick="skSetFilter(\'' + k + '\')">' + l + (k !== 'all' ? ' <b>' + counts[k] + '</b>' : '') + '</button>').join('');
+  document.getElementById('skCount').textContent = counts.pending + ' pending';
+  const list = _skRows.filter(r => _skFilter === 'all' || r.status === _skFilter);
+  const el = document.getElementById('skList');
+  if (!list.length) { el.innerHTML = '<div class="sk-empty">' + (_skRows.length ? 'Nothing here.' : 'No requests yet.') + '</div>'; return; }
+  el.innerHTML = list.map(r => { const now = skLevelNow(r); const fmt = r.format === '8' ? '8-Ball' : '9-Ball';
+    return '<div class="sk-r ' + esc(r.status) + '">'
+    + '<div class="sk-top"><span class="sk-who">' + esc(r.subject_name || '') + '</span><span class="sk-sub">#' + esc(r.subject_number) + '</span>' + (r.about_self ? '<span class="sk-tag self">about themselves</span>' : '') + '<span class="sk-tag ' + esc(r.status) + '">' + esc(r.status === 'no_change' ? 'no change' : r.status) + '</span><span class="sk-sub" style="margin-left:auto">' + new Date(r.created_at).toLocaleString() + '</span></div>'
+    + '<div style="margin:8px 0 2px"><span class="sk-lv">' + (r.current_sl ? 'SL' + r.current_sl : 'NR') + ' &rarr; SL' + esc(r.proposed_sl) + '</span> <span class="sk-sub">' + esc(fmt) + ' · asks to ' + esc(r.direction) + (now != null && now !== r.current_sl ? ' · <b>record now: SL' + now + '</b>' : '') + '</span></div>'
+    + '<dl class="sk-facts"><dt>Team</dt><dd><b>' + esc(r.team_name || '') + '</b> (' + esc(r.team_number || '') + ') · ' + esc(r.division_name || '') + (r.division_number ? ' (' + esc(r.division_number) + ')' : '') + '</dd>'
+    + '<dt>Asked by</dt><dd>' + (r.about_self ? 'the player' : esc(r.requester_name || '') + ' · #' + esc(r.requester_number) + ' · ' + esc(r.requester_email || '')) + '</dd>'
+    + '<dt>What they saw</dt><dd>' + esc(r.reasoning || '') + '</dd>'
+    + (r.seen_on || r.opponent ? '<dt>When</dt><dd>' + esc(r.seen_on || '') + (r.opponent ? ' vs ' + esc(r.opponent) : '') + '</dd>' : '')
+    + (r.decision_note ? '<dt>Decision note</dt><dd>' + esc(r.decision_note) + '</dd>' : '') + '</dl>'
+    + '<div class="sk-actions">'
+    + (r.status === 'pending' ? '<button class="btn btn-primary btn-sm" onclick="skDecide(' + r.id + ', \'raised\')">Raised</button><button class="btn btn-primary btn-sm" onclick="skDecide(' + r.id + ', \'lowered\')">Lowered</button><button class="btn btn-outline btn-sm" onclick="skDecide(' + r.id + ', \'no_change\')">No change</button>' : '')
+    + (r.decided_at ? '<span class="sk-sub">decided ' + new Date(r.decided_at).toLocaleDateString() + (r.decision_notified_at ? ' · requester emailed' : '') + '</span>' : '')
+    + '</div></div>'; }).join('');
+}
+async function skDecide(id, outcome) {
+  const r = _skRows.find(x => x.id === id); if (!r) return;
+  const label = outcome === 'no_change' ? 'no change' : outcome;
+  if (!confirm('Mark this review as "' + label + '"? Do this AFTER the level is set in the APA system. The requester gets an email; the player being reviewed does not.')) return;
+  let note = prompt('Optional note to include in the email to the requester. Blank = none:', ''); if (note === null) return; note = note.trim();
+  try {
+    const res = await fetch(skMailerUrl(), { method: 'POST', body: JSON.stringify({ action: 'sl_decide', admin_key: SB_KEY, id, outcome, note }) });
+    const j = JSON.parse(await res.text());
+    if (!j.ok) throw new Error(j.error || 'decision failed');
+    toast('Saved' + (j.sent ? ' — requester emailed' : ' — no email sent'));
+    await skInit();
+  } catch (e) { alert('Could not save: ' + e.message); }
+}
+window.skInit = skInit;
+
 
 
 
