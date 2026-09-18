@@ -6183,7 +6183,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.440';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.441';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -12935,6 +12935,7 @@ function fpRender() {
     + '<dt>What happened</dt><dd>' + esc(r.narrative || '') + '</dd>'
     + (r.extra ? '<dt>Anything else</dt><dd>' + esc(r.extra) + '</dd>' : '')
     + '<dt>Reported by</dt><dd>' + esc(r.reporter_name || '') + ' · #' + esc(r.reporter_number) + ' · ' + esc(r.reporter_email || '') + (r.reporter_team_name ? ' · ' + esc(r.reporter_team_name) + ' (' + esc(r.reporter_team_number) + ')' : '') + '</dd>'
+    + (r.review_note ? '<dt>Review note</dt><dd>' + esc(r.review_note) + '</dd>' : '')
     + (r.resolution ? '<dt>Outcome</dt><dd><b>' + esc(FP_RES[r.resolution] || r.resolution) + '</b>' + (r.resolution_note ? ' — ' + esc(r.resolution_note) : '') + '</dd>' : '') + '</dl>'
     + '<div class="fp-actions">'
     + (r.status === 'new' ? '<button class="btn btn-outline btn-sm" onclick="fpReview(' + r.id + ')">Start review</button>' : '')
