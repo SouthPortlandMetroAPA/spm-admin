@@ -1119,6 +1119,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="fixit">Fix-It Requests</button>
       <button class="tab" data-tab="hostroster">Host Rosters</button>
       <button class="tab" data-tab="skillreviews">Skill Reviews</button>
+      <button class="tab" data-tab="sportsmanship">Sportsmanship</button>
       <button class="tab" data-tab="ourrack">To-Do</button>
       <button class="tab" data-tab="preshot">PreShot</button>
       <button class="tab" data-tab="cuedrop">CueDrop</button>
@@ -5886,6 +5887,43 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       </div>
     </div>
 
+    <!-- ═══════════════ Sportsmanship — reports from FairPlay ═══════════════ -->
+    <div id="tab-sportsmanship" class="tab-panel">
+      <style>
+        #tab-sportsmanship .fp-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+        #tab-sportsmanship .fp-sub{color:var(--muted);font-size:.85rem}
+        #tab-sportsmanship .fp-filters{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px;align-items:center}
+        #tab-sportsmanship .fp-fbtn{padding:6px 12px;border:1px solid var(--border);border-radius:999px;background:var(--card);cursor:pointer;font-size:.9rem;color:var(--text);min-height:32px}
+        #tab-sportsmanship .fp-fbtn.active{background:var(--spm-accent);color:#fff;border-color:var(--spm-accent)}
+        #tab-sportsmanship .fp-r{border:1px solid var(--border);border-left:4px solid var(--border);border-radius:10px;background:var(--card);padding:12px 14px;margin-bottom:10px}
+        #tab-sportsmanship .fp-r.new{border-left-color:#d97706} #tab-sportsmanship .fp-r.in_review{border-left-color:#0031a1} #tab-sportsmanship .fp-r.resolved{border-left-color:#0a7d33;opacity:.8}
+        #tab-sportsmanship .fp-r.urgent{border-left-color:#ea002a;box-shadow:0 0 0 1px #ea002a33}
+        #tab-sportsmanship .fp-top{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+        #tab-sportsmanship .fp-who{font-weight:800;font-size:1.02rem}
+        #tab-sportsmanship .fp-tag{display:inline-block;font-size:.66rem;font-weight:800;letter-spacing:.04em;padding:2px 8px;border-radius:999px;text-transform:uppercase}
+        #tab-sportsmanship .fp-tag.new{background:#fff3cd;color:#7a5a00} #tab-sportsmanship .fp-tag.in_review{background:#e7edfb;color:#0031a1} #tab-sportsmanship .fp-tag.resolved{background:#e6f7ec;color:#0a7d33}
+        #tab-sportsmanship .fp-tag.urgent{background:#ea002a;color:#fff}
+        #tab-sportsmanship .fp-chip{display:inline-block;font-size:.8rem;padding:3px 9px;border-radius:999px;background:#f1f3f5;color:var(--text);margin:2px 4px 2px 0;border:1px solid var(--border)}
+        #tab-sportsmanship .fp-chip.p{background:#fde8f1;border-color:#f5c2d7;color:#9d174d;font-weight:700} #tab-sportsmanship .fp-chip.w{background:#eef6ee;border-color:#cfe3cf;color:#0a7d33}
+        #tab-sportsmanship .fp-chip.hot{background:#fff0f2;border-color:#f3b4be;color:#b8001f;font-weight:700}
+        #tab-sportsmanship .fp-facts{margin:6px 0 0;font-size:.92rem;display:grid;grid-template-columns:auto 1fr;gap:3px 12px}
+        #tab-sportsmanship .fp-facts dt{color:var(--muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;padding-top:3px} #tab-sportsmanship .fp-facts dd{margin:0;white-space:pre-wrap}
+        #tab-sportsmanship .fp-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center}
+        #tab-sportsmanship .fp-empty{color:var(--muted);padding:28px;text-align:center}
+      </style>
+      <div class="card">
+        <div class="fp-head">
+          <h2 style="margin:0">Sportsmanship &mdash; reports from FairPlay</h2>
+          <button class="btn btn-outline btn-sm" onclick="fpInit()">Refresh</button>
+          <span class="fp-sub" id="fpCount"></span>
+          <a class="btn btn-outline btn-sm" style="margin-left:auto;text-decoration:none" href="https://southportlandmetroapa.github.io/fairplay/" target="_blank" rel="noopener">Open the app &#8599;</a>
+        </div>
+        <p class="fp-sub" style="margin:0 0 12px">A signed-in player reports a team, a player, or several players on a team. Who reported stays in this tab. The reporter was promised an answer <b>within a week</b>: <b>Start review</b> can send a "we're on it" note; <b>Resolve</b> always emails them the outcome. The reported party is never emailed by this tool.</p>
+        <div class="fp-filters"><span id="fpPills"></span></div>
+        <div id="fpList"><div class="fp-empty">Loading&hellip;</div></div>
+      </div>
+    </div>
+
     <div id="tab-tabsmgr" class="tab-panel">
       <div class="card" style="padding:16px;max-width:640px">
         <h3 style="margin:0 0 2px">Tabs</h3>
@@ -6145,7 +6183,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.439';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.440';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11395,6 +11433,7 @@ const TAB_LABEL = {
   fixit:         'Fix-It Requests',
   hostroster:    'Host Rosters',
   skillreviews:  'Skill Reviews',
+  sportsmanship: 'Sportsmanship',
   ourrack:       'To-Do',
   preshot:       'PreShot',
   cuedrop:       'CueDrop',
@@ -11898,6 +11937,7 @@ function switchTab(name) {
   if (name === 'fixit') fxInit();
   if (name === 'hostroster') hrInit();
   if (name === 'skillreviews') skInit();
+  if (name === 'sportsmanship') fpInit();
   if (name === 'ourrack') orInit();
   if (name === 'preshot') psInit();
   if (name === 'cuedrop') cdInit();
@@ -12844,6 +12884,93 @@ async function skDecide(id, outcome) {
   } catch (e) { alert('Could not save: ' + e.message); }
 }
 window.skInit = skInit;
+/* ═══════════════════════════════════════════════════════════════════════
+   SPORTSMANSHIP — FairPlay reports (2026-09-18, T1)
+   DATA  fairplay.reports + fairplay.report_players (service_role only; the app writes via GAS)
+   FLOW  new → in_review (optional email) → resolved: noted | spoke | action | no_action (GAS fp_update emails the reporter)
+   ═══════════════════════════════════════════════════════════════════════ */
+const FP_WP = { 'Accept-Profile': 'fairplay', 'Content-Profile': 'fairplay' };
+const FP_BEH = { language: 'Rude or hostile language', threats: 'Threats or intimidation', physical: 'Physical contact', rules: 'Arguing calls / refusing rules', distracting: 'Distracting while shooting', handshake: 'Refused handshake / stormed off', impaired: 'Drunk or impaired', harassment: 'Harassment', venue: 'Seats / tables / venue', other: 'Something else' };
+const FP_SEV = { uncomfortable: 'uncomfortable', disrupted: 'disrupted the match', unsafe: 'felt UNSAFE or threatened' };
+const FP_CAP = { helpful: 'there, helped calm it', unhelpful: 'there, did not help', absent: 'not there', unsure: 'not sure' };
+const FP_STARS = { low: '1–2 stars', ok: '3+ stars', no: 'not marked', unsure: 'not sure' };
+const FP_WANT = { note: 'note it for their file', talk: 'have a word with them', action: 'take action' };
+const FP_RES = { noted: 'Noted on file', spoke: 'Spoke with them', action: 'Action taken', no_action: 'No action' };
+let _fpRows = [], _fpPeople = {}, _fpFilter = 'open';
+function fpMailerUrl() { return TCQ_MAILER_URL; }
+async function fpInit() {
+  try {
+    _fpRows = await sb('GET', 'reports?select=*&order=urgent.desc,created_at.desc', null, FP_WP) || [];
+    _fpPeople = {};
+    const ids = _fpRows.map(r => r.id);
+    for (let i = 0; i < ids.length; i += 200) { const ps = await sb('GET', 'report_players?select=report_id,member_number,name,role&report_id=in.(' + ids.slice(i, i + 200).join(',') + ')', null, FP_WP) || []; for (const p of ps) (_fpPeople[p.report_id] = _fpPeople[p.report_id] || []).push(p); }
+    fpRender();
+  } catch (e) { document.getElementById('fpList').innerHTML = '<div class="fp-empty">Load failed: ' + esc(e.message) + '</div>'; }
+}
+function fpSetFilter(f) { _fpFilter = f; fpRender(); }
+function fpDate(d) { if (!d) return ''; const p = String(d).split('-'); return p.length === 3 ? new Date(+p[0], +p[1] - 1, +p[2]).toLocaleDateString(undefined, { weekday: 'short', month: 'numeric', day: 'numeric' }) : d; }
+function fpRender() {
+  const counts = { new: 0, in_review: 0, resolved: 0, urgent: 0 };
+  for (const r of _fpRows) { counts[r.status] = (counts[r.status] || 0) + 1; if (r.urgent && r.status !== 'resolved') counts.urgent++; }
+  document.getElementById('fpPills').innerHTML = [['open', 'Open'], ['new', 'New'], ['in_review', 'In review'], ['resolved', 'Resolved'], ['all', 'All']].map(([k, l]) =>
+    '<button class="fp-fbtn' + (_fpFilter === k ? ' active' : '') + '" onclick="fpSetFilter(\'' + k + '\')">' + l + (k === 'open' ? ' <b>' + (counts.new + counts.in_review) + '</b>' : k !== 'all' ? ' <b>' + counts[k] + '</b>' : '') + '</button>').join('');
+  document.getElementById('fpCount').textContent = (counts.new + counts.in_review) + ' open' + (counts.urgent ? ' · ' + counts.urgent + ' URGENT' : '');
+  const list = _fpRows.filter(r => _fpFilter === 'all' || (_fpFilter === 'open' ? r.status !== 'resolved' : r.status === _fpFilter));
+  const el = document.getElementById('fpList');
+  if (!list.length) { el.innerHTML = '<div class="fp-empty">' + (_fpRows.length ? 'Nothing here.' : 'No reports yet.') + '</div>'; return; }
+  el.innerHTML = list.map(r => { const ppl = _fpPeople[r.id] || []; const inv = ppl.filter(p => p.role === 'involved'), wit = ppl.filter(p => p.role === 'witness');
+    const age = Math.floor((Date.now() - new Date(r.created_at).getTime()) / 864e5);
+    return '<div class="fp-r ' + esc(r.status) + (r.urgent && r.status !== 'resolved' ? ' urgent' : '') + '">'
+    + '<div class="fp-top"><span class="fp-who">' + esc(r.subject_team_name || '') + '</span><span class="fp-sub">(' + esc(r.subject_team_number) + ') · ' + esc(r.division_name || '') + '</span>'
+    + (r.urgent ? '<span class="fp-tag urgent">urgent</span>' : '') + '<span class="fp-tag ' + esc(r.status) + '">' + esc(r.status === 'in_review' ? 'in review' : r.status) + '</span>'
+    + '<span class="fp-sub" style="margin-left:auto">#' + r.id + ' · ' + new Date(r.created_at).toLocaleString() + (r.status !== 'resolved' && age >= 5 ? ' · <b style="color:#b8001f">' + age + ' days — promised a week</b>' : '') + '</span></div>'
+    + '<div style="margin:8px 0 4px">' + (r.whole_team ? '<span class="fp-chip p">the whole team</span>' : '') + inv.map(p => '<span class="fp-chip p">' + esc(p.name) + ' · #' + esc(p.member_number) + '</span>').join('') + (r.unknown_player ? '<span class="fp-chip p">unnamed: ' + esc(r.unknown_player) + '</span>' : '') + '</div>'
+    + '<div style="margin:0 0 4px">' + (r.behaviours || []).map(b => '<span class="fp-chip' + (b === 'physical' || b === 'threats' || b === 'harassment' ? ' hot' : '') + '">' + esc(FP_BEH[b] || b) + '</span>').join('') + '<span class="fp-chip' + (r.severity === 'unsafe' ? ' hot' : '') + '">' + esc(FP_SEV[r.severity] || r.severity) + '</span></div>'
+    + '<dl class="fp-facts">'
+    + '<dt>When</dt><dd>' + (r.week_number ? 'Week ' + esc(r.week_number) + ' · ' + esc(fpDate(r.match_date)) + (r.venue ? ' · ' + esc(r.venue) : '') + (r.reporter_team_name ? ' · vs ' + esc(r.reporter_team_name) : '') : 'not during one of the reporter\'s matches') + '</dd>'
+    + (r.captain_state ? '<dt>Their captain</dt><dd>' + esc(FP_CAP[r.captain_state] || r.captain_state) + '</dd>' : '')
+    + (r.scoresheet_stars ? '<dt>Scoresheet</dt><dd>' + esc(FP_STARS[r.scoresheet_stars] || r.scoresheet_stars) + '</dd>' : '')
+    + '<dt>Wants</dt><dd>' + esc(FP_WANT[r.wanted] || r.wanted) + '</dd>'
+    + (wit.length || r.witnesses_text ? '<dt>Witnesses</dt><dd>' + wit.map(p => '<span class="fp-chip w">' + esc(p.name) + ' · #' + esc(p.member_number) + '</span>').join('') + (r.witnesses_text ? esc(r.witnesses_text) : '') + '</dd>' : '')
+    + '<dt>What happened</dt><dd>' + esc(r.narrative || '') + '</dd>'
+    + (r.extra ? '<dt>Anything else</dt><dd>' + esc(r.extra) + '</dd>' : '')
+    + '<dt>Reported by</dt><dd>' + esc(r.reporter_name || '') + ' · #' + esc(r.reporter_number) + ' · ' + esc(r.reporter_email || '') + (r.reporter_team_name ? ' · ' + esc(r.reporter_team_name) + ' (' + esc(r.reporter_team_number) + ')' : '') + '</dd>'
+    + (r.resolution ? '<dt>Outcome</dt><dd><b>' + esc(FP_RES[r.resolution] || r.resolution) + '</b>' + (r.resolution_note ? ' — ' + esc(r.resolution_note) : '') + '</dd>' : '') + '</dl>'
+    + '<div class="fp-actions">'
+    + (r.status === 'new' ? '<button class="btn btn-outline btn-sm" onclick="fpReview(' + r.id + ')">Start review</button>' : '')
+    + (r.status !== 'resolved' ? '<button class="btn btn-primary btn-sm" onclick="fpResolve(' + r.id + ')">Resolve&hellip;</button>' : '')
+    + (r.reviewed_at ? '<span class="fp-sub">review started ' + new Date(r.reviewed_at).toLocaleDateString() + (r.review_notified_at ? ' · reporter emailed' : '') + '</span>' : '')
+    + (r.resolved_at ? '<span class="fp-sub">resolved ' + new Date(r.resolved_at).toLocaleDateString() + (r.resolution_notified_at ? ' · reporter emailed' : ' · no email') + '</span>' : '')
+    + '</div></div>'; }).join('');
+}
+async function fpPost(payload) {
+  const res = await fetch(fpMailerUrl(), { method: 'POST', body: JSON.stringify(Object.assign({ action: 'fp_update', admin_key: SB_KEY }, payload)) });
+  const j = JSON.parse(await res.text());
+  if (!j.ok) throw new Error(j.error || 'update failed');
+  return j;
+}
+async function fpReview(id) {
+  const r = _fpRows.find(x => x.id === id); if (!r) return;
+  const notify = confirm('Start the review of #' + id + ' (' + r.subject_team_name + ').\n\nOK = also email the reporter "we are looking into it".\nCancel = mark it in review quietly.');
+  let note = '';
+  if (notify) { note = prompt('Optional line for the reporter. Blank = none:', ''); if (note === null) return; note = note.trim(); }
+  try { const j = await fpPost({ id, status: 'in_review', notify, note }); toast('In review' + (j.sent ? ' — reporter emailed' : '')); await fpInit(); }
+  catch (e) { alert('Could not update: ' + e.message); }
+}
+async function fpResolve(id) {
+  const r = _fpRows.find(x => x.id === id); if (!r) return;
+  const pick = prompt('Resolve #' + id + ' (' + r.subject_team_name + '). The reporter gets an email; the reported party does not.\n\nType one:\n  noted      — noted on their file\n  spoke      — we spoke with them\n  action     — action taken\n  no_action  — no action (a reason is required)', 'noted');
+  if (pick === null) return;
+  const resolution = pick.trim().toLowerCase();
+  if (!FP_RES[resolution]) { alert('Type noted, spoke, action or no_action.'); return; }
+  let note = prompt(resolution === 'no_action' ? 'Why no action? This goes to the reporter — required:' : 'Optional note for the reporter. Blank = none:', ''); if (note === null) return; note = note.trim();
+  if (resolution === 'no_action' && !note) { alert('A "no action" close needs a reason for the reporter.'); return; }
+  if (!confirm('Send "' + FP_RES[resolution] + '" to the reporter for #' + id + '?')) return;
+  try { const j = await fpPost({ id, status: 'resolved', resolution, note }); toast('Resolved' + (j.sent ? ' — reporter emailed' : ' — no email sent')); await fpInit(); }
+  catch (e) { alert('Could not resolve: ' + e.message); }
+}
+window.fpInit = fpInit;
+
 
 
 
