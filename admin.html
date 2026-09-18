@@ -6110,7 +6110,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.437';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.438';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -41771,6 +41771,7 @@ async function ehLoadPlan() {
     const j = await ehCall('/plan', 'GET');
     _eh.items = j.items || [];
     ehRenderCounts(j);
+    ehFeedBanner(j);
     await ehLoadTypes();
     ehRenderUnassigned(j);
     ehRenderItems();
@@ -41783,6 +41784,18 @@ async function ehLoadPlan() {
   ehSyncApplyBtn();
 }
 
+/* Feed-sanity verdict from the worker: deletes are held when poolplayers stops carrying the future
+   (2026-09-17: the API returned past rows only and 42 live events looked "vanished"). */
+function ehFeedBanner(j) {
+  let el = document.getElementById('ehFeedBanner');
+  if (!el) { el = document.createElement('div'); el.id = 'ehFeedBanner'; const c = document.getElementById('ehCounts'); c.parentNode.insertBefore(el, c); }
+  const f = j.feed, held = (j.counts && j.counts.heldDeletes) || 0;
+  if (f && f.degraded) {
+    el.innerHTML = '<div style="background:#fff3cd;border:1px solid #f0c36d;border-left:5px solid #b45309;border-radius:8px;padding:10px 12px;margin:0 0 10px;font-size:.92rem"><b>Deletes held — the poolplayers feed is not carrying the future.</b> ' + esc(f.reason || '') + '. Nothing on the calendar will be removed until the feed lists future events again. Held: ' + held + ' deletes. Creates and updates still apply.</div>';
+  } else if (f) {
+    el.innerHTML = '<div class="hint" style="margin:0 0 8px">Feed: ' + f.entries + ' rows, ' + f.future + ' future · ' + f.stampedFuture + ' future events stamped on the calendar.</div>';
+  } else el.innerHTML = '';
+}
 function ehRenderCounts(j) {
   const c = j.counts || {};
   document.getElementById('ehCounts').innerHTML =
