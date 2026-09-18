@@ -41791,7 +41791,7 @@ function ehFeedBanner(j) {
   if (!el) { el = document.createElement('div'); el.id = 'ehFeedBanner'; const c = document.getElementById('ehCounts'); c.parentNode.insertBefore(el, c); }
   const f = j.feed, held = (j.counts && j.counts.heldDeletes) || 0;
   if (f && f.degraded) {
-    el.innerHTML = '<div style="background:#fff3cd;border:1px solid #f0c36d;border-left:5px solid #b45309;border-radius:8px;padding:10px 12px;margin:0 0 10px;font-size:.92rem"><b>Deletes held — the poolplayers feed is not carrying the future.</b> ' + esc(f.reason || '') + '. Nothing on the calendar will be removed until the feed lists future events again (' + held + ' deletes held). Creates and updates still apply.</div>';
+    el.innerHTML = '<div style="background:#fff3cd;border:1px solid #f0c36d;border-left:5px solid #b45309;border-radius:8px;padding:10px 12px;margin:0 0 10px;font-size:.92rem"><b>Deletes held — the poolplayers feed is not carrying the future.</b> ' + esc(f.reason || '') + '. Nothing on the calendar will be removed until the feed lists future events again. Held: ' + held + ' deletes. Creates and updates still apply.</div>';
   } else if (f) {
     el.innerHTML = '<div class="hint" style="margin:0 0 8px">Feed: ' + f.entries + ' rows, ' + f.future + ' future · ' + f.stampedFuture + ' future events stamped on the calendar.</div>';
   } else el.innerHTML = '';
