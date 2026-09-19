@@ -6183,7 +6183,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.441';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.442';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -12859,7 +12859,9 @@ function skRender() {
   el.innerHTML = list.map(r => { const now = skLevelNow(r); const fmt = r.format === '8' ? '8-Ball' : '9-Ball';
     return '<div class="sk-r ' + esc(r.status) + '">'
     + '<div class="sk-top"><span class="sk-who">' + esc(r.subject_name || '') + '</span><span class="sk-sub">#' + esc(r.subject_number) + '</span>' + (r.about_self ? '<span class="sk-tag self">about themselves</span>' : '') + '<span class="sk-tag ' + esc(r.status) + '">' + esc(r.status === 'no_change' ? 'no change' : r.status) + '</span><span class="sk-sub" style="margin-left:auto">' + new Date(r.created_at).toLocaleString() + '</span></div>'
-    + '<div style="margin:8px 0 2px"><span class="sk-lv">' + (r.current_sl ? 'SL' + r.current_sl : 'NR') + ' &rarr; SL' + esc(r.proposed_sl) + '</span> <span class="sk-sub">' + esc(fmt) + ' · asks to ' + esc(r.direction) + (now != null && now !== r.current_sl ? ' · <b>record now: SL' + now + '</b>' : '') + '</span></div>'
+    + '<div style="margin:8px 0 2px"><span class="sk-lv">' + (r.claimed_current_sl ? 'SL' + esc(r.claimed_current_sl) : (r.current_sl ? 'SL' + r.current_sl : 'NR')) + ' &rarr; SL' + esc(r.proposed_sl) + '</span> <span class="sk-sub">' + esc(fmt) + ' · asks to ' + esc(r.direction)
+    + (r.claimed_current_sl ? ' · they say SL' + esc(r.claimed_current_sl) + (r.current_sl ? (r.current_sl === r.claimed_current_sl ? ' <b style="color:#0a7d33">= record</b>' : ' · <b style="color:#b8001f">record at submit: SL' + r.current_sl + '</b>') : ' · record: not rated') : '')
+    + (now != null && now !== r.current_sl ? ' · <b>record now: SL' + now + '</b>' : '') + '</span></div>'
     + '<dl class="sk-facts"><dt>Team</dt><dd><b>' + esc(r.team_name || '') + '</b> (' + esc(r.team_number || '') + ') · ' + esc(r.division_name || '') + (r.division_number ? ' (' + esc(r.division_number) + ')' : '') + '</dd>'
     + '<dt>Asked by</dt><dd>' + (r.about_self ? 'the player' : esc(r.requester_name || '') + ' · #' + esc(r.requester_number) + ' · ' + esc(r.requester_email || '')) + '</dd>'
     + '<dt>What they saw</dt><dd>' + esc(r.reasoning || '') + '</dd>'
@@ -12921,7 +12923,7 @@ function fpRender() {
   el.innerHTML = list.map(r => { const ppl = _fpPeople[r.id] || []; const inv = ppl.filter(p => p.role === 'involved'), wit = ppl.filter(p => p.role === 'witness');
     const age = Math.floor((Date.now() - new Date(r.created_at).getTime()) / 864e5);
     return '<div class="fp-r ' + esc(r.status) + (r.urgent && r.status !== 'resolved' ? ' urgent' : '') + '">'
-    + '<div class="fp-top"><span class="fp-who">' + esc(r.subject_team_name || '') + '</span><span class="fp-sub">(' + esc(r.subject_team_number) + ') · ' + esc(r.division_name || '') + '</span>'
+    + '<div class="fp-top"><span class="fp-who">' + esc(r.subject_team_name || '') + '</span><span class="fp-sub">(' + esc((r.subject_team_numbers && r.subject_team_numbers.length ? r.subject_team_numbers : [r.subject_team_number]).join('/')) + ')' + (r.subject_night ? ' · ' + esc(r.subject_night) : '') + ' · ' + esc(r.division_name || '') + '</span>'
     + (r.urgent ? '<span class="fp-tag urgent">urgent</span>' : '') + '<span class="fp-tag ' + esc(r.status) + '">' + esc(r.status === 'in_review' ? 'in review' : r.status) + '</span>'
     + '<span class="fp-sub" style="margin-left:auto">#' + r.id + ' · ' + new Date(r.created_at).toLocaleString() + (r.status !== 'resolved' && age >= 5 ? ' · <b style="color:#b8001f">' + age + ' days — promised a week</b>' : '') + '</span></div>'
     + '<div style="margin:8px 0 4px">' + (r.whole_team ? '<span class="fp-chip p">the whole team</span>' : '') + inv.map(p => '<span class="fp-chip p">' + esc(p.name) + ' · #' + esc(p.member_number) + '</span>').join('') + (r.unknown_player ? '<span class="fp-chip p">unnamed: ' + esc(r.unknown_player) + '</span>' : '') + '</div>'
