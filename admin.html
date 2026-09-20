@@ -1128,7 +1128,8 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="racktime">RackTime</button>
       <button class="tab" data-tab="nexusreport">Nexus Issue</button>
       <button class="tab" data-tab="playersfund">Players Fund</button>
-      <button class="tab" data-tab="stripe">Stripe Customers</button>
+      <button class="tab" data-tab="shortrack">Requests</button>
+<button class="tab" data-tab="stripe">Stripe Customers</button>
       <!-- Pinned last and never hideable: it is the only route back to a
            hidden tab. slTabsApply enforces both. -->
       <button class="tab" data-tab="tabsmgr" title="Show, hide and reorder tabs">&#9776; Tabs</button>
@@ -5924,6 +5925,60 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       </div>
     </div>
 
+    <div id="tab-shortrack" class="tab-panel">
+      <style>
+        #tab-shortrack .sr-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 12px}
+        #tab-shortrack .sr-pill{padding:6px 12px;border:1px solid var(--border);border-radius:999px;background:var(--card);cursor:pointer;font-size:.9rem;color:var(--text);min-height:32px}
+        #tab-shortrack .sr-pill.on{background:var(--spm-accent);color:#fff;border-color:var(--spm-accent)}
+        #tab-shortrack .sr-tagf{padding:4px 10px;border:1px solid var(--border);border-radius:999px;background:#f8f9fb;cursor:pointer;font-size:.82rem;color:var(--text)}
+        #tab-shortrack .sr-tagf.on{background:#0031a1;color:#fff;border-color:#0031a1}
+        #tab-shortrack select,#tab-shortrack input[type=text]{padding:7px 10px;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--text);font:inherit;font-size:.9rem;min-height:34px}
+        #tab-shortrack .sr-r{border:1px solid var(--border);border-left:4px solid var(--border);border-radius:10px;background:var(--card);padding:12px 14px;margin-bottom:10px}
+        #tab-shortrack .sr-r.new{border-left-color:#d97706} #tab-shortrack .sr-r.working{border-left-color:#0031a1}
+        #tab-shortrack .sr-r.done{border-left-color:#0a7d33;opacity:.75} #tab-shortrack .sr-r.declined{border-left-color:#9ca3af;opacity:.7}
+        #tab-shortrack .sr-r.split{border-left-color:#7c3aed;opacity:.8}
+        #tab-shortrack .sr-need{font-weight:700;font-size:1.02rem;white-space:pre-wrap}
+        #tab-shortrack .sr-meta{color:var(--muted);font-size:.84rem;margin-top:3px}
+        #tab-shortrack .sr-tag{display:inline-block;font-size:.76rem;padding:2px 8px;border-radius:999px;background:#eef2ff;color:#0031a1;margin:3px 4px 0 0;border:1px solid #d5dcf5;cursor:pointer}
+        #tab-shortrack .sr-tag:hover{background:#ffe9ec;color:#b8001f;border-color:#f3b4be}
+        #tab-shortrack .sr-badge{display:inline-block;font-size:.66rem;font-weight:800;letter-spacing:.04em;padding:2px 8px;border-radius:999px;text-transform:uppercase}
+        #tab-shortrack .sr-badge.new{background:#fff3cd;color:#7a5a00} #tab-shortrack .sr-badge.working{background:#e7edfb;color:#0031a1}
+        #tab-shortrack .sr-badge.done{background:#e6f7ec;color:#0a7d33} #tab-shortrack .sr-badge.declined{background:#f1f3f5;color:#4b5563}
+        #tab-shortrack .sr-badge.split{background:#f3e8ff;color:#6b21a8}
+        #tab-shortrack .sr-acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;align-items:center}
+        #tab-shortrack .sr-box{margin-top:10px;padding:10px;border:1px solid var(--border);border-radius:8px;background:#fbfbfd}
+        #tab-shortrack textarea{width:100%;font:inherit;font-size:.92rem;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--text);box-sizing:border-box}
+        #tab-shortrack .sr-count{font-size:.85rem;color:var(--muted);margin:6px 0}
+        #tab-shortrack .sr-empty{color:var(--muted);padding:28px;text-align:center}
+        #tab-shortrack .sr-kid{font-size:.8rem;color:#6b21a8}
+      </style>
+      <div class="card">
+        <div class="sr-bar">
+          <h2 style="margin:0">Requests</h2>
+          <button class="btn btn-outline btn-sm" onclick="srInit()">Refresh</button>
+          <span class="sr-count" id="srCount"></span>
+          <a class="btn btn-outline btn-sm" style="margin-left:auto;text-decoration:none" href="https://southportlandmetroapa.github.io/shortrack/" target="_blank" rel="noopener">Open ShortRack &#8599;</a>
+        </div>
+        <p class="sr-count" style="margin:0 0 10px">Anything a player says they are missing. One item per request is what we ask for. When someone combines a few, use Split and each piece becomes its own request.</p>
+        <div class="sr-bar" id="srStatus"></div>
+        <div class="sr-bar">
+          <input type="text" id="srQ" placeholder="Search text, name, team" oninput="srRender()" style="min-width:210px">
+          <select id="srKind" onchange="srRender()"></select>
+          <select id="srTeam" onchange="srRender()"></select>
+          <select id="srSort" onchange="srRender()">
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+            <option value="kind">By kind</option>
+            <option value="team">By team</option>
+            <option value="who">By who asked</option>
+            <option value="status">By status</option>
+          </select>
+        </div>
+        <div class="sr-bar" id="srTags"></div>
+        <div id="srList"><div class="sr-empty">Loading&hellip;</div></div>
+      </div>
+    </div>
+
     <div id="tab-tabsmgr" class="tab-panel">
       <div class="card" style="padding:16px;max-width:640px">
         <h3 style="margin:0 0 2px">Tabs</h3>
@@ -6183,7 +6238,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.442';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.443';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11938,6 +11993,7 @@ function switchTab(name) {
   if (name === 'hostroster') hrInit();
   if (name === 'skillreviews') skInit();
   if (name === 'sportsmanship') fpInit();
+  if (name === 'shortrack') srInit();
   if (name === 'ourrack') orInit();
   if (name === 'preshot') psInit();
   if (name === 'cuedrop') cdInit();
@@ -12837,6 +12893,157 @@ window.hrInit = hrInit;
 const SK_WP = { 'Accept-Profile': 'skillcheck', 'Content-Profile': 'skillcheck' };
 let _skRows = [], _skFilter = 'pending', _skLevels = {};
 function skMailerUrl() { return TCQ_MAILER_URL; }
+
+/* ── Slate ▸ Requests (ShortRack). 2026-09-20 ─────────────────────────────────────────────────────────
+   WHAT  every item a player says they are missing, with ad-hoc tags, email replies and split.
+   WHY   the queue only pays off if it makes lists you can act on, so one row must mean one item.
+   FACETS are derived from the ROWS on every render. Nothing here hard-codes a tag, a kind or a team, which is
+   what lets a tag invented this afternoon filter this afternoon with no deploy.
+   DATA  shortrack.requests + shortrack.replies over the service key; sr_* GAS actions for anything that emails. */
+const SR_WP = { 'Accept-Profile': 'shortrack', 'Content-Profile': 'shortrack' };
+const SR_STATUSES = ['new', 'working', 'done', 'declined', 'split'];
+let _srRows = [], _srReplies = {}, _srStatus = 'open', _srTag = '';
+async function srInit() {
+  try {
+    _srRows = await sb('GET', 'requests?select=*&order=created_at.desc&limit=1000', null, SR_WP) || [];
+    const reps = await sb('GET', 'replies?select=request_id,body,sent_at&order=sent_at.desc&limit=1000', null, SR_WP) || [];
+    _srReplies = {};
+    reps.forEach(r => { (_srReplies[r.request_id] = _srReplies[r.request_id] || []).push(r); });
+    srRender();
+  } catch (e) { document.getElementById('srList').innerHTML = '<div class="sr-empty">Could not load: ' + esc(String(e.message || e)) + '</div>'; }
+}
+/* every list below comes from the data, never from a constant */
+function srFacets() {
+  const tags = [...new Set(_srRows.flatMap(r => r.tags || []))].sort();
+  const kinds = [...new Set(_srRows.map(r => r.kind).filter(Boolean))].sort();
+  const teams = [...new Set(_srRows.map(r => r.team_name).filter(Boolean))].sort();
+  return { tags, kinds, teams };
+}
+function srRender() {
+  const f = srFacets();
+  const sel = (id, list, label) => { const el = document.getElementById(id); const cur = el.value;
+    el.innerHTML = '<option value="">' + label + '</option>' + list.map(v => '<option value="' + esc(v) + '">' + esc(v) + '</option>').join('');
+    if (list.includes(cur)) el.value = cur; };
+  sel('srKind', f.kinds, 'Any kind'); sel('srTeam', f.teams, 'Any team');
+  document.getElementById('srStatus').innerHTML =
+    ['open', ...SR_STATUSES, 'all'].map(v => '<button class="sr-pill' + (_srStatus === v ? ' on' : '') + '" onclick="_srStatus=' + JSON.stringify(v).replace(/"/g, '&quot;') + ';srRender()">' + esc(v) + '</button>').join('');
+  document.getElementById('srTags').innerHTML = f.tags.length
+    ? '<span class="sr-count">Tags:</span>' + f.tags.map(t => '<button class="sr-tagf' + (_srTag === t ? ' on' : '') + '" onclick="_srTag=(_srTag===' + JSON.stringify(t).replace(/"/g, '&quot;') + '?\'\':' + JSON.stringify(t).replace(/"/g, '&quot;') + ');srRender()">' + esc(t) + '</button>').join('')
+    : '<span class="sr-count">No tags yet. Add one on any request and it becomes a filter here.</span>';
+  const q = document.getElementById('srQ').value.trim().toLowerCase();
+  const kind = document.getElementById('srKind').value, team = document.getElementById('srTeam').value;
+  const sort = document.getElementById('srSort').value;
+  let rows = _srRows.filter(r => {
+    if (_srStatus === 'open') { if (r.status !== 'new' && r.status !== 'working') return false; }
+    else if (_srStatus !== 'all' && r.status !== _srStatus) return false;
+    if (kind && r.kind !== kind) return false;
+    if (team && r.team_name !== team) return false;
+    if (_srTag && !(r.tags || []).includes(_srTag)) return false;
+    if (q) { const hay = [r.need, r.requester_name, r.team_name, r.kind, (r.tags || []).join(' ')].join(' ').toLowerCase();
+             if (!hay.includes(q)) return false; }
+    return true;
+  });
+  const by = { newest: (a, b) => b.created_at.localeCompare(a.created_at), oldest: (a, b) => a.created_at.localeCompare(b.created_at),
+    kind: (a, b) => String(a.kind || 'zz').localeCompare(String(b.kind || 'zz')) || b.created_at.localeCompare(a.created_at),
+    team: (a, b) => String(a.team_name || 'zz').localeCompare(String(b.team_name || 'zz')) || b.created_at.localeCompare(a.created_at),
+    who: (a, b) => String(a.requester_name || '').localeCompare(String(b.requester_name || '')) || b.created_at.localeCompare(a.created_at),
+    status: (a, b) => SR_STATUSES.indexOf(a.status) - SR_STATUSES.indexOf(b.status) || b.created_at.localeCompare(a.created_at) };
+  rows.sort(by[sort] || by.newest);
+  document.getElementById('srCount').textContent = rows.length + ' of ' + _srRows.length;
+  document.getElementById('srList').innerHTML = rows.length ? rows.map(srCard).join('')
+    : '<div class="sr-empty">Nothing matches those filters.</div>';
+}
+function srCard(r) {
+  const kids = _srRows.filter(x => x.parent_id === r.id).length;
+  const reps = _srReplies[r.id] || [];
+  const tagBtns = (r.tags || []).map(t => '<span class="sr-tag" title="Click to remove" onclick="srTag(' + r.id + ',' + JSON.stringify(t).replace(/"/g, '&quot;') + ',true)">' + esc(t) + ' &times;</span>').join('');
+  const allTags = srFacets().tags;
+  return '<div class="sr-r ' + esc(r.status) + '">'
+    + '<div><span class="sr-badge ' + esc(r.status) + '">' + esc(r.status) + '</span> '
+    + (r.parent_id ? '<span class="sr-kid">split from #' + r.parent_id + '</span> ' : '')
+    + (kids ? '<span class="sr-kid">' + kids + ' split off</span> ' : '') + '</div>'
+    + '<div class="sr-need">' + esc(r.need) + '</div>'
+    + '<div class="sr-meta">#' + r.id + ' &middot; ' + esc(r.requester_name || r.requester_number) + ' &middot; '
+    + esc(r.team_name || 'no team given') + (r.for_team ? ' &middot; for the whole team' : '')
+    + ' &middot; ' + esc(r.kind || 'no kind') + ' &middot; ' + new Date(r.created_at).toLocaleDateString() + '</div>'
+    + '<div>' + tagBtns + '<input list="srTagList" class="sr-tagf" style="width:140px" placeholder="+ tag" '
+    + 'onkeydown="if(event.key===\'Enter\'){srTag(' + r.id + ',this.value,false);this.value=\'\';}"></div>'
+    + '<datalist id="srTagList">' + allTags.map(t => '<option value="' + esc(t) + '">').join('') + '</datalist>'
+    + (reps.length ? '<div class="sr-meta" style="margin-top:6px">Last reply ' + new Date(reps[0].sent_at).toLocaleDateString() + ': ' + esc(reps[0].body.slice(0, 120)) + '</div>' : '')
+    + '<div class="sr-acts">'
+    + (r.status !== 'split' ? SR_STATUSES.filter(x => x !== 'split' && x !== r.status).map(x =>
+        '<button class="btn btn-outline btn-sm" onclick="srDecide(' + r.id + ',\'' + x + '\')">' + x + '</button>').join('') : '')
+    + '<button class="btn btn-outline btn-sm" onclick="srToggle(' + r.id + ',\'reply\')">Reply by email</button>'
+    + (r.status !== 'split' ? '<button class="btn btn-outline btn-sm" onclick="srToggle(' + r.id + ',\'split\')">Split</button>' : '')
+    + '</div>'
+    + '<div class="sr-box" id="srReply' + r.id + '" style="display:none">'
+    + '<textarea id="srReplyBody' + r.id + '" rows="3" placeholder="What do you want to tell them?"></textarea>'
+    + '<button class="btn btn-sm" style="margin-top:6px" onclick="srReply(' + r.id + ')">Send email</button></div>'
+    + '<div class="sr-box" id="srSplit' + r.id + '" style="display:none">'
+    + '<div class="sr-count">One line becomes one request. Fix the lines, then create.</div>'
+    + '<textarea id="srSplitBody' + r.id + '" rows="5" oninput="srSplitCount(' + r.id + ')"></textarea>'
+    + '<div class="sr-count" id="srSplitCount' + r.id + '"></div>'
+    + '<button class="btn btn-sm" onclick="srSplit(' + r.id + ')">Create these requests</button></div>'
+    + '</div>';
+}
+function srToggle(id, which) {
+  const el = document.getElementById('sr' + (which === 'reply' ? 'Reply' : 'Split') + id);
+  const open = el.style.display === 'none';
+  el.style.display = open ? 'block' : 'none';
+  if (open && which === 'split') {
+    const r = _srRows.find(x => x.id === id);
+    document.getElementById('srSplitBody' + id).value = srPresplit(r.need).join('\n');
+    srSplitCount(id);
+  }
+}
+/* Deliberately over-splits. Cutting "black and white" in half is cheap because the operator edits the lines before
+   anything is written; missing an item is expensive because it means re-reading the paragraph. */
+function srPresplit(text) {
+  return String(text || '').replace(/\r/g, '').split(/\n+/)
+    .flatMap(line => /^\s*([-*\u2022]|\d+[.)])\s+/.test(line)
+      ? [line.replace(/^\s*([-*\u2022]|\d+[.)])\s+/, '')]
+      : line.split(/\s*;\s*|\s+and also\s+|\s*,\s*and\s+|\s+and\s+/i))
+    .map(x => x.trim().replace(/^[,;]\s*/, '')).filter(Boolean);
+}
+function srSplitCount(id) {
+  const lines = document.getElementById('srSplitBody' + id).value.split('\n').map(x => x.trim()).filter(Boolean);
+  document.getElementById('srSplitCount' + id).textContent = lines.length < 2
+    ? 'A split needs at least two lines.' : 'This makes ' + lines.length + ' separate requests.';
+}
+async function srDecide(id, status) {
+  const note = (status === 'done' || status === 'declined')
+    ? (prompt('A note for them. It goes in the email. Leave blank for none.') || '') : '';
+  const res = await fetch(skMailerUrl(), { method: 'POST', body: JSON.stringify({ action: 'sr_decide', admin_key: SB_KEY, id, status, note }) });
+  const j = await res.json();
+  if (!j.ok) return alert('Could not update: ' + (j.error || 'unknown'));
+  await srInit();
+}
+async function srReply(id) {
+  const body = document.getElementById('srReplyBody' + id).value.trim();
+  if (!body) return alert('Type the message first.');
+  const res = await fetch(skMailerUrl(), { method: 'POST', body: JSON.stringify({ action: 'sr_reply', admin_key: SB_KEY, id, body }) });
+  const j = await res.json();
+  if (!j.ok) return alert('Could not send: ' + (j.error || 'unknown'));
+  if (!j.sent) alert('Saved, but the email did not send. They may be on the No-Contact list.');
+  await srInit();
+}
+async function srTag(id, tag, remove) {
+  if (!String(tag || '').trim()) return;
+  const res = await fetch(skMailerUrl(), { method: 'POST', body: JSON.stringify({ action: 'sr_tag', admin_key: SB_KEY, id, tag, remove: !!remove }) });
+  const j = await res.json();
+  if (!j.ok) return alert('Could not tag: ' + (j.error || 'unknown'));
+  await srInit();
+}
+async function srSplit(id) {
+  const lines = document.getElementById('srSplitBody' + id).value.split('\n').map(x => x.trim()).filter(Boolean);
+  if (lines.length < 2) return alert('A split needs at least two lines.');
+  if (!confirm('Create ' + lines.length + ' separate requests and mark this one split?')) return;
+  const res = await fetch(skMailerUrl(), { method: 'POST', body: JSON.stringify({ action: 'sr_split', admin_key: SB_KEY, id, lines }) });
+  const j = await res.json();
+  if (!j.ok) return alert('Could not split: ' + (j.error || 'unknown'));
+  await srInit();
+}
+
 async function skInit() {
   try {
     _skRows = await sb('GET', 'requests?select=*&order=created_at.desc', null, SK_WP) || [];
