@@ -6238,7 +6238,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.443';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.444';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -12888,7 +12888,8 @@ window.hrInit = hrInit;
    SKILL REVIEWS — skill-level review requests (2026-09-18, T1)
    DATA  skillcheck.requests (service_role only; the app writes via GAS)
          slate.players (read) — the subject's CURRENT levels, live
-   FLOW  pending → raised | lowered | no_change (GAS sl_decide emails the requester)
+   FLOW  pending → raised | lowered | no_change (GAS sl_decide emails NOBODY, 2026-09-28 directive:
+         not the requester, not the reviewed player, not the office. The note is for the record only.)
    ═══════════════════════════════════════════════════════════════════════ */
 const SK_WP = { 'Accept-Profile': 'skillcheck', 'Content-Profile': 'skillcheck' };
 let _skRows = [], _skFilter = 'pending', _skLevels = {};
@@ -13076,19 +13077,19 @@ function skRender() {
     + (r.decision_note ? '<dt>Decision note</dt><dd>' + esc(r.decision_note) + '</dd>' : '') + '</dl>'
     + '<div class="sk-actions">'
     + (r.status === 'pending' ? '<button class="btn btn-primary btn-sm" onclick="skDecide(' + r.id + ', \'raised\')">Raised</button><button class="btn btn-primary btn-sm" onclick="skDecide(' + r.id + ', \'lowered\')">Lowered</button><button class="btn btn-outline btn-sm" onclick="skDecide(' + r.id + ', \'no_change\')">No change</button>' : '')
-    + (r.decided_at ? '<span class="sk-sub">decided ' + new Date(r.decided_at).toLocaleDateString() + (r.decision_notified_at ? ' · requester emailed' : '') + '</span>' : '')
+    + (r.decided_at ? '<span class="sk-sub">decided ' + new Date(r.decided_at).toLocaleDateString() + ''/* no decision email since 2026-09-28; decision_notified_at is history and is never written again */ + '</span>' : '')
     + '</div></div>'; }).join('');
 }
 async function skDecide(id, outcome) {
   const r = _skRows.find(x => x.id === id); if (!r) return;
   const label = outcome === 'no_change' ? 'no change' : outcome;
-  if (!confirm('Mark this review as "' + label + '"? Do this AFTER the level is set in the APA system. The requester gets an email; the player being reviewed does not.')) return;
-  let note = prompt('Optional note to include in the email to the requester. Blank = none:', ''); if (note === null) return; note = note.trim();
+  if (!confirm('Mark this review as "' + label + '"? Do this AFTER the level is set in the APA system. No email goes out: not to the requester, not to the reviewed player.')) return;
+  let note = prompt('Optional note for the record. Nobody is emailed it. Blank = none:', ''); if (note === null) return; note = note.trim();
   try {
     const res = await fetch(skMailerUrl(), { method: 'POST', body: JSON.stringify({ action: 'sl_decide', admin_key: SB_KEY, id, outcome, note }) });
     const j = JSON.parse(await res.text());
     if (!j.ok) throw new Error(j.error || 'decision failed');
-    toast('Saved' + (j.sent ? ' — requester emailed' : ' — no email sent'));
+    toast('Saved — no email sent');
     await skInit();
   } catch (e) { alert('Could not save: ' + e.message); }
 }
