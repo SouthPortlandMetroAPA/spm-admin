@@ -6238,7 +6238,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.444';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.445';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -42836,21 +42836,47 @@ async function ehDeleteForeign() {
     for (const y of yKeys) {
       const row = rowsByY.get(y).sort((a, b) => a.x - b.x);
       if (!row.length) continue;
-      const first = row[0].str.trim();
-      if (/^\d{4,5}$/.test(first)) teamRows.push(row);
+      /* Identify the row from its first NON-EMPTY cell. pdf.js emits a zero-width item at the same x as
+         the team number on some rows; sorted by x it lands first, and testing it discarded the whole
+         row -- team number, name and VENUE -- with no error. That is how Jo's Grill (Canby) vanished
+         from divisions 048/049 while the identical row in 027 worked. */
+      const cells = row.filter(it => it.str.trim().length > 0);
+      if (!cells.length) continue;
+      if (/^\d{4,5}$/.test(cells[0].str.trim())) teamRows.push(row);
     }
 
+    /* Column starts are VOTED ON by every team row, not taken from the first one. A single long team
+       name that overruns its column makes pdf.js merge name+venue into one item, and that row then
+       reports one fewer column -- which, when it was row zero, shifted the venue window onto the
+       address column for the entire division (div 042: "DrinkingTeamW/PoolProblem Canton Phoenix").
+       A row like that now simply fails to vote for the venue column while the majority still carries
+       it. Threshold is a third rather than a majority so a division with several merged rows still
+       resolves. */
     let columnXs = [];
     if (teamRows.length) {
-      const firstNoWS = teamRows[0].filter(it => it.str.trim().length > 0).sort((a, b) => a.x - b.x);
+      const votes = new Map();
+      for (const row of teamRows) {
+        const seen = new Set();
+        for (const it of row.filter(i => i.str.trim().length > 0)) {
+          const bucket = Math.round(it.x / 5) * 5;   // tolerate sub-pixel drift between rows
+          if (seen.has(bucket)) continue;
+          seen.add(bucket);
+          const v = votes.get(bucket) || { n: 0, x: it.x };
+          v.n++; if (it.x < v.x) v.x = it.x;
+          votes.set(bucket, v);
+        }
+      }
+      const need = Math.max(1, Math.ceil(teamRows.length / 3));
+      const starts = [...votes.values()].filter(v => v.n >= need).map(v => v.x).sort((a, b) => a - b);
       let prevX = -Infinity;
-      for (const it of firstNoWS) {
-        if (it.x - prevX > 15) columnXs.push(it.x);
-        prevX = it.x;
+      for (const x of starts) {
+        if (x - prevX > 15) columnXs.push(x);
+        prevX = x;
       }
     }
 
     const venues = new Set();
+    let unreadableVenueRows = 0;
     if (columnXs.length >= 3) {
       const venueStart = columnXs[2] - 2;
       const venueEnd   = (columnXs[3] || Infinity) - 2;
@@ -42863,13 +42889,19 @@ async function ehDeleteForeign() {
           .join(' ')
           .replace(/\s+/g, ' ')
           .trim();
-        if (chunk && !isPlaceholderVenue(chunk)) venues.add(chunk);
+        if (chunk && !isPlaceholderVenue(chunk)) { venues.add(chunk); continue; }
+        /* A team row with nothing in the venue window is a row we FAILED TO READ, not a row without a
+           venue -- usually the merged name+venue case. Counted and returned so the operator sees it,
+           because a parser guard must distinguish "not data" from "data I could not read". */
+        if (!chunk) unreadableVenueRows++;
       }
     }
 
     return {
       division: divNumber ? { number: divNumber, name: divName, day_of_play: dayOfPlay, start_time: startTime } : null,
-      venues: [...venues].sort()
+      venues: [...venues].sort(),
+      teamRowCount: teamRows.length,
+      unreadableVenueRows: unreadableVenueRows
     };
   }
 
