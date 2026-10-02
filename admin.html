@@ -5253,6 +5253,18 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         /* aligned week grid: fixed cell width so every division lines up */
         #tab-matchfees .mf-tbl{table-layout:fixed}
         #tab-matchfees .mf-c,#tab-matchfees .mf-wh{width:30px;min-width:30px;max-width:30px;text-align:center}
+        /* The four tallies are pinned to their own header width. Without this they are the only
+           unconstrained columns in a width:100% table, so every spare pixel on a wide screen is split
+           between them and the counts drift a screen away from the weeks they summarise. */
+        #tab-matchfees .mf-owe{width:46px;min-width:46px;max-width:46px}
+        #tab-matchfees .mf-soon{width:64px;min-width:64px;max-width:64px}
+        #tab-matchfees .mf-failc{width:50px;min-width:50px;max-width:50px}
+        #tab-matchfees .mf-latec{width:44px;min-width:44px;max-width:44px}
+        /* reads the four as one block rather than four more week columns */
+        #tab-matchfees .mf-tbl .mf-owe{border-left:2px solid #d8dde3}
+        /* The slack has to go somewhere, and a spacer is the only place it can go that does not either
+           stretch a data column or shrink the table out of alignment with the division above it. */
+        #tab-matchfees .mf-tbl .mf-pad{width:auto;border:0;background:transparent;padding:0}
         #tab-matchfees .mf-pad{background:repeating-linear-gradient(45deg,#fafbfc,#fafbfc 3px,#f1f3f5 3px,#f1f3f5 6px);cursor:default}
         /* override: a DISTINCT check from the plain on-time tick */
         #tab-matchfees .mf-ontime_ovr{background:#dbe8ff;color:#0031a1;font-weight:900;box-shadow:inset 0 -2px 0 #0031a1}
@@ -6257,7 +6269,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.446';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.447';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -13899,7 +13911,8 @@ function mfTeamRow(div, team, weeks, today, ownWeeks) {
     '<td class="mf-owe">' + (owing ? owing : '') + '</td>' +
     '<td class="mf-soon">' + (soon ? soon : '') + '</td>' +
     '<td class="mf-failc">' + (failed ? failed : '') + '</td>' +
-    '<td class="mf-latec">' + (late ? late : '') + '</td></tr>', owing, soon, failed, late, ovr, resched };
+    '<td class="mf-latec">' + (late ? late : '') + '</td>' +
+    '<td class="mf-pad" aria-hidden="true"></td></tr>', owing, soon, failed, late, ovr, resched };
 }
 
 /* ── Adjustments: reschedule + late→on-time override ────────────────────────
@@ -14646,7 +14659,8 @@ function mfRender() {
       '<th class="mf-owe" title="Weeks past the deadline with no payment — ✗ — or where every attempt was declined — F">Owe</th>' +
       '<th class="mf-soon" title="Weeks played and unpaid whose deadline is inside 24 hours — the ! cells — not late yet">Due soon</th>' +
       '<th class="mf-failc" title="Weeks where a card was tried and declined — the F cells — needs a retry, not a chase">Failed</th>' +
-      '<th class="mf-latec" title="Weeks paid AFTER the deadline — the L cells. The money arrived, so nothing is owed">Late</th>';
+      '<th class="mf-latec" title="Weeks paid AFTER the deadline — the L cells. The money arrived, so nothing is owed">Late</th>' +
+      '<th class="mf-pad" aria-hidden="true"></th>';
     /* The tallies ride on the element so the expanders read exactly the
        numbers the badges show — one source, re-derived every render. */
     return '<details class="mf-div" data-dn="' + esc(d.division_number) +
