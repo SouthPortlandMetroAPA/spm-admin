@@ -5360,6 +5360,24 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <span id="mfStatus" class="muted"></span>
         </div>
         <div id="mfMeta" class="muted" style="font-size:.85rem"></div>
+        <style>
+          /* Deliberately NOT styled like a grid row. This panel is evidence that money arrived, not a
+             claim that a team exists, and it must not read as part of the fee table. */
+          #mfUnrec:empty{ display:none; }
+          #mfUnrec .mfu{ border:1px solid var(--border); border-left:4px solid #d97706; border-radius:10px;
+                         background:var(--card); padding:12px 14px; margin:0 0 14px; }
+          #mfUnrec .mfu h4{ margin:0 0 4px; font-size:.95rem; }
+          #mfUnrec .mfu .mfu-why{ color:var(--muted); font-size:.82rem; margin:0 0 10px; }
+          #mfUnrec .mfu-item{ display:flex; gap:10px; flex-wrap:wrap; align-items:baseline;
+                              padding:6px 0; border-top:1px solid var(--border); font-size:.9rem; }
+          #mfUnrec .mfu-item:first-of-type{ border-top:0; }
+          #mfUnrec .mfu-who{ font-weight:700; }
+          #mfUnrec .mfu-tag{ font-size:.66rem; font-weight:800; letter-spacing:.04em; text-transform:uppercase;
+                             padding:2px 8px; border-radius:999px; background:#fff3cd; color:#7a5a00; }
+          #mfUnrec .mfu-tag.unknown{ background:#fde8e8; color:#9b1c1c; }
+          #mfUnrec .mfu-sub{ color:var(--muted); font-size:.82rem; }
+          #mfUnrec .mfu-amt{ margin-left:auto; font-weight:800; }
+        </style>
       </div>
       <div class="card">
         <details class="mf-deadlines" id="mfDeadlinesPanel">
@@ -5405,6 +5423,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           </span>
         </div>
         <div id="mfSummary"></div>
+        <div id="mfUnrec"></div>
         <div id="mfGrid"></div>
       </div>
     </div>
@@ -6238,7 +6257,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.445';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.446';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -13529,6 +13548,10 @@ async function mfLoadData() {
   }
   await mfLoadDeadlines();
   _mf = mfBuildModel(divs, matches, payments, ups && ups[0], adjustments, roster, rosterPlayers);
+  /* Computed from the same payments array the grid uses, so the panel and the table can never disagree
+     about what was paid. Resolving the former slot is best-effort and never blocks the render. */
+  _mf.unrec = mfComputeUnreconciled(divs, payments);
+  try { await mfResolveFormerSlots(_mf.unrec, divs); } catch (e) { /* money still shows without it */ }
   mfRenderDeadlines();
   mfSetStatus('');
   // division filter options
@@ -14442,8 +14465,125 @@ function mfRestoreViewState(st) {
   if (typeof st.pageY === 'number') window.scrollTo(0, st.pageY);
 }
 
+/* ── Unreconciled payments ─────────────────────────────────────────────────────────────────────────
+   Money the report records against a (division, team number) the roster cannot account for. Computed
+   from the SAME payments array the grid uses, so the two can never disagree about what was paid.
+
+   Nothing here feeds mfCell, mfTeamRow or the attention tally. That is the whole point: see note at the
+   top of patch-unreconciled.mjs for why a report-derived grid row manufactures debt. */
+function mfComputeUnreconciled(divs, payments) {
+  const norm = v => String(v == null ? '' : v).trim().toLowerCase().replace(/\s+/g, ' ');
+  const slots = {}, teamCount = {};
+  for (const d of (divs || [])) {
+    const m = {};
+    (d.teams || []).forEach(t => { m[String(parseInt(t.team_number, 10))] = t.team_name; });
+    slots[d.division_number] = m;
+    teamCount[d.division_number] = (d.teams || []).length;
+  }
+  const orphans = {}, mismatches = {};
+  for (const p of (payments || [])) {
+    if ((p.status || '') !== 'Success') continue;
+    const dn = p.division_number;
+    const tn = String(parseInt(p.team_number_norm, 10));
+    if (!dn || !tn || tn === 'NaN') continue;
+    const slotName = (slots[dn] || {})[tn];
+    const key = dn + '|' + tn;
+    const bucket = (slotName === undefined) ? orphans : mismatches;
+    if (slotName !== undefined && norm(slotName) === norm(p.team_name)) continue;   // reconciled
+    const e = bucket[key] = bucket[key] || {
+      division_number: dn, team_number: tn, report_name: p.team_name || '(no name)',
+      slot_name: slotName === undefined ? null : slotName,
+      weeks: [], lines: 0, amount: 0, first_paid: null, last_paid: null, former_slot: null
+    };
+    e.lines++;
+    e.amount += (+p.amount || 0);
+    if (p.wop != null && e.weeks.indexOf(+p.wop) < 0) e.weeks.push(+p.wop);
+    if (p.payment_date && (!e.first_paid || p.payment_date < e.first_paid)) e.first_paid = p.payment_date;
+    if (p.payment_date && (!e.last_paid  || p.payment_date > e.last_paid))  e.last_paid  = p.payment_date;
+  }
+  const finish = o => Object.keys(o).map(k => o[k]).map(e => {
+    e.weeks.sort((a, b) => a - b);
+    /* The league removes a team by RENUMBERING it above the active range, so a position greater than
+       the division's team count is a decidable classification rather than a guess. Anything else is
+       reported as unknown and never dressed up as a removal. */
+    const prefix = String(parseInt(e.division_number, 10));
+    const pos = e.team_number.indexOf(prefix) === 0
+      ? parseInt(e.team_number.slice(prefix.length), 10) : NaN;
+    e.position = isNaN(pos) ? null : pos;
+    e.removed = e.position != null && e.position > (teamCount[e.division_number] || 0);
+    return e;
+  }).sort((a, b) => String(a.division_number).localeCompare(String(b.division_number)) ||
+                    a.team_number.localeCompare(b.team_number));
+  return { orphans: finish(orphans), mismatches: finish(mismatches) };
+}
+
+/* A removed team's old slot is recoverable: slate.teams_audit keeps the name the slot carried before it
+   was reused, so matching the report's team name against old_row->>'team_name' in the SAME division
+   turns a bare number into "formerly 88403". Best-effort — a failure here must never block the panel,
+   because the money is worth showing with or without the forwarding address. */
+async function mfResolveFormerSlots(unrec, divs) {
+  const all = (unrec.orphans || []).concat(unrec.mismatches || []);
+  if (!all.length) return;
+  const wanted = new Set(all.map(e => e.division_number));
+  const nums = [];
+  for (const d of (divs || [])) {
+    if (!wanted.has(d.division_number)) continue;
+    (d.teams || []).forEach(t => nums.push(t.team_number));
+  }
+  if (!nums.length) return;
+  let rows = [];
+  try {
+    rows = await mfFetchAll('teams_audit?select=team_number,old_row&team_number=in.(' +
+      nums.map(encodeURIComponent).join(',') + ')') || [];
+  } catch (e) { return; }
+  const norm = v => String(v == null ? '' : v).trim().toLowerCase().replace(/\s+/g, ' ');
+  const byName = {};
+  for (const r of rows) {
+    const was = r.old_row && r.old_row.team_name;
+    if (!was) continue;
+    byName[norm(was)] = byName[norm(was)] || String(parseInt(r.team_number, 10));
+  }
+  for (const e of all) {
+    const hit = byName[norm(e.report_name)];
+    if (hit && hit !== e.team_number) e.former_slot = hit;
+  }
+}
+
+function mfRenderUnreconciled() {
+  const box = document.getElementById('mfUnrec');
+  if (!box) return;
+  const u = (_mf && _mf.unrec) || { orphans: [], mismatches: [] };
+  const money = n => '$' + (+n || 0).toFixed(2);
+  const wk = e => e.weeks.length ? ('wk ' + e.weeks.join(', ')) : 'no week recorded';
+  const item = (e, kind) => '<div class="mfu-item">'
+    + '<span class="mfu-who">' + esc(e.report_name) + '</span>'
+    + '<span class="mfu-tag' + (kind === 'orphan' && !e.removed ? ' unknown' : '') + '">'
+    + esc(kind === 'orphan' ? (e.removed ? 'removed' : 'unknown number') : 'slot reused') + '</span>'
+    + '<span class="mfu-sub">div ' + esc(e.division_number) + ' · #' + esc(e.team_number)
+    + (e.former_slot ? ' · formerly #' + esc(e.former_slot) : '')
+    + (kind === 'mismatch' ? ' · roster says “' + esc(e.slot_name) + '”' : '')
+    + ' · ' + esc(wk(e)) + ' · ' + e.lines + ' payment' + (e.lines === 1 ? '' : 's') + '</span>'
+    + '<span class="mfu-amt">' + money(e.amount) + '</span>'
+    + '</div>';
+  let h = '';
+  if (u.orphans.length) {
+    h += '<div class="mfu"><h4>Payments with no team on the roster — ' + money(u.orphans.reduce((a, e) => a + e.amount, 0)) + '</h4>'
+      + '<p class="mfu-why">This money is in the report but cannot be attributed, so it appears nowhere in the grid below. '
+      + 'A number above the division\'s active range is a team that was removed and renumbered.</p>'
+      + u.orphans.map(e => item(e, 'orphan')).join('') + '</div>';
+  }
+  if (u.mismatches.length) {
+    h += '<div class="mfu"><h4>Payments on a reused team number — ' + money(u.mismatches.reduce((a, e) => a + e.amount, 0)) + '</h4>'
+      + '<p class="mfu-why">The report and the roster disagree about who holds this number, so these payments are '
+      + 'currently shown in the grid against the team named by the roster.</p>'
+      + u.mismatches.map(e => item(e, 'mismatch')).join('') + '</div>';
+  }
+  box.innerHTML = h;
+}
+
 function mfRender() {
   const _mfView = mfCaptureViewState();
+  mfRenderUnreconciled();   /* after the capture: this panel changes page height */
   const wrap = document.getElementById('mfGrid');
   const sum = document.getElementById('mfSummary');
   const meta = document.getElementById('mfMeta');
