@@ -5199,7 +5199,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         #tab-matchfees table.mf-tbl{border-collapse:collapse;font-size:.8rem;width:100%}
         #tab-matchfees .mf-tbl th,#tab-matchfees .mf-tbl td{border:1px solid #eef0f2;padding:2px 4px;text-align:center;white-space:nowrap}
         #tab-matchfees .mf-tbl .mf-tn{font-weight:600;text-align:left;position:sticky;left:0;background:#fff;z-index:1}
-        #tab-matchfees .mf-tbl .mf-tname{text-align:left;max-width:150px;overflow:hidden;text-overflow:ellipsis}
+        #tab-matchfees .mf-tbl .mf-tname{text-align:left;width:190px;max-width:190px;overflow:hidden;text-overflow:ellipsis}
         #tab-matchfees .mf-wh{color:#6b7280;font-weight:600;min-width:22px}
         #tab-matchfees .mf-c{font-weight:700;min-width:22px}
         #tab-matchfees .mf-ontime{background:#e7f6ec;color:#137a3a}
@@ -5230,6 +5230,10 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         #tab-matchfees .mf-cap{flex:none;font-size:.6rem;font-weight:800;text-transform:uppercase;letter-spacing:.03em;color:#b91c1c;background:#fee2e2;border-radius:999px;padding:1px 6px}
         #tab-matchfees .mf-cocap{color:#0031a1;background:#dbe8ff}
         #tab-matchfees .mf-tn{white-space:nowrap}
+        /* Under table-layout:fixed every column without a width shares the leftover equally, so a
+           column left unconstrained is a column that will be stretched. Room here for the team number,
+           the Text captain button and the widest optional chip; too narrow would SPILL, not clip. */
+        #tab-matchfees .mf-tbl .mf-tn{width:190px}
         #tab-matchfees .mf-capbtn{margin-left:6px}
         #tab-matchfees .mf-textcap{font-size:.7rem;font-weight:700;color:#fff;background:#0031a1;border-radius:999px;padding:2px 9px;text-decoration:none}
         #tab-matchfees .mf-textcap:hover{background:#00248a}
@@ -5264,7 +5268,9 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         #tab-matchfees .mf-tbl .mf-owe{border-left:2px solid #d8dde3}
         /* The slack has to go somewhere, and a spacer is the only place it can go that does not either
            stretch a data column or shrink the table out of alignment with the division above it. */
-        #tab-matchfees .mf-tbl .mf-pad{width:auto;border:0;background:transparent;padding:0}
+        /* No width, deliberately, and now the only one: under fixed layout the leftover goes to the
+           width-less columns, so being the only one is exactly what makes this absorb it. */
+        #tab-matchfees .mf-tbl .mf-pad{border:0;background:transparent;padding:0}
         #tab-matchfees .mf-pad{background:repeating-linear-gradient(45deg,#fafbfc,#fafbfc 3px,#f1f3f5 3px,#f1f3f5 6px);cursor:default}
         /* override: a DISTINCT check from the plain on-time tick */
         #tab-matchfees .mf-ontime_ovr{background:#dbe8ff;color:#0031a1;font-weight:900;box-shadow:inset 0 -2px 0 #0031a1}
@@ -6269,7 +6275,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.447';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.448';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
