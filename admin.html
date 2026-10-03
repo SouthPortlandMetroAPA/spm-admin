@@ -1129,7 +1129,6 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="nexusreport">Nexus Issue</button>
       <button class="tab" data-tab="playersfund">Players Fund</button>
       <button class="tab" data-tab="shortrack">Requests</button>
-      <button class="tab" data-tab="singles">Singles Board</button>
 <button class="tab" data-tab="stripe">Stripe Customers</button>
       <!-- Pinned last and never hideable: it is the only route back to a
            hidden tab. slTabsApply enforces both. -->
@@ -5963,40 +5962,6 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       </div>
     </div>
 
-    <div id="tab-singles" class="tab-panel">
-      <style>
-        #tab-singles .sg-head{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
-        #tab-singles .sg-sub{color:var(--muted);font-size:.85rem}
-        #tab-singles .sg-ev{margin:18px 0 0}
-        #tab-singles .sg-ev h3{display:flex;align-items:center;gap:10px;margin:0 0 8px;font-size:1.02rem}
-        #tab-singles .sg-cnt{font-size:.78rem;color:var(--muted)}
-        #tab-singles .sg-grp{margin:10px 0 0}
-        #tab-singles .sg-sl{display:inline-block;background:var(--spm-accent,#0031a1);color:#fff;
-          border-radius:6px;padding:2px 10px;font-size:.78rem;font-weight:700;margin-bottom:6px}
-        #tab-singles .sg-list{list-style:none;margin:0;padding:0;display:grid;gap:6px;
-          grid-template-columns:repeat(auto-fill,minmax(290px,1fr))}
-        #tab-singles .sg-p{display:flex;align-items:center;gap:10px;border:1px solid var(--border,#e0e4ea);
-          border-radius:9px;background:var(--card,#fff);padding:7px 11px;min-width:0}
-        #tab-singles .sg-p.out{opacity:.6;background:#f6f7f8}
-        #tab-singles .sg-p.out .sg-nm{text-decoration:line-through}
-        #tab-singles .sg-nm{font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-        #tab-singles .sg-mn{color:var(--muted);font-size:.76rem}
-        #tab-singles .sg-btn{font:inherit;font-size:.76rem;font-weight:700;border-radius:999px;
-          border:1px solid var(--border,#d0d5da);background:#fff;cursor:pointer;padding:4px 11px;white-space:nowrap}
-        #tab-singles .sg-p.out .sg-btn{background:#b91c1c;border-color:#b91c1c;color:#fff}
-      </style>
-      <div class="sg-head">
-        <h2 style="margin:0">Singles Board</h2>
-        <span class="sg-sub" id="sgSub"></span>
-        <span class="sg-sub" id="sgStatus" role="status"></span>
-      </div>
-      <p class="sg-sub" style="margin:0 0 4px">
-        Toggling here is what the public board shows. Nothing computes elimination from results —
-        it is whatever you set.
-      </p>
-      <div id="sgBody"></div>
-    </div>
-
     <div id="tab-shortrack" class="tab-panel">
       <style>
         #tab-shortrack .sr-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 12px}
@@ -6310,7 +6275,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.450';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.451';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11525,7 +11490,6 @@ async function lfDelete(id) {
 }
 
 const TAB_LABEL = {
-  singles:       'Singles Board',
   sessions:      'Sessions',
   uploads:       'Uploads',
   divisions:     'Divisions',
@@ -12030,7 +11994,6 @@ function switchTab(name) {
   try { localStorage.setItem('slateLastTab', name); } catch (e) {}  // restored on next load (3.320)
   const sub = document.getElementById('appSubpage');
   if (sub) sub.textContent = TAB_LABEL[name] || '';
-  if (name === 'singles')     sgInit();
   if (name === 'emailhq')     loadEmailHQ();
   if (name === 'divisions')   renderDivisionsTab();
   if (name === 'uploads')     loadReportStatus();
@@ -44315,76 +44278,6 @@ window.apaPreview = apaPreview; window.apaPrevClose = apaPrevClose;
 window.apaNxPick = apaNxPick; window.apaNxClearPick = apaNxClearPick;
 
 
-/* ═══════════════════════════════════════════════════════════════════════
-   SINGLES BOARD — elimination toggles (2026-10-03)
-   DATA  slate.singles_eliminations (RLS on, SELECT-only policy for anon; every write is service_role)
-   FLOW  toggle here -> the public board reads it on its next poll
-   The roster below is generated from tools/claude/regional/singles-board.tsv by
-   patch-slate-singles-tab.mjs, the same file the public page is built from, so the two cannot
-   disagree about who is on the board.
-   ═══════════════════════════════════════════════════════════════════════ */
-const SG_BOARD = [{"e":"8-Ball Classic","n":"97204593","m":"Noe Torres","s":6,"k":"k001"},{"e":"8-Ball Classic","n":"97207815","m":"Steven Ross","s":5,"k":"k002"},{"e":"8-Ball Classic","n":"97208978","m":"Shaun Holowati","s":6,"k":"k003"},{"e":"8-Ball Classic","n":"97210208","m":"Nick Skellenger","s":5,"k":"k004"},{"e":"8-Ball Classic","n":"97210408","m":"Stacy Enriquez","s":6,"k":"k005"},{"e":"8-Ball Classic","n":"97211105","m":"Shawn Kellar","s":6,"k":"k006"},{"e":"8-Ball Classic","n":"97215868","m":"Robert Skelton","s":4,"k":"k007"},{"e":"8-Ball Classic","n":"97218375","m":"MacKenzie Hornych","s":5,"k":"k008"},{"e":"8-Ball Classic","n":"97219618","m":"Kevin Blodgett","s":6,"k":"k009"},{"e":"8-Ball Classic","n":"97219735","m":"Hannah Gelok","s":4,"k":"k010"},{"e":"8-Ball Classic","n":"97220104","m":"Christopher Ravins","s":6,"k":"k011"},{"e":"8-Ball Classic","n":"97220365","m":"Tosha Bunger","s":3,"k":"k012"},{"e":"8-Ball Classic","n":"97222085","m":"Kathryn Peterson","s":3,"k":"k013"},{"e":"8-Ball Classic","n":"97223232","m":"Melinda Coker","s":5,"k":"k014"},{"e":"8-Ball Classic","n":"97223513","m":"Zach VanDyke","s":6,"k":"k015"},{"e":"8-Ball Classic","n":"97223520","m":"James Bean","s":6,"k":"k016"},{"e":"8-Ball Classic","n":"97224374","m":"Michele Clothier","s":3,"k":"k017"},{"e":"8-Ball Classic","n":"97224383","m":"Ricardo Torres","s":5,"k":"k018"},{"e":"8-Ball Classic","n":"97224384","m":"Luis Cruz Erasto","s":6,"k":"k019"},{"e":"8-Ball Classic","n":"97224393","m":"Leslie Younger","s":3,"k":"k020"},{"e":"8-Ball Classic","n":"97224415","m":"Crystal Weisenborn","s":4,"k":"k021"},{"e":"8-Ball Classic","n":"97224542","m":"Thomas Black","s":5,"k":"k022"},{"e":"8-Ball Classic","n":"97224617","m":"Dinara White","s":3,"k":"k023"},{"e":"8-Ball Classic","n":"97224937","m":"Chris Culbertson","s":4,"k":"k024"},{"e":"8-Ball Classic","n":"97224986","m":"Francisco Couto","s":3,"k":"k025"},{"e":"8-Ball Classic","n":"97225006","m":"Cheyenne Mackenzie","s":4,"k":"k026"},{"e":"8-Ball Classic","n":"97225035","m":"Brandon Holowati","s":4,"k":"k027"},{"e":"8-Ball Classic","n":"97225076","m":"Kyle Holowati","s":5,"k":"k028"},{"e":"8-Ball Classic","n":"97225184","m":"Tracy Danielson","s":6,"k":"k029"},{"e":"8-Ball Classic","n":"97225311","m":"Jim Ehmann","s":4,"k":"k030"},{"e":"8-Ball Classic","n":"97225481","m":"Ricardo schroeder Ju","s":4,"k":"k031"},{"e":"8-Ball Classic","n":"97225591","m":"Obed Sanchez","s":6,"k":"k032"},{"e":"8-Ball Classic","n":"97225641","m":"Natalie Hawkins","s":3,"k":"k033"},{"e":"8-Ball Classic","n":"97225653","m":"Dakota French","s":3,"k":"k034"},{"e":"8-Ball Classic","n":"97243813","m":"Alfred Epps","s":5,"k":"k035"},{"e":"8-Ball Classic","n":"97290540","m":"Douglas Taylor","s":6,"k":"k036"},{"e":"9-Ball Shootout","n":"97205594","m":"Todd Smith","s":6,"k":"k037"},{"e":"9-Ball Shootout","n":"97207815","m":"Steven Ross","s":5,"k":"k038"},{"e":"9-Ball Shootout","n":"97208294","m":"Onessia Elliott","s":3,"k":"k039"},{"e":"9-Ball Shootout","n":"97208978","m":"Shaun Holowati","s":6,"k":"k040"},{"e":"9-Ball Shootout","n":"97211105","m":"Shawn Kellar","s":7,"k":"k041"},{"e":"9-Ball Shootout","n":"97214082","m":"Mable Lee","s":3,"k":"k042"},{"e":"9-Ball Shootout","n":"97215868","m":"Robert Skelton","s":4,"k":"k043"},{"e":"9-Ball Shootout","n":"97218375","m":"MacKenzie Hornych","s":5,"k":"k044"},{"e":"9-Ball Shootout","n":"97218525","m":"Justin Willhite","s":7,"k":"k045"},{"e":"9-Ball Shootout","n":"97218856","m":"Charles Roberts","s":7,"k":"k046"},{"e":"9-Ball Shootout","n":"97219445","m":"Alan Aavedal","s":7,"k":"k047"},{"e":"9-Ball Shootout","n":"97220104","m":"Christopher Ravins","s":7,"k":"k048"},{"e":"9-Ball Shootout","n":"97220365","m":"Tosha Bunger","s":3,"k":"k049"},{"e":"9-Ball Shootout","n":"97220996","m":"Chris Lytsell","s":9,"k":"k050"},{"e":"9-Ball Shootout","n":"97221324","m":"Mark Swetzof","s":5,"k":"k051"},{"e":"9-Ball Shootout","n":"97222100","m":"Chad Clemenson","s":6,"k":"k052"},{"e":"9-Ball Shootout","n":"97222995","m":"Brandon Roben","s":8,"k":"k053"},{"e":"9-Ball Shootout","n":"97223232","m":"Melinda Coker","s":5,"k":"k054"},{"e":"9-Ball Shootout","n":"97223442","m":"Alexander Bancroft","s":5,"k":"k055"},{"e":"9-Ball Shootout","n":"97223513","m":"Zach VanDyke","s":7,"k":"k056"},{"e":"9-Ball Shootout","n":"97223894","m":"David McKiernan","s":9,"k":"k057"},{"e":"9-Ball Shootout","n":"97224049","m":"Sam Swetzof","s":4,"k":"k058"},{"e":"9-Ball Shootout","n":"97224374","m":"Michele Clothier","s":2,"k":"k059"},{"e":"9-Ball Shootout","n":"97224384","m":"Luis Cruz Erasto","s":6,"k":"k060"},{"e":"9-Ball Shootout","n":"97224393","m":"Leslie Younger","s":2,"k":"k061"},{"e":"9-Ball Shootout","n":"97224415","m":"Crystal Weisenborn","s":3,"k":"k062"},{"e":"9-Ball Shootout","n":"97224467","m":"Cary Horton","s":5,"k":"k063"},{"e":"9-Ball Shootout","n":"97224986","m":"Francisco Couto","s":4,"k":"k064"},{"e":"9-Ball Shootout","n":"97225035","m":"Brandon Holowati","s":4,"k":"k065"},{"e":"9-Ball Shootout","n":"97225067","m":"Van Velarde","s":4,"k":"k066"},{"e":"9-Ball Shootout","n":"97225076","m":"Kyle Holowati","s":4,"k":"k067"},{"e":"9-Ball Shootout","n":"97225165","m":"Chris Lessick","s":3,"k":"k068"},{"e":"9-Ball Shootout","n":"97225184","m":"Tracy Danielson","s":5,"k":"k069"},{"e":"9-Ball Shootout","n":"97225222","m":"Michaelalisson Da Sil","s":6,"k":"k070"},{"e":"9-Ball Shootout","n":"97225279","m":"Yutao Shi","s":6,"k":"k071"},{"e":"9-Ball Shootout","n":"97225311","m":"Jim Ehmann","s":5,"k":"k072"},{"e":"9-Ball Shootout","n":"97225481","m":"Ricardo schroeder Ju","s":4,"k":"k073"},{"e":"9-Ball Shootout","n":"97225484","m":"Johnathan Jones","s":6,"k":"k074"},{"e":"9-Ball Shootout","n":"97225528","m":"Stephen Harrison","s":5,"k":"k075"},{"e":"9-Ball Shootout","n":"97225591","m":"Obed Sanchez","s":6,"k":"k076"},{"e":"9-Ball Shootout","n":"97225623","m":"Trevor Lane","s":4,"k":"k077"}];
-const SG_WP = { 'Accept-Profile': 'slate', 'Content-Profile': 'slate' };
-let _sgOut = new Set();
-
-async function sgInit() {
-  try {
-    const rows = await sb('GET', 'singles_eliminations?select=event,member_number,eliminated') || [];
-    _sgOut = new Set(rows.filter(r => r.eliminated).map(r => r.event + '|' + r.member_number));
-    sgRender();
-  } catch (e) { setStatus('sgStatus', 'Could not load: ' + e.message, 'err'); }
-}
-
-function sgRender() {
-  const body = document.getElementById('sgBody');
-  if (!body) return;
-  const events = [...new Set(SG_BOARD.map(r => r.e))].sort();
-  body.innerHTML = events.map(ev => {
-    const rs = SG_BOARD.filter(r => r.e === ev);
-    const out = rs.filter(r => _sgOut.has(r.e + '|' + r.n)).length;
-    const sls = [...new Set(rs.map(r => r.s))].sort((a, b) => b - a);
-    return '<div class="sg-ev"><h3>' + esc(ev) +
-      '<span class="sg-cnt">' + (rs.length - out) + ' still in · ' + out + ' out</span></h3>' +
-      sls.map(sl => {
-        const g = rs.filter(r => r.s === sl).sort((a, b) => a.m.localeCompare(b.m));
-        return '<div class="sg-grp"><span class="sg-sl">SL ' + sl + '</span>' +
-          '<ul class="sg-list">' + g.map(r => {
-            const k = r.e + '|' + r.n, isOut = _sgOut.has(k);
-            return '<li class="sg-p' + (isOut ? ' out' : '') + '">' +
-              '<span class="sg-nm">' + esc(r.m) + '</span>' +
-              '<span class="sg-mn">#' + esc(r.n) + '</span>' +
-              '<button class="sg-btn" data-k="' + esc(k) + '">' +
-              (isOut ? 'Eliminated' : 'Still in') + '</button></li>';
-          }).join('') + '</ul></div>';
-      }).join('') + '</div>';
-  }).join('');
-  body.querySelectorAll('.sg-btn').forEach(b => { b.onclick = () => sgToggle(b.dataset.k, b); });
-  const total = SG_BOARD.length, out = SG_BOARD.filter(r => _sgOut.has(r.e + '|' + r.n)).length;
-  const sub = document.getElementById('sgSub');
-  if (sub) sub.textContent = total + ' board places · ' + out + ' eliminated';
-}
-
-/* Writes the row rather than deleting it when someone goes back in, so the board keeps a record that
-   the call was made and when. on_conflict + merge-duplicates, because a plain POST to an existing key
-   is a 23505 and PostgREST will not merge without being told to. */
-async function sgToggle(key, btn) {
-  const [event, mn] = key.split('|');
-  const pk = (SG_BOARD.find(function(r){ return r.e === event && r.n === mn; }) || {}).k || null;
-  const next = !_sgOut.has(key);
-  btn.disabled = true;
-  try {
-    await sb('POST', 'singles_eliminations?on_conflict=event,member_number',
-      { event: event, member_number: mn, public_key: pk, eliminated: next, updated_at: new Date().toISOString() },
-      { ...SG_WP, Prefer: 'resolution=merge-duplicates,return=minimal' });
-    if (next) _sgOut.add(key); else _sgOut.delete(key);
-    sgRender();
-    setStatus('sgStatus', 'Saved — the public board updates within 30 seconds.', 'ok');
-  } catch (e) {
-    setStatus('sgStatus', 'Could not save: ' + e.message, 'err');
-    btn.disabled = false;
-  }
-}
-window.sgInit = sgInit;
 </script>
 <!-- House modal wrap — page level ON PURPOSE (3.259): modals open from
      any tab; inside a tab panel they inherit display:none when that tab
