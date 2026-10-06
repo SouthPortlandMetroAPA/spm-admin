@@ -6275,7 +6275,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.451';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.452';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -25127,10 +25127,31 @@ async function spComputePatches() {
     // mid-session; their patches are ignored (no captain/label to mail).
     // (The per-code opt-out filter is applied inside the loops below
     // since one player can opt out of only some of their patches.)
+    /* Unknown is not "someone else's". _spDivisionMeta.get() returns undefined for a division the
+       registry has never seen, and `undefined === opId` is false, so the row would be dropped by the
+       operator filter exactly as if it belonged to the other operator — silently, with no error and
+       no missing-data signal. That cost 112 patches across 68 players in Fall 2026 (divisions 029,
+       030, 064, 065, 068, 069, 884 were added mid-year and never registered), undetected across five
+       report uploads.
+
+       So resolve every division FIRST and stop on any the registry cannot place. .has() rather than
+       === opId: a division that genuinely belongs to the other operator is KNOWN and gets skipped
+       normally; only true absence is an error, so this cannot fire on an ordinary two-operator report. */
+    const unknownDivs = [...new Set(rows.map(r => r.division_number))]
+      .filter(d => d && !_spDivisionMeta.has(d))
+      .sort();
+    if (unknownDivs.length) {
+      throw new Error(
+        'Report ' + bdReport.id + ' contains ' + unknownDivs.length + ' division(s) missing from '
+        + 'division_meta: ' + unknownDivs.join(', ') + '. Every patch in them would be silently '
+        + 'dropped. Add them (division_number + operator_id) and re-run Compute.');
+    }
+
     const opRows = rows.filter(r =>
       _spDivisionMeta.get(r.division_number) === opId
       && !spIsInactiveTeam(r.team_number));
-    console.log('[patches] rows after operator filter:', opRows.length);
+    console.log('[patches] divisions in report:', new Set(rows.map(r => r.division_number)).size,
+                '| all resolved | rows after operator filter:', opRows.length, 'of', rows.length);
 
     // Per-code patches: collapse rows by (member, division, sp_type)
     // — sum counts across teams within the division, take the team#
