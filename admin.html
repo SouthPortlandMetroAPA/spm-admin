@@ -6275,7 +6275,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.452';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.453';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -13144,6 +13144,10 @@ const FP_STARS = { low: '1–2 stars', ok: '3+ stars', no: 'not marked', unsure:
 const FP_WANT = { note: 'note it for their file', talk: 'have a word with them', action: 'take action' };
 const FP_RES = { noted: 'Noted on file', spoke: 'Spoke with them', action: 'Action taken', no_action: 'No action' };
 let _fpRows = [], _fpPeople = {}, _fpFilter = 'open';
+/* Shout-outs (2026-10-08) — fairplay.kudos. Separate arrays so nothing about the complaint list changes. */
+let _fpKudos = [], _fpKudosPeople = {};
+const FP_QUAL = { good_sport: 'Good sport, win or lose', own_fouls: 'Called their own fouls', helped: 'Helped a newer player',
+  friendly: 'Kept it friendly all night', fair_call: 'Fair on a close call', welcoming: 'Made us feel welcome', other: 'Something else' };
 function fpMailerUrl() { return TCQ_MAILER_URL; }
 async function fpInit() {
   try {
@@ -13151,6 +13155,17 @@ async function fpInit() {
     _fpPeople = {};
     const ids = _fpRows.map(r => r.id);
     for (let i = 0; i < ids.length; i += 200) { const ps = await sb('GET', 'report_players?select=report_id,member_number,name,role&report_id=in.(' + ids.slice(i, i + 200).join(',') + ')', null, FP_WP) || []; for (const p of ps) (_fpPeople[p.report_id] = _fpPeople[p.report_id] || []).push(p); }
+    /* Own try: a shout-out load failure must never blank the complaint list, which carries the
+       five-day "promised a week" flag. On failure the pill simply shows zero. */
+    try {
+      _fpKudos = await sb('GET', 'kudos?select=*&order=created_at.desc', null, FP_WP) || [];
+      _fpKudosPeople = {};
+      const kids = _fpKudos.map(k => k.id);
+      for (let i = 0; i < kids.length; i += 200) {
+        const ps = await sb('GET', 'kudos_players?select=kudos_id,member_number,name&kudos_id=in.(' + kids.slice(i, i + 200).join(',') + ')', null, FP_WP) || [];
+        for (const p of ps) (_fpKudosPeople[p.kudos_id] = _fpKudosPeople[p.kudos_id] || []).push(p);
+      }
+    } catch (e) { _fpKudos = []; console.warn('[fp] shout-outs load failed', e); }
     fpRender();
   } catch (e) { document.getElementById('fpList').innerHTML = '<div class="fp-empty">Load failed: ' + esc(e.message) + '</div>'; }
 }
@@ -13159,9 +13174,32 @@ function fpDate(d) { if (!d) return ''; const p = String(d).split('-'); return p
 function fpRender() {
   const counts = { new: 0, in_review: 0, resolved: 0, urgent: 0 };
   for (const r of _fpRows) { counts[r.status] = (counts[r.status] || 0) + 1; if (r.urgent && r.status !== 'resolved') counts.urgent++; }
-  document.getElementById('fpPills').innerHTML = [['open', 'Open'], ['new', 'New'], ['in_review', 'In review'], ['resolved', 'Resolved'], ['all', 'All']].map(([k, l]) =>
-    '<button class="fp-fbtn' + (_fpFilter === k ? ' active' : '') + '" onclick="fpSetFilter(\'' + k + '\')">' + l + (k === 'open' ? ' <b>' + (counts.new + counts.in_review) + '</b>' : k !== 'all' ? ' <b>' + counts[k] + '</b>' : '') + '</button>').join('');
+  document.getElementById('fpPills').innerHTML = [['open', 'Open'], ['new', 'New'], ['in_review', 'In review'], ['resolved', 'Resolved'], ['all', 'All'], ['kudos', 'Shout-outs']].map(([k, l]) =>
+    '<button class="fp-fbtn' + (_fpFilter === k ? ' active' : '') + '" onclick="fpSetFilter(\'' + k + '\')">' + l + (k === 'kudos' ? ' <b>' + _fpKudos.length + '</b>' : k === 'open' ? ' <b>' + (counts.new + counts.in_review) + '</b>' : k !== 'all' ? ' <b>' + counts[k] + '</b>' : '') + '</button>').join('');
   document.getElementById('fpCount').textContent = (counts.new + counts.in_review) + ' open' + (counts.urgent ? ' · ' + counts.urgent + ' URGENT' : '');
+  const el0 = document.getElementById('fpList');
+  if (_fpFilter === 'kudos') {
+    document.getElementById('fpCount').textContent = _fpKudos.length + ' shout-out' + (_fpKudos.length === 1 ? '' : 's');
+    if (!_fpKudos.length) { el0.innerHTML = '<div class="fp-empty">No shout-outs yet.</div>'; return; }
+    el0.innerHTML = _fpKudos.map(k => {
+      const ppl = _fpKudosPeople[k.id] || [];
+      return '<div class="fp-r resolved">'
+      + '<div class="fp-top"><span class="fp-who">' + esc(k.subject_team_name || '') + '</span><span class="fp-sub">(' + esc(k.subject_team_number || '') + ')' + (k.subject_division ? ' \u00b7 ' + esc(k.subject_division) : '') + '</span>'
+      + '<span class="fp-tag resolved">shout-out</span>'
+      + '<span class="fp-sub" style="margin-left:auto">#' + k.id + ' \u00b7 ' + new Date(k.created_at).toLocaleString() + '</span></div>'
+      + '<div style="margin:8px 0 4px">' + (k.whole_team ? '<span class="fp-chip p">the whole team</span>' : '')
+        + ppl.map(p => '<span class="fp-chip p">' + esc(p.name) + ' \u00b7 #' + esc(p.member_number) + '</span>').join('') + '</div>'
+      + '<div style="margin:0 0 4px">' + (k.qualities || []).map(q => '<span class="fp-chip">' + esc(FP_QUAL[q] || q) + '</span>').join('') + '</div>'
+      + '<dl class="fp-facts">'
+      + '<dt>When</dt><dd>' + (k.week_number ? 'Week ' + esc(k.week_number) + ' \u00b7 ' + esc(fpDate(k.match_date)) + (k.venue ? ' \u00b7 ' + esc(k.venue) : '') : 'not during one of their matches') + '</dd>'
+      + (k.note ? '<dt>They said</dt><dd>' + esc(k.note) + '</dd>' : '')
+      + '<dt>From</dt><dd>' + esc(k.sender_name || '') + ' \u00b7 #' + esc(k.sender_number) + ' \u00b7 ' + esc(k.sender_email || '') + '</dd>'
+      + '</dl>'
+      + '<p class="fp-sub" style="margin:6px 0 0">Not sent to anyone. Office record only.</p>'
+      + '</div>';
+    }).join('');
+    return;
+  }
   const list = _fpRows.filter(r => _fpFilter === 'all' || (_fpFilter === 'open' ? r.status !== 'resolved' : r.status === _fpFilter));
   const el = document.getElementById('fpList');
   if (!list.length) { el.innerHTML = '<div class="fp-empty">' + (_fpRows.length ? 'Nothing here.' : 'No reports yet.') + '</div>'; return; }
