@@ -1202,6 +1202,10 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         </p>
         <div id="reportsListStatus" class="status-line"></div>
         <div id="reportsList" class="reports-list"></div>
+        <!-- Role-class freshness of slate.team_memberships. The Reports list above tracks the FILES
+             that were uploaded; this tracks the TABLE they land in, which can be stale for one role
+             class while another is current. -->
+        <div id="rosterFreshness" style="margin-top:10px"></div>
       </div>
 
       <!-- Universal paste — auto-detects Player / Division / Team / Bonus -->
@@ -6275,7 +6279,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.454';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.455';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -19596,9 +19600,58 @@ window.commitTeamBonusPoints = async function(headers, rows) {
      yellow = 2 – 7 days
      red    = older than 7 days OR never uploaded
    ══════════════════════════════════════════════════════════════════════ */
+/* renderRosterFreshness — when was each ROLE CLASS of team_memberships last written?
+   Members are delete-and-replaced by every Team Screen import; Captain and Co-Captain rows are
+   preserved by it and so are append-only. A departed co-captain stayed on a captain's emailed
+   contact sheet for 11 days because nothing displayed that difference (2026-10-11). */
+async function renderRosterFreshness() {
+  const el = document.getElementById('rosterFreshness');
+  if (!el) return;
+  if (!currentSession) { el.innerHTML = ''; return; }
+  const base = 'team_memberships?select=created_at,teams!inner(divisions!inner(session_id))'
+             + '&teams.divisions.session_id=eq.' + currentSession.id
+             + '&order=created_at.desc&limit=1';
+  const grab = async roleFilter => {
+    const r = await fetch(SB_URL + '/rest/v1/' + base + '&' + roleFilter, {
+      headers: Object.assign({}, HEADERS_READ, { Prefer: 'count=exact' })   /* HEADERS_READ already carries Accept-Profile: slate */
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const rows = await r.json();
+    const cr = r.headers.get('content-range') || '';
+    const total = Number((cr.split('/')[1] || '0')) || 0;
+    return { when: rows.length ? rows[0].created_at : null, count: total };
+  };
+  let cap, mem;
+  try {
+    cap = await grab('role=in.(Captain,Co-Captain)');
+    mem = await grab('role=eq.Member');
+  } catch (e) {
+    /* Never leave the slot silently blank: an empty freshness panel reads as "nothing is stale". */
+    el.innerHTML = '<div class="hint">Could not read roster freshness (' + esc(e.message) + ').</div>';
+    return;
+  }
+  const d = t => t ? new Date(t).toLocaleDateString() : 'never';
+  const days = (a, b) => (a && b) ? Math.round((new Date(b) - new Date(a)) / 864e5) : 0;
+  const gap = days(cap.when, mem.when);
+  let html = '<div class="hint"><strong>Team roster in Slate</strong> (' + esc(currentSession.name) + ') — '
+    + 'captains &amp; co-captains: <strong>' + esc(d(cap.when)) + '</strong> (' + cap.count + ' rows) &middot; '
+    + 'members: <strong>' + esc(d(mem.when)) + '</strong> (' + mem.count + ' rows)</div>';
+  if (cap.when && mem.when && gap > 0) {
+    html += '<div class="status-line warn" style="margin-top:6px">'
+      + 'Captain and co-captain rows are <strong>' + gap + ' day' + (gap === 1 ? '' : 's') + ' older</strong> than member rows. '
+      + 'A Team Screen import replaces Members but <strong>preserves</strong> Captain and Co-Captain rows, '
+      + 'so re-importing will not remove someone who has left those roles — remove them on the '
+      + '<strong>Team Changes</strong> tab. Until then they still appear on captain contact sheets emailed from Rolodex.'
+      + '</div>';
+  }
+  el.innerHTML = html;
+}
+
 async function loadReportStatus() {
   const list = document.getElementById('reportsList');
   if (!list) return;
+  /* fire and forget — a freshness read must never delay or break the reports list */
+  renderRosterFreshness().catch(e => console.warn('[Slate] roster freshness', e));
   if (!currentSession) {
     list.innerHTML = '<p class="hint" style="padding:4px 0">No current session. Create one on the Sessions tab first.</p>';
     return;
