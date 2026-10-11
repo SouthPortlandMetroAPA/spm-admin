@@ -6275,7 +6275,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.453';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.454';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -37012,12 +37012,32 @@ async function rsInit() {
 async function rsLoadDivisions() {
   const sel = document.getElementById('rsDivision');
   try {
-    /* Every captain PDF on file — any session, any division. Newest per division. */
+    /* Every captain PDF on file, from every session — deliberately, because a captain sometimes asks
+       for a past session's list. The options are therefore GROUPED and LABELLED BY SESSION.
+       They used to read "090 — Southwest 8 Ball (2026-06-26)", i.e. two near-identical lines per
+       division separated only by a raw upload date, and a Summer directory went out to a Fall captain
+       on 2026-10-11. The option text now names the session, the current one is its own group at the
+       top, so sending an old list is a deliberate act rather than a mis-read. */
     const rows = await sbGetAll('captain_pdfs?select=id,division_number,division_name,session_id,uploaded_at&order=division_number,uploaded_at.desc');
     if (!rows.length) { sel.innerHTML = '<option value="">No captain lists uploaded yet</option>'; return; }
-    sel.innerHTML = '<option value="">Pick a division…</option>' + rows.map(r =>
-      '<option value="' + r.id + '">' + esc(r.division_number) + ' — ' + esc(r.division_name)
-      + ' (' + String(r.uploaded_at).slice(0, 10) + ')</option>').join('');
+    let sessNames = {};
+    try {
+      const ss = await sbGetAll('sessions?select=id,name');
+      for (const x of ss) sessNames[x.id] = x.name;
+    } catch (e) { sessNames = {}; }
+    const curId = currentSession && currentSession.id;
+    const nameOf = r => sessNames[r.session_id] || ('session ' + r.session_id);
+    const opt = r => '<option value="' + r.id + '">' + esc(r.division_number) + ' — ' + esc(r.division_name)
+      + ' · ' + esc(nameOf(r)) + ' (' + String(r.uploaded_at).slice(0, 10) + ')</option>';
+    const cur = rows.filter(r => Number(r.session_id) === Number(curId));
+    const past = rows.filter(r => Number(r.session_id) !== Number(curId));
+    /* group the past rows by session so "Past sessions" is not one long undifferentiated list */
+    const pastBySess = {};
+    for (const r of past) (pastBySess[r.session_id] = pastBySess[r.session_id] || []).push(r);
+    sel.innerHTML = '<option value="">Pick a division…</option>'
+      + (cur.length ? '<optgroup label="' + esc(sessNames[curId] || 'Current session') + ' (current)">' + cur.map(opt).join('') + '</optgroup>' : '')
+      + Object.keys(pastBySess).map(sid =>
+          '<optgroup label="Past — ' + esc(sessNames[sid] || ('session ' + sid)) + '">' + pastBySess[sid].map(opt).join('') + '</optgroup>').join('');
   } catch (e) { sel.innerHTML = '<option value="">Failed to load lists</option>'; }
   rsSyncSendBtn();
 }
