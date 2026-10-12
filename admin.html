@@ -6279,7 +6279,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.456';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.455';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -7333,7 +7333,6 @@ async function runTeamScreenImport(file, pdf, opts) {
     setStatus(stId, 'Re-resolving captain/co-captain rows against new rosters…', 'progress');
     // Build a per-team set of valid member_numbers (after Step 9 inserts).
     const _tsRosterMnByTeam = new Map();         // team_id -> Set(member_number)
-    const _tsScreenMnByTeam = new Map();         // team_id -> Set(member_number) AS PARSED, captains NOT folded in
     const _tsRosterEntriesByTeam = new Map();    // team_id -> [{member_number,name_raw,player:{first_name,last_name}}]
     {
       // The new rosters are exactly what we just inserted (membershipRows)
@@ -7343,11 +7342,6 @@ async function runTeamScreenImport(file, pdf, opts) {
         if (!r.member_number) continue;
         if (!_tsRosterMnByTeam.has(r.team_id)) _tsRosterMnByTeam.set(r.team_id, new Set());
         _tsRosterMnByTeam.get(r.team_id).add(r.member_number);
-        /* Screen-only mirror. _tsRosterMnByTeam gets the existing captains folded in a few lines
-           below, which is what makes every captain look "still on roster"; this set never does, so
-           it can answer "is this person actually on the screen?" */
-        if (!_tsScreenMnByTeam.has(r.team_id)) _tsScreenMnByTeam.set(r.team_id, new Set());
-        _tsScreenMnByTeam.get(r.team_id).add(r.member_number);
       }
       for (const r of _tsSnapshotCaptains) {
         if (!r.member_number) continue;
@@ -7399,32 +7393,6 @@ async function runTeamScreenImport(file, pdf, opts) {
       } else {
         _tsCaptainPatches.push({ snapshot: cap, newMn });
       }
-    }
-
-    /* ── Prune departed captains (2026-10-11) ───────────────────────────────────────────────
-       Scoped deliberately: only teams whose screen roster actually parsed non-empty, only rows with
-       a member_number, and never a row the step above is re-resolving to a corrected number. A team
-       the PDF missed, or one that parsed empty, keeps its captains — an incomplete parse must not be
-       able to empty a team's captaincy, which is what Rolodex access is gated on. */
-    const _tsPatchedCaps = new Set(_tsCaptainPatches.map(p => p.snapshot));
-    const _tsDeparted = [];
-    for (const cap of _tsSnapshotCaptains) {
-      if (!cap.member_number) continue;                       // name-only row: nothing to match on
-      if (_tsPatchedCaps.has(cap)) continue;                  // number corrected, not a departure
-      const screenSet = _tsScreenMnByTeam.get(cap.team_id);
-      if (!screenSet || !screenSet.size) continue;            // team not covered, or parsed empty
-      if (screenSet.has(cap.member_number)) continue;         // still on the screen
-      _tsDeparted.push(cap);
-    }
-    if (_tsDeparted.length) {
-      setStatus(stId, 'Removing ' + _tsDeparted.length + ' captain/co-captain row(s) no longer on the screen…', 'progress');
-      for (const cap of _tsDeparted) {
-        await sb('DELETE', 'team_memberships?team_id=eq.' + cap.team_id
-          + '&member_number=eq.' + encodeURIComponent(cap.member_number)
-          + '&role=in.(Captain,Co-Captain)');
-      }
-      console.log('[Slate] Team Screen — pruned', _tsDeparted.length, 'departed captain/co-captain row(s):',
-        _tsDeparted.map(c => c.team_id + '/' + c.member_number + ' ' + c.role).join(', '));
     }
 
     if (_tsReresolveFailures.length) {
