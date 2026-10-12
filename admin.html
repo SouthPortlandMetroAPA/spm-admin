@@ -5475,9 +5475,21 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           <h2>FargoScout</h2>
           <span class="hint" style="font-size:.8rem">Find new players in FargoRate. Paste your list — <b>columns are auto-detected</b> (Member #, First, Last, 8-Ball SL, 9-Ball SL, State, Date Started, header optional; or just First Last State). Cached weekly so it never re-hammers FargoRate.</span>
         </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+          <button class="btn btn-primary btn-sm" id="fsSweepActive" onclick="fsSweep('active')">Sweep active players</button>
+          <button class="btn btn-sm" id="fsSweepInactive" onclick="fsSweep('inactive')">Sweep inactive players</button>
+          <button class="btn btn-sm" id="fsStopBtn" onclick="fsStop()" style="display:none">Stop</button>
+          <span class="hint" style="font-size:.78rem" id="fsSweepCounts">counting…</span>
+        </div>
+        <p class="hint" style="font-size:.76rem;margin:0 0 8px">
+          <b>Active</b> = on a team this session. <b>Inactive</b> = played an SPM division before but not this session.
+          Cached weekly, so only names not looked up in the last 7 days hit FargoRate. A cold sweep of the
+          active list is roughly four minutes; Stop keeps whatever has already come back.
+        </p>
+        <details style="margin-bottom:6px"><summary class="hint" style="font-size:.78rem;cursor:pointer">or paste a specific list</summary>
         <textarea id="fsInput" rows="5" placeholder="Member Number&#9;First Name&#9;Last Name&#9;8-Ball Skill Level&#9;9-Ball Skill Level&#9;Date Started&#10;…paste rows here (or just: Chad James, OR)" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--border-strong);border-radius:8px;font:ui-monospace,Menlo,Consolas,monospace;font-size:.82rem;resize:vertical"></textarea>
         <div style="display:flex;gap:10px;align-items:center;margin-top:6px;flex-wrap:wrap">
-          <button class="btn btn-primary btn-sm" id="fsRunBtn" onclick="fsRunLookup()">Look up in FargoRate</button>
+          <button class="btn btn-sm" id="fsRunBtn" onclick="fsRunLookup()">Look up pasted list</button></details>
           <span id="fsStatus" style="font-size:.82rem"></span>
           <span class="hint" style="font-size:.72rem;margin-left:auto">Robustness = games behind the rating: <span class="fs-rob fs-rob-red">≥ threshold established</span> <span class="fs-rob fs-rob-yel">&lt; threshold provisional</span></span>
         </div>
@@ -6279,7 +6291,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.457';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.458';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -14879,7 +14891,7 @@ let _fsSaved = [];     // saved rows cache (for table + viz)
 let _fsThresh = 200;   // robustness threshold — drives grouping + the viz
 let _fsCollapse = { work_notfound: true, saved_notfound: true };
 
-function fsInit() { fsLoadSaved(); }
+function fsInit() { fsLoadSaved(); fsSweepCounts(); }
 function fsStatus(m, k) { const el = document.getElementById('fsStatus'); if (!el) return; el.textContent = m || ''; el.style.color = k === 'err' ? 'var(--spm-primary)' : (k === 'ok' ? '#1a6a30' : 'var(--muted)'); }
 function fsRobBadge(rob) { if (rob == null) return '<span class="fs-rob fs-rob-non">—</span>'; return '<span class="fs-rob ' + (rob >= _fsThresh ? 'fs-rob-red' : 'fs-rob-yel') + '">' + rob + '</span>'; }
 function fsInState(loc, st) { return String(loc || '').toUpperCase().split(/[^A-Z]+/).includes(String(st || '').toUpperCase()); }
@@ -14973,16 +14985,57 @@ async function fsCachePut(q, cands) {
 }
 
 /* ── Lookup (cache-first, throttled) ──────────────────────────────── */
-async function fsRunLookup() {
-  const parsed = fsParseInput(document.getElementById('fsInput').value);
+/* Roster sweep (2026-10-12). Source is slate.fargo_sweep_roster -- SPM only.
+   NEVER slate.players, which is 26,219 people from the wider regional membership. */
+let _fsStop = false;
+function fsStop() { _fsStop = true; fsStatus('Stopping after the current lookup...', 'progress'); }
+async function fsSweepCounts() {
+  const el = document.getElementById('fsSweepCounts'); if (!el) return;
+  try {
+    const a = await sb('POST', 'rpc/fargo_sweep_roster', { p_bucket: 'active' });
+    const i = await sb('POST', 'rpc/fargo_sweep_roster', { p_bucket: 'inactive' });
+    const ab = document.getElementById('fsSweepActive'), ib = document.getElementById('fsSweepInactive');
+    if (ab) ab.textContent = 'Sweep active players (' + a.length + ')';
+    if (ib) ib.textContent = 'Sweep inactive players (' + i.length + ')';
+    el.textContent = a.length + ' active, ' + i.length + ' inactive';
+  } catch (e) { el.textContent = 'Could not load roster counts: ' + (e.message || e); }
+}
+async function fsSweep(bucket) {
+  let roster;
+  try { roster = await sb('POST', 'rpc/fargo_sweep_roster', { p_bucket: bucket }); }
+  catch (e) { fsStatus('Could not load the ' + bucket + ' roster: ' + (e.message || e), 'err'); return; }
+  if (!roster || !roster.length) { fsStatus('No ' + bucket + ' players found.', 'err'); return; }
+  const rows = roster.map(p => ({
+    member: p.member_number, first: p.first_name, last: p.last_name, state: p.state || '',
+    sl8: p.sl_8ball, sl9: p.sl_9ball, last_played: p.last_played,
+    name: ((p.first_name || '') + ' ' + (p.last_name || '')).trim(),
+    candidates: [], picked: null, status: 'pending', error: null
+  }));
+  await fsRunLookup(rows, bucket + ' sweep');
+}
+
+/* One throttled, cache-first loop for both entry points. Two copies of a loop that calls a
+   third-party API is how one of them quietly loses its throttle. */
+async function fsRunLookup(preRows, label) {
+  const parsed = preRows || fsParseInput(document.getElementById('fsInput').value);
+  label = label || 'pasted list';
   if (!parsed.length) { fsStatus('No rows detected — paste your list (with or without a header row).', 'err'); return; }
-  const btn = document.getElementById('fsRunBtn'); btn.disabled = true;
+  _fsStop = false;
+  const btn = document.getElementById('fsRunBtn');
+  const sa = document.getElementById('fsSweepActive'), si = document.getElementById('fsSweepInactive');
+  const stopBtn = document.getElementById('fsStopBtn');
+  [btn, sa, si].forEach(b => { if (b) b.disabled = true; });
+  if (stopBtn) stopBtn.style.display = '';
   _fsRows = parsed.map(p => ({ ...p, name: (p.first + ' ' + p.last).trim(), candidates: [], picked: null, status: 'pending', error: null }));
   fsRenderWork();
   let api = 0, cached = 0;
   for (let i = 0; i < _fsRows.length; i++) {
+    if (_fsStop) { fsStatus('Stopped at ' + i + '/' + _fsRows.length + ' - ' + api + ' live, ' + cached + ' cached. What came back is kept.', 'ok');
+                   [btn, sa, si].forEach(b => { if (b) b.disabled = false; });
+                   if (stopBtn) stopBtn.style.display = 'none';
+                   fsRenderWork(); return; }
     const row = _fsRows[i], q = fsNorm(row.name);
-    fsStatus('Looking up ' + (i + 1) + '/' + _fsRows.length + '… (' + api + ' live, ' + cached + ' cached)', 'progress');
+    fsStatus(label + ' — ' + (i + 1) + '/' + _fsRows.length + '… (' + api + ' live, ' + cached + ' cached)', 'progress');
     let cands = await fsCacheGet(q), hit = cands != null;
     if (!hit) {
       try {
@@ -15003,7 +15056,8 @@ async function fsRunLookup() {
     if (!hit) await fsSleep(FS_THROTTLE_MS);
   }
   fsStatus('Done — ' + api + ' live lookups, ' + cached + ' from cache. Review, then Save.', 'ok');
-  btn.disabled = false;
+  [btn, sa, si].forEach(b => { if (b) b.disabled = false; });
+  if (stopBtn) stopBtn.style.display = 'none';
 }
 function fsPick(i, pid) { _fsRows[i].picked = pid; fsRenderWork(); }
 
