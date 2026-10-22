@@ -23744,10 +23744,10 @@ window.spDeleteReport = spDeleteReport;
    recent batch's mailed_at+batch_id and marks the sp_mail_batches row
    is_undone=true.
 
-   Validation gate: every team_number that has patches MUST have a
-   matching slate.sp_labels row for the same operator, else the Mail
-   button stays disabled and the blocker tells you which teams need
-   addresses.
+   Label gate (3.459): a patch whose team has no slate.sp_labels row for
+   the operator is HELD — listed, never stamped — and the blocker names
+   the teams. Held teams no longer disable Mail for everyone else
+   (spSplitUnmailed / spMailButtonState; guard validate-sp-mail-hold.mjs).
    ════════════════════════════════════════════════════════════════════ */
 
 const SP_TYPE_TO_BD_FIELD = {
@@ -25627,10 +25627,33 @@ function spSplitUnmailed(list, optouts) {
     if (p.mailed_at) continue;
     const s = optoutMap.get(p.member_number);
     if (s && s.has(p.sp_type)) out.optedOut.push(p);
-    else if (!p.contact_name) out.held.push(p);
+    else if (!String(p.contact_name || '').trim()) out.held.push(p);
     else out.mailable.push(p);
   }
   return out;
+}
+
+/* Mail-button state from a split — the ONLY thing that decides it. Pure, so the
+   guard can exercise every case; spRenderPatches assigns mailBtn.disabled once,
+   from here. Held teams never disable the button while anything is mailable. */
+function spMailButtonState(split, listLen) {
+  const heldTeams = [...new Set(split.held.map(p => p.team_number))];
+  const heldNote = heldTeams.length
+    ? ' ' + split.held.length + ' held — team' + (heldTeams.length === 1 ? ' ' : 's ')
+      + heldTeams.slice(0, 8).join(', ') + (heldTeams.length > 8 ? ' …' : '')
+      + (heldTeams.length === 1 ? ' has' : ' have') + ' no mailing label, so '
+      + (split.held.length === 1 ? 'it stays' : 'they stay') + ' unmailed.'
+    : '';
+  if (split.mailable.length > 0) {
+    return { disabled: false, cls: heldTeams.length ? '' : 'ok',
+             text: split.mailable.length + ' patches ready to mail to '
+               + new Set(split.mailable.map(spContactKey)).size + ' captain(s).' + heldNote };
+  }
+  if (split.held.length > 0) {
+    return { disabled: true, cls: 'err', text: 'Nothing to mail yet.' + heldNote };
+  }
+  return { disabled: true, cls: listLen ? 'ok' : '',
+           text: listLen ? 'All ' + listLen + ' computed patches have been mailed.' : '' };
 }
 
 /* ─── Render — group by team/envelope, show counts + mail state ─── */
@@ -25643,38 +25666,17 @@ function spRenderPatches() {
      the opt-out list is skipped from the mailing queue but still shows
      in the list below (with the "opted out" tag rendered per-row). */
   const split = spSplitUnmailed(list, _spOptouts);
-  const mailable = split.mailable;
 
   spRenderPatchesSummary(list, _spLastBatch);
 
-  // Held = no mailing contact (sp_patches_v found no label or override for
-  // the team). Listed by team so the operator knows exactly what stays back.
-  const heldByTeam = new Map();
-  for (const p of split.held) heldByTeam.set(p.team_number, (heldByTeam.get(p.team_number) || 0) + 1);
-  const heldNote = heldByTeam.size
-    ? ' ' + split.held.length + ' held — team' + (heldByTeam.size === 1 ? ' ' : 's ')
-      + [...heldByTeam.keys()].slice(0, 8).join(', ') + (heldByTeam.size > 8 ? ' …' : '')
-      + (heldByTeam.size === 1 ? ' has' : ' have') + ' no mailing label, so '
-      + (split.held.length === 1 ? 'it stays' : 'they stay') + ' unmailed until a label exists.'
-    : '';
+  // Held = no mailing contact (sp_patches_v found no label for the team).
+  // The state helper lists held teams; it never lets them disable the button
+  // while anything else is mailable.
   const mailBtn = document.getElementById('spMailPatchesBtn');
   const undoBtn = document.getElementById('spUndoMailBtn');
-  mailBtn.disabled = mailable.length === 0;
-  if (mailable.length === 0 && split.held.length === 0) {
-    setStatus('spPatchesBlocker',
-      list.length ? 'All ' + list.length + ' computed patches have been mailed.' : '',
-      list.length ? 'ok' : '');
-  } else if (mailable.length === 0) {
-    setStatus('spPatchesBlocker',
-      'Nothing to mail yet.' + heldNote + ' A Labels PDF that lists '
-      + (heldByTeam.size === 1 ? 'that team' : 'those teams') + ' releases them.',
-      'err');
-  } else {
-    setStatus('spPatchesBlocker',
-      mailable.length + ' patches ready to mail to '
-      + new Set(mailable.map(spContactKey)).size + ' captain(s).' + heldNote,
-      heldByTeam.size ? '' : 'ok');
-  }
+  const st = spMailButtonState(split, list.length);
+  mailBtn.disabled = st.disabled;
+  setStatus('spPatchesBlocker', st.text, st.cls);
   undoBtn.disabled = !_spLastBatch;
 
   if (list.length === 0) {
@@ -25726,7 +25728,7 @@ function spRenderPatches() {
       ? esc(sample.address_line1)
         + (sample.address_line2 ? '<br>' + esc(sample.address_line2) : '')
         + '<br>' + esc(sample.city) + ', ' + esc(sample.state) + ' ' + esc(sample.zip)
-      : '<span style="color:#b91c1c; font-weight:600;">Held — not mailed until a Labels PDF lists this team</span>';
+      : '<span style="color:#b91c1c; font-weight:600;">Held — this team has no mailing label (not in the Labels PDF), so these are not mailed</span>';
     const tagHTML = p => {
       const isNew = !p.mailed_at;
       const cls = p.is_slam ? 'sp-tag-slam' : 'sp-tag-reg';
@@ -25983,9 +25985,13 @@ function spRenderPatchesSummary(list, lastBatch) {
     root.innerHTML = 'No patches computed yet for this session.';
     return;
   }
-  const um = list.filter(p => !p.mailed_at);
+  // Count what the NEXT MAILING will actually contain (spSplitUnmailed — the
+  // same selection the Mail button and the stamp use), so the envelope-stock
+  // estimate excludes held (no label) and opted-out patches.
+  const split = spSplitUnmailed(list, _spOptouts);
+  const um = split.mailable;
   const m  = list.filter(p =>  p.mailed_at);
-  // Group unmailed by captain — envelopes are per-captain, weight-split
+  // Group by captain — envelopes are per-captain, weight-split
   // at ENVELOPE_CAPACITY.
   const weightByContact = new Map();
   for (const p of um) {
@@ -25999,6 +26005,8 @@ function spRenderPatchesSummary(list, lastBatch) {
   let html = '<strong>' + um.length + '</strong> patches to mail'
     + ' to <strong>' + weightByContact.size + '</strong> captain(s)'
     + ', <strong>' + envCount + '</strong> envelope(s)'
+    + (split.held.length ? ' &middot; <span style="color:#b91c1c;">' + split.held.length + ' held (no mailing label)</span>' : '')
+    + (split.optedOut.length ? ' &middot; <span class="muted">' + split.optedOut.length + ' opted out</span>' : '')
     + ' &middot; <span class="muted">' + m.length + ' already mailed</span>';
   if (lastBatch) {
     html += '<br><span class="muted" style="font-size:0.85rem;">Last mailing: '
@@ -26082,7 +26090,10 @@ async function spMailPatches() {
     console.error('[patches] mail failed:', e);
     setStatus('spPatchesBlocker', 'Mail failed: ' + e.message, 'err');
   } finally {
-    if (btn) btn.disabled = false;
+    // Re-derive, never force-enable: after a mailing only HELD patches may
+    // remain, and a live-looking button that silently does nothing is a lie.
+    if (btn) btn.disabled = spMailButtonState(spSplitUnmailed(_spPatches, _spOptouts),
+                                              (_spPatches || []).length).disabled;
   }
 }
 
