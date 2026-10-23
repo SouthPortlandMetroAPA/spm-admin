@@ -6417,7 +6417,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.461';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.462';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -18008,8 +18008,8 @@ async function mpEnableFromFeed(sourceId) {
     last_board_at: o.EndDateTime ? mpPacificIso(o.EndDateTime) : null, venue_name: (a.Name || '').trim() || null, venue_address: addr || null,
     entry_fee: +fm[1], greens_fee: +fm[2], regionals_season: season.trim() || mpSeasonFor(startIso), enabled: true, is_test: false };
   try {
-    await sb('POST', 'events?on_conflict=source_event_id', row, { ...MP_RP, Prefer: 'resolution=merge-duplicates,return=representation' });
-    await mpAudit('enable_event', null, null, { source_event_id: row.source_event_id, fees: fees, season: row.regionals_season });
+    const ins = await sb('POST', 'events?on_conflict=source_event_id', row, { ...MP_RP, Prefer: 'resolution=merge-duplicates,return=representation' });
+    await mpAudit('enable_event', (ins && ins[0] && ins[0].id) || null, null, { source_event_id: row.source_event_id, fees: fees, season: row.regionals_season });
     await mpReload();
   } catch (e) { mpStatus('Could not turn on sign-ups: ' + e.message, true); }
 }
@@ -18038,7 +18038,7 @@ function mpRenderEvents() {
       + (e.enabled ? '' : ' <span class="mps-pill off">sign-ups off</span>') + gone + '<br><span class="mps-muted">' + mpEsc(e.venue_name || '') + '</span></td>'
       + '<td><input class="mps-in mps-money" value="' + mpEsc(e.entry_fee) + '" data-mp-change="event" data-id="' + e.id + '" data-field="entry_fee" aria-label="entry fee"> + '
       + '<input class="mps-in mps-money" value="' + mpEsc(e.greens_fee) + '" data-mp-change="event" data-id="' + e.id + '" data-field="greens_fee" aria-label="greens fee"></td>'
-      + '<td><input type="datetime-local" class="mps-in" value="' + mpEsc(cut) + '" data-mp-change="event" data-id="' + e.id + '" data-field="cutoff_at" aria-label="cutoff" title="Blank = open until the start"></td>'
+      + '<td><input type="datetime-local" class="mps-in" value="' + mpEsc(cut) + '" data-mp-blur="cutoff" data-orig="' + mpEsc(cut) + '" data-id="' + e.id + '" aria-label="cutoff" title="Blank = open until the start. Saves when you leave the field."></td>'
       + '<td><input class="mps-in" style="width:110px" value="' + mpEsc(e.regionals_season) + '" data-mp-change="event" data-id="' + e.id + '" data-field="regionals_season" aria-label="regionals season"></td>'
       + '<td>' + regs.length + '</td><td>' + paid + '</td>'
       + '<td><button type="button" class="btn btn-sm" data-mp="select" data-id="' + e.id + '">Roster</button> '
@@ -18281,7 +18281,7 @@ function mpRenderPending() {
 
 /* ── activity: who did what — the member for self-service, admin:slate for this tab, admin for mp_admin_* ── */
 function mpRenderAudit() {
-  const rows = _mpAudit.filter(a => _mpSel == null || a.event_id === _mpSel).slice(0, 60);
+  const rows = _mpAudit.filter(a => _mpSel == null || a.event_id === _mpSel || a.event_id == null).slice(0, 60);   /* tab-wide actions such as maintenance carry no event */
   if (!rows.length) { mpSet('mpAuditList', '<span class="mps-muted">Nothing yet for this event.</span>'); return; }
   const who = a => /^[0-9]{8}$/.test(a.actor) ? 'player #' + a.actor : a.actor;
   mpSet('mpAuditList', '<table class="mps-t"><thead><tr><th>When</th><th>Who</th><th>What</th><th>Player</th><th>Detail</th></tr></thead><tbody>' + rows.map(a =>
@@ -18326,6 +18326,11 @@ async function mpInit() {
         case 'cancel':    mpCancel(mn, id); break;
         case 'elig':      mpSetElig(mn, id, b.dataset.v); break;
       }
+    });
+    /* the cutoff is committed on focusout, never on change: Chrome fires change on every segment of a datetime-local */
+    panel.addEventListener('focusout', e => {
+      const f = e.target.closest('[data-mp-blur="cutoff"]'); if (!f || !panel.contains(f)) return;
+      if (f.value !== (f.dataset.orig || '')) mpSaveEvent(+f.dataset.id, 'cutoff_at', f.value);
     });
     panel.addEventListener('change', e => {
       const f = e.target.closest('[data-mp-change]'); if (!f || !panel.contains(f)) return;
