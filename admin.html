@@ -4104,125 +4104,275 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
     <!-- ══════════════════════════════════════════════════════════════
          TAB: POOLPICS — ported from Apps/Snapshot/site/admin.html (3.306)
          ══════════════════════════════════════════════════════════════ -->
-    <!-- ═══════════════ MultiPass — singles-qualifier registration (Slate 3.460) ═══════════════
+    <!-- ═══════════════ MultiPass — singles-qualifier registration (Slate tab, legacy-admin look) ═══════════════
          Brief: tools/claude/briefs/2026-10-20-multipass-rebuild.md. Guard: tools/claude/validate-multipass.mjs (SLATE).
-         Reads/writes multipass.* with the service key (sb() + Accept/Content-Profile multipass). The player page
-         (Apps/Multipass/site) lets a signed-in player register / cancel THEMSELF through apa-mailer mp_*. This tab:
-         take sign-ups for calendar events (poolplayers league 1457), fees / cutoff / Regionals season, the roster per
-         event (paid + method, 3-state eligibility, QUALIFIED mark), operator add (CueDrop for SPM players; the full
-         8-digit number for out-of-area players) and cancel through mp_admin_*, copy emails (No-Contact list:
-         dncIsBlocked + sbCopyEmails), formula-safe CSV, payment summary, pending-eligibility queue, maintenance.
+         LOOK  the legacy MultiPass admin (Apps/Multipass/site/admin.html, git a628727), on the operator's call ("slate will
+               need a mutlipass tab for the admin just like the old multipass admin", 2026-10-23): gradient header with
+               an ADMIN DASHBOARD pill, Refresh / Export CSV toolbar, Registrations | Qualifiers pills, a SELECT EVENT
+               dropdown that opens on Pending Eligibility, the total bar, the event banner, the Payment Summary, filter
+               pills with counts + Copy Emails, the roster table (Member # / First / Last / SL / Payment pills /
+               eligibility circles / Singles star / cancel X), qualifier cards, branded pop-ups, the "Saving…" toast.
+               Breakpoints as the legacy admin: full width, 700 px from 768, 900 px from 1200.
+         DATA  multipass.* with the service key (sb() + Accept/Content-Profile multipass); operator add / cancel through
+               apa-mailer mp_admin_*. Kept from the rebuild (no legacy counterpart): qualifiers come from the league calendar
+               (poolplayers 1457), the Regionals season, add a player (CueDrop; full 8-digit number for out of area), the
+               notify choice, the activity log, the No-Contact filter on copy, the 20 s live refresh.
          Requires the admin loaded with ?key=<service-role JWT>. Source of this block: tools/claude/multipass/slate-panel.html -->
     <div id="tab-multipass" class="tab-panel">
       <style>
-        #tab-multipass .mps-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
-        #tab-multipass .mps-head h2{margin:0}
-        #tab-multipass .mps-muted{color:var(--muted);font-size:.88rem}
-        #tab-multipass .mps-card{border:1px solid var(--border);border-radius:12px;background:var(--card);padding:16px;margin-bottom:16px}
-        #tab-multipass .mps-card h3{margin:0 0 8px;font-size:1.05rem}
-        #tab-multipass .mps-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0}
-        #tab-multipass .mps-spacer{flex:1}
-        #tab-multipass table.mps-t{width:100%;border-collapse:collapse;font-size:.88rem}
-        #tab-multipass table.mps-t th,#tab-multipass table.mps-t td{border-bottom:1px solid var(--border);padding:6px 8px;text-align:left;vertical-align:middle}
-        #tab-multipass table.mps-t th{font-size:.76rem;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);cursor:default}
-        #tab-multipass table.mps-t th.mps-sort{cursor:pointer}
-        #tab-multipass tr.mps-cancelled td{opacity:.5}
-        #tab-multipass tr.mps-later td{background:#fff8e1}
-        #tab-multipass .mps-pill{display:inline-block;font-size:.72rem;font-weight:700;padding:2px 8px;border-radius:999px;background:#e7edfb;color:#0031a1}
-        #tab-multipass .mps-pill.nine{background:#fde8ec;color:#b0001f}
-        #tab-multipass .mps-pill.test{background:#fff3cd;color:#7a5a00}
-        #tab-multipass .mps-pill.off{background:#f1f3f5;color:#4b5563}
-        #tab-multipass .mps-pill.warn{background:#fde8ec;color:#b0001f}
-        #tab-multipass .mps-sortbtn{background:none;border:none;padding:4px 0;font:inherit;font-size:.76rem;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);cursor:pointer;min-height:32px}
-        #tab-multipass .mps-sortbtn[aria-pressed="true"]{color:var(--text)}
-        #tab-multipass .mps-scroll{overflow-x:auto}
-        #tab-multipass input.mps-in,#tab-multipass select.mps-in{padding:4px 8px;border:1px solid var(--border);border-radius:6px;font:inherit;font-size:.85rem;background:var(--card);color:var(--text)}
-        #tab-multipass input.mps-money{width:64px}
-        #tab-multipass .mps-sum{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin:8px 0}
-        #tab-multipass .mps-sum div{border:1px solid var(--border);border-radius:8px;padding:8px 12px}
-        #tab-multipass .mps-sum b{display:block;font-size:1.1rem}
-        #tab-multipass .mps-q{color:#0a7d33;font-weight:700}
-        #tab-multipass .mps-add{border-top:1px dashed var(--border);margin-top:12px;padding-top:12px}
+        #tab-multipass .mpa{--mp-primary:#ea002a;--mp-accent:#0031a1;--mp-bg:#f5f5f5;--mp-card:#fff;--mp-border:#e1e1e1;--mp-text:#1f1f1f;--mp-muted:#666;
+          background:var(--mp-bg);color:var(--mp-text);font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:16px;line-height:1.5;
+          padding:12px;border-radius:12px;max-width:100%;margin:0 auto}
+        @media (min-width:768px){ #tab-multipass .mpa{max-width:700px;padding:16px} #tab-multipass .mpa-head{padding:20px 20px 16px}
+          #tab-multipass .mpa-toolbar{max-width:400px;margin:0 auto 12px} }
+        @media (min-width:1200px){ #tab-multipass .mpa{max-width:900px} #tab-multipass .mpa-head{border-radius:14px;padding:14px 16px 12px} }
+        #tab-multipass .mpa *{box-sizing:border-box}
+        #tab-multipass .mpa-head{border-radius:22px;padding:16px 16px 14px;color:#fff;background:linear-gradient(135deg,var(--mp-primary),var(--mp-accent));
+          box-shadow:0 6px 18px rgba(0,0,0,.25);text-align:center;margin-bottom:12px;position:relative}
+        #tab-multipass .mpa-title{font-size:clamp(1.25rem,1rem + 1vw,1.75rem);font-weight:900;line-height:1.1}
+        #tab-multipass .mpa-subgroup{display:inline-block;margin-top:4px}
+        #tab-multipass .mpa-sub{font-size:clamp(1.5rem,1.25rem + 1.25vw,2.25rem);font-weight:400;font-style:italic;opacity:.95}
+        #tab-multipass .mpa-pill{display:block;width:100%;margin-top:6px;padding:6px 16px;border-radius:999px;font-size:.75rem;font-weight:800;letter-spacing:.06em;
+          text-transform:uppercase;background:rgba(255,255,255,.25);color:#fff;border:2px solid rgba(255,255,255,.7)}
+        #tab-multipass .mpa-status{margin:6px 0 0;font-size:.875rem;opacity:.95;min-height:1.3em}
+        #tab-multipass .mpa-status.bad{font-weight:800;background:rgba(0,0,0,.25);border-radius:999px;padding:2px 12px;display:inline-block}
+        #tab-multipass .mpa-view{position:absolute;top:10px;right:12px;font-size:.75rem;font-weight:700;color:#fff;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.6);
+          border-radius:999px;padding:4px 10px;text-decoration:none}
+        @media (max-width:600px){ #tab-multipass .mpa-view{position:static;display:inline-block;margin-top:8px} }
+        #tab-multipass .mpa-toolbar{display:flex;gap:8px;margin-bottom:12px}
+        #tab-multipass .mpa-tbtn{flex:1;padding:10px 0;border:1px solid var(--mp-border);border-radius:999px;background:var(--mp-card);color:var(--mp-text);font-size:.875rem;
+          font-weight:700;font-family:inherit;cursor:pointer;min-height:44px}
+        #tab-multipass .mpa-tbtn:hover{background:var(--mp-bg)}
+        #tab-multipass .mpa-tbtn:disabled{opacity:.5;cursor:not-allowed}
+        #tab-multipass .mpa-tabs{display:flex;margin-bottom:12px;background:var(--mp-bg);border-radius:999px;border:1px solid var(--mp-border);overflow:hidden}
+        #tab-multipass .mpa-tab{flex:1;padding:10px 0;border:none;background:transparent;color:var(--mp-muted);font-size:.875rem;font-weight:700;font-family:inherit;cursor:pointer;min-height:44px}
+        #tab-multipass .mpa-tab.active{background:var(--mp-accent);color:#fff}
+        #tab-multipass .mpa-card{background:var(--mp-card);border:1px solid var(--mp-border);border-radius:22px;padding:16px;box-shadow:0 3px 10px rgba(0,0,0,.1);margin-bottom:12px}
+        #tab-multipass .mpa-label{font-size:.75rem;font-weight:700;color:var(--mp-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px}
+        #tab-multipass .mpa-select{width:100%;padding:10px 36px 10px 12px;font-size:.9375rem;border-radius:999px;border:1px solid var(--mp-border);background:var(--mp-bg);
+          font-family:inherit;color:var(--mp-text);cursor:pointer;-webkit-appearance:none;appearance:none;min-height:44px;
+          background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23888'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+          background-repeat:no-repeat;background-position:right 12px center;background-size:20px}
+        #tab-multipass .mpa-select:focus{border-color:var(--mp-accent);box-shadow:0 0 0 3px rgba(0,49,161,.15);outline:none}
+        #tab-multipass .mpa-total{background:linear-gradient(135deg,var(--mp-primary),var(--mp-accent));color:#fff;border-radius:22px;padding:10px 16px;font-size:.875rem;font-weight:700;text-align:center;margin-bottom:12px}
+        #tab-multipass .mpa-banner{background:var(--mp-card);border:1px solid var(--mp-border);border-radius:22px;padding:12px 16px;margin-bottom:12px;box-shadow:0 3px 10px rgba(0,0,0,.08);font-size:.875rem}
+        #tab-multipass .mpa-banner .first{font-size:.9375rem;margin-bottom:4px}
+        #tab-multipass .mpa-open{color:#1e7e34;font-weight:800} #tab-multipass .mpa-closed{color:#c82333;font-weight:800}
+        #tab-multipass .mpa-addr{color:var(--mp-muted);font-size:.8125rem}
+        #tab-multipass .mpa-sum{background:#f8f9fa;border:1px solid #dee2e6;border-radius:12px;padding:16px 20px;margin-bottom:16px}
+        #tab-multipass .mpa-sum-title{font-weight:700;font-size:.85rem;text-transform:uppercase;letter-spacing:.05em;color:#495057;margin-bottom:8px}
+        #tab-multipass .mpa-sum-fees{font-size:.8rem;color:#5c636a;margin-bottom:12px}
+        #tab-multipass .mpa-sum-m{display:flex;justify-content:space-between;font-size:.8rem;padding:6px 0;border-bottom:1px solid #e9ecef}
+        #tab-multipass .mpa-sum-m:last-child{border-bottom:none}
+        #tab-multipass .mpa-sum-m b{color:#495057;font-weight:600} #tab-multipass .mpa-sum-m span{color:#5c636a}
+        #tab-multipass .mpa-sum-tot{border-top:2px solid #dee2e6;padding-top:8px;margin-top:12px}
+        #tab-multipass .mpa-sum-row{display:flex;justify-content:space-between;font-size:.85rem;padding:4px 0}
+        #tab-multipass .mpa-sum-row strong{color:#495057}
+        #tab-multipass .mpa-sum-grand{font-size:.95rem;padding:8px 0 4px;border-top:1px solid #dee2e6;margin-top:4px}
+        #tab-multipass .mpa-sum-grand strong{color:#1e7e34} #tab-multipass .mpa-sum-unpaid strong{color:#c82333}
+        #tab-multipass .mpa-filters{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center}
+        #tab-multipass .mpa-fbtn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:6px 16px;border-radius:999px;border:1px solid #dee2e6;font-size:.75rem;
+          font-weight:600;text-transform:uppercase;letter-spacing:.03em;cursor:pointer;font-family:inherit;background:#fff;color:#5c636a;min-height:36px}
+        #tab-multipass .mpa-fbtn:hover{border-color:#adb5bd;background:#f8f9fa}
+        #tab-multipass .mpa-fbtn.active{background:var(--mp-accent);color:#fff;border-color:var(--mp-accent)}
+        #tab-multipass .mpa-fbtn.copy{border-color:var(--mp-accent);color:var(--mp-accent)}
+        #tab-multipass .mpa-opts{display:flex;gap:12px;flex-wrap:wrap;align-items:center;font-size:.8125rem;color:var(--mp-muted);margin:-4px 0 12px}
+        #tab-multipass .mpa-opts label{display:inline-flex;align-items:center;gap:6px;cursor:pointer}
+        #tab-multipass .mpa-wrap{background:var(--mp-card);border:1px solid var(--mp-border);border-radius:22px;box-shadow:0 3px 10px rgba(0,0,0,.1);margin-bottom:12px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+        #tab-multipass table.mpa-t{width:100%;border-collapse:collapse;font-size:.8125rem;min-width:580px}
+        #tab-multipass table.mpa-t th{background:var(--mp-bg);font-size:.6875rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--mp-muted);padding:8px 6px;
+          text-align:left;border-bottom:2px solid var(--mp-border);white-space:nowrap}
+        #tab-multipass table.mpa-t th.sortable{cursor:pointer;user-select:none;position:relative;padding-right:18px}
+        #tab-multipass table.mpa-t th.sortable:hover{color:var(--mp-text)}
+        #tab-multipass table.mpa-t th.sortable::after{content:'⇅';position:absolute;right:4px;opacity:.3;font-size:.6rem}
+        #tab-multipass table.mpa-t th.sortable.sort-asc::after{content:'▲';opacity:.8}
+        #tab-multipass table.mpa-t th.sortable.sort-desc::after{content:'▼';opacity:.8}
+        #tab-multipass table.mpa-t td{padding:8px 6px;border-bottom:1px solid var(--mp-border);vertical-align:middle}
+        #tab-multipass table.mpa-t tr:last-child td{border-bottom:none}
+        #tab-multipass table.mpa-t .sl{text-align:center;font-weight:700}
+        #tab-multipass table.mpa-t .ctr{text-align:center}
+        #tab-multipass tr.mpa-cancelled td{opacity:.55}
+        #tab-multipass tr.mpa-later td{background:#fff8e1}
+        #tab-multipass .mpa-tag{display:inline-block;font-size:.625rem;font-weight:800;letter-spacing:.03em;text-transform:uppercase;padding:1px 6px;border-radius:999px;background:#e9ecef;color:#495057;margin:2px 4px 0 0}
+        #tab-multipass .mpa-tag.warn{background:#fde8ec;color:#a3001d} #tab-multipass .mpa-tag.test{background:#fff3cd;color:#7a5a00}
+        #tab-multipass .mpa-pay{display:flex;gap:4px;flex-wrap:nowrap}
+        #tab-multipass .mpa-paybtn{display:inline-flex;align-items:center;justify-content:center;padding:4px 8px;border-radius:999px;border:none;font-size:.625rem;font-weight:800;
+          letter-spacing:.03em;text-transform:uppercase;cursor:pointer;font-family:inherit;white-space:nowrap;min-height:32px;min-width:44px;background:#e9ecef;color:#5c636a}
+        #tab-multipass .mpa-paybtn.active{background:#1e7e34;color:#fff}
+        #tab-multipass .mpa-paybtn:disabled{opacity:.5;cursor:not-allowed}
+        #tab-multipass .mpa-circles{display:flex;gap:4px;justify-content:center;align-items:center}
+        #tab-multipass .mpa-circle{width:28px;height:28px;border-radius:50%;border:2px solid transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;
+          font-size:13px;font-weight:700;color:#fff;padding:0;font-family:inherit;line-height:1;transition:opacity .15s,transform .15s}
+        #tab-multipass .mpa-circle.on{transform:scale(1.15);box-shadow:0 2px 6px rgba(0,0,0,.25)}
+        #tab-multipass .mpa-circle:not(.on){opacity:.3}
+        #tab-multipass .mpa-circle:not(.on):hover:not(:disabled){opacity:.7}
+        #tab-multipass .mpa-circle:disabled{opacity:.15;cursor:not-allowed}
+        #tab-multipass .mpa-c-yes{background:#28a745} #tab-multipass .mpa-c-no{background:#dc3545} #tab-multipass .mpa-c-maybe{background:#999}
+        #tab-multipass .mpa-star{display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:32px;padding:4px 10px;border-radius:999px;border:none;
+          font-size:.625rem;font-weight:800;letter-spacing:.03em;text-transform:uppercase;cursor:pointer;font-family:inherit;background:#e9ecef;color:#5c636a}
+        #tab-multipass .mpa-star.on{background:#f59e0b;color:#1f1f1f}
+        #tab-multipass .mpa-star:disabled{opacity:.5;cursor:not-allowed}
+        #tab-multipass .mpa-x{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:50%;border:1px solid #dc3545;background:transparent;
+          color:#c82333;font-size:.75rem;font-weight:700;cursor:pointer;font-family:inherit}
+        #tab-multipass .mpa-x:hover{background:#dc3545;color:#fff}
+        #tab-multipass .mpa-empty{text-align:center;padding:24px 16px;color:var(--mp-muted);font-size:.9375rem;font-style:italic}
+        #tab-multipass .mpa-badge{display:inline-block;padding:4px 12px;border-radius:999px;font-size:.6875rem;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:#fff;white-space:nowrap}
+        #tab-multipass .mpa-b8{background:var(--mp-primary)} #tab-multipass .mpa-b9{background:var(--mp-accent)}
+        #tab-multipass .mpa-maint{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+        #tab-multipass .mpa-maint label{font-size:.9375rem;font-weight:700;display:flex;align-items:center;gap:8px;cursor:pointer}
+        #tab-multipass .mpa-maint input[type=checkbox]{width:20px;height:20px;cursor:pointer}
+        #tab-multipass .mpa-addq{display:block;width:100%;padding:12px 0;border:none;border-radius:999px;background:linear-gradient(135deg,var(--mp-primary),var(--mp-accent));color:#fff;
+          font-size:.9375rem;font-weight:800;font-family:inherit;cursor:pointer;margin-bottom:12px;min-height:48px}
+        #tab-multipass .mpa-wins{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:12px;align-items:center}
+        #tab-multipass .mpa-win{background:var(--mp-card);border:1px solid var(--mp-border);border-radius:999px;padding:6px 14px;font-size:.8rem;font-weight:600;cursor:pointer;min-height:36px;font-family:inherit;color:var(--mp-text)}
+        #tab-multipass .mpa-win.active{background:linear-gradient(135deg,var(--mp-primary),var(--mp-accent));color:#fff;border-color:transparent}
+        #tab-multipass .mpa-qcard{background:var(--mp-card);border:1px solid var(--mp-border);border-radius:22px;padding:16px;box-shadow:0 3px 10px rgba(0,0,0,.1);margin-bottom:12px}
+        #tab-multipass .mpa-qcard.past{background:#f2f2f2;box-shadow:none;border-left:4px solid #888}   /* grey, not faded: faded text measured 2.7-3.5:1 */
+        #tab-multipass .mpa-qhead{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:8px}
+        #tab-multipass .mpa-qdate{font-size:1rem;font-weight:800}
+        #tab-multipass .mpa-qdetail{font-size:.8125rem;line-height:1.6;color:#555}
+        #tab-multipass .mpa-qdetail strong{color:var(--mp-text)}
+        #tab-multipass .mpa-qacts{display:flex;gap:8px;margin-top:12px}
+        #tab-multipass .mpa-edit{flex:1;padding:8px 0;border:2px solid var(--mp-accent);border-radius:999px;background:transparent;color:var(--mp-accent);font-size:.8125rem;font-weight:700;font-family:inherit;cursor:pointer;min-height:44px}
+        #tab-multipass .mpa-edit:hover{background:var(--mp-accent);color:#fff}
+        #tab-multipass .mpa-stop{flex:1;padding:8px 0;border:2px solid #dc3545;border-radius:999px;background:transparent;color:#c82333;font-size:.8125rem;font-weight:700;font-family:inherit;cursor:pointer;min-height:44px}
+        #tab-multipass .mpa-stop:hover{background:#dc3545;color:#fff}
+        #tab-multipass .mpa-stop.on{border-color:#1e7e34;color:#1e7e34} #tab-multipass .mpa-stop.on:hover{background:#1e7e34;color:#fff}
+        #tab-multipass details.mpa-card summary{cursor:pointer;font-weight:800;font-size:.9375rem;min-height:28px}
+        #tab-multipass .mpa-in{padding:8px 12px;border:1px solid var(--mp-border);border-radius:12px;font:inherit;font-size:.875rem;background:var(--mp-bg);color:var(--mp-text);min-height:40px}
+        #tab-multipass .mpa-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0}
+        #tab-multipass .mpa-go{padding:8px 18px;border:none;border-radius:999px;background:linear-gradient(135deg,var(--mp-primary),var(--mp-accent));color:#fff;font-weight:800;font-family:inherit;cursor:pointer;min-height:40px}
+        #tab-multipass .mpa-go:disabled{opacity:.5;cursor:not-allowed}
+        #tab-multipass .mpa-muted{color:var(--mp-muted);font-size:.8125rem}
+        #tab-multipass .mpa-foot{text-align:center;font-size:.75rem;color:var(--mp-muted);margin:24px 0 4px}
+        #tab-multipass table.mpa-t.narrow{min-width:0}
+        #tab-multipass .mpa-star,#tab-multipass .mpa-tag{white-space:nowrap}
+        /* branded pop-ups (legacy .modal) and the background-save toast */
+        #mpModal{--mp-primary:#ea002a;--mp-accent:#0031a1;--mp-muted:#666;position:fixed;inset:0;background:rgba(0,0,0,.58);z-index:1000;display:none;justify-content:center;align-items:center;padding:16px;overflow-y:auto}
+        /* Slate's page-wide rules (label = uppercase grey block; input:focus = no outline) must not reach this tab or its pop-ups */
+        #tab-multipass .mpa label,#mpModal label{display:inline-flex;align-items:center;gap:6px;text-transform:none;letter-spacing:normal;font-size:inherit;font-weight:inherit;color:inherit;margin:0}
+        #mpModal label.mpa-fl{display:block;font-size:.75rem;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}
+        #tab-multipass .mpa-maint label{font-size:.9375rem;font-weight:700}
+        #tab-multipass .mpa :focus-visible,#mpModal :focus-visible{outline:3px solid #0031a1;outline-offset:2px}
+        #tab-multipass .mpa-paybtn.more{min-width:32px;padding:4px 6px;font-size:.875rem;letter-spacing:0}
+        @media (max-width:480px){ #mpModal .mpa-feed-venue{display:none} #mpModal .mpa-mpanel{padding:20px 12px 16px} }
+        #mpModal.show{display:flex}
+        #mpModal .mpa-mpanel{background:#fff;border-radius:16px;padding:24px 20px 20px;width:100%;max-width:400px;box-shadow:0 8px 40px rgba(0,0,0,.35);text-align:center;color:#1f1f1f;margin:auto;
+          font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+        #mpModal.wide .mpa-mpanel{max-width:640px;text-align:left}
+        @media (min-width:1200px){ #mpModal .mpa-mpanel{max-width:420px} #mpModal.wide .mpa-mpanel{max-width:680px} }
+        #mpModal .mpa-mtitle{font-size:1.125rem;font-weight:800;margin-bottom:8px;text-align:center}
+        #mpModal .mpa-mmsg{font-size:.9375rem;line-height:1.5;margin-bottom:20px;color:#555;white-space:pre-line}
+        #mpModal .mpa-macts{display:flex;gap:8px}
+        #mpModal .mpa-mbtn{flex:1;padding:12px 0;font-size:.9375rem;font-weight:700;border:none;border-radius:999px;cursor:pointer;font-family:inherit;min-height:48px}
+        #mpModal .mpa-mbtn.yes{background:#ea002a;color:#fff} #mpModal .mpa-mbtn.no{background:#f5f5f5;color:#1f1f1f;border:1px solid #e1e1e1}
+        #mpModal .mpa-mbtn.save{background:linear-gradient(135deg,#ea002a,#0031a1);color:#fff}
+        #mpModal .mpa-mbtn:disabled{opacity:.6;cursor:not-allowed}
+        #mpModal .mpa-fg{margin-bottom:12px;text-align:left}
+        #mpModal .mpa-fl{display:block;font-size:.75rem;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}
+        #mpModal .mpa-fi{width:100%;padding:10px 12px;border:1px solid #e1e1e1;border-radius:12px;font-size:.9375rem;font-family:inherit;background:#f5f5f5;min-height:44px;box-sizing:border-box}
+        #mpModal .mpa-fi:focus{border-color:#0031a1;box-shadow:0 0 0 3px rgba(0,49,161,.15);outline:none}
+        #mpModal .mpa-ro{font-size:.875rem;color:#444;background:#f8f9fa;border-radius:12px;padding:10px 12px;margin-bottom:12px;line-height:1.5}
+        #mpModal .mpa-check{display:flex;gap:8px;align-items:center;justify-content:center;font-size:.875rem;margin:-8px 0 16px;cursor:pointer}
+        #mpModal table{width:100%;border-collapse:collapse;font-size:.8125rem}
+        #mpModal td,#mpModal th{padding:6px;border-bottom:1px solid #e1e1e1;text-align:left;vertical-align:middle}
+        #mpModal th{font-size:.6875rem;text-transform:uppercase;letter-spacing:.06em;color:#666}
+        #mpModal .mpa-feedwrap{max-height:60vh;overflow:auto;margin-bottom:16px}
+        #mpModal .mpa-feedbtn{padding:6px 12px;border:none;border-radius:999px;background:linear-gradient(135deg,#ea002a,#0031a1);color:#fff;font-weight:700;font-size:.75rem;cursor:pointer;min-height:32px;font-family:inherit}
+        #mpToast{display:none;position:fixed;bottom:16px;right:16px;background:#1e40af;color:#fff;padding:8px 16px;border-radius:8px;font-size:.75rem;font-weight:600;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,.25)}
+        #mpToast.show{display:block} #mpToast.retrying{background:#b45309} #mpToast.bad{background:#a3001d}
+        /* CueDrop find-player (house widget) */
         #tab-multipass .cd-search{position:relative}
-        #tab-multipass .cd-ac{position:absolute;top:100%;left:0;right:0;background:var(--card);border:1px solid var(--border);border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,.14);z-index:50;max-height:260px;overflow:auto;display:none;margin-top:2px}
+        #tab-multipass .cd-ac{position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #e1e1e1;border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,.14);z-index:50;max-height:260px;overflow:auto;display:none;margin-top:2px}
         #tab-multipass .cd-ac.show{display:block}
-        #tab-multipass .cd-ac-item{padding:8px 11px;cursor:pointer;border-bottom:1px solid var(--border)}
+        #tab-multipass .cd-ac-item{padding:8px 11px;cursor:pointer;border-bottom:1px solid #e1e1e1}
         #tab-multipass .cd-ac-item:last-child{border-bottom:none}
-        #tab-multipass .cd-ac-item:hover,#tab-multipass .cd-ac-item.on{background:var(--spm-accent);color:#fff}
+        #tab-multipass .cd-ac-item:hover,#tab-multipass .cd-ac-item.on{background:#0031a1;color:#fff}
         #tab-multipass .cd-ac-name{font-weight:600}
         #tab-multipass .cd-ac-sub{font-size:.8rem;opacity:.85}
         #tab-multipass .cd-picked{background:#e8f0fe;color:#1a3b6b;border-radius:8px;padding:8px 11px;font-size:.85rem;display:flex;gap:8px;align-items:center}
         #tab-multipass .cd-picked b{color:#12305e}
         #tab-multipass .cd-x{cursor:pointer;margin-left:auto;opacity:.7}
       </style>
-      <div class="mps-head">
-        <h2>MultiPass</h2>
-        <span class="mps-muted">Singles-qualifier sign-ups · <a href="https://southportlandmetroapa.github.io/multipass/" target="_blank" rel="noopener">player page</a></span>
-        <span class="mps-spacer"></span>
-        <label class="mps-muted"><input type="checkbox" id="mpMaint"> Pause sign-ups (maintenance)</label>
-        <span id="mpStatus" class="mps-muted"></span>
-      </div>
-
-      <section class="mps-card">
-        <h3>Calendar events</h3>
-        <p class="mps-muted" style="margin:0 0 8px">Upcoming events on the league calendar (poolplayers league 1457). Take sign-ups for the ones players register for.</p>
-        <div id="mpFeed"><span class="mps-muted">Loading the calendar…</span></div>
-      </section>
-
-      <section class="mps-card">
-        <div class="mps-row"><h3 style="margin:0">Taking sign-ups</h3><span class="mps-spacer"></span><span id="mpWin"></span>
-          <label class="mps-muted"><input type="checkbox" id="mpShowTest"> test fixtures</label></div>
-        <div id="mpEvents" class="mps-scroll"></div>
-      </section>
-
-      <section class="mps-card">
-        <div class="mps-row"><h3 style="margin:0">Roster</h3><select id="mpEventSel" class="mps-in"></select>
-          <span class="mps-spacer"></span><label class="mps-muted"><input type="checkbox" id="mpShowCancelled"> show cancelled</label></div>
-        <div id="mpSummary"></div>
-        <div class="mps-row" id="mpFilters"></div>
-        <div class="mps-row">
-          <button type="button" id="mpCopy" class="btn btn-sm">Copy emails</button>
-          <button type="button" id="mpCsv" class="btn btn-sm">Export CSV</button>
-          <label class="mps-muted"><input type="checkbox" id="mpNotifyCancel" checked> email the player when I cancel</label>
-          <span id="mpCopyStatus" class="mps-muted"></span>
+      <div class="mpa">
+        <header class="mpa-head">
+          <a class="mpa-view" href="https://southportlandmetroapa.github.io/multipass/" target="_blank" rel="noopener">View site ↗</a>
+          <div class="mpa-title">South Portland Metro APA</div>
+          <div class="mpa-subgroup"><div class="mpa-sub">MultiPass</div></div>
+          <div class="mpa-pill">Admin Dashboard</div>
+          <div class="mpa-status" id="mpStatus" aria-live="polite"></div>
+        </header>
+        <div class="mpa-toolbar">
+          <button type="button" class="mpa-tbtn" data-mp="refresh">↻ Refresh</button>
+          <button type="button" class="mpa-tbtn" id="mpCsv">↓ Export CSV</button>
         </div>
-        <div id="mpRoster" class="mps-scroll"></div>
-        <div class="mps-add">
-          <h3>Add a player</h3>
-          <div class="mps-row">
-            <div class="cd-search" style="flex:1;min-width:240px">
-              <input id="mpAddSearch" autocomplete="off" placeholder="Search player by name or APA #" class="mps-in" style="width:100%">
-              <div class="cd-ac" id="mpAddAc"></div>
+        <div class="mpa-tabs" role="tablist">
+          <button type="button" class="mpa-tab active" data-mp="view" data-v="reg" id="mpTabReg" role="tab">Registrations</button>
+          <button type="button" class="mpa-tab" data-mp="view" data-v="qual" id="mpTabQual" role="tab">Qualifiers</button>
+        </div>
+
+        <section id="mpRegView">
+          <div class="mpa-card">
+            <div class="mpa-label">Select Event</div>
+            <select id="mpEventSel" class="mpa-select" aria-label="Select event"></select>
+          </div>
+          <div class="mpa-total" id="mpTotal"></div>
+          <div id="mpEventView">
+            <div id="mpBanner"></div>
+            <div id="mpSummary"></div>
+            <div class="mpa-filters" id="mpFilters"></div>
+            <div class="mpa-opts">
+              <label><input type="checkbox" id="mpShowCancelled"> show cancelled</label>
+              <span id="mpCopyStatus"></span>
             </div>
-            <label class="mps-muted"><input type="checkbox" id="mpAddManualToggle"> not in Slate (out of area)</label>
+            <div id="mpRoster"></div>
+            <details class="mpa-card" id="mpAddBox">
+              <summary>+ Add a player to this event</summary>
+              <div class="mpa-row">
+                <div class="cd-search" style="flex:1;min-width:240px">
+                  <input id="mpAddSearch" autocomplete="off" placeholder="Search player by name or APA #" class="mpa-in" style="width:100%">
+                  <div class="cd-ac" id="mpAddAc"></div>
+                </div>
+                <label class="mpa-muted"><input type="checkbox" id="mpAddManualToggle"> not in Slate (out of area)</label>
+              </div>
+              <div class="cd-picked" id="mpAddPicked" style="display:none"></div>
+              <div class="mpa-row" id="mpAddManual" style="display:none">
+                <input id="mpAddNum" class="mpa-in" placeholder="Full 8-digit APA #" inputmode="numeric" maxlength="8" style="width:160px">
+                <input id="mpAddFirst" class="mpa-in" placeholder="First name">
+                <input id="mpAddLast" class="mpa-in" placeholder="Last name">
+                <input id="mpAddEmail" class="mpa-in" placeholder="Email, optional" style="min-width:200px">
+              </div>
+              <div class="mpa-row">
+                <select id="mpAddSource" class="mpa-in"><option value="admin">Added by the office</option><option value="walkin">Walk-in</option></select>
+                <label class="mpa-muted"><input type="checkbox" id="mpAddNotify" checked> email them a confirmation</label>
+                <button type="button" id="mpAddBtn" class="mpa-go">Add to this event</button>
+                <span id="mpAddStatus" class="mpa-muted"></span>
+              </div>
+            </details>
+            <details class="mpa-card">
+              <summary>Activity</summary>
+              <p class="mpa-muted" style="margin:6px 0 8px">Every sign-up, cancel and office change for this event, newest first. Who: the player for self-service, admin:slate for this tab.</p>
+              <div id="mpAuditList" style="overflow-x:auto"></div>
+            </details>
           </div>
-          <div class="cd-picked" id="mpAddPicked" style="display:none"></div>
-          <div class="mps-row" id="mpAddManual" style="display:none">
-            <input id="mpAddNum" class="mps-in" placeholder="Full 8-digit APA #" inputmode="numeric" maxlength="8" style="width:150px">
-            <input id="mpAddFirst" class="mps-in" placeholder="First name">
-            <input id="mpAddLast" class="mps-in" placeholder="Last name">
-            <input id="mpAddEmail" class="mps-in" placeholder="Email (optional)" style="min-width:200px">
+          <div id="mpPendingView" hidden>
+            <div id="mpPending"></div>
           </div>
-          <div class="mps-row">
-            <select id="mpAddSource" class="mps-in"><option value="admin">Added by the office</option><option value="walkin">Walk-in</option></select>
-            <label class="mps-muted"><input type="checkbox" id="mpAddNotify" checked> email them a confirmation</label>
-            <button type="button" id="mpAddBtn" class="btn btn-sm">Add to this event</button>
-            <span id="mpAddStatus" class="mps-muted"></span>
-          </div>
-        </div>
-      </section>
+        </section>
 
-      <section class="mps-card">
-        <h3>Activity</h3>
-        <p class="mps-muted" style="margin:0 0 8px">Every sign-up, cancel and office change for the selected event, newest first. Who = the player for self-service, admin:slate for this tab.</p>
-        <div id="mpAuditList" class="mps-scroll"></div>
-      </section>
-
-      <section class="mps-card">
-        <h3>Waiting on the 10-scores check</h3>
-        <p class="mps-muted" style="margin:0 0 8px">Registered players whose singles eligibility nobody has confirmed yet (at least 10 league match scores in that format in the last two years).</p>
-        <div id="mpPending"></div>
-      </section>
+        <section id="mpQualView" hidden>
+          <div class="mpa-card mpa-maint">
+            <label><input type="checkbox" id="mpMaint"> 🔒 Maintenance Mode</label>
+            <span class="mpa-muted">Players see "sign-ups are paused" and cannot register or cancel. There is no bypass key.</span>
+          </div>
+          <button type="button" class="mpa-addq" data-mp="addq">+ Add Qualifier</button>
+          <div class="mpa-wins"><span id="mpWin"></span><label class="mpa-muted" style="margin-left:auto"><input type="checkbox" id="mpShowTest"> test fixtures</label></div>
+          <div id="mpEvents"></div>
+        </section>
+        <div class="mpa-foot">South Portland Metro APA • MultiPass Admin</div>
+      </div>
+      <div id="mpModal" role="dialog" aria-modal="true" aria-labelledby="mpModalTitle"></div>
+      <div id="mpToast" aria-live="polite"></div>
     </div>
 
     <!-- ═══════════════ ChalkTalk — player question submissions (v0.1) ═══════════════
@@ -6417,7 +6567,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.463';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.464';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -17877,43 +18027,86 @@ function cmStartPoll() {
 }
 
 /* ════════════════════════════════════════════════════════════════════════
-   MULTIPASS — singles-qualifier registration — Slate 3.460
+   MULTIPASS — singles-qualifier registration — Slate tab, legacy-admin look
    ────────────────────────────────────────────────────────────────────────
    Brief: tools/claude/briefs/2026-10-20-multipass-rebuild.md. Guard: tools/claude/validate-multipass.mjs, SLATE section.
    Source of this block: tools/claude/multipass/slate-tab.js — patched in by tools/claude/multipass/patch-slate.mjs.
+   LOOK     the legacy MultiPass admin, on the operator's call 2026-10-23: Registrations | Qualifiers; SELECT EVENT opens on
+            Pending Eligibility and remembers the last choice; banner, Payment Summary, filter pills with counts + Copy
+            Emails; roster Member # / First / Last / SL / payment pills / eligibility circles / Singles star / cancel X with
+            sortable First, Last, SL; one-tap payment, an Undo Payment pop-up; eligibility saves in the background with a
+            Saving / Retrying toast; qualifier cards; branded pop-ups instead of the browser's confirm and prompt.
    DATA     multipass.events / registrations / eligibility / qualified / audit / settings, service key via sb() with
             Accept/Content-Profile multipass. Registrations are NEVER deleted here — the service role has no DELETE on
-            them; a cancel is a status change made by apa-mailer mp_admin_cancel, which also mails the player.
+            them; a cancel is a status change made by apa-mailer mp_admin_cancel, which can also mail the player.
    RULES    eligibility = the operator's 3-state check of "10 league match scores in 2 years" — a row per
-            member + format + Regionals season; Unconfirmed deletes the row. QUALIFIED is its own table, so resetting
+            member + format + Regionals season; the ? circle deletes the row. QUALIFIED is its own table, so resetting
             eligibility can never erase a winner. A qualified player's later entries in that format are flagged.
    PEOPLE   add = CueDrop find-player for SPM players — the picked member_number is the key, never a typed name;
             out-of-area = the full 8-digit APA number, never 972-prefixed — another area has another prefix.
    CONTACT  copy emails consults dncIsBlocked per member AND goes through sbCopyEmails — server-side strip —
             and is registered in DNC_SURFACES in validate-email-blocklist.mjs. CSV cells are formula-neutralised.
-   LIVE     20 s poll on a signature of everything shown; skipped while this tab is hidden or a field has focus.
-   EVENTS   no inline handler carries a value: buttons and fields carry data-mp / data-mp-change plus data-* values and ONE
-            delegated listener reads them — an id from the poolplayers feed can never be decoded into script on the page
-            that holds the service key.
+   LIVE     20 s poll on a signature of everything shown; skipped while this tab is hidden, a field has focus, a pop-up is
+            open or a save is in flight.
+   EVENTS   no inline handler carries a value: buttons carry data-mp plus data-* values and ONE delegated listener reads
+            them — an id from the poolplayers feed can never be decoded into script on the page that holds the service key.
    ════════════════════════════════════════════════════════════════════════ */
 const MP_RP = { 'Accept-Profile': 'multipass', 'Content-Profile': 'multipass' };
 const MP_MAILER_URL = 'https://script.google.com/macros/s/AKfycbzGTzkBRTrIIP_tD6sbtOOUmNZkXDdtxPoO4c8fdWt5h3tZFueNSISPv8Q3LWStx73Whw/exec';
 const MP_FEED_URL = 'https://api.poolplayers.com/events/GetAllEvents/1457';   /* SPM league since the 2026-09 split */
 const MP_TZ = 'America/Los_Angeles';
 const MP_METHODS = ['Cash', 'Venmo', 'CashApp', 'PayPal', 'Zelle', 'Unknown'];
+/* the legacy four as pills, in the legacy order; the other database methods sit behind a small ⋯ pill, so the table keeps the
+   legacy width (six pills pushed the cancel X off a 1280 px screen) and no method is unreachable */
+const MP_PAY_PILLS = ['Cash', 'CashApp', 'Venmo', 'PayPal'];
+const MP_PAY_MORE = MP_METHODS.filter(m => !MP_PAY_PILLS.includes(m));
 const MP_WINDOWS = [['up', 'Upcoming'], ['30', '30d'], ['60', '60d'], ['90', '90d'], ['180', '6mo'], ['365', '12mo'], ['all', 'All']];
 const MP_FILTERS = [['all', 'All'], ['unpaid', 'Unpaid'], ['paid', 'Paid'], ['eligible', 'Eligible'], ['ineligible', 'Ineligible'], ['unconfirmed', 'Unconfirmed'], ['qualified', 'Qualified']];
+const MP_PENDING = '__pending__';
+const MP_SEL_KEY = 'multipass.admin.event';   /* the last event picked; legacy kept it the same way */
 let _mpEvents = [], _mpRegs = [], _mpElig = [], _mpQual = [], _mpAudit = [], _mpPlayers = {}, _mpFeedRows = null, _mpMaint = false;
-let _mpSel = null, _mpFilter = 'all', _mpSort = 'last', _mpWin = 'up', _mpSig = '', _mpPoll = null, _mpInited = false, _mpBusy = false;
-let _mpAc = [], _mpPicked = null, _mpFocus = -1, _mpTimer = null;
+let _mpSel = null, _mpFilter = 'all', _mpSort = { k: null, dir: 0 }, _mpWin = 'up', _mpView = 'reg', _mpSig = '', _mpPoll = null, _mpInited = false, _mpBusy = 0, _mpPickAt = 0;
+let _mpAc = [], _mpPicked = null, _mpFocus = -1, _mpTimer = null, _mpModalDone = null, _mpModalKind = '', _mpToastT = null;
+const _mpQ = []; let _mpQRunning = false;
+/* rows tapped in the current view stay where they are until the view changes (event, filter, tab, Refresh): a quick second
+   tap must never land on the NEXT player because the first tap made a row leave the list (nemesis developer, round 2) */
+let _mpKeep = new Set();
+let _mpLoadedAt = 0, _mpPollDown = false, _mpModalOpener = null;
 
 function mpEsc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function mpFmt(f) { return f === '9' ? '9-Ball' : '8-Ball'; }
+function mpBadge(f) { return '<span class="mpa-badge ' + (f === '9' ? 'mpa-b9' : 'mpa-b8') + '">' + mpFmt(f) + '</span>'; }
 function mpDay(iso) { return new Intl.DateTimeFormat('en-US', { timeZone: MP_TZ, weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(iso)); }
+function mpLongDay(iso) { return new Intl.DateTimeFormat('en-US', { timeZone: MP_TZ, weekday: 'long', month: 'long', day: 'numeric' }).format(new Date(iso)); }
+function mpMonthDay(iso) { return new Intl.DateTimeFormat('en-US', { timeZone: MP_TZ, month: 'long', day: 'numeric' }).format(new Date(iso)); }
+function mpParen(t) { return '(' + t + ')'; }
+function mpPlayers(n) { return n + ' player' + (n === 1 ? '' : 's'); }
 function mpTime(iso) { return new Intl.DateTimeFormat('en-US', { timeZone: MP_TZ, hour: 'numeric', minute: '2-digit' }).format(new Date(iso)); }
 function mpMoney(n) { const v = Number(n || 0); return '$' + (v % 1 ? v.toFixed(2) : String(v)); }
 function mpSet(id, html) { const el = document.getElementById(id); if (el) el.innerHTML = html; }
-function mpStatus(msg, bad) { const el = document.getElementById('mpStatus'); if (el) { el.textContent = msg || ''; el.style.color = bad ? 'var(--spm-primary)' : ''; } }
+function mpStatus(msg, bad) { const el = document.getElementById('mpStatus'); if (el) { el.textContent = msg || ''; el.className = 'mpa-status' + (bad ? ' bad' : ''); } }
+function mpToast(msg, kind, ms) {
+  const t = document.getElementById('mpToast'); if (!t) return;
+  clearTimeout(_mpToastT); t.textContent = msg; t.className = 'show' + (kind ? ' ' + kind : '');
+  if (ms) _mpToastT = setTimeout(() => { t.className = ''; }, ms);
+}
+function mpClosedAt(e) { return Date.parse(e.cutoff_at || e.starts_at); }
+function mpIsOpen(e) { return e.enabled && Date.now() < mpClosedAt(e); }
+function mpIsPast(e) { return Date.parse(e.starts_at) < Date.now() - 12 * 3600e3; }
+/* the cutoff field shows and takes PACIFIC wall-clock time, whatever time zone the office computer is set to */
+function mpPacificWall(iso) {
+  if (!iso) return '';
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: MP_TZ, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).formatToParts(new Date(iso)).map(x => [x.type, x.value]));
+  return p.year + '-' + p.month + '-' + p.day + 'T' + p.hour + ':' + p.minute;
+}
+function mpMoneyIn(t) { return /^\s*\d+(\.\d{1,2})?\s*$/.test(String(t)) ? Number(t) : NaN; }
+/* the Regionals season is a KEY (eligibility and qualified rows match it exactly), so it is picked from a list, never typed */
+function mpSeasonOptions(iso, cur) {
+  const y = +new Intl.DateTimeFormat('en-US', { timeZone: MP_TZ, year: 'numeric' }).format(new Date(iso)), out = [];
+  for (let k = y - 1; k <= y + 2; k++) out.push('Spring ' + k, 'Summer ' + k);
+  if (cur && !out.includes(cur)) out.unshift(cur);
+  return out;
+}
 /* poolplayers gives naive wall-clock times; they are Pacific. Resolve the real instant — DST-safe. */
 function mpPacificIso(naive) {
   const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/.exec(String(naive || '')); if (!m) return null;
@@ -17948,21 +18141,86 @@ async function mpAudit(action, eventId, mn, detail) {
   catch (e) { mpStatus('Saved, but the audit row did not write: ' + e.message, true); return false; }
 }
 
+/* ── branded pop-ups — legacy .modal: Never Mind / Yes, a form, or a wide picker. Resolve through _mpModalDone. ── */
+function mpModalOpen(html, kind, wide) {
+  const m = document.getElementById('mpModal'); if (!m) return;
+  if (!mpModalIsOpen()) _mpModalOpener = document.activeElement;
+  _mpModalKind = kind; m.className = 'show' + (wide ? ' wide' : '');
+  m.innerHTML = '<div class="mpa-mpanel">' + html + '</div>';
+}
+function mpModalClose() {
+  const m = document.getElementById('mpModal'); if (m) { m.className = ''; m.innerHTML = ''; } _mpModalKind = '';
+  const o = _mpModalOpener; _mpModalOpener = null; if (o && document.contains(o) && o.focus) o.focus();
+}
+function mpModalIsOpen() { const m = document.getElementById('mpModal'); return !!(m && m.classList.contains('show')); }
+/* settle a pending pop-up promise once: a new pop-up first settles the old one as Never Mind */
+function mpModalSettle(result) { const r = _mpModalDone; _mpModalDone = null; if (r) r(result); }
+function mpModalFinish(result) { mpModalClose(); mpModalSettle(result); }
+function mpConfirm(title, msg, yes, check) {
+  return new Promise(res => {
+    mpModalSettle({ ok: false });
+    _mpModalDone = res;
+    mpModalOpen('<div class="mpa-mtitle" id="mpModalTitle">' + mpEsc(title) + '</div><div class="mpa-mmsg">' + mpEsc(msg) + '</div>'
+      + (check ? '<label class="mpa-check"><input type="checkbox" id="mpModalCheck"' + (check.on ? ' checked' : '') + '> ' + mpEsc(check.label) + '</label>' : '')
+      + '<div class="mpa-macts"><button type="button" class="mpa-mbtn no" data-mpm="no">Never Mind</button><button type="button" class="mpa-mbtn yes" data-mpm="yes">' + mpEsc(yes) + '</button></div>', 'confirm');
+    const n = document.querySelector('#mpModal [data-mpm="no"]'); if (n) n.focus();
+  });
+}
+/* the qualifier form: the calendar fixes date, time and venue; the office sets fees, cutoff and the Regionals season.
+   The cutoff is read only when Save is pressed — never on change, which Chrome fires per datetime-local segment. */
+function mpForm(title, readonlyHtml, v) {
+  return new Promise(res => {
+    mpModalSettle(null);
+    _mpModalDone = res;
+    mpModalOpen('<div class="mpa-mtitle" id="mpModalTitle">' + mpEsc(title) + '</div><div class="mpa-ro">' + readonlyHtml + '</div>'
+      + '<div class="mpa-fg"><label class="mpa-fl" for="mpFSeason">Regionals a win goes to</label><select id="mpFSeason" class="mpa-fi"' + (v.locked ? ' disabled' : '') + '>'
+      + v.seasons.map(o => '<option' + (o === v.season ? ' selected' : '') + '>' + mpEsc(o) + '</option>').join('') + '</select>'
+      + (v.locked ? '<div class="mpa-fl" style="text-transform:none;letter-spacing:0;margin-top:4px">Locked: players are registered under it, and their checks and wins are filed by it.</div>' : '') + '</div>'
+      + '<div style="display:flex;gap:8px"><div class="mpa-fg" style="flex:1"><label class="mpa-fl" for="mpFEntry">Entry $</label><input id="mpFEntry" class="mpa-fi" inputmode="decimal" value="' + mpEsc(v.entry) + '"></div>'
+      + '<div class="mpa-fg" style="flex:1"><label class="mpa-fl" for="mpFGreens">Greens $</label><input id="mpFGreens" class="mpa-fi" inputmode="decimal" value="' + mpEsc(v.greens) + '"></div></div>'
+      + '<div class="mpa-fg"><label class="mpa-fl" for="mpFCutoff">Online cutoff, Pacific time. Blank = open until the start</label><input id="mpFCutoff" type="datetime-local" class="mpa-fi" value="' + mpEsc(v.cutoff) + '"></div>'
+      + '<div id="mpFErr" class="mpa-mmsg" style="color:#a3001d;margin:-4px 0 8px;text-align:center"></div>'
+      + '<div class="mpa-macts"><button type="button" class="mpa-mbtn no" data-mpm="no">Cancel</button><button type="button" class="mpa-mbtn save" data-mpm="save">Save</button></div>', 'form');
+    const f = document.getElementById('mpFEntry'); if (f) f.focus();
+  });
+}
+function mpFormRead() {
+  const g = id => (document.getElementById(id) || {}).value || '';
+  const entry = mpMoneyIn(g('mpFEntry')), greens = mpMoneyIn(g('mpFGreens')), season = g('mpFSeason').trim(), cut = g('mpFCutoff');
+  if (!isFinite(entry) || !isFinite(greens)) return { error: 'Fees are a number of dollars, like 50 or 3.50.' };
+  if (!season) return { error: 'Pick the Regionals a win sends someone to.' };
+  return { entry, greens, season, cutoff: cut ? mpPacificIso(cut) : null, drift: !!(document.getElementById('mpFDrift') || {}).checked };   /* the field is Pacific wall-clock time */
+}
+
 /* ── load ──────────────────────────────────────────────────────────────── */
+/* PostgREST returns at most 1000 rows whatever ?limit says: page through, in a stable order, so a table past 1000 rows
+   never loses its newest rows in silence (Slate sbGetAll pattern; nemesis developer, round 2) */
+async function mpGetAll(path) {
+  const PAGE = 1000; let all = [], offset = 0;
+  for (;;) {
+    const page = await sb('GET', path + '&limit=' + PAGE + '&offset=' + offset, null, MP_RP);
+    if (!page || !page.length) break;
+    all = all.concat(page);
+    if (page.length < PAGE) break;
+    offset += PAGE;
+  }
+  return all;
+}
 async function mpLoad() {
   const [events, regs, elig, qual, settings, audit] = await Promise.all([
-    sb('GET', 'events?select=*&order=starts_at', null, MP_RP),
-    sb('GET', 'registrations?select=*&order=registered_at&limit=10000', null, MP_RP),
-    sb('GET', 'eligibility?select=*&limit=10000', null, MP_RP),
-    sb('GET', 'qualified?select=*&limit=10000', null, MP_RP),
+    mpGetAll('events?select=*&order=starts_at,id'),
+    mpGetAll('registrations?select=*&order=registered_at,id'),
+    mpGetAll('eligibility?select=*&order=member_number,format,regionals_season'),
+    mpGetAll('qualified?select=*&order=member_number,format,regionals_season'),
     sb('GET', 'settings?id=eq.1&select=maintenance', null, MP_RP),
     sb('GET', 'audit?select=*&order=at.desc&limit=300', null, MP_RP)]);
   _mpEvents = events || []; _mpRegs = regs || []; _mpElig = elig || []; _mpQual = qual || []; _mpAudit = audit || [];
   _mpMaint = !!(settings && settings[0] && settings[0].maintenance);
+  mpOverlayQueue();
   const need = [...new Set(_mpRegs.map(r => r.member_number))].filter(mn => !_mpPlayers[mn]);
   for (let i = 0; i < need.length; i += 150) {
     const chunk = need.slice(i, i + 150).map(encodeURIComponent).join(',');
-    const ps = await sb('GET', 'players?member_number=in.(' + chunk + ')&select=member_number,first_name,last_name,nickname,email,sl_8ball,sl_9ball', null, { 'Accept-Profile': 'slate' }) || [];
+    const ps = await sb('GET', 'players?member_number=in.(' + chunk + ')&select=member_number,first_name,last_name,nickname,email,cell_phone,sl_8ball,sl_9ball', null, { 'Accept-Profile': 'slate' }) || [];
     for (const p of ps) _mpPlayers[p.member_number] = p;
     for (const mn of need.slice(i, i + 150)) if (!_mpPlayers[mn]) _mpPlayers[mn] = { member_number: mn, outOfArea: true };
   }
@@ -17975,195 +18233,374 @@ function mpSignature() {
 }
 async function mpLoadFeed() {
   try { const r = await fetch(MP_FEED_URL); if (!r.ok) throw new Error('HTTP ' + r.status); _mpFeedRows = await r.json(); }
-  catch (e) { _mpFeedRows = null; mpSet('mpFeed', '<span class="mps-muted" style="color:var(--spm-primary)">Could not load the league calendar: ' + mpEsc(e.message) + '</span>'); return; }
-  mpRenderFeed();
+  catch (e) { _mpFeedRows = null; mpSet('mpFeed', '<p class="mpa-mmsg" style="color:#a3001d">Could not load the league calendar: ' + mpEsc(e.message) + '</p>'); return; }
+  mpRenderFeed(); mpRenderEvents();
 }
 
-/* ── render: calendar feed ─────────────────────────────────────────────── */
+/* ── + Add Qualifier: the league calendar, in a pop-up ─────────────────── */
+function mpOpenAddQ() {
+  _mpModalDone = null;
+  mpModalOpen('<div class="mpa-mtitle" id="mpModalTitle" tabindex="-1">Add Qualifier</div>'
+    + '<p class="mpa-mmsg" style="text-align:center;margin-bottom:12px">From the league calendar, poolplayers league 1457. Take sign-ups for the ones players register for.</p>'
+    + '<div id="mpFeed" class="mpa-feedwrap"><p class="mpa-mmsg" style="text-align:center">Loading the calendar…</p></div>'
+    + '<div class="mpa-macts"><button type="button" class="mpa-mbtn no" data-mpm="no">Close</button></div>', 'feed', true);
+  if (_mpFeedRows) mpRenderFeed(); else mpLoadFeed();
+  const t = document.getElementById('mpModalTitle'); if (t) t.focus();
+}
 function mpRenderFeed() {
-  if (!_mpFeedRows) return;
+  if (!_mpFeedRows || !document.getElementById('mpFeed')) return;
   const now = Date.now(), have = new Map(_mpEvents.map(e => [String(e.source_event_id), e]));
   const rows = _mpFeedRows.map(x => x.OtherEventInformation ? { o: x.OtherEventInformation, a: x.AddressInformation || {} } : null).filter(Boolean)
     .map(x => ({ ...x, startIso: mpPacificIso(x.o.StartDateTime) })).filter(x => x.startIso && Date.parse(x.startIso) > now)
     .sort((a, b) => a.startIso.localeCompare(b.startIso));
-  if (!rows.length) { mpSet('mpFeed', '<span class="mps-muted">Nothing upcoming on the calendar.</span>'); return; }
-  mpSet('mpFeed', '<table class="mps-t"><thead><tr><th>Date</th><th>Event</th><th>Venue</th><th></th></tr></thead><tbody>' + rows.map(x => {
+  if (!rows.length) { mpSet('mpFeed', '<p class="mpa-mmsg" style="text-align:center">Nothing upcoming on the calendar.</p>'); return; }
+  mpSet('mpFeed', '<table><thead><tr><th>Date</th><th>Event</th><th class="mpa-feed-venue">Venue</th><th></th></tr></thead><tbody>' + rows.map(x => {
     const id = String(x.o.OtherEventID), ex = have.get(id), fmt = mpFmtOfTitle(x.o.EventName);
-    const act = ex ? (ex.enabled ? '<span class="mps-pill">taking sign-ups</span>' : '<button type="button" class="btn btn-sm" data-mp="enable" data-id="' + ex.id + '" data-on="1">Take sign-ups again</button>')
-      : fmt ? '<button type="button" class="btn btn-sm" data-mp="fromfeed" data-src="' + mpEsc(id) + '">Take sign-ups</button>'
-            : '<span class="mps-muted">not an 8 or 9-Ball event</span>';
-    return '<tr><td>' + mpEsc(mpDay(x.startIso)) + '<br><span class="mps-muted">' + mpEsc(mpTime(x.startIso)) + '</span></td><td>' + mpEsc(x.o.EventName)
-      + (fmt ? ' <span class="mps-pill' + (fmt === '9' ? ' nine' : '') + '">' + mpFmt(fmt) + '</span>' : '') + '</td><td>' + mpEsc(x.a.Name || '') + '</td><td>' + act + '</td></tr>';
+    const act = ex ? (ex.enabled ? '<span class="mpa-tag">taking sign-ups</span>' : '<button type="button" class="mpa-feedbtn" data-mp="enable" data-id="' + ex.id + '" data-on="1">Take sign-ups again</button>')
+      : fmt ? '<button type="button" class="mpa-feedbtn" data-mp="fromfeed" data-src="' + mpEsc(id) + '">Take sign-ups</button>'
+            : '<span class="mpa-muted">not an 8 or 9-Ball event</span>';
+    return '<tr><td>' + mpEsc(mpDay(x.startIso)) + '<br><span class="mpa-muted">' + mpEsc(mpTime(x.startIso)) + '</span></td><td>' + mpEsc(x.o.EventName)
+      + (fmt ? ' ' + mpBadge(fmt) : '') + '</td><td class="mpa-feed-venue">' + mpEsc(x.a.Name || '') + '</td><td>' + act + '</td></tr>';
   }).join('') + '</tbody></table>');
 }
 async function mpEnableFromFeed(sourceId) {
   const x = (_mpFeedRows || []).find(r => r.OtherEventInformation && String(r.OtherEventInformation.OtherEventID) === String(sourceId)); if (!x) return;
   const o = x.OtherEventInformation, a = x.AddressInformation || {};
   const startIso = mpPacificIso(o.StartDateTime), fmt = mpFmtOfTitle(o.EventName);
-  const season = prompt('Which Singles Regionals does a win here send someone to?', mpSeasonFor(startIso)); if (season === null) return;
-  const fees = prompt('Entry fee + greens fee, e.g. 50+3', '50+3'); if (fees === null) return;
-  const fm = /^\s*(\d+(?:\.\d+)?)\s*\+\s*(\d+(?:\.\d+)?)\s*$/.exec(fees); if (!fm) { alert('Write the fees like 50+3.'); return; }
   const addr = [a.Address1, a.City, [a.State, String(a.Zip || '').replace(/-_+$/, '')].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+  const f = await mpForm('Take Sign-ups', '<b>' + mpEsc(mpLongDay(startIso)) + '</b> · ' + mpBadge(fmt) + '<br>' + mpEsc(o.EventName || '') + '<br>' + mpEsc(mpTime(startIso))
+    + (o.EndDateTime ? ', last boards ' + mpEsc(mpTime(mpPacificIso(o.EndDateTime))) : '') + '<br><b>' + mpEsc(a.Name || 'Venue not on the calendar') + '</b>' + (addr ? '<br>' + mpEsc(addr) : ''),
+    { season: mpSeasonFor(startIso), seasons: mpSeasonOptions(startIso), locked: false, entry: 50, greens: 3, cutoff: '' });
+  if (!f) return;
+  const fees = f.entry + '+' + f.greens;
   const row = { source_event_id: String(o.OtherEventID), format: fmt, title: String(o.EventName || '').trim(), starts_at: startIso,
     last_board_at: o.EndDateTime ? mpPacificIso(o.EndDateTime) : null, venue_name: (a.Name || '').trim() || null, venue_address: addr || null,
-    entry_fee: +fm[1], greens_fee: +fm[2], regionals_season: season.trim() || mpSeasonFor(startIso), enabled: true, is_test: false };
+    entry_fee: f.entry, greens_fee: f.greens, cutoff_at: f.cutoff, regionals_season: f.season || mpSeasonFor(startIso), enabled: true, is_test: false };
   try {
     const ins = await sb('POST', 'events?on_conflict=source_event_id', row, { ...MP_RP, Prefer: 'resolution=merge-duplicates,return=representation' });
     await mpAudit('enable_event', (ins && ins[0] && ins[0].id) || null, null, { source_event_id: row.source_event_id, fees: fees, season: row.regionals_season });
+    mpToast('Taking sign-ups for ' + mpLongDay(startIso), '', 2500);
     await mpReload();
   } catch (e) { mpStatus('Could not turn on sign-ups: ' + e.message, true); }
 }
 
-/* ── render: events taking sign-ups ────────────────────────────────────── */
+/* ── Qualifiers: maintenance, + Add Qualifier, time windows, one card per qualifier ── */
 function mpInWindow(e) {
   const t = Date.parse(e.starts_at), now = Date.now();
   if (_mpWin === 'all') return true;
   if (_mpWin === 'up') return t > now - 12 * 3600e3;
   return t > now - (+_mpWin) * 86400e3;
 }
-function mpVisibleEvents() {
-  const showTest = document.getElementById('mpShowTest') && document.getElementById('mpShowTest').checked;
-  return _mpEvents.filter(e => (showTest || !e.is_test) && mpInWindow(e));
-}
+function mpShowTest() { const t = document.getElementById('mpShowTest'); return !!(t && t.checked); }
+function mpVisibleEvents() { return _mpEvents.filter(e => (mpShowTest() || !e.is_test) && mpInWindow(e)); }
 function mpRenderEvents() {
-  mpSet('mpWin', '<div class="filter-chips">' + MP_WINDOWS.map(w => '<button type="button" class="chip' + (_mpWin === w[0] ? ' active' : '') + '" data-mp="win" data-v="' + w[0] + '">' + w[1] + '</button>').join('') + '</div>');
+  mpSet('mpWin', MP_WINDOWS.map(w => '<button type="button" class="mpa-win' + (_mpWin === w[0] ? ' active' : '') + '" data-mp="win" data-v="' + w[0] + '">' + w[1] + '</button>').join(' '));
   const evs = mpVisibleEvents(), feedIds = _mpFeedRows ? new Set(_mpFeedRows.map(x => String((x.OtherEventInformation || {}).OtherEventID))) : null;
-  if (!evs.length) { mpSet('mpEvents', '<span class="mps-muted">No events in this window. Use the calendar above to take sign-ups.</span>'); return; }
-  mpSet('mpEvents', '<table class="mps-t"><thead><tr><th>Date</th><th>Event</th><th>Fees</th><th>Cutoff</th><th>Regionals</th><th>In</th><th>Paid</th><th></th></tr></thead><tbody>' + evs.map(e => {
-    const regs = _mpRegs.filter(r => r.event_id === e.id && r.status === 'registered'), paid = regs.filter(r => r.paid).length;
-    const gone = feedIds && !e.is_test && !feedIds.has(String(e.source_event_id)) ? ' <span class="mps-pill warn" title="This event id is no longer on the poolplayers calendar">not on the calendar</span>' : '';
-    const cut = e.cutoff_at ? new Date(new Date(e.cutoff_at).getTime() - new Date(e.cutoff_at).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : '';
-    return '<tr><td>' + mpEsc(mpDay(e.starts_at)) + '<br><span class="mps-muted">' + mpEsc(mpTime(e.starts_at)) + '</span></td>'
-      + '<td><span class="mps-pill' + (e.format === '9' ? ' nine' : '') + '">' + mpFmt(e.format) + '</span> ' + mpEsc(e.title) + (e.is_test ? ' <span class="mps-pill test">TEST</span>' : '')
-      + (e.enabled ? '' : ' <span class="mps-pill off">sign-ups off</span>') + gone + '<br><span class="mps-muted">' + mpEsc(e.venue_name || '') + '</span></td>'
-      + '<td><input class="mps-in mps-money" value="' + mpEsc(e.entry_fee) + '" data-mp-change="event" data-id="' + e.id + '" data-field="entry_fee" aria-label="entry fee"> + '
-      + '<input class="mps-in mps-money" value="' + mpEsc(e.greens_fee) + '" data-mp-change="event" data-id="' + e.id + '" data-field="greens_fee" aria-label="greens fee"></td>'
-      + '<td><input type="datetime-local" class="mps-in" value="' + mpEsc(cut) + '" data-mp-blur="cutoff" data-orig="' + mpEsc(cut) + '" data-id="' + e.id + '" aria-label="cutoff" title="Blank = open until the start. Saves when you leave the field."></td>'
-      + '<td><input class="mps-in" style="width:110px" value="' + mpEsc(e.regionals_season) + '" data-mp-change="event" data-id="' + e.id + '" data-field="regionals_season" aria-label="regionals season"></td>'
-      + '<td>' + regs.length + '</td><td>' + paid + '</td>'
-      + '<td><button type="button" class="btn btn-sm" data-mp="select" data-id="' + e.id + '">Roster</button> '
-      + '<button type="button" class="btn btn-sm" data-mp="enable" data-id="' + e.id + '" data-on="' + (e.enabled ? '0' : '1') + '">' + (e.enabled ? 'Stop sign-ups' : 'Take sign-ups') + '</button></td></tr>';
-  }).join('') + '</tbody></table>');
+  if (!evs.length) { mpSet('mpEvents', '<div class="mpa-empty">No qualifiers in this window. Tap + Add Qualifier to take sign-ups for a calendar event.</div>'); return; }
+  mpSet('mpEvents', evs.map(e => {
+    const regs = _mpRegs.filter(r => r.event_id === e.id && r.status === 'registered'), paid = regs.filter(r => r.paid).length, past = mpIsPast(e);
+    const gone = feedIds && !e.is_test && !feedIds.has(String(e.source_event_id)) ? '<span class="mpa-tag warn" title="This event id is no longer on the poolplayers calendar">not on the calendar</span>' : '';
+    const moved = !past && mpFeedDrift(e) ? '<span class="mpa-tag warn" title="The league calendar has a different date, time or venue. Edit to use it.">calendar changed</span>' : '';
+    const tags = (e.is_test ? '<span class="mpa-tag test">test</span>' : '') + (e.enabled ? '' : '<span class="mpa-tag">sign-ups off</span>') + gone + moved;
+    return '<div class="mpa-qcard' + (past ? ' past' : '') + '"><div class="mpa-qhead"><div class="mpa-qdate">' + mpEsc(mpLongDay(e.starts_at)) + '</div>' + mpBadge(e.format) + '</div>'
+      + '<div class="mpa-qdetail">' + mpEsc(mpTime(e.starts_at)) + (e.last_board_at ? ' – ' + mpEsc(mpTime(e.last_board_at)) + ' last boards' : '')
+      + '<br><strong>' + mpEsc(e.venue_name || 'Venue to be announced') + '</strong>' + (e.venue_address ? '<br>' + mpEsc(e.venue_address) : '')
+      + '<br>' + regs.length + ' registered · ' + paid + ' paid · fees ' + mpMoney(e.entry_fee) + ' + ' + mpMoney(e.greens_fee)
+      + '<br>Regionals: ' + mpEsc(e.regionals_season) + (e.cutoff_at ? ' · online cutoff ' + mpEsc(mpDay(e.cutoff_at) + ' ' + mpTime(e.cutoff_at)) : '')
+      + (tags ? '<br>' + tags : '') + '</div>'
+      + '<div class="mpa-qacts"><button type="button" class="mpa-edit" data-mp="select" data-id="' + e.id + '">Roster</button>'
+      + (past ? '' : '<button type="button" class="mpa-edit" data-mp="edit" data-id="' + e.id + '">Edit</button>'
+        + '<button type="button" class="mpa-stop' + (e.enabled ? '' : ' on') + '" data-mp="enable" data-id="' + e.id + '" data-on="' + (e.enabled ? '0' : '1') + '">' + (e.enabled ? 'Stop sign-ups' : 'Take sign-ups') + '</button>')
+      + '</div></div>';
+  }).join(''));
 }
-function mpSetWin(w) { _mpWin = w; mpRenderAll(); }
-async function mpSaveEvent(id, field, value) {
+function mpSetWin(w) { _mpWin = w; mpRenderEvents(); }
+/* what the league calendar now says about an enabled qualifier, if it differs from the snapshot taken at sign-up time */
+function mpFeedDrift(e) {
+  if (!_mpFeedRows || e.is_test) return null;
+  const x = _mpFeedRows.find(r => r.OtherEventInformation && String(r.OtherEventInformation.OtherEventID) === String(e.source_event_id)); if (!x) return null;
+  const o = x.OtherEventInformation, a = x.AddressInformation || {};
+  const addr = [a.Address1, a.City, [a.State, String(a.Zip || '').replace(/-_+$/, '')].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+  const now = { starts_at: mpPacificIso(o.StartDateTime), last_board_at: o.EndDateTime ? mpPacificIso(o.EndDateTime) : null, venue_name: (a.Name || '').trim() || null, venue_address: addr || null };
+  const diff = {};
+  if (Date.parse(now.starts_at) !== Date.parse(e.starts_at)) diff.starts_at = now.starts_at;
+  if ((now.last_board_at ? Date.parse(now.last_board_at) : null) !== (e.last_board_at ? Date.parse(e.last_board_at) : null)) diff.last_board_at = now.last_board_at;
+  if ((now.venue_name || '') !== (e.venue_name || '')) diff.venue_name = now.venue_name;
+  if ((now.venue_address || '') !== (e.venue_address || '')) diff.venue_address = now.venue_address;
+  return Object.keys(diff).length ? diff : null;
+}
+async function mpEditEvent(id) {
+  const e = _mpEvents.find(x => x.id === id); if (!e) return;
+  const drift = mpFeedDrift(e);
+  const f = await mpForm('Edit Qualifier', '<b>' + mpEsc(mpLongDay(e.starts_at)) + '</b> · ' + mpBadge(e.format) + '<br>' + mpEsc(e.title || '') + '<br>' + mpEsc(mpTime(e.starts_at))
+    + '<br><b>' + mpEsc(e.venue_name || 'Venue to be announced') + '</b>' + (e.venue_address ? '<br>' + mpEsc(e.venue_address) : '')
+    + '<br><span style="color:#666">Date, time and venue come from the league calendar.</span>'
+    + (drift ? '<br><label class="mpa-check" style="justify-content:flex-start;margin:8px 0 0"><input type="checkbox" id="mpFDrift" checked> The calendar now says: '
+      + mpEsc([drift.starts_at ? mpLongDay(drift.starts_at) + ' ' + mpTime(drift.starts_at) : '', drift.venue_name || drift.venue_address ? (drift.venue_name || e.venue_name || '') + (drift.venue_address ? ', ' + drift.venue_address : '') : '', drift.last_board_at !== undefined && !drift.starts_at ? 'last boards ' + (drift.last_board_at ? mpTime(drift.last_board_at) : 'none') : ''].filter(Boolean).join(' · '))
+      + '. Use it. Players already registered are not re-sent an invite.</label>' : ''),
+    { season: e.regionals_season, seasons: mpSeasonOptions(e.starts_at, e.regionals_season), locked: _mpRegs.some(r => r.event_id === e.id), entry: e.entry_fee, greens: e.greens_fee, cutoff: mpPacificWall(e.cutoff_at) });
+  if (!f) return;
   const patch = {};
-  if (field === 'entry_fee' || field === 'greens_fee') { const n = Number(value); if (!isFinite(n) || n < 0) { alert('Fees are a number of dollars.'); mpRenderEvents(); return; } patch[field] = n; }
-  else if (field === 'cutoff_at') patch.cutoff_at = value ? new Date(value).toISOString() : null;   /* datetime-local is the browser's local time — the office is Pacific */
-  else if (field === 'regionals_season') { if (!String(value).trim()) { mpRenderEvents(); return; } patch.regionals_season = String(value).trim(); }
-  else return;
-  try { await sb('PATCH', 'events?id=eq.' + id, patch, MP_RP); await mpAudit('edit_event', id, null, patch); await mpReload(); }
+  if (drift && f.drift) Object.assign(patch, drift);
+  if (Number(e.entry_fee) !== f.entry) patch.entry_fee = f.entry;
+  if (Number(e.greens_fee) !== f.greens) patch.greens_fee = f.greens;
+  if (e.regionals_season !== f.season && !_mpRegs.some(r => r.event_id === e.id)) patch.regionals_season = f.season;   /* locked once anyone is registered */
+  if ((e.cutoff_at ? Date.parse(e.cutoff_at) : null) !== (f.cutoff ? Date.parse(f.cutoff) : null)) patch.cutoff_at = f.cutoff;
+  if (!Object.keys(patch).length) return;
+  await mpSaveEvent(id, patch);
+}
+async function mpSaveEvent(id, patch) {
+  try { await sb('PATCH', 'events?id=eq.' + id, patch, MP_RP); await mpAudit('edit_event', id, null, patch); mpToast('Saved', '', 1500); await mpReload(); }
   catch (e) { mpStatus('Could not save: ' + e.message, true); }
 }
 async function mpSetEnabled(id, on) {
-  if (!on && !confirm('Stop taking sign-ups for this event? Players already registered stay registered.')) return;
-  try { await sb('PATCH', 'events?id=eq.' + id, { enabled: !!on }, MP_RP); await mpAudit(on ? 'enable_event' : 'disable_event', id, null, null); await mpReload(); }
-  catch (e) { mpStatus('Could not change sign-ups: ' + e.message, true); }
+  const e = _mpEvents.find(x => x.id === id);
+  if (!on && !(await mpConfirm('Stop Sign-ups', (e ? mpLongDay(e.starts_at) + ', ' + mpFmt(e.format) + '.\n' : '') + 'Players can no longer register online. Everyone already registered stays registered.', 'Yes, Stop')).ok) return;
+  try { await sb('PATCH', 'events?id=eq.' + id, { enabled: !!on }, MP_RP); await mpAudit(on ? 'enable_event' : 'disable_event', id, null, null); mpToast(on ? 'Taking sign-ups' : 'Sign-ups stopped', '', 1500); await mpReload(); }
+  catch (err) { mpStatus('Could not change sign-ups: ' + err.message, true); }
 }
 
-/* ── render: roster ────────────────────────────────────────────────────── */
-function mpSelect(id) { _mpSel = id; const s = document.getElementById('mpEventSel'); if (s) s.value = String(id); mpRenderRoster(); mpRenderAudit(); const r = document.getElementById('mpRoster'); if (r) r.scrollIntoView({ block: 'nearest' }); }
+/* ── Registrations: SELECT EVENT, total bar, banner, summary, filters, roster ── */
 function mpEligOf(mn, ev) { const x = _mpElig.find(e => e.member_number === mn && e.format === ev.format && e.regionals_season === ev.regionals_season); return x ? x.state : 'unconfirmed'; }
 function mpQualOf(mn, ev) { return _mpQual.find(q => q.member_number === mn && q.format === ev.format && q.regionals_season === ev.regionals_season) || null; }
 function mpName(r) { const p = _mpPlayers[r.member_number] || {}; return (p.first_name ? cdPlayerName(p) : [r.first_name, r.last_name].filter(Boolean).join(' ')) || '(no name)'; }
 function mpEmail(r) { const p = _mpPlayers[r.member_number] || {}; return String(r.email || p.email || '').replace(/\s+/g, ''); }
-function mpRosterRows() {
+function mpListEvents() { return _mpEvents.filter(e => mpShowTest() || !e.is_test); }
+function mpPendingCount() {
+  const keys = new Set();
+  for (const r of _mpRegs) {
+    if (r.status !== 'registered') continue;
+    const ev = _mpEvents.find(e => e.id === r.event_id); if (!ev || (ev.is_test && !mpShowTest())) continue;
+    if (mpEligOf(r.member_number, ev) === 'unconfirmed') keys.add(r.member_number + '|' + ev.format + '|' + ev.regionals_season);
+  }
+  return keys.size;
+}
+function mpRenderSelect() {
+  const sel = document.getElementById('mpEventSel'); if (!sel) return;
+  const evs = mpListEvents();
+  if (_mpSel !== MP_PENDING && !evs.some(e => e.id === _mpSel)) _mpSel = MP_PENDING;
+  sel.innerHTML = '<option value="' + MP_PENDING + '"' + (_mpSel === MP_PENDING ? ' selected' : '') + '>Pending Eligibility — ' + mpPendingCount() + ' pending</option>'
+    + evs.map(e => {
+      const regs = _mpRegs.filter(r => r.event_id === e.id && r.status === 'registered');
+      const pend = regs.filter(r => mpEligOf(r.member_number, e) === 'unconfirmed').length;
+      return '<option value="' + e.id + '"' + (e.id === _mpSel ? ' selected' : '') + '>' + mpEsc(mpMonthDay(e.starts_at) + ' — ' + mpFmt(e.format) + ' ' + mpParen(regs.length + ' registered')
+        + (pend ? ' — ' + pend + ' pending' : '') + (mpIsOpen(e) ? '' : ' [CLOSED]') + (e.is_test ? ' [TEST]' : '')) + '</option>';
+    }).join('');
+  const evIds = new Set(evs.map(e => e.id)), total = _mpRegs.filter(r => r.status === 'registered' && evIds.has(r.event_id)).length;
+  mpSet('mpTotal', total + ' total registration' + (total === 1 ? '' : 's') + ' across ' + evs.length + ' event' + (evs.length === 1 ? '' : 's'));
+}
+function mpPick(v) {
+  _mpSel = v === MP_PENDING ? MP_PENDING : +v; _mpKeep = new Set(); _mpPickAt = Date.now();
+  try { localStorage.setItem(MP_SEL_KEY, String(_mpSel)); } catch (e) {}
+  mpRenderRoster(); mpRenderAudit();
+}
+function mpSelect(id) { mpSetView('reg'); mpPick(id); const s = document.getElementById('mpEventSel'); if (s) s.value = String(id); }
+function mpRosterRows(opts) {
   const ev = _mpEvents.find(e => e.id === _mpSel); if (!ev) return { ev: null, rows: [] };
-  const showCancelled = document.getElementById('mpShowCancelled') && document.getElementById('mpShowCancelled').checked;
+  const everything = !!(opts && opts.everything);
+  const showCancelled = everything || (document.getElementById('mpShowCancelled') && document.getElementById('mpShowCancelled').checked);
   let rows = _mpRegs.filter(r => r.event_id === ev.id && (showCancelled || r.status === 'registered')).map(r => {
     const q = mpQualOf(r.member_number, ev), qEv = q ? _mpEvents.find(e => e.id === q.event_id) : null;
     const later = !!(q && r.status === 'registered' && (!qEv || Date.parse(qEv.starts_at) < Date.parse(ev.starts_at)));
     const p = _mpPlayers[r.member_number] || {};
-    return { r, ev, name: mpName(r), last: (p.last_name || r.last_name || '').toLowerCase(), first: (p.first_name || r.first_name || '').toLowerCase(),
+    return { r, ev, name: mpName(r), last: p.last_name || r.last_name || '', first: p.first_name ? (p.nickname || p.first_name) : (r.first_name || ''),
              sl: ev.format === '9' ? (p.sl_9ball || 0) : (p.sl_8ball || 0), elig: mpEligOf(r.member_number, ev), q: q, qEv: qEv, later: later, email: mpEmail(r) };
   });
-  rows = rows.filter(x => _mpFilter === 'all' || (_mpFilter === 'unpaid' && !x.r.paid) || (_mpFilter === 'paid' && x.r.paid) || (_mpFilter === x.elig) || (_mpFilter === 'qualified' && x.q));
-  const key = { last: x => x.last + ' ' + x.first, first: x => x.first + ' ' + x.last, sl: x => String(9 - x.sl) + x.last, when: x => x.r.registered_at };
-  rows.sort((a, b) => key[_mpSort](a).localeCompare(key[_mpSort](b)));
+  if (!everything) rows = rows.filter(x => mpMatches(x, _mpFilter) || _mpKeep.has('r' + x.r.id));
+  if (_mpSort.k && _mpSort.dir) {
+    const key = { last: x => (x.last + ' ' + x.first).toLowerCase(), first: x => (x.first + ' ' + x.last).toLowerCase(), sl: x => String(x.sl).padStart(2, '0') + x.last.toLowerCase() }[_mpSort.k];
+    rows.sort((a, b) => (_mpSort.k === 'sl' && !a.sl !== !b.sl) ? (a.sl ? -1 : 1) : key(a).localeCompare(key(b)) * _mpSort.dir);   /* no SL (out of area) sorts last, as legacy */
+  }   /* off = registration order, as the database returns it (legacy default) */
   return { ev, rows };
 }
+function mpMatches(x, f) {
+  return f === 'all' || (f === 'unpaid' && !x.r.paid) || (f === 'paid' && x.r.paid) || (f === x.elig) || (f === 'qualified' && !!x.q);
+}
 function mpRenderRoster() {
-  const sel = document.getElementById('mpEventSel');
-  if (sel) {
-    const evs = mpVisibleEvents();
-    if (_mpSel == null || !evs.some(e => e.id === _mpSel)) _mpSel = evs.length ? evs[0].id : null;
-    sel.innerHTML = evs.map(e => '<option value="' + e.id + '"' + (e.id === _mpSel ? ' selected' : '') + '>' + mpEsc(mpDay(e.starts_at) + ' · ' + mpFmt(e.format) + ' · ' + (e.venue_name || '')) + (e.is_test ? ' · TEST' : '') + '</option>').join('');
-  }
-  mpSet('mpFilters', '<div class="filter-chips">' + MP_FILTERS.map(f => '<button type="button" class="chip' + (_mpFilter === f[0] ? ' active' : '') + '" data-mp="filter" data-v="' + f[0] + '">' + f[1] + '</button>').join('') + '</div>');
-  const { ev, rows } = mpRosterRows();
-  if (!ev) { mpSet('mpRoster', '<span class="mps-muted">Pick an event.</span>'); mpSet('mpSummary', ''); return; }
-  mpRenderSummary(ev);
-  if (!rows.length) { mpSet('mpRoster', '<span class="mps-muted">Nobody here' + (_mpFilter === 'all' ? ' yet.' : ' for this filter.') + '</span>'); return; }
-  const th = (k, l) => '<th><button type="button" class="mps-sortbtn" data-mp="sort" data-v="' + k + '" aria-pressed="' + (_mpSort === k) + '">' + l + (_mpSort === k ? ' ▾' : '') + '</button></th>';
-  mpSet('mpRoster', '<table class="mps-t"><thead><tr>' + th('last', 'Player') + '<th>Email</th>' + th('sl', 'SL') + th('when', 'Registered') + '<th>Paid</th><th>10-scores check</th><th>Regionals</th><th></th></tr></thead><tbody>'
+  const wrapBefore = document.querySelector('#mpRoster .mpa-wrap, #mpPending .mpa-wrap'), scrollX = wrapBefore ? wrapBefore.scrollLeft : 0;
+  mpRenderRosterNow();
+  const wrapAfter = document.querySelector(_mpSel === MP_PENDING ? '#mpPending .mpa-wrap' : '#mpRoster .mpa-wrap'); if (wrapAfter && scrollX) wrapAfter.scrollLeft = scrollX;
+}
+function mpRenderRosterNow() {
+  mpRenderSelect();
+  const pending = _mpSel === MP_PENDING;
+  const evView = document.getElementById('mpEventView'), pendView = document.getElementById('mpPendingView');
+  if (evView) evView.hidden = pending; if (pendView) pendView.hidden = !pending;
+  if (pending) { mpRenderPending(); return; }
+  const e = _mpEvents.find(x => x.id === _mpSel); if (!e) return;
+  mpRenderBanner(e); mpRenderSummary(e);
+  const base = _mpRegs.filter(r => r.event_id === e.id && r.status === 'registered').map(r => ({ r, elig: mpEligOf(r.member_number, e), q: mpQualOf(r.member_number, e) }));
+  mpSet('mpFilters', MP_FILTERS.map(f => '<button type="button" class="mpa-fbtn' + (_mpFilter === f[0] ? ' active' : '') + '" data-mp="filter" data-v="' + f[0] + '">' + f[1] + ' ' + mpParen(base.filter(x => mpMatches(x, f[0])).length) + '</button>').join('')
+    + '<button type="button" class="mpa-fbtn copy" data-mp="copy" id="mpCopy">📋 Copy Emails</button>');
+  const { rows } = mpRosterRows();
+  if (!rows.length) { mpSet('mpRoster', '<div class="mpa-wrap"><div class="mpa-empty">' + (_mpFilter === 'all' ? 'No registrations yet.' : 'Nobody here for this filter.') + '</div></div>'); return; }
+  const th = (k, l) => '<th class="sortable' + (_mpSort.k === k ? (_mpSort.dir > 0 ? ' sort-asc' : ' sort-desc') : '') + '" data-mp="sort" data-v="' + k + '" tabindex="0" aria-sort="'
+    + (_mpSort.k === k ? (_mpSort.dir > 0 ? 'ascending' : 'descending') : 'none') + '">' + l + '</th>';
+  mpSet('mpRoster', '<div class="mpa-wrap"><table class="mpa-t"><thead><tr><th>Member #</th>' + th('first', 'First') + th('last', 'Last') + th('sl', mpFmt(e.format) + ' SL')
+    + '<th>Payment</th><th class="ctr">Eligibility</th><th class="ctr">Singles</th><th></th></tr></thead><tbody>'
     + rows.map(x => {
-      const r = x.r, mn = r.member_number, cancelled = r.status !== 'registered';
-      const pay = '<select class="mps-in" data-mp-change="paid" data-id="' + r.id + '" aria-label="payment"' + (cancelled ? ' disabled' : '') + '><option value="">not paid</option>'
-        + MP_METHODS.map(m => '<option value="' + m + '"' + (r.paid && r.payment_method === m ? ' selected' : '') + '>' + m + '</option>').join('') + '</select>';
-      const el = '<select class="mps-in" data-mp-change="elig" data-mn="' + mpEsc(mn) + '" data-id="' + ev.id + '" aria-label="10-scores check">'
-        + [['unconfirmed', 'Unconfirmed'], ['eligible', 'Eligible'], ['ineligible', 'Not eligible']].map(o => '<option value="' + o[0] + '"' + (x.elig === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select>';
-      const qual = x.q ? '<span class="mps-q">★ qualified' + (x.qEv ? ' ' + mpEsc(mpDay(x.qEv.starts_at)) : '') + '</span> <button type="button" class="btn btn-sm" data-mp="unqualify" data-mn="' + mpEsc(mn) + '" data-id="' + ev.id + '">undo</button>'
-        : '<button type="button" class="btn btn-sm" data-mp="qualify" data-mn="' + mpEsc(mn) + '" data-id="' + ev.id + '"' + (cancelled ? ' disabled' : '') + '>Won a board</button>';
-      return '<tr class="' + (cancelled ? 'mps-cancelled' : x.later ? 'mps-later' : '') + '"><td><b>' + mpEsc(x.name) + '</b><br><span class="mps-muted">#' + mpEsc(mn)
-        + ((_mpPlayers[mn] || {}).outOfArea ? ' · not in Slate' : '') + ' · ' + mpEsc(r.source) + (cancelled ? ' · cancelled' : '') + '</span>'
-        + (x.later ? '<br><span class="mps-pill warn">already qualified — later entry</span>' : '') + '</td>'
-        + '<td>' + (x.email ? mpEsc(x.email) : '<span class="mps-muted">no email</span>') + '</td><td>' + (x.sl || '') + '</td>'
-        + '<td>' + mpEsc(mpDay(r.registered_at)) + '</td><td>' + pay + '</td><td>' + el + '</td><td>' + qual + '</td>'
-        + '<td>' + (cancelled ? '' : '<button type="button" class="btn btn-sm" data-mp="cancel" data-mn="' + mpEsc(mn) + '" data-id="' + ev.id + '">Cancel</button>') + '</td></tr>';
-    }).join('') + '</tbody></table>');
+      const r = x.r, mn = r.member_number, off = r.status !== 'registered', dis = off ? ' disabled' : '';
+      const other = r.paid && MP_PAY_MORE.includes(r.payment_method);
+      const pay = '<div class="mpa-pay">' + MP_PAY_PILLS.map(m => '<button type="button" class="mpa-paybtn' + (r.paid && r.payment_method === m ? ' active' : '') + '" data-mp="pay" data-id="' + r.id + '" data-v="' + m + '"' + dis + '>' + m + '</button>').join('')
+        + (other ? '<button type="button" class="mpa-paybtn active" data-mp="pay" data-id="' + r.id + '" data-v="' + mpEsc(r.payment_method) + '"' + dis + '>' + mpEsc(r.payment_method) + '</button>'
+                 : '<button type="button" class="mpa-paybtn more" data-mp="paymore" data-id="' + r.id + '" aria-label="Other payment methods" title="' + MP_PAY_MORE.join(', ') + '"' + dis + '>⋯</button>') + '</div>';
+      const circ = (v, cls, sym, lbl) => '<button type="button" class="mpa-circle ' + cls + (x.elig === v ? ' on' : '') + '" data-mp="elig" data-mn="' + mpEsc(mn) + '" data-id="' + e.id + '" data-v="' + v + '" aria-label="' + lbl + '" title="' + lbl + '"' + dis + '>' + sym + '</button>';
+      const elig = '<div class="mpa-circles">' + circ('eligible', 'mpa-c-yes', '✓', 'Eligible') + circ('ineligible', 'mpa-c-no', '✕', 'Not eligible') + circ('unconfirmed', 'mpa-c-maybe', '?', 'Unconfirmed') + '</div>';
+      const star = '<button type="button" class="mpa-star' + (x.q ? ' on' : '') + '" data-mp="' + (x.q ? 'unqualify' : 'qualify') + '" data-mn="' + mpEsc(mn) + '" data-id="' + e.id + '"'
+        + (off && !x.q ? ' disabled' : '') + ' title="' + (x.q ? 'Qualified for ' + mpEsc(e.regionals_season) + ' Singles Regionals' + (x.qEv ? ', ' + mpEsc(mpDay(x.qEv.starts_at)) : '') + '. Tap to undo.' : 'Mark: won a board, qualified') + '">' + (x.q ? '★ Yes' : '☆') + '</button>';
+      const tags = ((_mpPlayers[mn] || {}).outOfArea ? '<span class="mpa-tag">not in Slate</span>' : '') + (r.source !== 'self' ? '<span class="mpa-tag">' + mpEsc(r.source) + '</span>' : '')
+        + (off ? '<span class="mpa-tag">cancelled</span>' : '') + (x.later ? '<span class="mpa-tag warn" title="Already qualified in this format; this is a later entry">later entry</span>' : '');
+      return '<tr class="' + (off ? 'mpa-cancelled' : x.later ? 'mpa-later' : '') + '"><td>' + mpEsc(mn) + (tags ? '<br>' + tags : '') + '</td><td>' + mpEsc(x.first) + '</td><td>' + mpEsc(x.last) + '</td>'
+        + '<td class="sl">' + (x.sl || '') + '</td><td>' + pay + '</td><td>' + elig + '</td><td class="ctr">' + star + '</td>'
+        + '<td class="ctr">' + (off ? '' : '<button type="button" class="mpa-x" data-mp="cancel" data-mn="' + mpEsc(mn) + '" data-id="' + e.id + '" aria-label="Cancel registration" title="Cancel registration">✕</button>') + '</td></tr>';
+    }).join('') + '</tbody></table></div>');
+}
+function mpRenderBanner(e) {
+  const open = mpIsOpen(e);
+  mpSet('mpBanner', '<div class="mpa-banner"><div class="first"><b>' + mpEsc(mpLongDay(e.starts_at)) + '</b> — ' + mpFmt(e.format) + ' — <span class="' + (open ? 'mpa-open">OPEN' : 'mpa-closed">CLOSED') + '</span>'
+    + (e.is_test ? ' <span class="mpa-tag test">test</span>' : '') + (e.enabled ? '' : ' <span class="mpa-tag">sign-ups off</span>') + '</div>'
+    + '<div>' + mpEsc(mpTime(e.starts_at)) + (e.last_board_at ? ' – ' + mpEsc(mpTime(e.last_board_at)) + ' last boards' : '') + (e.cutoff_at ? ' · online cutoff ' + mpEsc(mpDay(e.cutoff_at) + ' ' + mpTime(e.cutoff_at)) : '') + '</div>'
+    + '<div>' + mpEsc(e.venue_name || 'Venue to be announced') + '</div>' + (e.venue_address ? '<div class="mpa-addr">' + mpEsc(e.venue_address) + '</div>' : '')
+    + '<div class="mpa-addr">Regionals: ' + mpEsc(e.regionals_season) + '</div></div>');
 }
 function mpRenderSummary(ev) {
   const regs = _mpRegs.filter(r => r.event_id === ev.id && r.status === 'registered'), price = Number(ev.entry_fee) + Number(ev.greens_fee);
-  const paid = regs.filter(r => r.paid), byMethod = MP_METHODS.map(m => [m, paid.filter(r => r.payment_method === m).length]).filter(x => x[1]);
-  mpSet('mpSummary', '<div class="mps-sum"><div>Registered<b>' + regs.length + '</b></div><div>Per player<b>' + mpMoney(price) + '</b><span class="mps-muted">' + mpMoney(ev.entry_fee) + ' entry + ' + mpMoney(ev.greens_fee) + ' greens</span></div>'
-    + '<div>Paid<b>' + paid.length + ' · ' + mpMoney(paid.length * price) + '</b><span class="mps-muted">' + (byMethod.map(x => mpEsc(x[0]) + ' ' + x[1]).join(' · ') || 'nobody yet') + '</span></div>'
-    + '<div>Entry / greens collected<b>' + mpMoney(paid.length * Number(ev.entry_fee)) + ' / ' + mpMoney(paid.length * Number(ev.greens_fee)) + '</b></div>'
-    + '<div>Not paid<b>' + (regs.length - paid.length) + '</b><span class="mps-muted">after the day: did not show</span></div></div>');
+  const paid = regs.filter(r => r.paid), unpaid = regs.length - paid.length;
+  const shown = MP_PAY_PILLS.concat(MP_PAY_MORE.filter(m => paid.some(r => r.payment_method === m)));   /* the legacy four always; Zelle / Unknown when used */
+  mpSet('mpSummary', '<div class="mpa-sum"><div class="mpa-sum-title">Payment Summary</div>'
+    + '<div class="mpa-sum-fees">' + mpMoney(ev.entry_fee) + ' entry + ' + mpMoney(ev.greens_fee) + ' greens = <b>' + mpMoney(price) + '</b> per player</div>'
+    + shown.map(m => { const n = paid.filter(r => r.payment_method === m).length; return '<div class="mpa-sum-m"><b>' + m + '</b><span>' + mpPlayers(n) + ' — <b>' + mpMoney(n * price) + '</b></span></div>'; }).join('')
+    + '<div class="mpa-sum-tot"><div class="mpa-sum-row"><span>Entry Fees ' + mpParen(paid.length + ' × ' + mpMoney(ev.entry_fee)) + '</span><strong>' + mpMoney(paid.length * Number(ev.entry_fee)) + '</strong></div>'
+    + '<div class="mpa-sum-row"><span>Greens Fees ' + mpParen(paid.length + ' × ' + mpMoney(ev.greens_fee)) + '</span><strong>' + mpMoney(paid.length * Number(ev.greens_fee)) + '</strong></div>'
+    + '<div class="mpa-sum-row mpa-sum-grand"><span>Total Collected</span><strong>' + mpPlayers(paid.length) + ' — ' + mpMoney(paid.length * price) + '</strong></div>'
+    + '<div class="mpa-sum-row mpa-sum-unpaid"><span>' + (mpIsPast(ev) ? 'Not Paid ' + mpParen('did not attend') : 'Not Paid Yet') + '</span><strong>' + mpPlayers(unpaid) + '</strong></div></div></div>');
 }
-function mpSetFilter(f) { _mpFilter = f; mpRenderRoster(); }
-function mpSetSort(k) { _mpSort = k; mpRenderRoster(); }
+/* a second tap on the active filter goes back to All (legacy) */
+function mpSetFilter(f) { _mpFilter = (_mpFilter === f && f !== 'all') ? 'all' : f; _mpKeep = new Set(); mpRenderRoster(); }
+/* First / Last / SL: ascending, descending, then off — registration order */
+function mpSetSort(k) {
+  if (_mpSort.k !== k) _mpSort = { k: k, dir: 1 };
+  else if (_mpSort.dir === 1) _mpSort.dir = -1;
+  else _mpSort = { k: null, dir: 0 };
+  mpRenderRoster();
+}
 
 /* ── writes ────────────────────────────────────────────────────────────── */
+/* one tap marks paid with that method, or switches the method; a tap on the active (green) pill asks first — Undo Payment */
+async function mpPayTap(regId, method) {
+  const r = _mpRegs.find(x => x.id === regId); if (!r || r.status !== 'registered') return;
+  _mpKeep.add('r' + regId);
+  if (r.paid && r.payment_method === method) {
+    const ok = (await mpConfirm('Undo Payment', mpName(r) + ' is marked paid by ' + method + '.\nMark them as not paid?', 'Yes, Undo')).ok;
+    if (ok) await mpSetPaid(regId, '');
+    return;
+  }
+  await mpSetPaid(regId, method);
+}
+async function mpPayMore(regId) {
+  const r = _mpRegs.find(x => x.id === regId); if (!r || r.status !== 'registered') return;
+  mpModalSettle({ ok: false });
+  const pick = await new Promise(res => {
+    _mpModalDone = res;
+    mpModalOpen('<div class="mpa-mtitle" id="mpModalTitle">Other Payment</div><div class="mpa-mmsg">' + mpEsc(mpName(r)) + ' paid by…</div><div class="mpa-macts" style="flex-wrap:wrap">'
+      + MP_PAY_MORE.map(m => '<button type="button" class="mpa-mbtn save" data-mpm="pick" data-v="' + mpEsc(m) + '">' + mpEsc(m) + '</button>').join('')
+      + '<button type="button" class="mpa-mbtn no" data-mpm="no">Never Mind</button></div>', 'pick');
+  });
+  if (pick && pick.ok && MP_PAY_MORE.includes(pick.v)) { _mpKeep.add('r' + regId); await mpSetPaid(regId, pick.v); }
+}
 async function mpSetPaid(regId, method) {
   const patch = method ? { paid: true, payment_method: method } : { paid: false, payment_method: null };
-  try { const r = _mpRegs.find(x => x.id === regId); await sb('PATCH', 'registrations?id=eq.' + regId, patch, MP_RP); await mpAudit(method ? 'paid' : 'unpaid', r && r.event_id, r && r.member_number, patch); await mpReload(); }
-  catch (e) { mpStatus('Could not save the payment: ' + e.message, true); }
+  _mpBusy++; mpToast('Saving…');
+  try { const r = _mpRegs.find(x => x.id === regId); await sb('PATCH', 'registrations?id=eq.' + regId, patch, MP_RP); await mpAudit(method ? 'paid' : 'unpaid', r && r.event_id, r && r.member_number, patch); mpToast('Saved', '', 1200); await mpReload(); }
+  catch (e) { mpToast('Could not save the payment', 'bad', 4000); mpStatus('Could not save the payment: ' + e.message, true); }
+  finally { _mpBusy--; }
 }
-/* 3-state: Eligible / Not eligible upsert the row; Unconfirmed deletes it. The QUALIFIED mark lives in its own table
-   and is never touched here — a reset cannot erase a winner — a legacy bug, Spiral brief Don't-port list. */
-async function mpSetElig(mn, eventId, state) {
+/* the circles answer at once and save behind the scenes, in order, 3 tries each, with a Saving / Retrying toast (legacy queue) */
+function mpEligTap(mn, eventId, state) {
   const ev = _mpEvents.find(e => e.id === eventId); if (!ev) return;
+  const reg = _mpRegs.find(r => r.event_id === eventId && r.member_number === mn);
+  _mpKeep.add(_mpSel === MP_PENDING ? 'p' + mn : 'r' + (reg ? reg.id : ''));
+  const prev = mpEligOf(mn, ev);
+  mpEligLocal(mn, eventId, state);
+  document.querySelectorAll('#tab-multipass [data-mp="elig"]').forEach(b => {   /* in place: nothing moves under the finger */
+    if (b.dataset.mn === mn && +b.dataset.id === eventId) b.classList.toggle('on', b.dataset.v === state);
+  });
+  _mpQ.push({ mn: mn, eventId: eventId, state: state, prev: prev }); mpRunQueue();
+}
+function mpEligLocal(mn, eventId, state) {
+  const ev = _mpEvents.find(e => e.id === eventId); if (!ev) return;
+  _mpElig = _mpElig.filter(x => !(x.member_number === mn && x.format === ev.format && x.regionals_season === ev.regionals_season));
+  if (state !== 'unconfirmed') _mpElig.push({ member_number: mn, format: ev.format, regionals_season: ev.regionals_season, state: state });
+}
+/* a reload while answers are still queued must not flip those circles back: lay the queued answers over what loaded */
+function mpOverlayQueue() { for (const j of _mpQ) mpEligLocal(j.mn, j.eventId, j.state); }
+async function mpRunQueue() {
+  if (_mpQRunning) return;
+  _mpQRunning = true; _mpBusy++;
+  const failed = [];
+  try {
+    while (_mpQ.length) {
+      const j = _mpQ[0]; let ok = false;
+      for (let t = 0; t < 3 && !ok; t++) {
+        mpToast(t ? 'Retrying… ' + (t + 1) + ' of 3' : 'Saving…', t ? 'retrying' : '');
+        ok = await mpSetElig(j.mn, j.eventId, j.state, true);
+        if (!ok && t < 2) await new Promise(res => setTimeout(res, 800 * (t + 1)));
+      }
+      _mpQ.shift();
+      if (!ok) { failed.push('#' + j.mn); mpEligLocal(j.mn, j.eventId, j.prev); }   /* undo what the circle showed: it never reached the database */
+    }
+  } finally {
+    _mpQRunning = false; _mpBusy--;
+    if (failed.length) mpRenderRoster();   /* show the reverted circles even if the reload below cannot reach the database */
+    mpToast(failed.length ? 'Not saved for ' + failed.join(', ') + '. Those circles are back as they were.' : 'Saved', failed.length ? 'bad' : '', failed.length ? 8000 : 1200);
+    await mpReload();
+  }
+}
+/* 3-state: Eligible / Not eligible upsert the row; Unconfirmed deletes it. The winner mark lives in its own table
+   and is never touched here — a reset cannot erase a winner — a legacy bug, Spiral brief Don't-port list. */
+async function mpSetElig(mn, eventId, state, quiet) {
+  const ev = _mpEvents.find(e => e.id === eventId); if (!ev) return false;
   const key = 'member_number=eq.' + encodeURIComponent(mn) + '&format=eq.' + ev.format + '&regionals_season=eq.' + encodeURIComponent(ev.regionals_season);
   try {
     if (state === 'unconfirmed') await sb('DELETE', 'eligibility?' + key, null, MP_RP);
     else await sb('POST', 'eligibility?on_conflict=member_number,format,regionals_season', { member_number: mn, format: ev.format, regionals_season: ev.regionals_season, state: state, set_by: 'admin:slate', set_at: new Date().toISOString() },
                   { ...MP_RP, Prefer: 'resolution=merge-duplicates,return=representation' });
     await mpAudit('eligibility:' + state, eventId, mn, { format: ev.format, season: ev.regionals_season });
-    await mpReload();
-  } catch (e) { mpStatus('Could not save the check: ' + e.message, true); }
+    if (!quiet) await mpReload();
+    return true;
+  } catch (e) { mpStatus('Could not save the check: ' + e.message, true); return false; }
 }
+/* the Singles star — one tap, as the legacy admin; a second tap undoes it. Marks qualified for this format + Regionals
+   season: later sign-ups in that format are flagged and new ones refused by the server. */
 async function mpQualify(mn, eventId) {
   const ev = _mpEvents.find(e => e.id === eventId); if (!ev) return;
-  if (!confirm('Mark #' + mn + ' as qualified for ' + mpFmt(ev.format) + ' ' + ev.regionals_season + ' Singles Regionals? Their later ' + mpFmt(ev.format) + ' sign-ups get flagged and new ones are refused.')) return;
+  _mpBusy++; mpToast('Saving…');
   try { await sb('POST', 'qualified', { member_number: mn, format: ev.format, regionals_season: ev.regionals_season, event_id: ev.id, marked_by: 'admin:slate' }, MP_RP);
-        await mpAudit('qualified', eventId, mn, { format: ev.format, season: ev.regionals_season }); await mpReload(); }
-  catch (e) { mpStatus('Could not mark qualified: ' + e.message, true); }
+        await mpAudit('qualified', eventId, mn, { format: ev.format, season: ev.regionals_season }); mpToast('#' + mn + ' marked qualified for ' + mpFmt(ev.format) + ' ' + ev.regionals_season + ': later ' + mpFmt(ev.format) + ' sign-ups are refused. Tap ★ again to undo.', '', 5000); await mpReload(); }
+  catch (e) { mpToast('Could not mark qualified', 'bad', 4000); mpStatus('Could not mark qualified: ' + e.message, true); }
+  finally { _mpBusy--; }
 }
 async function mpUnqualify(mn, eventId) {
-  const ev = _mpEvents.find(e => e.id === eventId); if (!ev || !confirm('Undo the qualified mark for #' + mn + '?')) return;
+  const ev = _mpEvents.find(e => e.id === eventId); if (!ev) return;
+  _mpBusy++; mpToast('Saving…');
   try { await sb('DELETE', 'qualified?member_number=eq.' + encodeURIComponent(mn) + '&format=eq.' + ev.format + '&regionals_season=eq.' + encodeURIComponent(ev.regionals_season), null, MP_RP);
-        await mpAudit('unqualified', eventId, mn, { format: ev.format, season: ev.regionals_season }); await mpReload(); }
-  catch (e) { mpStatus('Could not undo: ' + e.message, true); }
+        await mpAudit('unqualified', eventId, mn, { format: ev.format, season: ev.regionals_season }); mpToast('Qualified mark removed', '', 2000); await mpReload(); }
+  catch (e) { mpToast('Could not undo', 'bad', 4000); mpStatus('Could not undo: ' + e.message, true); }
+  finally { _mpBusy--; }
 }
 async function mpCancel(mn, eventId) {
-  const notify = document.getElementById('mpNotifyCancel') && document.getElementById('mpNotifyCancel').checked;
-  if (!confirm('Cancel #' + mn + ' for this event?' + (notify ? ' They get a cancellation email with a calendar update.' : ' No email is sent.'))) return;
-  _mpBusy = true;
-  try { const r = await mpGas('mp_admin_cancel', { member_number: mn, event_id: eventId, notify: !!notify });
-        if (!r.ok) mpStatus('Not cancelled: ' + (r.error || 'unknown error'), true); else mpStatus('Cancelled #' + mn + (r.email === 'sent' ? ', emailed' : r.email === 'blocked' ? ', on the No-Contact list so not emailed' : '') + '.');
+  const ev = _mpEvents.find(e => e.id === eventId), r = _mpRegs.find(x => x.event_id === eventId && x.member_number === mn); if (!ev) return;
+  const ans = await mpConfirm('Cancel Registration', 'Cancel ' + (r ? mpName(r) : '#' + mn) + ', #' + mn + '\n' + mpFmt(ev.format) + ' · ' + mpLongDay(ev.starts_at) + '?', 'Yes, Cancel',
+    { label: 'Email them a cancellation with a calendar update', on: true });
+  if (!ans.ok) return;
+  const notify = !!ans.checked;
+  _mpBusy++; mpToast('Cancelling…');
+  try { const res = await mpGas('mp_admin_cancel', { member_number: mn, event_id: eventId, notify: notify });
+        if (!res.ok) { mpToast('Not cancelled', 'bad', 4000); mpStatus('Not cancelled: ' + (res.error || 'unknown error'), true); }
+        else mpToast('Cancelled #' + mn + (res.email === 'sent' ? ', emailed' : res.email === 'blocked' ? ', on the No-Contact list so not emailed' : res.email === 'failed' ? ', but the email did not go out' : ''), '', 3500);
         await mpReload(); }
-  catch (e) { mpStatus('Could not cancel: ' + e.message, true); }
-  finally { _mpBusy = false; }
+  catch (e) { mpToast('Could not cancel', 'bad', 4000); mpStatus('Could not cancel: ' + e.message, true); }
+  finally { _mpBusy--; }
 }
 
 /* ── contact: copy emails — No-Contact list — and CSV ──────────────────────── */
@@ -18176,18 +18613,28 @@ async function mpCopyEmails() {
   const skipped = live.length - allowed.length;
   if (!allowed.length) { if (st) st.textContent = 'No emails to copy' + (skipped ? ' — ' + skipped + ' on the No-Contact list' : '') + '.'; return; }
   const res = await sbCopyEmails(allowed.map(x => x.email).join(', '), 'slate:multipass');
-  if (st) st.textContent = res.ok ? 'Copied ' + (res.copied - res.removed) + ' email' + (res.copied - res.removed === 1 ? '' : 's') + ((skipped + res.removed) ? ' — left out ' + (skipped + res.removed) + ' on the No-Contact list' : '') + '.' : res.error;
+  const n = res.ok ? res.copied : 0, btn = document.getElementById('mpCopy');
+  if (res.ok && btn) { btn.textContent = '✅ Copied ' + n + '!'; setTimeout(() => { const b = document.getElementById('mpCopy'); if (b) b.textContent = '📋 Copy Emails'; }, 1800); }
+  if (st) st.textContent = res.ok ? ((skipped + res.removed) ? 'Left out ' + (skipped + res.removed) + ' on the No-Contact list.' : '') : res.error;
 }
+/* the selected event, every registration including cancelled; on Pending Eligibility, that list (the legacy CSV wrote headers only there) */
 function mpExportCsv() {
-  const { ev, rows } = mpRosterRows(); if (!ev) return;
-  const head = ['Event date', 'Format', 'Venue', 'APA #', 'First', 'Last', 'Email', 'Source', 'Registered', 'Status', 'Paid', 'Method', '10-scores check', 'Qualified', 'SL'];
-  const lines = [head.map(mpCsvCell).join(',')].concat(rows.map(x => {
-    const p = _mpPlayers[x.r.member_number] || {};
-    return [mpDay(ev.starts_at), mpFmt(ev.format), ev.venue_name || '', x.r.member_number, p.first_name || x.r.first_name || '', p.last_name || x.r.last_name || '', x.email,
-            x.r.source, x.r.registered_at, x.r.status, x.r.paid ? 'yes' : 'no', x.r.payment_method || '', x.elig, x.q ? 'yes' : '', x.sl || ''].map(mpCsvCell).join(',');
-  }));
+  let name, lines;
+  const head = ['Event date', 'Format', 'Venue', 'APA #', 'First', 'Last', 'Email', 'Phone', '8-Ball SL', '9-Ball SL', 'Source', 'Registered', 'Status', 'Paid', 'Method', '10-scores check', 'Qualified'];
+  const line = (ev, r) => { const p = _mpPlayers[r.member_number] || {}, q = mpQualOf(r.member_number, ev);
+    return [mpDay(ev.starts_at), mpFmt(ev.format), ev.venue_name || '', r.member_number, p.first_name || r.first_name || '', p.last_name || r.last_name || '', mpEmail(r), p.cell_phone || '',
+            p.sl_8ball || '', p.sl_9ball || '', r.source, r.registered_at, r.status, r.paid ? 'yes' : 'no', r.payment_method || '', mpEligOf(r.member_number, ev), q ? 'yes' : ''].map(mpCsvCell).join(','); };
+  if (_mpSel === MP_PENDING || _mpView === 'qual') {
+    const evs = mpListEvents(), ids = new Set(evs.map(e => e.id));
+    lines = [head.map(mpCsvCell).join(',')].concat(_mpRegs.filter(r => ids.has(r.event_id)).map(r => line(evs.find(e => e.id === r.event_id), r)));
+    name = 'multipass-all-events.csv';
+  } else {
+    const { ev, rows } = mpRosterRows({ everything: true }); if (!ev) return;
+    lines = [head.map(mpCsvCell).join(',')].concat(rows.map(x => line(ev, x.r)));
+    name = 'multipass-' + new Date(ev.starts_at).toISOString().slice(0, 10) + '-' + mpFmt(ev.format) + '.csv';
+  }
   const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'multipass-' + new Date(ev.starts_at).toISOString().slice(0, 10) + '-' + mpFmt(ev.format) + '.csv';
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
   document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
 }
 
@@ -18243,7 +18690,7 @@ async function mpAddPlayer() {
     body = { member_number: _mpPicked.member_number };
   }
   body.event_id = ev.id; body.source = document.getElementById('mpAddSource').value; body.notify = document.getElementById('mpAddNotify').checked;
-  _mpBusy = true; say('Checking…');
+  _mpBusy++; say('Checking…');
   try {
     const pv = await mpGas('mp_admin_preview', { member_number: body.member_number, event_id: ev.id });
     if (!pv.ok) { say(pv.error || 'Could not check that player.', true); return; }
@@ -18251,97 +18698,159 @@ async function mpAddPlayer() {
     /* the manual path is for players Slate does not know; anyone Slate knows goes through the find-player box so the
        picked record, never a typed name, is what gets stored — house rule: player selection = CueDrop */
     if (manual && pv.in_slate) { say('That APA number is in Slate as ' + (pv.name || 'a player') + '. Untick "not in Slate" and use the find-player box.', true); return; }
-    if (pv.why && !confirm('Heads up: #' + body.member_number + ' ' + (MP_WARN[pv.why] || pv.why) + '. Add them anyway?')) { say(''); return; }
+    /* the server reports only the FIRST rule a player fails (closed comes before qualified); a walk-in after the start or an
+       out-of-area player would hide "already qualified" or "not eligible" — so read those two directly too */
+    const warns = [];
+    if (pv.why) warns.push(MP_WARN[pv.why] || pv.why);
+    if (pv.qualified && pv.why !== 'qualified') warns.push(MP_WARN.qualified);
+    if (pv.eligibility === 'ineligible' && pv.why !== 'ineligible') warns.push(MP_WARN.ineligible);
+    if (warns.length && !(await mpConfirm('Add Anyway?', '#' + body.member_number + ' ' + warns.join('; ') + '.', 'Yes, Add')).ok) { say(''); return; }
     const r = await mpGas('mp_admin_register', Object.assign({ dry_run: false }, body));
     if (!r.ok) { say(r.error || 'Could not add.', true); return; }
-    say('Added' + (r.email === 'sent' ? ', confirmation emailed.' : r.email === 'blocked' ? ', no email — No-Contact list.' : '.'));
+    say('Added' + (r.email === 'sent' ? ', confirmation emailed.' : r.email === 'blocked' ? ', no email — No-Contact list.' : r.email === 'failed' ? ', but the email did not go out.' : '.'));
     mpAddClearPick(); ['mpAddNum', 'mpAddFirst', 'mpAddLast', 'mpAddEmail'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
     await mpReload();
   } catch (e) { say('Could not add: ' + e.message, true); }
-  finally { _mpBusy = false; }
+  finally { _mpBusy--; }
 }
 
-/* ── waiting on the 10-scores check — every upcoming event, one row per player + format + season ── */
-function mpRenderPending() {
-  const now = Date.now(), seen = new Map();
+/* ── Pending Eligibility — the default view: every player with a registration whose 10-scores check nobody has
+   confirmed, past events included (legacy). One row per player; a cell per format: circles, or a dash when the
+   player has no registration in that format. ── */
+function mpPendingRows() {
+  const byMn = new Map();
   for (const r of _mpRegs) {
     if (r.status !== 'registered') continue;
-    const ev = _mpEvents.find(e => e.id === r.event_id); if (!ev || ev.is_test || Date.parse(ev.starts_at) < now - 12 * 3600e3) continue;
-    if (mpEligOf(r.member_number, ev) !== 'unconfirmed') continue;
-    const k = r.member_number + '|' + ev.format + '|' + ev.regionals_season;
-    if (!seen.has(k)) seen.set(k, { r, ev, dates: [] });
-    seen.get(k).dates.push(mpDay(ev.starts_at));
+    const ev = _mpEvents.find(e => e.id === r.event_id); if (!ev || (ev.is_test && !mpShowTest())) continue;
+    const row = byMn.get(r.member_number) || { mn: r.member_number, r: r, f: {} };
+    const cur = row.f[ev.format], state = mpEligOf(r.member_number, ev);
+    /* a format spans one Regionals season in practice; if a player has two, the one still unconfirmed is the one shown */
+    if (!cur || (cur.state !== 'unconfirmed' && state === 'unconfirmed')) row.f[ev.format] = { ev: ev, state: state };
+    byMn.set(r.member_number, row);
   }
-  if (!seen.size) { mpSet('mpPending', '<span class="mps-muted">Nobody waiting.</span>'); return; }
-  mpSet('mpPending', '<table class="mps-t"><thead><tr><th>Player</th><th>Format</th><th>Signed up for</th><th></th></tr></thead><tbody>' + [...seen.values()].map(x =>
-    '<tr><td><b>' + mpEsc(mpName(x.r)) + '</b> <span class="mps-muted">#' + mpEsc(x.r.member_number) + '</span></td><td>' + mpFmt(x.ev.format) + ' · ' + mpEsc(x.ev.regionals_season) + '</td><td>' + mpEsc(x.dates.join(', ')) + '</td>'
-    + '<td><button type="button" class="btn btn-sm" data-mp="elig" data-mn="' + mpEsc(x.r.member_number) + '" data-id="' + x.ev.id + '" data-v="eligible">Eligible</button> '
-    + '<button type="button" class="btn btn-sm" data-mp="elig" data-mn="' + mpEsc(x.r.member_number) + '" data-id="' + x.ev.id + '" data-v="ineligible">Not eligible</button></td></tr>').join('') + '</tbody></table>');
+  const rows = [...byMn.values()].filter(x => Object.values(x.f).some(c => c.state === 'unconfirmed') || _mpKeep.has('p' + x.mn));
+  const p = mn => _mpPlayers[mn] || {};
+  return rows.sort((a, b) => ((p(a.mn).last_name || a.r.last_name || '') + ' ' + (p(a.mn).first_name || a.r.first_name || '')).toLowerCase()
+    .localeCompare(((p(b.mn).last_name || b.r.last_name || '') + ' ' + (p(b.mn).first_name || b.r.first_name || '')).toLowerCase()));
+}
+function mpRenderPending() {
+  const rows = mpPendingRows();
+  if (!rows.length) {
+    mpSet('mpPending', '<div class="mpa-wrap"><div class="mpa-empty">' + (mpListEvents().length ? 'All caught up. Nobody is waiting on the 10-scores check.'
+      : 'No qualifiers yet. Take sign-ups for one in <button type="button" class="mpa-go" data-mp="view" data-v="qual">Qualifiers</button>') + '</div></div>');
+    return;
+  }
+  const cell = (x, f) => {
+    const c = x.f[f]; if (!c) return '<td class="ctr mpa-muted">—</td>';
+    const b = (v, cls, sym, lbl) => '<button type="button" class="mpa-circle ' + cls + (c.state === v ? ' on' : '') + '" data-mp="elig" data-mn="' + mpEsc(x.mn) + '" data-id="' + c.ev.id + '" data-v="' + v + '" aria-label="' + lbl + ' ' + mpFmt(f) + '" title="' + lbl + ', ' + mpEsc(c.ev.regionals_season) + '">' + sym + '</button>';
+    return '<td><div class="mpa-circles">' + b('eligible', 'mpa-c-yes', '✓', 'Eligible') + b('ineligible', 'mpa-c-no', '✕', 'Not eligible') + b('unconfirmed', 'mpa-c-maybe', '?', 'Unconfirmed') + '</div></td>';
+  };
+  mpSet('mpPending', '<div class="mpa-wrap"><table class="mpa-t narrow"><thead><tr><th>Member #</th><th>Name</th><th class="ctr">8-Ball</th><th class="ctr">9-Ball</th></tr></thead><tbody>'
+    + rows.map(x => '<tr><td>' + mpEsc(x.mn) + '</td><td><b>' + mpEsc(mpName(x.r)) + '</b></td>' + cell(x, '8') + cell(x, '9') + '</tr>').join('') + '</tbody></table></div>');
 }
 
 /* ── activity: who did what — the member for self-service, admin:slate for this tab, admin for mp_admin_* ── */
 function mpRenderAudit() {
-  const rows = _mpAudit.filter(a => _mpSel == null || a.event_id === _mpSel || a.event_id == null).slice(0, 60);   /* tab-wide actions such as maintenance carry no event */
-  if (!rows.length) { mpSet('mpAuditList', '<span class="mps-muted">Nothing yet for this event.</span>'); return; }
+  const rows = _mpAudit.filter(a => _mpSel == null || _mpSel === MP_PENDING || a.event_id === _mpSel || a.event_id == null).slice(0, 60);   /* tab-wide actions such as maintenance carry no event */
+  if (!rows.length) { mpSet('mpAuditList', '<span class="mpa-muted">Nothing yet for this event.</span>'); return; }
   const who = a => /^[0-9]{8}$/.test(a.actor) ? 'player #' + a.actor : a.actor;
-  mpSet('mpAuditList', '<table class="mps-t"><thead><tr><th>When</th><th>Who</th><th>What</th><th>Player</th><th>Detail</th></tr></thead><tbody>' + rows.map(a =>
+  mpSet('mpAuditList', '<table class="mpa-t"><thead><tr><th>When</th><th>Who</th><th>What</th><th>Player</th><th>Detail</th></tr></thead><tbody>' + rows.map(a =>
     '<tr><td>' + mpEsc(mpDay(a.at) + ' ' + mpTime(a.at)) + '</td><td>' + mpEsc(who(a)) + '</td><td>' + mpEsc(a.action) + '</td><td>' + mpEsc(a.member_number ? '#' + a.member_number : '') + '</td>'
-    + '<td class="mps-muted">' + mpEsc(a.detail ? JSON.stringify(a.detail).slice(0, 120) : '') + '</td></tr>').join('') + '</tbody></table>');
+    + '<td class="mpa-muted">' + mpEsc(a.detail ? JSON.stringify(a.detail).slice(0, 120) : '') + '</td></tr>').join('') + '</tbody></table>');
 }
 
 /* ── maintenance — a server-side gate in every mp_* player action; no bypass key exists ── */
 async function mpToggleMaint(on) {
-  if (!confirm(on ? 'Pause sign-ups? Players see a "paused" notice and cannot register or cancel until you turn this off.' : 'Turn sign-ups back on?')) { document.getElementById('mpMaint').checked = _mpMaint; return; }
+  const ok = (await mpConfirm(on ? 'Maintenance Mode' : 'End Maintenance', on ? 'Players see "sign-ups are paused" and cannot register or cancel until you turn this off.' : 'Turn player sign-ups back on?', on ? 'Yes, Pause' : 'Yes, Resume')).ok;
+  if (!ok) { document.getElementById('mpMaint').checked = _mpMaint; return; }
   try { await sb('PATCH', 'settings?id=eq.1', { maintenance: !!on }, MP_RP); await mpAudit(on ? 'maintenance_on' : 'maintenance_off', null, null, null); await mpReload(); }
   catch (e) { mpStatus('Could not change: ' + e.message, true); document.getElementById('mpMaint').checked = _mpMaint; }
 }
 
 /* ── wiring ────────────────────────────────────────────────────────────── */
+function mpSetView(v) {
+  _mpView = v === 'qual' ? 'qual' : 'reg'; _mpKeep = new Set();
+  const rv = document.getElementById('mpRegView'), qv = document.getElementById('mpQualView');
+  if (rv) rv.hidden = _mpView !== 'reg'; if (qv) qv.hidden = _mpView !== 'qual';
+  const tr = document.getElementById('mpTabReg'), tq = document.getElementById('mpTabQual');
+  if (tr) { tr.classList.toggle('active', _mpView === 'reg'); tr.setAttribute('aria-selected', String(_mpView === 'reg')); }
+  if (tq) { tq.classList.toggle('active', _mpView === 'qual'); tq.setAttribute('aria-selected', String(_mpView === 'qual')); }
+}
 function mpRenderAll() {
   const m = document.getElementById('mpMaint'); if (m) m.checked = _mpMaint;
-  mpStatus(_mpMaint ? 'Sign-ups are PAUSED for players.' : '', _mpMaint);
-  mpRenderFeed(); mpRenderEvents(); mpRenderRoster(); mpRenderPending(); mpRenderAudit();
+  const live = _mpEvents.filter(e => !e.is_test && e.enabled && !mpIsPast(e)).length;
+  if (_mpMaint) mpStatus('MAINTENANCE: sign-ups are paused for players', true);
+  else mpStatus(live + ' qualifier' + (live === 1 ? '' : 's') + ' taking sign-ups');
+  mpRenderEvents(); mpRenderRoster(); mpRenderAudit(); mpRenderFeed();
 }
-async function mpReload() { try { await mpLoad(); mpRenderAll(); } catch (e) { mpStatus('Could not load MultiPass: ' + e.message, true); } }
+async function mpReload() {
+  try { await mpLoad(); _mpLoadedAt = Date.now(); mpRenderAll(); return true; }
+  catch (e) { mpLoadFailed(e); return false; }
+}
+/* a failed load never looks like an empty league: say so, keep what was on screen, offer Try Again */
+function mpLoadFailed(e) {
+  const when = _mpLoadedAt ? ' Last good load ' + mpTime(new Date(_mpLoadedAt).toISOString()) + '.' : '';
+  mpStatus('Cannot reach the database: ' + (e && e.message ? e.message : 'no connection') + '.' + when, true);
+  if (!_mpLoadedAt) mpSet('mpPending', '<div class="mpa-wrap"><div class="mpa-empty">Could not load MultiPass. Check the connection, then <button type="button" class="mpa-go" data-mp="refresh">Try Again</button></div></div>');
+}
 async function mpInit() {
-  if (!SB_KEY) { mpSet('mpEvents', '<span class="mps-muted">Open Slate with ?key=… to manage MultiPass.</span>'); return; }
+  if (!SB_KEY) { mpSet('mpPending', '<div class="mpa-empty">Open Slate with ?key=… to manage MultiPass.</div>'); return; }
+  if (!_mpLoadedAt) { mpStatus('Loading…'); mpSet('mpPending', '<div class="mpa-wrap"><div class="mpa-empty">Loading MultiPass…</div></div>'); }
   if (!_mpInited) {
     _mpInited = true;
+    try { const saved = localStorage.getItem(MP_SEL_KEY); _mpSel = saved && saved !== MP_PENDING && /^[0-9]+$/.test(saved) ? +saved : MP_PENDING; } catch (e) { _mpSel = MP_PENDING; }
     mpAddWireSearch();
-    document.getElementById('mpEventSel').addEventListener('change', e => { _mpSel = +e.target.value; mpRenderRoster(); mpRenderAudit(); });
-    /* ONE delegated listener per event type — every action reads data-* values, none is built into an inline handler */
+    document.getElementById('mpEventSel').addEventListener('change', e => mpPick(e.target.value));
+    /* ONE delegated listener — every action reads data-* values, none is built into an inline handler */
     const panel = document.getElementById('tab-multipass');
     panel.addEventListener('click', e => {
       const b = e.target.closest('[data-mp]'); if (!b || !panel.contains(b) || b.disabled) return;
       const id = +b.dataset.id, mn = b.dataset.mn || '';
       switch (b.dataset.mp) {
+        case 'view':      mpSetView(b.dataset.v); break;
+        case 'refresh':   _mpKeep = new Set(); mpToast('Refreshing…'); mpReload().then(ok => mpToast(ok ? 'Up to date' : 'Could not refresh: no connection', ok ? '' : 'bad', ok ? 1200 : 5000)); break;
+        case 'paymore':   mpPayMore(id); break;
+        case 'addq':      mpOpenAddQ(); break;
         case 'fromfeed':  mpEnableFromFeed(b.dataset.src); break;
         case 'enable':    mpSetEnabled(id, b.dataset.on === '1'); break;
+        case 'edit':      mpEditEvent(id); break;
         case 'select':    mpSelect(id); break;
         case 'win':       mpSetWin(b.dataset.v); break;
         case 'filter':    mpSetFilter(b.dataset.v); break;
         case 'sort':      mpSetSort(b.dataset.v); break;
+        case 'pay':       mpPayTap(id, b.dataset.v); break;
+        case 'elig':      mpEligTap(mn, id, b.dataset.v); break;
         case 'qualify':   mpQualify(mn, id); break;
         case 'unqualify': mpUnqualify(mn, id); break;
         case 'cancel':    mpCancel(mn, id); break;
-        case 'elig':      mpSetElig(mn, id, b.dataset.v); break;
+        case 'copy':      mpCopyEmails(); break;
       }
     });
-    /* the cutoff is committed on focusout, never on change: Chrome fires change on every segment of a datetime-local */
-    panel.addEventListener('focusout', e => {
-      const f = e.target.closest('[data-mp-blur="cutoff"]'); if (!f || !panel.contains(f)) return;
-      if (f.value !== (f.dataset.orig || '')) mpSaveEvent(+f.dataset.id, 'cutoff_at', f.value);
+    /* the pop-up's own buttons: Never Mind / Yes / Save; a click on the backdrop or Escape is Never Mind */
+    const modal = document.getElementById('mpModal');
+    modal.addEventListener('click', e => {
+      if (e.target === modal) { mpModalFinish(_mpModalKind === 'form' ? null : { ok: false }); return; }
+      const b = e.target.closest('[data-mpm]'); if (!b || b.disabled) return;
+      if (b.dataset.mpm === 'yes') mpModalFinish({ ok: true, checked: (document.getElementById('mpModalCheck') || {}).checked });
+      else if (b.dataset.mpm === 'no') mpModalFinish(_mpModalKind === 'form' ? null : { ok: false });
+      else if (b.dataset.mpm === 'save') { const v = mpFormRead(); if (v.error) mpSet('mpFErr', mpEsc(v.error)); else mpModalFinish(v); }
+      else if (b.dataset.mpm === 'pick') mpModalFinish({ ok: true, v: b.dataset.v });
     });
-    panel.addEventListener('change', e => {
-      const f = e.target.closest('[data-mp-change]'); if (!f || !panel.contains(f)) return;
-      const id = +f.dataset.id;
-      if (f.dataset.mpChange === 'event') mpSaveEvent(id, f.dataset.field, f.value);
-      else if (f.dataset.mpChange === 'paid') mpSetPaid(id, f.value);
-      else if (f.dataset.mpChange === 'elig') mpSetElig(f.dataset.mn, id, f.value);
+    document.addEventListener('keydown', e => {
+      if (!mpModalIsOpen()) return;
+      if (e.key === 'Escape') { mpModalFinish(_mpModalKind === 'form' ? null : { ok: false }); return; }
+      if (e.key === 'Tab') {   /* keep Tab inside the pop-up */
+        const f = [...modal.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex="0"]')]; if (!f.length) return;
+        if (e.shiftKey && document.activeElement === f[0]) { e.preventDefault(); f[f.length - 1].focus(); }
+        else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
+      }
+    });
+    panel.addEventListener('keydown', e => {   /* Enter / Space on a sortable header sorts, as a click does */
+      const th = e.target.closest('th[data-mp="sort"]'); if (!th || (e.key !== 'Enter' && e.key !== ' ')) return;
+      e.preventDefault(); th.click();
     });
     document.getElementById('mpShowCancelled').addEventListener('change', mpRenderRoster);
     document.getElementById('mpShowTest').addEventListener('change', () => { mpRenderEvents(); mpRenderRoster(); });
-    document.getElementById('mpCopy').addEventListener('click', mpCopyEmails);
     document.getElementById('mpCsv').addEventListener('click', mpExportCsv);
     document.getElementById('mpAddBtn').addEventListener('click', mpAddPlayer);
     document.getElementById('mpMaint').addEventListener('change', e => mpToggleMaint(e.target.checked));
@@ -18358,12 +18867,13 @@ async function mpInit() {
 function mpStartPoll() {
   if (_mpPoll) clearInterval(_mpPoll);
   _mpPoll = setInterval(async () => {
-    const panel = document.getElementById('tab-multipass'); if (!panel || !panel.classList.contains('active') || _mpBusy) return;
-    if (document.activeElement && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) && panel.contains(document.activeElement)) return;
+    const panel = document.getElementById('tab-multipass'); if (!panel || !panel.classList.contains('active') || _mpBusy || mpModalIsOpen()) return;
+    const ae = document.activeElement;   /* a dropdown or checkbox keeps focus after a click: that must not freeze the roster (A7) */
+    if (ae && panel.contains(ae) && (ae.matches('textarea, input:not([type=checkbox]):not([type=radio]):not([type=button])') || (ae.tagName === 'SELECT' && Date.now() - _mpPickAt < 4000))) return;
     try {
-      const before = _mpSig; await mpLoad();
-      if (_mpSig !== before) mpRenderAll();
-    } catch { /* transient */ }
+      const before = _mpSig, wasDown = _mpPollDown; await mpLoad(); _mpLoadedAt = Date.now(); _mpPollDown = false;
+      if (_mpSig !== before || wasDown) mpRenderAll();
+    } catch (e) { _mpPollDown = true; mpLoadFailed(e); }   /* say the view is stale; the next tick tries again */
   }, 20000);
 }
 
