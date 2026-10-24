@@ -1124,6 +1124,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="preshot">PreShot</button>
       <button class="tab" data-tab="cuedrop">CueDrop</button>
       <button class="tab" data-tab="countmein">CountMeIn</button>
+      <button class="tab" data-tab="multipass">MultiPass</button>
       <button class="tab" data-tab="jackets">Jackets</button>
       <button class="tab" data-tab="racktime">RackTime</button>
       <button class="tab" data-tab="nexusreport">Nexus Issue</button>
@@ -1708,6 +1709,10 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
           </div>
         </div>
         <div id="spPatchesBlocker" class="status-line"></div>
+        <!-- Pre-flight (3.461): what to look at before Mail — patches routed to a
+             team the player isn't on, labels naming someone off the team,
+             captains getting several envelopes. spRenderPreflight(); never blocks. -->
+        <div id="spPreflight"></div>
         <!-- Unclaimed SPs (the "minority report"). Rendered by spRenderMinority()
              only when the All-League ↔ By-Division reconciliation finds an SP
              that no team ever claimed — i.e. the player was removed from the
@@ -4099,6 +4104,127 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
     <!-- ══════════════════════════════════════════════════════════════
          TAB: POOLPICS — ported from Apps/Snapshot/site/admin.html (3.306)
          ══════════════════════════════════════════════════════════════ -->
+    <!-- ═══════════════ MultiPass — singles-qualifier registration (Slate 3.460) ═══════════════
+         Brief: tools/claude/briefs/2026-10-20-multipass-rebuild.md. Guard: tools/claude/validate-multipass.mjs (SLATE).
+         Reads/writes multipass.* with the service key (sb() + Accept/Content-Profile multipass). The player page
+         (Apps/Multipass/site) lets a signed-in player register / cancel THEMSELF through apa-mailer mp_*. This tab:
+         take sign-ups for calendar events (poolplayers league 1457), fees / cutoff / Regionals season, the roster per
+         event (paid + method, 3-state eligibility, QUALIFIED mark), operator add (CueDrop for SPM players; the full
+         8-digit number for out-of-area players) and cancel through mp_admin_*, copy emails (No-Contact list:
+         dncIsBlocked + sbCopyEmails), formula-safe CSV, payment summary, pending-eligibility queue, maintenance.
+         Requires the admin loaded with ?key=<service-role JWT>. Source of this block: tools/claude/multipass/slate-panel.html -->
+    <div id="tab-multipass" class="tab-panel">
+      <style>
+        #tab-multipass .mps-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+        #tab-multipass .mps-head h2{margin:0}
+        #tab-multipass .mps-muted{color:var(--muted);font-size:.88rem}
+        #tab-multipass .mps-card{border:1px solid var(--border);border-radius:12px;background:var(--card);padding:16px;margin-bottom:16px}
+        #tab-multipass .mps-card h3{margin:0 0 8px;font-size:1.05rem}
+        #tab-multipass .mps-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0}
+        #tab-multipass .mps-spacer{flex:1}
+        #tab-multipass table.mps-t{width:100%;border-collapse:collapse;font-size:.88rem}
+        #tab-multipass table.mps-t th,#tab-multipass table.mps-t td{border-bottom:1px solid var(--border);padding:6px 8px;text-align:left;vertical-align:middle}
+        #tab-multipass table.mps-t th{font-size:.76rem;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);cursor:default}
+        #tab-multipass table.mps-t th.mps-sort{cursor:pointer}
+        #tab-multipass tr.mps-cancelled td{opacity:.5}
+        #tab-multipass tr.mps-later td{background:#fff8e1}
+        #tab-multipass .mps-pill{display:inline-block;font-size:.72rem;font-weight:700;padding:2px 8px;border-radius:999px;background:#e7edfb;color:#0031a1}
+        #tab-multipass .mps-pill.nine{background:#fde8ec;color:#b0001f}
+        #tab-multipass .mps-pill.test{background:#fff3cd;color:#7a5a00}
+        #tab-multipass .mps-pill.off{background:#f1f3f5;color:#4b5563}
+        #tab-multipass .mps-pill.warn{background:#fde8ec;color:#b0001f}
+        #tab-multipass .mps-sortbtn{background:none;border:none;padding:4px 0;font:inherit;font-size:.76rem;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);cursor:pointer;min-height:32px}
+        #tab-multipass .mps-sortbtn[aria-pressed="true"]{color:var(--text)}
+        #tab-multipass .mps-scroll{overflow-x:auto}
+        #tab-multipass input.mps-in,#tab-multipass select.mps-in{padding:4px 8px;border:1px solid var(--border);border-radius:6px;font:inherit;font-size:.85rem;background:var(--card);color:var(--text)}
+        #tab-multipass input.mps-money{width:64px}
+        #tab-multipass .mps-sum{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin:8px 0}
+        #tab-multipass .mps-sum div{border:1px solid var(--border);border-radius:8px;padding:8px 12px}
+        #tab-multipass .mps-sum b{display:block;font-size:1.1rem}
+        #tab-multipass .mps-q{color:#0a7d33;font-weight:700}
+        #tab-multipass .mps-add{border-top:1px dashed var(--border);margin-top:12px;padding-top:12px}
+        #tab-multipass .cd-search{position:relative}
+        #tab-multipass .cd-ac{position:absolute;top:100%;left:0;right:0;background:var(--card);border:1px solid var(--border);border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,.14);z-index:50;max-height:260px;overflow:auto;display:none;margin-top:2px}
+        #tab-multipass .cd-ac.show{display:block}
+        #tab-multipass .cd-ac-item{padding:8px 11px;cursor:pointer;border-bottom:1px solid var(--border)}
+        #tab-multipass .cd-ac-item:last-child{border-bottom:none}
+        #tab-multipass .cd-ac-item:hover,#tab-multipass .cd-ac-item.on{background:var(--spm-accent);color:#fff}
+        #tab-multipass .cd-ac-name{font-weight:600}
+        #tab-multipass .cd-ac-sub{font-size:.8rem;opacity:.85}
+        #tab-multipass .cd-picked{background:#e8f0fe;color:#1a3b6b;border-radius:8px;padding:8px 11px;font-size:.85rem;display:flex;gap:8px;align-items:center}
+        #tab-multipass .cd-picked b{color:#12305e}
+        #tab-multipass .cd-x{cursor:pointer;margin-left:auto;opacity:.7}
+      </style>
+      <div class="mps-head">
+        <h2>MultiPass</h2>
+        <span class="mps-muted">Singles-qualifier sign-ups · <a href="https://southportlandmetroapa.github.io/multipass/" target="_blank" rel="noopener">player page</a></span>
+        <span class="mps-spacer"></span>
+        <label class="mps-muted"><input type="checkbox" id="mpMaint"> Pause sign-ups (maintenance)</label>
+        <span id="mpStatus" class="mps-muted"></span>
+      </div>
+
+      <section class="mps-card">
+        <h3>Calendar events</h3>
+        <p class="mps-muted" style="margin:0 0 8px">Upcoming events on the league calendar (poolplayers league 1457). Take sign-ups for the ones players register for.</p>
+        <div id="mpFeed"><span class="mps-muted">Loading the calendar…</span></div>
+      </section>
+
+      <section class="mps-card">
+        <div class="mps-row"><h3 style="margin:0">Taking sign-ups</h3><span class="mps-spacer"></span><span id="mpWin"></span>
+          <label class="mps-muted"><input type="checkbox" id="mpShowTest"> test fixtures</label></div>
+        <div id="mpEvents" class="mps-scroll"></div>
+      </section>
+
+      <section class="mps-card">
+        <div class="mps-row"><h3 style="margin:0">Roster</h3><select id="mpEventSel" class="mps-in"></select>
+          <span class="mps-spacer"></span><label class="mps-muted"><input type="checkbox" id="mpShowCancelled"> show cancelled</label></div>
+        <div id="mpSummary"></div>
+        <div class="mps-row" id="mpFilters"></div>
+        <div class="mps-row">
+          <button type="button" id="mpCopy" class="btn btn-sm">Copy emails</button>
+          <button type="button" id="mpCsv" class="btn btn-sm">Export CSV</button>
+          <label class="mps-muted"><input type="checkbox" id="mpNotifyCancel" checked> email the player when I cancel</label>
+          <span id="mpCopyStatus" class="mps-muted"></span>
+        </div>
+        <div id="mpRoster" class="mps-scroll"></div>
+        <div class="mps-add">
+          <h3>Add a player</h3>
+          <div class="mps-row">
+            <div class="cd-search" style="flex:1;min-width:240px">
+              <input id="mpAddSearch" autocomplete="off" placeholder="Search player by name or APA #" class="mps-in" style="width:100%">
+              <div class="cd-ac" id="mpAddAc"></div>
+            </div>
+            <label class="mps-muted"><input type="checkbox" id="mpAddManualToggle"> not in Slate (out of area)</label>
+          </div>
+          <div class="cd-picked" id="mpAddPicked" style="display:none"></div>
+          <div class="mps-row" id="mpAddManual" style="display:none">
+            <input id="mpAddNum" class="mps-in" placeholder="Full 8-digit APA #" inputmode="numeric" maxlength="8" style="width:150px">
+            <input id="mpAddFirst" class="mps-in" placeholder="First name">
+            <input id="mpAddLast" class="mps-in" placeholder="Last name">
+            <input id="mpAddEmail" class="mps-in" placeholder="Email (optional)" style="min-width:200px">
+          </div>
+          <div class="mps-row">
+            <select id="mpAddSource" class="mps-in"><option value="admin">Added by the office</option><option value="walkin">Walk-in</option></select>
+            <label class="mps-muted"><input type="checkbox" id="mpAddNotify" checked> email them a confirmation</label>
+            <button type="button" id="mpAddBtn" class="btn btn-sm">Add to this event</button>
+            <span id="mpAddStatus" class="mps-muted"></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="mps-card">
+        <h3>Activity</h3>
+        <p class="mps-muted" style="margin:0 0 8px">Every sign-up, cancel and office change for the selected event, newest first. Who = the player for self-service, admin:slate for this tab.</p>
+        <div id="mpAuditList" class="mps-scroll"></div>
+      </section>
+
+      <section class="mps-card">
+        <h3>Waiting on the 10-scores check</h3>
+        <p class="mps-muted" style="margin:0 0 8px">Registered players whose singles eligibility nobody has confirmed yet (at least 10 league match scores in that format in the last two years).</p>
+        <div id="mpPending"></div>
+      </section>
+    </div>
+
     <!-- ═══════════════ ChalkTalk — player question submissions (v0.1) ═══════════════
          Reads chalktalk.questions (service-role; Accept-Profile override on sb()).
          Each submitter email resolves → slate.players (0/1/many) for name / APA# /
@@ -6291,7 +6417,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.459';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.463';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -11546,6 +11672,7 @@ const TAB_LABEL = {
   preshot:       'PreShot',
   cuedrop:       'CueDrop',
   countmein:     'CountMeIn',
+  multipass:     'MultiPass',
   racktime:      'RackTime',
   nexusreport:   'Nexus Issue',
   playersfund:   'Players Fund',
@@ -12051,6 +12178,7 @@ function switchTab(name) {
   if (name === 'preshot') psInit();
   if (name === 'cuedrop') cdInit();
   if (name === 'countmein') cmInit();
+  if (name === 'multipass') mpInit();
   if (name === 'jackets') mjInit();
   if (name === 'racktime') rktInit();
   if (name === 'nexusreport') apaNexusInit();
@@ -17744,6 +17872,497 @@ function cmStartPoll() {
       const rows = await sb('GET', 'rsvps?' + (slug ? 'event_slug=eq.' + encodeURIComponent(slug) + '&' : '') + 'select=*&order=created_at.desc&limit=10000', null, CM_RP) || [];
       const sig = cmSignature(rows);
       if (sig !== _cmSig) { _cmRsvps = rows; _cmSig = sig; cmRender(); cmRenderAudience(); }
+    } catch { /* transient */ }
+  }, 20000);
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   MULTIPASS — singles-qualifier registration — Slate 3.460
+   ────────────────────────────────────────────────────────────────────────
+   Brief: tools/claude/briefs/2026-10-20-multipass-rebuild.md. Guard: tools/claude/validate-multipass.mjs, SLATE section.
+   Source of this block: tools/claude/multipass/slate-tab.js — patched in by tools/claude/multipass/patch-slate.mjs.
+   DATA     multipass.events / registrations / eligibility / qualified / audit / settings, service key via sb() with
+            Accept/Content-Profile multipass. Registrations are NEVER deleted here — the service role has no DELETE on
+            them; a cancel is a status change made by apa-mailer mp_admin_cancel, which also mails the player.
+   RULES    eligibility = the operator's 3-state check of "10 league match scores in 2 years" — a row per
+            member + format + Regionals season; Unconfirmed deletes the row. QUALIFIED is its own table, so resetting
+            eligibility can never erase a winner. A qualified player's later entries in that format are flagged.
+   PEOPLE   add = CueDrop find-player for SPM players — the picked member_number is the key, never a typed name;
+            out-of-area = the full 8-digit APA number, never 972-prefixed — another area has another prefix.
+   CONTACT  copy emails consults dncIsBlocked per member AND goes through sbCopyEmails — server-side strip —
+            and is registered in DNC_SURFACES in validate-email-blocklist.mjs. CSV cells are formula-neutralised.
+   LIVE     20 s poll on a signature of everything shown; skipped while this tab is hidden or a field has focus.
+   EVENTS   no inline handler carries a value: buttons and fields carry data-mp / data-mp-change plus data-* values and ONE
+            delegated listener reads them — an id from the poolplayers feed can never be decoded into script on the page
+            that holds the service key.
+   ════════════════════════════════════════════════════════════════════════ */
+const MP_RP = { 'Accept-Profile': 'multipass', 'Content-Profile': 'multipass' };
+const MP_MAILER_URL = 'https://script.google.com/macros/s/AKfycbzGTzkBRTrIIP_tD6sbtOOUmNZkXDdtxPoO4c8fdWt5h3tZFueNSISPv8Q3LWStx73Whw/exec';
+const MP_FEED_URL = 'https://api.poolplayers.com/events/GetAllEvents/1457';   /* SPM league since the 2026-09 split */
+const MP_TZ = 'America/Los_Angeles';
+const MP_METHODS = ['Cash', 'Venmo', 'CashApp', 'PayPal', 'Zelle', 'Unknown'];
+const MP_WINDOWS = [['up', 'Upcoming'], ['30', '30d'], ['60', '60d'], ['90', '90d'], ['180', '6mo'], ['365', '12mo'], ['all', 'All']];
+const MP_FILTERS = [['all', 'All'], ['unpaid', 'Unpaid'], ['paid', 'Paid'], ['eligible', 'Eligible'], ['ineligible', 'Ineligible'], ['unconfirmed', 'Unconfirmed'], ['qualified', 'Qualified']];
+let _mpEvents = [], _mpRegs = [], _mpElig = [], _mpQual = [], _mpAudit = [], _mpPlayers = {}, _mpFeedRows = null, _mpMaint = false;
+let _mpSel = null, _mpFilter = 'all', _mpSort = 'last', _mpWin = 'up', _mpSig = '', _mpPoll = null, _mpInited = false, _mpBusy = false;
+let _mpAc = [], _mpPicked = null, _mpFocus = -1, _mpTimer = null;
+
+function mpEsc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function mpFmt(f) { return f === '9' ? '9-Ball' : '8-Ball'; }
+function mpDay(iso) { return new Intl.DateTimeFormat('en-US', { timeZone: MP_TZ, weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(iso)); }
+function mpTime(iso) { return new Intl.DateTimeFormat('en-US', { timeZone: MP_TZ, hour: 'numeric', minute: '2-digit' }).format(new Date(iso)); }
+function mpMoney(n) { const v = Number(n || 0); return '$' + (v % 1 ? v.toFixed(2) : String(v)); }
+function mpSet(id, html) { const el = document.getElementById(id); if (el) el.innerHTML = html; }
+function mpStatus(msg, bad) { const el = document.getElementById('mpStatus'); if (el) { el.textContent = msg || ''; el.style.color = bad ? 'var(--spm-primary)' : ''; } }
+/* poolplayers gives naive wall-clock times; they are Pacific. Resolve the real instant — DST-safe. */
+function mpPacificIso(naive) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/.exec(String(naive || '')); if (!m) return null;
+  const wall = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0));
+  const offsetAt = ms => { const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: MP_TZ, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).formatToParts(new Date(ms)).map(x => [x.type, x.value]));
+    return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - ms; };
+  let ms = wall - offsetAt(wall); ms = wall - offsetAt(ms);
+  return new Date(ms).toISOString();
+}
+function mpFmtOfTitle(t) { const s = String(t || ''); return /9.?ball/i.test(s) ? '9' : /8.?ball/i.test(s) ? '8' : ''; }
+/* Regionals season a qualifier feeds — APA: qualify Jun 16 to Nov 30 → the Spring Regionals of the next year;
+   Dec 1 to Jun 15 → the Summer Regionals. Only a DEFAULT: the operator can change it before turning sign-ups on. */
+function mpSeasonFor(iso) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: MP_TZ, year: 'numeric', month: 'numeric', day: 'numeric' }).formatToParts(new Date(iso)).map(x => [x.type, x.value]));
+  const y = +p.year, md = (+p.month) * 100 + (+p.day);
+  if (md >= 616 && md <= 1130) return 'Spring ' + (y + 1);
+  return 'Summer ' + (md >= 1201 ? y + 1 : y);
+}
+/* Spreadsheet formula injection: a cell that starts with = + - @ or a control char is executed by Excel / Sheets.
+   Prefix a quote so it stays text, then CSV-quote it. */
+function mpCsvCell(v) {
+  let s = String(v == null ? '' : v);
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  return '"' + s.replace(/"/g, '""') + '"';
+}
+async function mpGas(action, extra) {
+  const r = await fetch(MP_MAILER_URL, { method: 'POST', body: JSON.stringify(Object.assign({ action: action, admin_key: SB_KEY }, extra || {})) });
+  return r.json();
+}
+async function mpAudit(action, eventId, mn, detail) {
+  try { await sb('POST', 'audit', { actor: 'admin:slate', action: action, event_id: eventId || null, member_number: mn || null, detail: detail || null }, MP_RP); return true; }
+  catch (e) { mpStatus('Saved, but the audit row did not write: ' + e.message, true); return false; }
+}
+
+/* ── load ──────────────────────────────────────────────────────────────── */
+async function mpLoad() {
+  const [events, regs, elig, qual, settings, audit] = await Promise.all([
+    sb('GET', 'events?select=*&order=starts_at', null, MP_RP),
+    sb('GET', 'registrations?select=*&order=registered_at&limit=10000', null, MP_RP),
+    sb('GET', 'eligibility?select=*&limit=10000', null, MP_RP),
+    sb('GET', 'qualified?select=*&limit=10000', null, MP_RP),
+    sb('GET', 'settings?id=eq.1&select=maintenance', null, MP_RP),
+    sb('GET', 'audit?select=*&order=at.desc&limit=300', null, MP_RP)]);
+  _mpEvents = events || []; _mpRegs = regs || []; _mpElig = elig || []; _mpQual = qual || []; _mpAudit = audit || [];
+  _mpMaint = !!(settings && settings[0] && settings[0].maintenance);
+  const need = [...new Set(_mpRegs.map(r => r.member_number))].filter(mn => !_mpPlayers[mn]);
+  for (let i = 0; i < need.length; i += 150) {
+    const chunk = need.slice(i, i + 150).map(encodeURIComponent).join(',');
+    const ps = await sb('GET', 'players?member_number=in.(' + chunk + ')&select=member_number,first_name,last_name,nickname,email,sl_8ball,sl_9ball', null, { 'Accept-Profile': 'slate' }) || [];
+    for (const p of ps) _mpPlayers[p.member_number] = p;
+    for (const mn of need.slice(i, i + 150)) if (!_mpPlayers[mn]) _mpPlayers[mn] = { member_number: mn, outOfArea: true };
+  }
+  _mpSig = mpSignature();
+}
+function mpSignature() {
+  return JSON.stringify([_mpMaint, _mpEvents.map(e => [e.id, e.enabled, e.entry_fee, e.greens_fee, e.cutoff_at, e.regionals_season, e.updated_at]),
+    _mpRegs.map(r => [r.id, r.status, r.paid, r.payment_method, r.updated_at]), _mpElig.map(x => [x.member_number, x.format, x.regionals_season, x.state]),
+    _mpQual.map(x => [x.member_number, x.format, x.regionals_season, x.event_id]), _mpAudit.length ? _mpAudit[0].id : 0]);
+}
+async function mpLoadFeed() {
+  try { const r = await fetch(MP_FEED_URL); if (!r.ok) throw new Error('HTTP ' + r.status); _mpFeedRows = await r.json(); }
+  catch (e) { _mpFeedRows = null; mpSet('mpFeed', '<span class="mps-muted" style="color:var(--spm-primary)">Could not load the league calendar: ' + mpEsc(e.message) + '</span>'); return; }
+  mpRenderFeed();
+}
+
+/* ── render: calendar feed ─────────────────────────────────────────────── */
+function mpRenderFeed() {
+  if (!_mpFeedRows) return;
+  const now = Date.now(), have = new Map(_mpEvents.map(e => [String(e.source_event_id), e]));
+  const rows = _mpFeedRows.map(x => x.OtherEventInformation ? { o: x.OtherEventInformation, a: x.AddressInformation || {} } : null).filter(Boolean)
+    .map(x => ({ ...x, startIso: mpPacificIso(x.o.StartDateTime) })).filter(x => x.startIso && Date.parse(x.startIso) > now)
+    .sort((a, b) => a.startIso.localeCompare(b.startIso));
+  if (!rows.length) { mpSet('mpFeed', '<span class="mps-muted">Nothing upcoming on the calendar.</span>'); return; }
+  mpSet('mpFeed', '<table class="mps-t"><thead><tr><th>Date</th><th>Event</th><th>Venue</th><th></th></tr></thead><tbody>' + rows.map(x => {
+    const id = String(x.o.OtherEventID), ex = have.get(id), fmt = mpFmtOfTitle(x.o.EventName);
+    const act = ex ? (ex.enabled ? '<span class="mps-pill">taking sign-ups</span>' : '<button type="button" class="btn btn-sm" data-mp="enable" data-id="' + ex.id + '" data-on="1">Take sign-ups again</button>')
+      : fmt ? '<button type="button" class="btn btn-sm" data-mp="fromfeed" data-src="' + mpEsc(id) + '">Take sign-ups</button>'
+            : '<span class="mps-muted">not an 8 or 9-Ball event</span>';
+    return '<tr><td>' + mpEsc(mpDay(x.startIso)) + '<br><span class="mps-muted">' + mpEsc(mpTime(x.startIso)) + '</span></td><td>' + mpEsc(x.o.EventName)
+      + (fmt ? ' <span class="mps-pill' + (fmt === '9' ? ' nine' : '') + '">' + mpFmt(fmt) + '</span>' : '') + '</td><td>' + mpEsc(x.a.Name || '') + '</td><td>' + act + '</td></tr>';
+  }).join('') + '</tbody></table>');
+}
+async function mpEnableFromFeed(sourceId) {
+  const x = (_mpFeedRows || []).find(r => r.OtherEventInformation && String(r.OtherEventInformation.OtherEventID) === String(sourceId)); if (!x) return;
+  const o = x.OtherEventInformation, a = x.AddressInformation || {};
+  const startIso = mpPacificIso(o.StartDateTime), fmt = mpFmtOfTitle(o.EventName);
+  const season = prompt('Which Singles Regionals does a win here send someone to?', mpSeasonFor(startIso)); if (season === null) return;
+  const fees = prompt('Entry fee + greens fee, e.g. 50+3', '50+3'); if (fees === null) return;
+  const fm = /^\s*(\d+(?:\.\d+)?)\s*\+\s*(\d+(?:\.\d+)?)\s*$/.exec(fees); if (!fm) { alert('Write the fees like 50+3.'); return; }
+  const addr = [a.Address1, a.City, [a.State, String(a.Zip || '').replace(/-_+$/, '')].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+  const row = { source_event_id: String(o.OtherEventID), format: fmt, title: String(o.EventName || '').trim(), starts_at: startIso,
+    last_board_at: o.EndDateTime ? mpPacificIso(o.EndDateTime) : null, venue_name: (a.Name || '').trim() || null, venue_address: addr || null,
+    entry_fee: +fm[1], greens_fee: +fm[2], regionals_season: season.trim() || mpSeasonFor(startIso), enabled: true, is_test: false };
+  try {
+    const ins = await sb('POST', 'events?on_conflict=source_event_id', row, { ...MP_RP, Prefer: 'resolution=merge-duplicates,return=representation' });
+    await mpAudit('enable_event', (ins && ins[0] && ins[0].id) || null, null, { source_event_id: row.source_event_id, fees: fees, season: row.regionals_season });
+    await mpReload();
+  } catch (e) { mpStatus('Could not turn on sign-ups: ' + e.message, true); }
+}
+
+/* ── render: events taking sign-ups ────────────────────────────────────── */
+function mpInWindow(e) {
+  const t = Date.parse(e.starts_at), now = Date.now();
+  if (_mpWin === 'all') return true;
+  if (_mpWin === 'up') return t > now - 12 * 3600e3;
+  return t > now - (+_mpWin) * 86400e3;
+}
+function mpVisibleEvents() {
+  const showTest = document.getElementById('mpShowTest') && document.getElementById('mpShowTest').checked;
+  return _mpEvents.filter(e => (showTest || !e.is_test) && mpInWindow(e));
+}
+function mpRenderEvents() {
+  mpSet('mpWin', '<div class="filter-chips">' + MP_WINDOWS.map(w => '<button type="button" class="chip' + (_mpWin === w[0] ? ' active' : '') + '" data-mp="win" data-v="' + w[0] + '">' + w[1] + '</button>').join('') + '</div>');
+  const evs = mpVisibleEvents(), feedIds = _mpFeedRows ? new Set(_mpFeedRows.map(x => String((x.OtherEventInformation || {}).OtherEventID))) : null;
+  if (!evs.length) { mpSet('mpEvents', '<span class="mps-muted">No events in this window. Use the calendar above to take sign-ups.</span>'); return; }
+  mpSet('mpEvents', '<table class="mps-t"><thead><tr><th>Date</th><th>Event</th><th>Fees</th><th>Cutoff</th><th>Regionals</th><th>In</th><th>Paid</th><th></th></tr></thead><tbody>' + evs.map(e => {
+    const regs = _mpRegs.filter(r => r.event_id === e.id && r.status === 'registered'), paid = regs.filter(r => r.paid).length;
+    const gone = feedIds && !e.is_test && !feedIds.has(String(e.source_event_id)) ? ' <span class="mps-pill warn" title="This event id is no longer on the poolplayers calendar">not on the calendar</span>' : '';
+    const cut = e.cutoff_at ? new Date(new Date(e.cutoff_at).getTime() - new Date(e.cutoff_at).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : '';
+    return '<tr><td>' + mpEsc(mpDay(e.starts_at)) + '<br><span class="mps-muted">' + mpEsc(mpTime(e.starts_at)) + '</span></td>'
+      + '<td><span class="mps-pill' + (e.format === '9' ? ' nine' : '') + '">' + mpFmt(e.format) + '</span> ' + mpEsc(e.title) + (e.is_test ? ' <span class="mps-pill test">TEST</span>' : '')
+      + (e.enabled ? '' : ' <span class="mps-pill off">sign-ups off</span>') + gone + '<br><span class="mps-muted">' + mpEsc(e.venue_name || '') + '</span></td>'
+      + '<td><input class="mps-in mps-money" value="' + mpEsc(e.entry_fee) + '" data-mp-change="event" data-id="' + e.id + '" data-field="entry_fee" aria-label="entry fee"> + '
+      + '<input class="mps-in mps-money" value="' + mpEsc(e.greens_fee) + '" data-mp-change="event" data-id="' + e.id + '" data-field="greens_fee" aria-label="greens fee"></td>'
+      + '<td><input type="datetime-local" class="mps-in" value="' + mpEsc(cut) + '" data-mp-blur="cutoff" data-orig="' + mpEsc(cut) + '" data-id="' + e.id + '" aria-label="cutoff" title="Blank = open until the start. Saves when you leave the field."></td>'
+      + '<td><input class="mps-in" style="width:110px" value="' + mpEsc(e.regionals_season) + '" data-mp-change="event" data-id="' + e.id + '" data-field="regionals_season" aria-label="regionals season"></td>'
+      + '<td>' + regs.length + '</td><td>' + paid + '</td>'
+      + '<td><button type="button" class="btn btn-sm" data-mp="select" data-id="' + e.id + '">Roster</button> '
+      + '<button type="button" class="btn btn-sm" data-mp="enable" data-id="' + e.id + '" data-on="' + (e.enabled ? '0' : '1') + '">' + (e.enabled ? 'Stop sign-ups' : 'Take sign-ups') + '</button></td></tr>';
+  }).join('') + '</tbody></table>');
+}
+function mpSetWin(w) { _mpWin = w; mpRenderAll(); }
+async function mpSaveEvent(id, field, value) {
+  const patch = {};
+  if (field === 'entry_fee' || field === 'greens_fee') { const n = Number(value); if (!isFinite(n) || n < 0) { alert('Fees are a number of dollars.'); mpRenderEvents(); return; } patch[field] = n; }
+  else if (field === 'cutoff_at') patch.cutoff_at = value ? new Date(value).toISOString() : null;   /* datetime-local is the browser's local time — the office is Pacific */
+  else if (field === 'regionals_season') { if (!String(value).trim()) { mpRenderEvents(); return; } patch.regionals_season = String(value).trim(); }
+  else return;
+  try { await sb('PATCH', 'events?id=eq.' + id, patch, MP_RP); await mpAudit('edit_event', id, null, patch); await mpReload(); }
+  catch (e) { mpStatus('Could not save: ' + e.message, true); }
+}
+async function mpSetEnabled(id, on) {
+  if (!on && !confirm('Stop taking sign-ups for this event? Players already registered stay registered.')) return;
+  try { await sb('PATCH', 'events?id=eq.' + id, { enabled: !!on }, MP_RP); await mpAudit(on ? 'enable_event' : 'disable_event', id, null, null); await mpReload(); }
+  catch (e) { mpStatus('Could not change sign-ups: ' + e.message, true); }
+}
+
+/* ── render: roster ────────────────────────────────────────────────────── */
+function mpSelect(id) { _mpSel = id; const s = document.getElementById('mpEventSel'); if (s) s.value = String(id); mpRenderRoster(); mpRenderAudit(); const r = document.getElementById('mpRoster'); if (r) r.scrollIntoView({ block: 'nearest' }); }
+function mpEligOf(mn, ev) { const x = _mpElig.find(e => e.member_number === mn && e.format === ev.format && e.regionals_season === ev.regionals_season); return x ? x.state : 'unconfirmed'; }
+function mpQualOf(mn, ev) { return _mpQual.find(q => q.member_number === mn && q.format === ev.format && q.regionals_season === ev.regionals_season) || null; }
+function mpName(r) { const p = _mpPlayers[r.member_number] || {}; return (p.first_name ? cdPlayerName(p) : [r.first_name, r.last_name].filter(Boolean).join(' ')) || '(no name)'; }
+function mpEmail(r) { const p = _mpPlayers[r.member_number] || {}; return String(r.email || p.email || '').replace(/\s+/g, ''); }
+function mpRosterRows() {
+  const ev = _mpEvents.find(e => e.id === _mpSel); if (!ev) return { ev: null, rows: [] };
+  const showCancelled = document.getElementById('mpShowCancelled') && document.getElementById('mpShowCancelled').checked;
+  let rows = _mpRegs.filter(r => r.event_id === ev.id && (showCancelled || r.status === 'registered')).map(r => {
+    const q = mpQualOf(r.member_number, ev), qEv = q ? _mpEvents.find(e => e.id === q.event_id) : null;
+    const later = !!(q && r.status === 'registered' && (!qEv || Date.parse(qEv.starts_at) < Date.parse(ev.starts_at)));
+    const p = _mpPlayers[r.member_number] || {};
+    return { r, ev, name: mpName(r), last: (p.last_name || r.last_name || '').toLowerCase(), first: (p.first_name || r.first_name || '').toLowerCase(),
+             sl: ev.format === '9' ? (p.sl_9ball || 0) : (p.sl_8ball || 0), elig: mpEligOf(r.member_number, ev), q: q, qEv: qEv, later: later, email: mpEmail(r) };
+  });
+  rows = rows.filter(x => _mpFilter === 'all' || (_mpFilter === 'unpaid' && !x.r.paid) || (_mpFilter === 'paid' && x.r.paid) || (_mpFilter === x.elig) || (_mpFilter === 'qualified' && x.q));
+  const key = { last: x => x.last + ' ' + x.first, first: x => x.first + ' ' + x.last, sl: x => String(9 - x.sl) + x.last, when: x => x.r.registered_at };
+  rows.sort((a, b) => key[_mpSort](a).localeCompare(key[_mpSort](b)));
+  return { ev, rows };
+}
+function mpRenderRoster() {
+  const sel = document.getElementById('mpEventSel');
+  if (sel) {
+    const evs = mpVisibleEvents();
+    if (_mpSel == null || !evs.some(e => e.id === _mpSel)) _mpSel = evs.length ? evs[0].id : null;
+    sel.innerHTML = evs.map(e => '<option value="' + e.id + '"' + (e.id === _mpSel ? ' selected' : '') + '>' + mpEsc(mpDay(e.starts_at) + ' · ' + mpFmt(e.format) + ' · ' + (e.venue_name || '')) + (e.is_test ? ' · TEST' : '') + '</option>').join('');
+  }
+  mpSet('mpFilters', '<div class="filter-chips">' + MP_FILTERS.map(f => '<button type="button" class="chip' + (_mpFilter === f[0] ? ' active' : '') + '" data-mp="filter" data-v="' + f[0] + '">' + f[1] + '</button>').join('') + '</div>');
+  const { ev, rows } = mpRosterRows();
+  if (!ev) { mpSet('mpRoster', '<span class="mps-muted">Pick an event.</span>'); mpSet('mpSummary', ''); return; }
+  mpRenderSummary(ev);
+  if (!rows.length) { mpSet('mpRoster', '<span class="mps-muted">Nobody here' + (_mpFilter === 'all' ? ' yet.' : ' for this filter.') + '</span>'); return; }
+  const th = (k, l) => '<th><button type="button" class="mps-sortbtn" data-mp="sort" data-v="' + k + '" aria-pressed="' + (_mpSort === k) + '">' + l + (_mpSort === k ? ' ▾' : '') + '</button></th>';
+  mpSet('mpRoster', '<table class="mps-t"><thead><tr>' + th('last', 'Player') + '<th>Email</th>' + th('sl', 'SL') + th('when', 'Registered') + '<th>Paid</th><th>10-scores check</th><th>Regionals</th><th></th></tr></thead><tbody>'
+    + rows.map(x => {
+      const r = x.r, mn = r.member_number, cancelled = r.status !== 'registered';
+      const pay = '<select class="mps-in" data-mp-change="paid" data-id="' + r.id + '" aria-label="payment"' + (cancelled ? ' disabled' : '') + '><option value="">not paid</option>'
+        + MP_METHODS.map(m => '<option value="' + m + '"' + (r.paid && r.payment_method === m ? ' selected' : '') + '>' + m + '</option>').join('') + '</select>';
+      const el = '<select class="mps-in" data-mp-change="elig" data-mn="' + mpEsc(mn) + '" data-id="' + ev.id + '" aria-label="10-scores check">'
+        + [['unconfirmed', 'Unconfirmed'], ['eligible', 'Eligible'], ['ineligible', 'Not eligible']].map(o => '<option value="' + o[0] + '"' + (x.elig === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select>';
+      const qual = x.q ? '<span class="mps-q">★ qualified' + (x.qEv ? ' ' + mpEsc(mpDay(x.qEv.starts_at)) : '') + '</span> <button type="button" class="btn btn-sm" data-mp="unqualify" data-mn="' + mpEsc(mn) + '" data-id="' + ev.id + '">undo</button>'
+        : '<button type="button" class="btn btn-sm" data-mp="qualify" data-mn="' + mpEsc(mn) + '" data-id="' + ev.id + '"' + (cancelled ? ' disabled' : '') + '>Won a board</button>';
+      return '<tr class="' + (cancelled ? 'mps-cancelled' : x.later ? 'mps-later' : '') + '"><td><b>' + mpEsc(x.name) + '</b><br><span class="mps-muted">#' + mpEsc(mn)
+        + ((_mpPlayers[mn] || {}).outOfArea ? ' · not in Slate' : '') + ' · ' + mpEsc(r.source) + (cancelled ? ' · cancelled' : '') + '</span>'
+        + (x.later ? '<br><span class="mps-pill warn">already qualified — later entry</span>' : '') + '</td>'
+        + '<td>' + (x.email ? mpEsc(x.email) : '<span class="mps-muted">no email</span>') + '</td><td>' + (x.sl || '') + '</td>'
+        + '<td>' + mpEsc(mpDay(r.registered_at)) + '</td><td>' + pay + '</td><td>' + el + '</td><td>' + qual + '</td>'
+        + '<td>' + (cancelled ? '' : '<button type="button" class="btn btn-sm" data-mp="cancel" data-mn="' + mpEsc(mn) + '" data-id="' + ev.id + '">Cancel</button>') + '</td></tr>';
+    }).join('') + '</tbody></table>');
+}
+function mpRenderSummary(ev) {
+  const regs = _mpRegs.filter(r => r.event_id === ev.id && r.status === 'registered'), price = Number(ev.entry_fee) + Number(ev.greens_fee);
+  const paid = regs.filter(r => r.paid), byMethod = MP_METHODS.map(m => [m, paid.filter(r => r.payment_method === m).length]).filter(x => x[1]);
+  mpSet('mpSummary', '<div class="mps-sum"><div>Registered<b>' + regs.length + '</b></div><div>Per player<b>' + mpMoney(price) + '</b><span class="mps-muted">' + mpMoney(ev.entry_fee) + ' entry + ' + mpMoney(ev.greens_fee) + ' greens</span></div>'
+    + '<div>Paid<b>' + paid.length + ' · ' + mpMoney(paid.length * price) + '</b><span class="mps-muted">' + (byMethod.map(x => mpEsc(x[0]) + ' ' + x[1]).join(' · ') || 'nobody yet') + '</span></div>'
+    + '<div>Entry / greens collected<b>' + mpMoney(paid.length * Number(ev.entry_fee)) + ' / ' + mpMoney(paid.length * Number(ev.greens_fee)) + '</b></div>'
+    + '<div>Not paid<b>' + (regs.length - paid.length) + '</b><span class="mps-muted">after the day: did not show</span></div></div>');
+}
+function mpSetFilter(f) { _mpFilter = f; mpRenderRoster(); }
+function mpSetSort(k) { _mpSort = k; mpRenderRoster(); }
+
+/* ── writes ────────────────────────────────────────────────────────────── */
+async function mpSetPaid(regId, method) {
+  const patch = method ? { paid: true, payment_method: method } : { paid: false, payment_method: null };
+  try { const r = _mpRegs.find(x => x.id === regId); await sb('PATCH', 'registrations?id=eq.' + regId, patch, MP_RP); await mpAudit(method ? 'paid' : 'unpaid', r && r.event_id, r && r.member_number, patch); await mpReload(); }
+  catch (e) { mpStatus('Could not save the payment: ' + e.message, true); }
+}
+/* 3-state: Eligible / Not eligible upsert the row; Unconfirmed deletes it. The QUALIFIED mark lives in its own table
+   and is never touched here — a reset cannot erase a winner — a legacy bug, Spiral brief Don't-port list. */
+async function mpSetElig(mn, eventId, state) {
+  const ev = _mpEvents.find(e => e.id === eventId); if (!ev) return;
+  const key = 'member_number=eq.' + encodeURIComponent(mn) + '&format=eq.' + ev.format + '&regionals_season=eq.' + encodeURIComponent(ev.regionals_season);
+  try {
+    if (state === 'unconfirmed') await sb('DELETE', 'eligibility?' + key, null, MP_RP);
+    else await sb('POST', 'eligibility?on_conflict=member_number,format,regionals_season', { member_number: mn, format: ev.format, regionals_season: ev.regionals_season, state: state, set_by: 'admin:slate', set_at: new Date().toISOString() },
+                  { ...MP_RP, Prefer: 'resolution=merge-duplicates,return=representation' });
+    await mpAudit('eligibility:' + state, eventId, mn, { format: ev.format, season: ev.regionals_season });
+    await mpReload();
+  } catch (e) { mpStatus('Could not save the check: ' + e.message, true); }
+}
+async function mpQualify(mn, eventId) {
+  const ev = _mpEvents.find(e => e.id === eventId); if (!ev) return;
+  if (!confirm('Mark #' + mn + ' as qualified for ' + mpFmt(ev.format) + ' ' + ev.regionals_season + ' Singles Regionals? Their later ' + mpFmt(ev.format) + ' sign-ups get flagged and new ones are refused.')) return;
+  try { await sb('POST', 'qualified', { member_number: mn, format: ev.format, regionals_season: ev.regionals_season, event_id: ev.id, marked_by: 'admin:slate' }, MP_RP);
+        await mpAudit('qualified', eventId, mn, { format: ev.format, season: ev.regionals_season }); await mpReload(); }
+  catch (e) { mpStatus('Could not mark qualified: ' + e.message, true); }
+}
+async function mpUnqualify(mn, eventId) {
+  const ev = _mpEvents.find(e => e.id === eventId); if (!ev || !confirm('Undo the qualified mark for #' + mn + '?')) return;
+  try { await sb('DELETE', 'qualified?member_number=eq.' + encodeURIComponent(mn) + '&format=eq.' + ev.format + '&regionals_season=eq.' + encodeURIComponent(ev.regionals_season), null, MP_RP);
+        await mpAudit('unqualified', eventId, mn, { format: ev.format, season: ev.regionals_season }); await mpReload(); }
+  catch (e) { mpStatus('Could not undo: ' + e.message, true); }
+}
+async function mpCancel(mn, eventId) {
+  const notify = document.getElementById('mpNotifyCancel') && document.getElementById('mpNotifyCancel').checked;
+  if (!confirm('Cancel #' + mn + ' for this event?' + (notify ? ' They get a cancellation email with a calendar update.' : ' No email is sent.'))) return;
+  _mpBusy = true;
+  try { const r = await mpGas('mp_admin_cancel', { member_number: mn, event_id: eventId, notify: !!notify });
+        if (!r.ok) mpStatus('Not cancelled: ' + (r.error || 'unknown error'), true); else mpStatus('Cancelled #' + mn + (r.email === 'sent' ? ', emailed' : r.email === 'blocked' ? ', on the No-Contact list so not emailed' : '') + '.');
+        await mpReload(); }
+  catch (e) { mpStatus('Could not cancel: ' + e.message, true); }
+  finally { _mpBusy = false; }
+}
+
+/* ── contact: copy emails — No-Contact list — and CSV ──────────────────────── */
+async function mpCopyEmails() {
+  const st = document.getElementById('mpCopyStatus');
+  await dncEnsure();
+  const { rows } = mpRosterRows();
+  const live = rows.filter(x => x.r.status === 'registered' && x.email);
+  const allowed = live.filter(x => !dncIsBlocked(x.r.member_number));
+  const skipped = live.length - allowed.length;
+  if (!allowed.length) { if (st) st.textContent = 'No emails to copy' + (skipped ? ' — ' + skipped + ' on the No-Contact list' : '') + '.'; return; }
+  const res = await sbCopyEmails(allowed.map(x => x.email).join(', '), 'slate:multipass');
+  if (st) st.textContent = res.ok ? 'Copied ' + (res.copied - res.removed) + ' email' + (res.copied - res.removed === 1 ? '' : 's') + ((skipped + res.removed) ? ' — left out ' + (skipped + res.removed) + ' on the No-Contact list' : '') + '.' : res.error;
+}
+function mpExportCsv() {
+  const { ev, rows } = mpRosterRows(); if (!ev) return;
+  const head = ['Event date', 'Format', 'Venue', 'APA #', 'First', 'Last', 'Email', 'Source', 'Registered', 'Status', 'Paid', 'Method', '10-scores check', 'Qualified', 'SL'];
+  const lines = [head.map(mpCsvCell).join(',')].concat(rows.map(x => {
+    const p = _mpPlayers[x.r.member_number] || {};
+    return [mpDay(ev.starts_at), mpFmt(ev.format), ev.venue_name || '', x.r.member_number, p.first_name || x.r.first_name || '', p.last_name || x.r.last_name || '', x.email,
+            x.r.source, x.r.registered_at, x.r.status, x.r.paid ? 'yes' : 'no', x.r.payment_method || '', x.elig, x.q ? 'yes' : '', x.sl || ''].map(mpCsvCell).join(',');
+  }));
+  const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'multipass-' + new Date(ev.starts_at).toISOString().slice(0, 10) + '-' + mpFmt(ev.format) + '.csv';
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+
+/* ── add a player: CueDrop find-player for SPM, or the full 8-digit number for out of area ── */
+function mpAddWireSearch() {
+  const input = document.getElementById('mpAddSearch'); if (!input || input._wired) return; input._wired = true;
+  input.addEventListener('input', () => {
+    clearTimeout(_mpTimer); const v = input.value.trim();
+    if (v.length < 2) { mpAddCloseAc(); return; }
+    _mpTimer = setTimeout(async () => { try { _mpAc = await cdSearch(v); _mpFocus = -1; mpAddRenderAc(); } catch (e) { mpAddCloseAc(); } }, 250);
+  });
+  input.addEventListener('keydown', e => {
+    const ac = document.getElementById('mpAddAc'); if (!ac || !ac.classList.contains('show')) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); _mpFocus = Math.min(_mpAc.length - 1, _mpFocus + 1); mpAddRenderAc(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); _mpFocus = Math.max(0, _mpFocus - 1); mpAddRenderAc(); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (_mpFocus >= 0) mpAddPick(_mpFocus); }
+    else if (e.key === 'Escape') mpAddCloseAc();
+  });
+  document.addEventListener('click', e => { if (!e.target.closest('#tab-multipass .cd-search')) mpAddCloseAc(); });
+}
+function mpAddRenderAc() {
+  const box = document.getElementById('mpAddAc'); if (!box) return;
+  if (!_mpAc.length) { box.innerHTML = '<div class="cd-ac-item" style="cursor:default;color:var(--muted)">No matches</div>'; box.classList.add('show'); return; }
+  box.innerHTML = _mpAc.map((p, i) => '<div class="cd-ac-item' + (i === _mpFocus ? ' on' : '') + '" onmousedown="mpAddPick(' + i + ')"><div class="cd-ac-name">' + esc(cdPlayerName(p)) + '</div><div class="cd-ac-sub">APA #' + esc(p.member_number) + (p.email ? ' · ' + esc(p.email) : '') + '</div></div>').join('');
+  box.classList.add('show');
+}
+function mpAddCloseAc() { const b = document.getElementById('mpAddAc'); if (b) b.classList.remove('show'); }
+function mpAddPick(i) {
+  const p = _mpAc[i]; if (!p) return;
+  _mpPicked = { member_number: p.member_number, name: cdPlayerName(p), email: String(p.email || '').trim() };
+  const inp = document.getElementById('mpAddSearch'); if (inp) inp.value = '';
+  mpAddCloseAc();
+  const pk = document.getElementById('mpAddPicked');
+  pk.style.display = 'flex';
+  pk.innerHTML = 'Adding: <b>' + esc(_mpPicked.name) + '</b> &middot; APA #' + esc(_mpPicked.member_number)
+    + (_mpPicked.email ? '' : ' &middot; <span style="color:var(--spm-primary)">no email on file</span>') + ' <span class="cd-x" onclick="mpAddClearPick()">&#10005;</span>';
+}
+function mpAddClearPick() { _mpPicked = null; const pk = document.getElementById('mpAddPicked'); if (pk) { pk.style.display = 'none'; pk.innerHTML = ''; } }
+const MP_WARN = { not_rostered: 'is not on a team in this format this session', closed: 'registration for this event has closed', qualified: 'already qualified in this format',
+                  ineligible: 'is marked not eligible', no_event: 'sign-ups are off for this event', already: 'is already registered' };
+async function mpAddPlayer() {
+  const st = document.getElementById('mpAddStatus'), say = (m, bad) => { if (st) { st.textContent = m; st.style.color = bad ? 'var(--spm-primary)' : ''; } };
+  const ev = _mpEvents.find(e => e.id === _mpSel); if (!ev) { say('Pick an event first.', true); return; }
+  const manual = document.getElementById('mpAddManualToggle').checked;
+  let body;
+  if (manual) {
+    const mn = document.getElementById('mpAddNum').value.trim();
+    if (!/^[0-9]{8}$/.test(mn)) { say('Type the full 8-digit APA number exactly as printed on their card.', true); return; }
+    body = { member_number: mn, first_name: document.getElementById('mpAddFirst').value.trim(), last_name: document.getElementById('mpAddLast').value.trim(), email: document.getElementById('mpAddEmail').value.trim() };
+    if (!body.first_name || !body.last_name) { say('First and last name are needed for a player who is not in Slate.', true); return; }
+  } else {
+    if (!_mpPicked) { say('Find the player first.', true); return; }
+    body = { member_number: _mpPicked.member_number };
+  }
+  body.event_id = ev.id; body.source = document.getElementById('mpAddSource').value; body.notify = document.getElementById('mpAddNotify').checked;
+  _mpBusy = true; say('Checking…');
+  try {
+    const pv = await mpGas('mp_admin_preview', { member_number: body.member_number, event_id: ev.id });
+    if (!pv.ok) { say(pv.error || 'Could not check that player.', true); return; }
+    if (pv.my_status === 'registered') { say('Already registered for this event.', true); return; }
+    /* the manual path is for players Slate does not know; anyone Slate knows goes through the find-player box so the
+       picked record, never a typed name, is what gets stored — house rule: player selection = CueDrop */
+    if (manual && pv.in_slate) { say('That APA number is in Slate as ' + (pv.name || 'a player') + '. Untick "not in Slate" and use the find-player box.', true); return; }
+    if (pv.why && !confirm('Heads up: #' + body.member_number + ' ' + (MP_WARN[pv.why] || pv.why) + '. Add them anyway?')) { say(''); return; }
+    const r = await mpGas('mp_admin_register', Object.assign({ dry_run: false }, body));
+    if (!r.ok) { say(r.error || 'Could not add.', true); return; }
+    say('Added' + (r.email === 'sent' ? ', confirmation emailed.' : r.email === 'blocked' ? ', no email — No-Contact list.' : '.'));
+    mpAddClearPick(); ['mpAddNum', 'mpAddFirst', 'mpAddLast', 'mpAddEmail'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    await mpReload();
+  } catch (e) { say('Could not add: ' + e.message, true); }
+  finally { _mpBusy = false; }
+}
+
+/* ── waiting on the 10-scores check — every upcoming event, one row per player + format + season ── */
+function mpRenderPending() {
+  const now = Date.now(), seen = new Map();
+  for (const r of _mpRegs) {
+    if (r.status !== 'registered') continue;
+    const ev = _mpEvents.find(e => e.id === r.event_id); if (!ev || ev.is_test || Date.parse(ev.starts_at) < now - 12 * 3600e3) continue;
+    if (mpEligOf(r.member_number, ev) !== 'unconfirmed') continue;
+    const k = r.member_number + '|' + ev.format + '|' + ev.regionals_season;
+    if (!seen.has(k)) seen.set(k, { r, ev, dates: [] });
+    seen.get(k).dates.push(mpDay(ev.starts_at));
+  }
+  if (!seen.size) { mpSet('mpPending', '<span class="mps-muted">Nobody waiting.</span>'); return; }
+  mpSet('mpPending', '<table class="mps-t"><thead><tr><th>Player</th><th>Format</th><th>Signed up for</th><th></th></tr></thead><tbody>' + [...seen.values()].map(x =>
+    '<tr><td><b>' + mpEsc(mpName(x.r)) + '</b> <span class="mps-muted">#' + mpEsc(x.r.member_number) + '</span></td><td>' + mpFmt(x.ev.format) + ' · ' + mpEsc(x.ev.regionals_season) + '</td><td>' + mpEsc(x.dates.join(', ')) + '</td>'
+    + '<td><button type="button" class="btn btn-sm" data-mp="elig" data-mn="' + mpEsc(x.r.member_number) + '" data-id="' + x.ev.id + '" data-v="eligible">Eligible</button> '
+    + '<button type="button" class="btn btn-sm" data-mp="elig" data-mn="' + mpEsc(x.r.member_number) + '" data-id="' + x.ev.id + '" data-v="ineligible">Not eligible</button></td></tr>').join('') + '</tbody></table>');
+}
+
+/* ── activity: who did what — the member for self-service, admin:slate for this tab, admin for mp_admin_* ── */
+function mpRenderAudit() {
+  const rows = _mpAudit.filter(a => _mpSel == null || a.event_id === _mpSel || a.event_id == null).slice(0, 60);   /* tab-wide actions such as maintenance carry no event */
+  if (!rows.length) { mpSet('mpAuditList', '<span class="mps-muted">Nothing yet for this event.</span>'); return; }
+  const who = a => /^[0-9]{8}$/.test(a.actor) ? 'player #' + a.actor : a.actor;
+  mpSet('mpAuditList', '<table class="mps-t"><thead><tr><th>When</th><th>Who</th><th>What</th><th>Player</th><th>Detail</th></tr></thead><tbody>' + rows.map(a =>
+    '<tr><td>' + mpEsc(mpDay(a.at) + ' ' + mpTime(a.at)) + '</td><td>' + mpEsc(who(a)) + '</td><td>' + mpEsc(a.action) + '</td><td>' + mpEsc(a.member_number ? '#' + a.member_number : '') + '</td>'
+    + '<td class="mps-muted">' + mpEsc(a.detail ? JSON.stringify(a.detail).slice(0, 120) : '') + '</td></tr>').join('') + '</tbody></table>');
+}
+
+/* ── maintenance — a server-side gate in every mp_* player action; no bypass key exists ── */
+async function mpToggleMaint(on) {
+  if (!confirm(on ? 'Pause sign-ups? Players see a "paused" notice and cannot register or cancel until you turn this off.' : 'Turn sign-ups back on?')) { document.getElementById('mpMaint').checked = _mpMaint; return; }
+  try { await sb('PATCH', 'settings?id=eq.1', { maintenance: !!on }, MP_RP); await mpAudit(on ? 'maintenance_on' : 'maintenance_off', null, null, null); await mpReload(); }
+  catch (e) { mpStatus('Could not change: ' + e.message, true); document.getElementById('mpMaint').checked = _mpMaint; }
+}
+
+/* ── wiring ────────────────────────────────────────────────────────────── */
+function mpRenderAll() {
+  const m = document.getElementById('mpMaint'); if (m) m.checked = _mpMaint;
+  mpStatus(_mpMaint ? 'Sign-ups are PAUSED for players.' : '', _mpMaint);
+  mpRenderFeed(); mpRenderEvents(); mpRenderRoster(); mpRenderPending(); mpRenderAudit();
+}
+async function mpReload() { try { await mpLoad(); mpRenderAll(); } catch (e) { mpStatus('Could not load MultiPass: ' + e.message, true); } }
+async function mpInit() {
+  if (!SB_KEY) { mpSet('mpEvents', '<span class="mps-muted">Open Slate with ?key=… to manage MultiPass.</span>'); return; }
+  if (!_mpInited) {
+    _mpInited = true;
+    mpAddWireSearch();
+    document.getElementById('mpEventSel').addEventListener('change', e => { _mpSel = +e.target.value; mpRenderRoster(); mpRenderAudit(); });
+    /* ONE delegated listener per event type — every action reads data-* values, none is built into an inline handler */
+    const panel = document.getElementById('tab-multipass');
+    panel.addEventListener('click', e => {
+      const b = e.target.closest('[data-mp]'); if (!b || !panel.contains(b) || b.disabled) return;
+      const id = +b.dataset.id, mn = b.dataset.mn || '';
+      switch (b.dataset.mp) {
+        case 'fromfeed':  mpEnableFromFeed(b.dataset.src); break;
+        case 'enable':    mpSetEnabled(id, b.dataset.on === '1'); break;
+        case 'select':    mpSelect(id); break;
+        case 'win':       mpSetWin(b.dataset.v); break;
+        case 'filter':    mpSetFilter(b.dataset.v); break;
+        case 'sort':      mpSetSort(b.dataset.v); break;
+        case 'qualify':   mpQualify(mn, id); break;
+        case 'unqualify': mpUnqualify(mn, id); break;
+        case 'cancel':    mpCancel(mn, id); break;
+        case 'elig':      mpSetElig(mn, id, b.dataset.v); break;
+      }
+    });
+    /* the cutoff is committed on focusout, never on change: Chrome fires change on every segment of a datetime-local */
+    panel.addEventListener('focusout', e => {
+      const f = e.target.closest('[data-mp-blur="cutoff"]'); if (!f || !panel.contains(f)) return;
+      if (f.value !== (f.dataset.orig || '')) mpSaveEvent(+f.dataset.id, 'cutoff_at', f.value);
+    });
+    panel.addEventListener('change', e => {
+      const f = e.target.closest('[data-mp-change]'); if (!f || !panel.contains(f)) return;
+      const id = +f.dataset.id;
+      if (f.dataset.mpChange === 'event') mpSaveEvent(id, f.dataset.field, f.value);
+      else if (f.dataset.mpChange === 'paid') mpSetPaid(id, f.value);
+      else if (f.dataset.mpChange === 'elig') mpSetElig(f.dataset.mn, id, f.value);
+    });
+    document.getElementById('mpShowCancelled').addEventListener('change', mpRenderRoster);
+    document.getElementById('mpShowTest').addEventListener('change', () => { mpRenderEvents(); mpRenderRoster(); });
+    document.getElementById('mpCopy').addEventListener('click', mpCopyEmails);
+    document.getElementById('mpCsv').addEventListener('click', mpExportCsv);
+    document.getElementById('mpAddBtn').addEventListener('click', mpAddPlayer);
+    document.getElementById('mpMaint').addEventListener('change', e => mpToggleMaint(e.target.checked));
+    document.getElementById('mpAddManualToggle').addEventListener('change', e => {
+      document.getElementById('mpAddManual').style.display = e.target.checked ? 'flex' : 'none';
+      document.getElementById('mpAddSearch').closest('.cd-search').style.display = e.target.checked ? 'none' : '';
+      if (e.target.checked) mpAddClearPick();
+    });
+  }
+  await mpReload();
+  mpLoadFeed();
+  mpStartPoll();
+}
+function mpStartPoll() {
+  if (_mpPoll) clearInterval(_mpPoll);
+  _mpPoll = setInterval(async () => {
+    const panel = document.getElementById('tab-multipass'); if (!panel || !panel.classList.contains('active') || _mpBusy) return;
+    if (document.activeElement && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) && panel.contains(document.activeElement)) return;
+    try {
+      const before = _mpSig; await mpLoad();
+      if (_mpSig !== before) mpRenderAll();
     } catch { /* transient */ }
   }, 20000);
 }
@@ -23458,6 +24077,17 @@ const OPTOUT_CODES = ['r','8','x','9','n','k','m8','mx','m9','mn','8m','9m','g']
 function spRenderOptouts() {
   const el = document.getElementById('spOptoutList');
   if (!el) return;
+  /* patch_optouts is anon-writable (PatchCheck self-service) and member_number /
+     opted_out_types land inside onclick / ontoggle attributes below — esc() does not
+     escape quotes. The DB now enforces 5 digits + known codes (constraints
+     patch_optouts_member_number_fmt_chk / _types_chk, 2026-10-23); this is the
+     second wall: anything else is never rendered as markup. */
+  const badShape = _spOptouts.filter(o => !/^[0-9]{5}$/.test(String(o.member_number || ''))
+    || (o.opted_out_types || []).some(c => !OPTOUT_CODES.includes(c)));
+  if (badShape.length) {
+    console.warn('[SP] ' + badShape.length + ' opt-out row(s) with an unexpected shape were not rendered');
+    _spOptouts = _spOptouts.filter(o => !badShape.includes(o));
+  }
   if (!_spOptouts.length) {
     el.innerHTML = '<p class="hint" style="margin:0;">No opt-outs.</p>';
     return;
@@ -23665,6 +24295,7 @@ async function spDeleteReport(id) {
 
 function spSetOperator(op) {
   _spOperatorFilter = op;
+  _spMailNotice = null;   // a stamp outcome belongs to the operator view it happened in
   document.querySelectorAll('#spOperatorSeg .seg-btn-slate').forEach(b =>
     b.classList.toggle('active', b.dataset.op === op));
   spRenderReports();
@@ -23732,12 +24363,16 @@ window.spDeleteReport = spDeleteReport;
          8m: x>=1 AND 8>=1
          9m: n>=1 AND 9>=1
          g : x>=1 AND 8>=1 AND 9>=1 AND n>=1
-       Routing = team_number of the most-recent un-mailed constituent.
-       Tiebreaker = highest team_number (per user rule).
+       Routing = the highest team_number among the constituent SPs' teams
+       (per user rule). An earlier note here said "most-recent un-mailed
+       constituent" — that was never implemented; spComputePatches does this.
 
-   Weight:
-     R/8/x/9/n/k = 1, 8m/9m = 2, g = 4.
-     Envelope capacity = 8 weight units.
+   Weight (sp_patches.weight, DB CHECK): R/8/x/9/n/k = 1, 8m/9m = 2, g = 4.
+     It is stored data ONLY — nothing packs on it since 3.461. Envelopes
+     hold ENVELOPE_CAPACITY = 8 PATCHES and a slam is one patch (the legacy
+     SP Admin rule). Weighting slams sent 4 captains in the 2026-10-22 batch
+     a second envelope that held a single slam. ALL packing goes through
+     spEnvelopePlan (guard: validate-sp-envelopes.mjs).
 
    Patches sit in slate.sp_patches with mailed_at + batch_id NULL until
    "Mail Patches" stamps a batch. "Undo Last Mailing" clears the most
@@ -23766,7 +24401,7 @@ const SP_WEIGHT = {
   'm8':1,'mx':1,'m9':1,'mn':1,
   '8m':2,'9m':2,'g':4
 };
-const ENVELOPE_CAPACITY = 8;
+const ENVELOPE_CAPACITY = 8;   // PATCHES per envelope (a slam counts 1) — see spEnvelopePlan
 const SP_DISPLAY = {
   'r':'R',  '8':'8',  'x':'x',  '9':'9',  'n':'n',  'k':'k',
   'm8':'m8','mx':'mx','m9':'m9','mn':'mn',
@@ -24625,6 +25260,9 @@ function spContactKey(p) {
 }
 
 let _spPatches = [];            // slate.sp_patches_v rows for current (session, operator)
+const _spPatchesLoad = { error: null };   // last spLoadPatches failure (an object so sandboxes can see it)
+let _spMailInFlight = false;   // spRenderPatches keeps Mail / Undo disabled while a stamp runs (3.461)
+let _spMailNotice = null;      // { text, cls } — the last stamp's outcome; shown until the next Mail / Undo
 let _spLastBatch = null;        // most-recent sp_mail_batches row (active = is_undone=false)
 /* The batch the EMAIL panel is pointed at. Defaults to the newest, but the
    operator can select an older one — a mailing that was never emailed used to
@@ -24676,10 +25314,12 @@ async function spLoadPatches() {
   try {
     _spPatches = await sbGetAll(
       'sp_patches_v?session_id=eq.' + currentSession.id + opFilter
-      + '&select=*&order=team_number.asc,is_slam.asc,sp_type.asc');
+      + '&select=*&order=team_number.asc,is_slam.asc,sp_type.asc,id.asc');
+    _spPatchesLoad.error = null;
   } catch (e) {
     console.warn('[patches] load failed', e);
     _spPatches = [];
+    _spPatchesLoad.error = e;   // spMailPatches refuses to stamp on a failed reload (3.461)
   }
   // Find latest active batch (for "Undo Last Mailing").
   if (opId != null) {
@@ -24708,7 +25348,7 @@ async function spLoadPatches() {
         /* How many DISTINCT people were emailed per batch — that is what makes
            "never emailed" visible rather than something you find out months
            later from a member. */
-        const log = await sbGetAll('patch_notify_log?select=batch_id,member_number');
+        const log = await sbGetAll('patch_notify_log?select=batch_id,member_number&order=id.asc');
         const seen = {};
         for (const r of (log || [])) {
           if (!r.batch_id) continue;
@@ -24726,6 +25366,7 @@ async function spLoadPatches() {
     _spLastBatch = null;
   }
   spRenderPatches();
+  spPreflightLoad();   // roster for the pre-flight checks; re-renders that panel when it lands
   if (typeof spNotifyRefreshBatchInfo === 'function') spNotifyRefreshBatchInfo();
 }
 
@@ -24936,7 +25577,7 @@ function spManSync() {
    Parsed counts are NEVER mutated \u2014 a manual SP is always its own row \u2014 so it
    can be un-applied exactly on delete, and a re-upload can't double it. \u2500\u2500\u2500\u2500 */
 async function spProjectManuals(reportId) {
-  const manuals = await sbGetAll('sp_manual_sp?session_id=eq.' + currentSession.id + '&select=*');
+  const manuals = await sbGetAll('sp_manual_sp?session_id=eq.' + currentSession.id + '&select=*&order=id.asc');
   /* Idempotent by construction: drop this report's projections and re-lay them.
      Every bd upload mints a NEW report_id with fresh rows (the wipe-and-replace
      pattern that has destroyed tagged data here before), so projection re-runs
@@ -25378,7 +26019,7 @@ async function spComputePatches() {
         + 'be detected. Run both reports for the same date and re-upload.';
       console.warn('[patches] reconciliation skipped — no LL paired on data_through');
     } else {
-      const llRows = await sbGetAll('sp_all_league_rows?report_id=eq.' + llReport.id + '&select=*');
+      const llRows = await sbGetAll('sp_all_league_rows?report_id=eq.' + llReport.id + '&select=*&order=id.asc');
       /* Attributed-by-anyone, from THIS bd. Uses the same inactive-team rule
          the compute uses, so a pulled team's SPs SURFACE here rather than
          being silently discarded. */
@@ -25617,13 +26258,25 @@ async function spComputePatches() {
    unmailed patch mailed, labeled or not. Now held patches stay unmailed
    (they keep showing below, flagged) until a label exists; the rest mail.
    Guard: tools/claude/validate-sp-mail-hold.mjs. */
+/* One row per patch id (3.461). sp_patches_v can return a patch twice when two
+   sp_label_overrides rows match one contact (a blank-operator row and an operator row —
+   the unique key treats blank operators as distinct). Every count and the stamp take the
+   first row; spPreflight names the duplicates so the overrides get fixed. */
+function spDedupeById(list) {
+  const seen = new Set(), unique = [], duplicates = [];
+  for (const p of (list || [])) {
+    if (seen.has(p.id)) duplicates.push(p); else { seen.add(p.id); unique.push(p); }
+  }
+  return { unique, duplicates };
+}
+
 function spSplitUnmailed(list, optouts) {
   const optoutMap = new Map();  // member_number → Set<sp_type>
   for (const o of (optouts || [])) {
     optoutMap.set(o.member_number, new Set(o.opted_out_types || []));
   }
   const out = { mailable: [], held: [], optedOut: [] };
-  for (const p of (list || [])) {
+  for (const p of spDedupeById(list).unique) {
     if (p.mailed_at) continue;
     const s = optoutMap.get(p.member_number);
     if (s && s.has(p.sp_type)) out.optedOut.push(p);
@@ -25656,6 +26309,225 @@ function spMailButtonState(split, listLen) {
            text: listLen ? 'All ' + listLen + ' computed patches have been mailed.' : '' };
 }
 
+/* Make a batch's audit row match what the SERVER holds for it (3.461). Read back, never
+   inferred from PATCH responses — a lost response would otherwise mark a batch empty while
+   its patches sit stamped and unprintable. Only a batch the server shows as truly empty is
+   closed as undone, so the print picker never offers an empty mailing. */
+async function spSettleBatch(batchId) {
+  const rows = spDedupeById(await sbGetAll('sp_patches_v?batch_id=eq.' + batchId + '&select=*&order=id.asc')).unique;
+  const n = rows.length, env = n ? spEnvelopePlan(rows).length : 0;
+  await sb('PATCH', 'sp_mail_batches?id=eq.' + batchId, n
+    ? { patch_count: n, envelope_count: env }
+    : { patch_count: 0, envelope_count: 0, is_undone: true, undone_at: new Date().toISOString() });
+  return { patch_count: n, envelope_count: env };
+}
+
+/* ─── Pre-flight (3.461) — what to look at BEFORE "Mail Patches" ─────────
+   Stamping is the point of no return: what is stamped gets printed and posted.
+   The 2026-10-22 batch went out with a patch routed to a captain whose team the
+   player is not on, two for players on no Fall roster, a label naming someone
+   not on the team, and captains sent envelopes they did not need — all in the
+   data, none on screen. This panel lists them for the patches the NEXT mailing
+   will contain (spSplitUnmailed().mailable). It never blocks Mail: each item is
+   a judgement (pull a slip, add a c/o override, fix the label upload).
+   Roster = slate.team_memberships of the current session (Team Screen import).
+   Numbers: sp_patches 5-digit ↔ roster 8-digit, matched on the last 5
+   (spNotifyM5); teams String(parseInt()) both sides (spNotifyTeamKey).
+   spPreflight is PURE (guard: validate-sp-envelopes.mjs P1–P4). */
+let _spPreflightRoster = null;   // { sessionId, byTeam: Map(team → [{m5, role, first, last, nick}]), teamsByM5: Map(m5 → Set(team)), count } | { sessionId, error }
+
+function spPreflightNameKey(s) {
+  const q = String.fromCharCode(34, 0x201C, 0x201D);   // straight + curly double quotes around a "Nickname"
+  return String(s || '').normalize('NFD').replace(/\p{M}/gu, '')
+    .replace(new RegExp('[' + q + '][^' + q + ']*[' + q + ']', 'g'), ' ')
+    .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function spPreflight(mailable, roster) {
+  const out = { offTeam: [], offRoster: [], contactNotOnTeam: [], contactNotCaptain: [],
+                multiEnvelope: [], sharedAddress: [], duplicates: [], rosterChecked: false };
+  const dd = spDedupeById(mailable);
+  mailable = dd.unique; out.duplicates = dd.duplicates;
+  if (!mailable.length) return out;
+  // Envelopes — straight from the plan the stamp and print use.
+  const perContact = new Map();
+  for (const e of spEnvelopePlan(mailable)) {
+    const k = spContactKey(e.patches[0]);
+    if (!perContact.has(k)) perContact.set(k, []);
+    perContact.get(k).push(e);
+  }
+  const byAddr = new Map();
+  for (const es of perContact.values()) {
+    const s = es[0];
+    if (es.length > 1) out.multiEnvelope.push({ contact: s.contact_name, sizes: es.map(e => e.patches.length) });
+    if (!s.contact_name) continue;
+    // Street + apartment line + ZIP5 — ZIP+4 vs ZIP5 is the same house; Apt 2 vs Apt 3 is not.
+    const a = spAddrKey((s.address_line1 || '') + ' ' + (s.address_line2 || ''), s.zip);
+    if (!byAddr.has(a)) byAddr.set(a, []);
+    byAddr.get(a).push(s.contact_name);
+  }
+  for (const names of byAddr.values()) if (names.length > 1) out.sharedAddress.push(names);
+  if (!roster || roster.error || !roster.byTeam || !roster.byTeam.size) return out;
+  out.rosterChecked = true;
+  // Routing: is the player on the roster of the team whose captain gets the patch?
+  for (const p of mailable) {
+    const tk = spNotifyTeamKey(p.team_number), m5 = spNotifyM5(p.member_number);
+    if ((roster.byTeam.get(tk) || []).some(r => r.m5 === m5)) continue;
+    const elsewhere = [...(roster.teamsByM5.get(m5) || [])].sort((a, b) => a - b);
+    (elsewhere.length ? out.offTeam : out.offRoster).push({ patch: p, elsewhere });
+  }
+  // Label contact: on the team at all? captain / co-captain? A contact who captains ANY
+  // team this session is a known captain's mailbox — routine, so not flagged (round-2
+  // critic: 6 of the 8 "not captain" lines were exactly that, every session).
+  const isCap = r => /^(captain|co-captain)$/i.test(r.role);
+  const captainNames = new Set();
+  for (const rows of roster.byTeam.values()) for (const r of rows) if (isCap(r)) {
+    captainNames.add(spPreflightNameKey(r.first + ' ' + r.last));
+    if (r.nick) captainNames.add(spPreflightNameKey(r.nick + ' ' + r.last));
+  }
+  const seen = new Set();
+  for (const p of mailable) {
+    const tk = spNotifyTeamKey(p.team_number);
+    if (seen.has(tk) || !p.contact_name) continue;
+    seen.add(tk);
+    const team = roster.byTeam.get(tk);
+    if (!team) continue;   // the whole team is off the roster — its patches are already listed above
+    const want = spPreflightNameKey(p.contact_name);
+    const hit = team.filter(r => spPreflightNameKey(r.first + ' ' + r.last) === want
+      || (r.nick && spPreflightNameKey(r.nick + ' ' + r.last) === want));
+    const caps = team.filter(isCap).map(r => r.first + ' ' + r.last);
+    if (!hit.length) out.contactNotOnTeam.push({ team: tk, contact: p.contact_name, captains: caps });
+    else if (!hit.some(isCap) && !captainNames.has(want)) out.contactNotCaptain.push({ team: tk, contact: p.contact_name, captains: caps });
+  }
+  return out;
+}
+
+/* The items that need a decision at the stuffing table, as plain data — one wording for the
+   panel, the Envelopes… list and the slips cover sheet (3.461 round 2: the panel alone vanished
+   the moment Mail emptied the queue, i.e. exactly when stuffing starts). The advice keeps the
+   mail and the records in step: once stamped (mode 'seal') a patch goes in its envelope to
+   its labeled contact — never "pull it", "hand-deliver it" or "hand-address it", which would
+   leave the envelope count, the Envelopes list and the notify email wrong. Before stamping
+   (mode 'mail') the only fix is at the source (the label) — never a c/o override, which keys
+   on the NAME for every team and session. Guard P7b lists the allowed verbs. */
+function spPreflightActions(f, mode) {
+  const sealed = mode === 'seal';
+  const who = p => (p.member_name || p.member_number) + ' · ' + (SP_DISPLAY[p.sp_type] || p.sp_type)
+    + ' → team ' + spNotifyTeamKey(p.team_number) + ' (envelope to ' + (p.contact_name || '—') + ')';
+  const n = (k, one, many) => k + ' ' + (k === 1 ? one : many);
+  const out = [];
+  if (f.duplicates && f.duplicates.length) out.push({ title: n(f.duplicates.length, 'patch appears', 'patches appear') + ' twice in the patch data',
+    help: 'Two mailing overrides match one contact, so the same patch comes back twice — it is counted once here. Fix the overrides before you mail or print.',
+    lines: f.duplicates.map(p => who(p)) });
+  if (f.offTeam.length) out.push({ title: n(f.offTeam.length, 'patch goes', 'patches go') + ' to a captain whose team the player is not on',
+    help: sealed
+      ? 'Leave it in the envelope — APA credited it to that team and the slip names the player. Tell that captain who it is for.'
+      : 'APA credited it to that team, so that captain will receive it with a slip naming the player. Mail it and tell the captain who it is for.',
+    lines: f.offTeam.map(x => who(x.patch) + ' — plays on ' + x.elsewhere.join(', ')) });
+  if (f.offRoster.length) out.push({ title: n(f.offRoster.length, 'patch is', 'patches are') + ' for a player on no roster this session',
+    help: 'They earned it, then left (or the Team Screen import missed them). ' + (sealed
+      ? 'Leave it in the envelope and tell their old captain who it is for.'
+      : 'Their old captain will receive it — mail it and tell the captain who it is for.'),
+    lines: f.offRoster.map(x => who(x.patch)) });
+  if (f.contactNotOnTeam.length) out.push({ title: n(f.contactNotOnTeam.length, 'label names', 'labels name') + ' someone who is not on that team',
+    help: sealed
+      ? 'Mail it as labeled and tell that person who it is for. Ask APA to fix the label so the next mailing goes right.'
+      : 'Before you mail: if the label is wrong, ask APA to fix it and re-upload the Labels PDF — otherwise it goes to this person.',
+    lines: f.contactNotOnTeam.map(x => 'Team ' + x.team + ' → ' + x.contact + (x.captains.length ? ' · Team Screen captain: ' + x.captains.join(', ') : '')) });
+  return out;
+}
+
+async function spPreflightLoad() {
+  if (!currentSession) return;
+  const sid = currentSession.id;
+  try {
+    const rows = await sbGetAll('team_memberships?select=member_number,role,'
+      + 'player:players(first_name,last_name,nickname),'
+      + 'team:teams!inner(team_number,division:divisions!inner(session_id))'
+      + '&team.division.session_id=eq.' + sid + '&order=team_id.asc,member_number.asc,id.asc');
+    // No Team Screen import yet = the checks cannot run — never report that as "checked".
+    if (!rows || !rows.length) throw new Error('no Team Screen roster has been imported for this session');
+    const byTeam = new Map(), teamsByM5 = new Map();
+    for (const r of (rows || [])) {
+      const tk = spNotifyTeamKey(r.team && r.team.team_number);
+      const m5 = spNotifyM5(r.member_number);
+      const pl = r.player || {};
+      if (!byTeam.has(tk)) byTeam.set(tk, []);
+      byTeam.get(tk).push({ m5, role: r.role || '', first: pl.first_name || '', last: pl.last_name || '', nick: pl.nickname || '' });
+      if (!teamsByM5.has(m5)) teamsByM5.set(m5, new Set());
+      teamsByM5.get(m5).add(tk);
+    }
+    _spPreflightRoster = { sessionId: sid, byTeam, teamsByM5, count: (rows || []).length };
+  } catch (e) {
+    console.warn('[preflight] roster load failed', e);
+    _spPreflightRoster = { sessionId: sid, error: e.message };
+  }
+  spRenderPreflight(spSplitUnmailed(_spPatches || [], _spOptouts));
+}
+
+/* A batch printed today packs with today's plan + today's labels. If that differs from what the
+   batch recorded at stamping (packing changed in 3.461, or Labels were re-uploaded since), a
+   reprint will not match the envelopes already posted — say so wherever we print. */
+function spPlanMismatchNote(batch, planLen) {
+  if (!batch || batch.envelope_count == null || batch.envelope_count === planLen) return '';
+  return 'This mailing was stamped as ' + batch.envelope_count + ' envelope' + (batch.envelope_count === 1 ? '' : 's')
+    + '; packing it today gives ' + planLen + ' (the packing rule changed in 3.461, or Labels were re-uploaded since). '
+    + 'A reprint will not match envelopes you already posted — reprint the whole set, not single envelopes.';
+}
+
+function spRenderPreflight(split) {
+  const box = document.getElementById('spPreflight');
+  if (!box) return;
+  /* Before stamping: the patches the next mailing will contain. After stamping (nothing left
+     to mail): the selected batch — the warnings matter most at the stuffing table. */
+  let subject = (split && split.mailable) || [], batch = null;
+  if (!subject.length) {
+    batch = spSelectedBatch();
+    subject = batch ? (_spPatches || []).filter(p => p.batch_id === batch.id) : [];
+  }
+  if (!subject.length) { box.innerHTML = ''; return; }
+  const roster = _spPreflightRoster && currentSession && _spPreflightRoster.sessionId === currentSession.id
+    ? _spPreflightRoster : null;
+  const f = spPreflight(subject, roster);
+  if (!batch) f.duplicates = spDedupeById((_spPatches || []).filter(p => !p.mailed_at)).duplicates;
+  const acts = spPreflightActions(f, batch ? 'seal' : 'mail');
+  const red = acts.reduce((s, a) => s + a.lines.length, 0);
+  const plan = spEnvelopePlan(subject);
+  const box3 = (c, inner, open) => '<details' + (open ? ' open' : '') + ' style="border-left:4px solid ' + c[0] + ';background:' + c[1]
+    + ';border-radius:0 8px 8px 0;padding:8px 10px;margin:6px 0;font-size:0.84rem">' + inner + '</details>';
+  const RED = ['#b91c1c', '#fef2f2', '#fecaca'], AMBER = ['#a16207', '#fefce8', '#fde68a'];
+  const section = (c, a, open) => box3(c,
+    '<summary style="cursor:pointer;font-weight:700;color:' + c[0] + '">' + esc(a.title) + '</summary>'
+    + '<p class="hint" style="margin:4px 0 6px">' + esc(a.help) + '</p>'
+    + a.lines.map(t => '<div style="padding:3px 0;border-top:1px solid ' + c[2] + '">' + esc(t) + '</div>').join(''), open);
+  const amber = f.contactNotCaptain.length ? section(AMBER, {
+    title: f.contactNotCaptain.length + (f.contactNotCaptain.length === 1 ? ' label names a player who is' : ' labels name players who are') + ' not a captain anywhere this session',
+    help: 'On the team but not captain on the Team Screen. Usually fine — APA’s mailing contact can be anyone; glance in case it’s stale.',
+    lines: f.contactNotCaptain.map(x => 'Team ' + x.team + ' → ' + x.contact + (x.captains.length ? ' · captain: ' + x.captains.join(', ') : '')) }, false) : '';
+  const multi = f.multiEnvelope.length
+    ? f.multiEnvelope.length + ' get more than one (' + f.multiEnvelope.map(x => esc(x.contact || '—') + ' ' + x.sizes.join('+')).join(', ') + ')'
+    : 'one envelope each';
+  const shared = f.sharedAddress.length
+    ? ' · ' + f.sharedAddress.length + ' address' + (f.sharedAddress.length === 1 ? ' gets' : 'es get') + ' envelopes for two captains ('
+      + f.sharedAddress.map(nm => esc(nm.join(' & '))).join('; ') + ')'
+    : '';
+  const info = '<p class="hint" style="margin:4px 0">Envelopes: ' + plan.length + ' for ' + new Set(subject.map(spContactKey)).size
+    + ' captain(s) — ' + multi + shared + '. ' + ENVELOPE_CAPACITY + ' patches per envelope, a slam counts as one, a player’s patches stay with their slip.</p>';
+  const mismatch = batch ? spPlanMismatchNote(batch, plan.length) : '';
+  const rosterNote = !roster
+    ? '<p class="hint" style="margin:2px 0">Checking rosters…</p>'
+    : roster.error
+      ? '<p style="color:#b91c1c;font-size:0.84rem;margin:2px 0">Roster didn’t load, so the “not on the team” checks did NOT run: ' + esc(roster.error) + '</p>'
+      : '';
+  const heading = (batch ? 'Before you seal — mailing of ' + esc(new Date(batch.created_at).toLocaleDateString()) : 'Before you mail')
+    + (roster && !roster.error ? (red ? ': <span style="color:#b91c1c">' + red + ' to check</span>' : ': nothing to check') : '');
+  box.innerHTML = '<div style="margin:8px 0"><div style="font-weight:700;font-size:0.9rem;margin-bottom:2px">' + heading + '</div>'
+    + rosterNote
+    + (mismatch ? '<p style="color:#b91c1c;font-size:0.84rem;margin:4px 0">' + esc(mismatch) + '</p>' : '')
+    + acts.map(a => section(RED, a, true)).join('')
+    + amber + info + '</div>';
+}
+
 /* ─── Render — group by team/envelope, show counts + mail state ─── */
 function spRenderPatches() {
   const root = document.getElementById('spPatchesList');
@@ -25675,9 +26547,11 @@ function spRenderPatches() {
   const mailBtn = document.getElementById('spMailPatchesBtn');
   const undoBtn = document.getElementById('spUndoMailBtn');
   const st = spMailButtonState(split, list.length);
-  mailBtn.disabled = st.disabled;
-  setStatus('spPatchesBlocker', st.text, st.cls);
-  undoBtn.disabled = !_spLastBatch;
+  mailBtn.disabled = st.disabled || _spMailInFlight;
+  // A stamp's outcome (warnings included) stays up until the next Mail / Undo.
+  setStatus('spPatchesBlocker', _spMailNotice ? _spMailNotice.text : st.text, _spMailNotice ? _spMailNotice.cls : st.cls);
+  undoBtn.disabled = !_spLastBatch || _spMailInFlight;
+  spRenderPreflight(split);
 
   if (list.length === 0) {
     root.innerHTML = '<p class="hint">Click "Compute from latest By-Division" to derive the patch list.</p>';
@@ -25694,7 +26568,12 @@ function spRenderPatches() {
   // Group by mailing contact (captain) — one block per envelope target,
   // matching how envelopes are built. A captain who runs several teams
   // is a single block. Unlabeled patches fall in their own per-team
-  // block. Envelope count = ceil(unmailed weight / capacity).
+  // block. Envelope count = what the NEXT mailing will put in the post for
+  // this contact: spEnvelopePlan over its MAILABLE patches only (held and
+  // opted-out patches never get an envelope) — the same number the summary,
+  // the stamp and Print Envelopes use.
+  const mailableIds = new Set(split.mailable.map(p => p.id));
+  const optedOutIds = new Set(split.optedOut.map(p => p.id));
   const byContact = new Map();
   for (const p of list) {
     const k = spContactKey(p);
@@ -25708,8 +26587,8 @@ function spRenderPatches() {
     if (!shown.length) continue;                 // nothing here under the filter
     const um = patches.filter(p => !p.mailed_at);
     const mailed = patches.filter(p => p.mailed_at);
-    const weightSum = um.reduce((s, p) => s + (p.weight || 1), 0);
-    const envCount = Math.max(1, Math.ceil(weightSum / ENVELOPE_CAPACITY));
+    const toMail = patches.filter(p => mailableIds.has(p.id));
+    const envCount = toMail.length ? spEnvelopePlan(toMail).length : 0;
     const sample = patches[0];
     const teams = [...new Set(patches.map(p => p.team_number))].sort();
     /* If sp_label_overrides has a row matching this contact, sp_patches_v
@@ -25729,12 +26608,18 @@ function spRenderPatches() {
         + (sample.address_line2 ? '<br>' + esc(sample.address_line2) : '')
         + '<br>' + esc(sample.city) + ', ' + esc(sample.state) + ' ' + esc(sample.zip)
       : '<span style="color:#b91c1c; font-weight:600;">Held — this team has no mailing label (not in the Labels PDF), so these are not mailed</span>';
+    /* Unmailed has three fates (3.461): ● goes in the next mailing; ⊘ opted out
+       (never mailed unless they opt back in); ⚠ held (no mailing label). Before,
+       all three showed the same green ● and the "To mail" list over-counted. */
     const tagHTML = p => {
-      const isNew = !p.mailed_at;
       const cls = p.is_slam ? 'sp-tag-slam' : 'sp-tag-reg';
-      const status = isNew
-        ? '<span style="color:#0a7d29; font-weight:700;">●</span>'
-        : '<span style="color:#9ca3af;" title="Mailed ' + esc(new Date(p.mailed_at).toLocaleString()) + '">✓</span>';
+      const status = p.mailed_at
+        ? '<span style="color:#9ca3af;" title="Mailed ' + esc(new Date(p.mailed_at).toLocaleString()) + '">✓</span>'
+        : mailableIds.has(p.id)
+          ? '<span style="color:#0a7d29; font-weight:700;" title="Goes in the next mailing">●</span>'
+          : optedOutIds.has(p.id)
+            ? '<span style="color:#6b7280; font-weight:700;" title="Opted out — not mailed">⊘ opted out</span>'
+            : '<span style="color:#b91c1c; font-weight:700;" title="Held — no mailing label for this team">⚠ held</span>';
       return '<span class="sp-patch-tag ' + cls + '">' + status + ' '
         + esc(SP_DISPLAY[p.sp_type]) + ' &middot; '
         + esc(p.member_name) + ' (' + esc(p.member_number) + ')'
@@ -25747,8 +26632,9 @@ function spRenderPatches() {
       +   '<div>' + head + ' &middot; '
       +     um.length + ' unmailed'
       +     (mailed.length ? ' &middot; <span class="muted">' + mailed.length + ' mailed</span>' : '')
-      +     ' &middot; <span class="muted">' + envCount + ' envelope' + (envCount === 1 ? '' : 's')
-      +     ' &middot; team' + (teams.length === 1 ? '' : 's') + ' ' + esc(teams.join(', '))
+      +     ' &middot; <span class="muted">'
+      +     (envCount ? envCount + ' envelope' + (envCount === 1 ? '' : 's') + ' next mailing &middot; ' : '')
+      +     'team' + (teams.length === 1 ? '' : 's') + ' ' + esc(teams.join(', '))
       +   '</span></div>'
       +   '<div class="muted" style="font-size:0.86rem; text-align:right;">' + addr + '</div>'
       + '</div>'
@@ -25991,19 +26877,11 @@ function spRenderPatchesSummary(list, lastBatch) {
   const split = spSplitUnmailed(list, _spOptouts);
   const um = split.mailable;
   const m  = list.filter(p =>  p.mailed_at);
-  // Group by captain — envelopes are per-captain, weight-split
-  // at ENVELOPE_CAPACITY.
-  const weightByContact = new Map();
-  for (const p of um) {
-    const k = spContactKey(p);
-    weightByContact.set(k, (weightByContact.get(k) || 0) + (p.weight || 1));
-  }
-  let envCount = 0;
-  for (const w of weightByContact.values()) {
-    envCount += Math.max(1, Math.ceil(w / ENVELOPE_CAPACITY));
-  }
+  // Envelopes per captain come from the ONE plan print uses (spEnvelopePlan).
+  const envCount = um.length ? spEnvelopePlan(um).length : 0;
+  const captains = new Set(um.map(spContactKey)).size;
   let html = '<strong>' + um.length + '</strong> patches to mail'
-    + ' to <strong>' + weightByContact.size + '</strong> captain(s)'
+    + ' to <strong>' + captains + '</strong> captain(s)'
     + ', <strong>' + envCount + '</strong> envelope(s)'
     + (split.held.length ? ' &middot; <span style="color:#b91c1c;">' + split.held.length + ' held (no mailing label)</span>' : '')
     + (split.optedOut.length ? ' &middot; <span class="muted">' + split.optedOut.length + ' opted out</span>' : '')
@@ -26016,43 +26894,68 @@ function spRenderPatchesSummary(list, lastBatch) {
   root.innerHTML = html;
 }
 
-/* ─── Mail Patches — atomic batch stamp ────────────────────────────
+/* ─── Mail Patches — batch stamp ───────────────────────────────────
    Generates a batch_id client-side, inserts the sp_mail_batches row
-   first, then PATCHes every unmailed sp_patches row for this
-   (session, operator) with mailed_at=now() + batch_id in chunked
-   updates.
+   first, then PATCHes the selected sp_patches rows with mailed_at=now()
+   + batch_id in chunked updates.
 
-   Print Slips / Print Envelopes UI lands in Phase 5; this phase just
-   manages state.
+   Stamps from the SERVER's state, never this tab's memory (3.461):
+     - patches are reloaded first — a tab left open does not see a mailing
+       made on another device since it loaded;
+     - opt-outs are re-read STRICTLY — a player may have opted out on
+       PatchCheck since the tab loaded, and spLoadOptouts fails OPEN (an
+       error leaves the list empty, which would mail every opted-out patch).
+       If they can't be read, nothing is stamped;
+     - every PATCH carries mailed_at=is.null, so a patch some other tab
+       stamped in the meantime is never moved into this batch (it would be
+       printed and posted twice). The rows the server actually changed are
+       counted; on a shortfall the audit row is corrected and the operator
+       told. Guard: validate-sp-envelopes.mjs (S1–S3).
 */
 async function spMailPatches() {
-  if (!currentSession || _spOperatorFilter === 'ALL') return;
+  if (!currentSession || _spOperatorFilter === 'ALL' || _spMailInFlight) return;
   const opId = SP_OPERATOR_SHORTS[_spOperatorFilter];
-  /* The batch is spSplitUnmailed().mailable — the SAME selection the Mail
-     button shows. Opted-out patches stay unmailed forever (unless the player
-     un-opts-out); HELD patches (no mailing contact) stay unmailed until a
-     label exists. Stamping a held patch would mark it mailed with no envelope
-     ever printed — it would silently vanish from the queue (pre-3.459 bug,
-     masked only because one held team disabled the button for everyone). */
-  const unmailed = spSplitUnmailed(_spPatches, _spOptouts).mailable;
-  if (!unmailed.length) return;
-
   const btn = document.getElementById('spMailPatchesBtn');
+  /* In flight: the pre-stamp reload re-renders the list, and spRenderPatches would
+     otherwise re-enable Mail mid-stamp (a second click = a second, parallel batch). */
+  _spMailInFlight = true;
+  _spMailNotice = null;
   if (btn) btn.disabled = true;
-  setStatus('spPatchesBlocker', 'Stamping batch…', '');
-  try {
-    const batchId = crypto.randomUUID();
-    // Envelope count — per captain (mailing contact), weight-split at
-    // ENVELOPE_CAPACITY. Matches spBatchEnvelopes' grouping.
-    const weightByContact = new Map();
-    for (const p of unmailed) {
-      const k = spContactKey(p);
-      weightByContact.set(k, (weightByContact.get(k) || 0) + (p.weight || 1));
+  let batchId = null, notice = null;
+  try {   // everything after the lock is inside try, so finally always releases it
+    /* What the operator reviewed on screen. The stamp never ADDS to it: patches computed
+       elsewhere since this page drew (preprod and prod share the DB) wait for a review. */
+    const reviewed = new Set(spSplitUnmailed(_spPatches, _spOptouts).mailable.map(p => p.id));
+    setStatus('spPatchesBlocker', 'Re-reading patches and opt-outs…', '');
+    await spLoadPatches();
+    // spLoadPatches swallows its own errors (empty list) — here that must be a loud stop.
+    if (_spPatchesLoad.error) throw new Error('the patch list did not reload — ' + _spPatchesLoad.error.message + ' — so nothing was stamped');
+    // Paged and ordered by the primary key: a page cap must never drop an opt-out (fail open).
+    const optouts = await sbGetAll('patch_optouts?select=member_number,opted_out_types&order=member_number.asc');
+    if (!Array.isArray(optouts)) throw new Error('the opt-out list did not load, so nothing was stamped');
+    /* The batch is spSplitUnmailed().mailable — the SAME selection the Mail
+       button shows. Opted-out patches stay unmailed forever (unless the player
+       un-opts-out); HELD patches (no mailing contact) stay unmailed until a
+       label exists. Stamping a held patch would mark it mailed with no envelope
+       ever printed — it would silently vanish from the queue (pre-3.459 bug,
+       masked only because one held team disabled the button for everyone). */
+    const fresh = spSplitUnmailed(_spPatches, optouts).mailable;
+    const unmailed = fresh.filter(p => reviewed.has(p.id));
+    // Keep the screen honest: the fresh opt-outs replace the tab's copy (names kept).
+    _spOptouts = optouts.map(o => Object.assign({}, (_spOptouts || []).find(x => x.member_number === o.member_number) || {}, o));
+    const appeared = fresh.length - unmailed.length;   // new since this page drew — not stamped
+    const vanished = reviewed.size - unmailed.length;  // mailed elsewhere / opted out since — not stamped
+    const sinceNote = (vanished ? ' ' + vanished + ' patch' + (vanished === 1 ? '' : 'es') + ' you saw were left out: mailed from another tab/device or opted out since this page loaded.' : '')
+      + (appeared ? ' ' + appeared + ' new patch' + (appeared === 1 ? '' : 'es') + ' appeared since this page loaded and were NOT stamped — review them, then Mail again.' : '');
+    if (!unmailed.length) {
+      notice = { cls: 'err', text: 'Nothing was stamped.' + (sinceNote || ' Nothing on screen was ready to mail.') };
+      return;
     }
-    let envCount = 0;
-    for (const w of weightByContact.values()) {
-      envCount += Math.max(1, Math.ceil(w / ENVELOPE_CAPACITY));
-    }
+
+    setStatus('spPatchesBlocker', 'Stamping batch…', '');
+    batchId = crypto.randomUUID();
+    // Envelope count — the same plan Print Envelopes will print.
+    const envCount = spEnvelopePlan(unmailed).length;
     // 1) Audit row.
     await sb('POST', 'sp_mail_batches', {
       id: batchId,
@@ -26062,14 +26965,14 @@ async function spMailPatches() {
       envelope_count: envCount,
       created_by_device: getDeviceId()
     });
-    // 2) Stamp the patches. PostgREST update by primary key list.
+    // 2) Stamp the patches — only rows the server still holds as unmailed.
     const ids = unmailed.map(p => p.id);
     const stampedAt = new Date().toISOString();
     const CHUNK = 200;
     let done = 0;
     while (done < ids.length) {
       const slice = ids.slice(done, done + CHUNK);
-      const idFilter = 'id=in.(' + slice.join(',') + ')';
+      const idFilter = 'id=in.(' + slice.join(',') + ')&mailed_at=is.null';
       await sb('PATCH', 'sp_patches?' + idFilter, {
         mailed_at: stampedAt,
         batch_id: batchId
@@ -26077,51 +26980,107 @@ async function spMailPatches() {
       done += slice.length;
       setStatus('spPatchesBlocker', 'Stamping… ' + done + '/' + ids.length, '');
     }
-    setStatus('spPatchesBlocker',
-      'Mailed batch of ' + unmailed.length + ' patches (' + envCount + ' envelopes). Print Slips / Print Envelopes now act on this batch.',
-      'ok');
+    // 3) The audit row = what the SERVER holds for this batch (a lost PATCH response
+    //    must not hide stamped patches, and nothing un-stamped may be counted).
+    const settled = await spSettleBatch(batchId);
+    const short = ids.length - settled.patch_count;
+    notice = settled.patch_count === 0
+      ? { cls: 'err', text: 'Nothing was stamped — every patch you saw had just been mailed from another tab or device, '
+          + 'so this batch was closed. Print from that mailing instead.' + sinceNote }
+      : {
+      cls: short || vanished || appeared ? 'err' : 'ok',
+      text: 'Mailed batch of ' + settled.patch_count + ' patches (' + settled.envelope_count
+        + ' envelopes). Print Slips / Print Envelopes now act on this batch.'
+        + (short ? ' ' + short + ' of ' + ids.length + ' had already been mailed from another tab or device and were NOT stamped again — check that batch before you print.' : '')
+        + sinceNote
+    };
     /* The picker keeps the operator's selection across refreshes — right for a
        plain reload, WRONG right after a mailing: it stayed on the previous batch
        and Print Slips printed that one (escape 0913-sp-slips-old-batch). A new
        mailing is always the batch you want to print next. */
     _spNotifyBatch = null;   // a NEW mailing exists → follow the newest batch
     await spLoadPatches();
+    /* …and "newest" can be ANOTHER tab's batch stamped a moment later — point Print at
+       THIS stamp's batch explicitly (round-3 review: the race 3.461 was built for). */
+    const mine = settled.patch_count ? (_spNotifyBatchList || []).find(b => b.id === batchId) : null;
+    if (mine && _spNotifyBatch !== mine) {
+      _spNotifyBatch = mine;
+      if (typeof spNotifyRefreshBatchInfo === 'function') spNotifyRefreshBatchInfo();
+    }
   } catch (e) {
     console.error('[patches] mail failed:', e);
-    setStatus('spPatchesBlocker', 'Mail failed: ' + e.message, 'err');
+    // A failure mid-stamp leaves the audit row claiming patches that were never
+    // stamped — make it tell the server's truth before the operator reacts.
+    let settled = null;
+    if (batchId) { try { settled = await spSettleBatch(batchId); } catch (e2) { /* reported below */ } }
+    notice = { cls: 'err', text: 'Mail failed: ' + e.message + (!batchId ? '' : settled
+      ? ' — ' + settled.patch_count + ' patches are stamped in this batch' + (settled.patch_count ? '; check it before printing.' : ' (none — the batch was closed).')
+      : ' — some patches may be stamped; reload and check the newest batch before printing.') };
+    _spNotifyBatch = null;
+    try { await spLoadPatches(); } catch (e3) { /* the notice already says reload */ }
   } finally {
+    _spMailInFlight = false;
+    // The outcome survives every re-render until the next Mail/Undo (spRenderPatches shows it).
+    if (notice) { _spMailNotice = notice; setStatus('spPatchesBlocker', notice.text, notice.cls); }
     // Re-derive, never force-enable: after a mailing only HELD patches may
     // remain, and a live-looking button that silently does nothing is a lie.
     if (btn) btn.disabled = spMailButtonState(spSplitUnmailed(_spPatches, _spOptouts),
                                               (_spPatches || []).length).disabled;
+    // The reload rendered Undo while the lock was still held — release it here too.
+    const undoBtn = document.getElementById('spUndoMailBtn');
+    if (undoBtn) undoBtn.disabled = !_spLastBatch;
   }
 }
 
 async function spUndoLastMailing() {
-  if (!_spLastBatch) return;
-  if (!confirm('Undo last mailing of ' + _spLastBatch.patch_count + ' patches?\n\nAll patches in that batch will go back to unmailed.')) return;
+  if (!_spLastBatch || _spMailInFlight) return;
+  /* Undo acts on the SERVER's latest live batch, never this tab's memory (3.461, round-3
+     review): a stale tab would undo an older mailing that is already in the post, and its
+     patches would be mailed a second time. If the server's latest isn't the one on screen,
+     stop and make the operator look again. */
+  const opId = SP_OPERATOR_SHORTS[_spOperatorFilter];
+  let latest;
+  try {
+    latest = (await sb('GET', 'sp_mail_batches?operator_id=eq.' + opId + '&session_id=eq.' + currentSession.id
+      + '&is_undone=eq.false&created_by_device=neq.legacy-backfill-spring&select=*&order=created_at.desc&limit=1')) || [];
+  } catch (e) {
+    setStatus('spPatchesBlocker', 'Undo stopped — could not re-read the latest mailing: ' + e.message, 'err');
+    return;
+  }
+  if (!latest.length || latest[0].id !== _spLastBatch.id) {
+    _spMailNotice = { cls: 'err', text: 'Undo stopped — this page was out of date: the latest mailing on the server is not the one '
+      + 'it showed. The list is reloaded now; check which mailing is latest before you undo.' };
+    _spNotifyBatch = null;
+    await spLoadPatches();
+    return;
+  }
+  const b = latest[0];
+  if (!confirm('Undo the mailing of ' + new Date(b.created_at).toLocaleString() + ' — ' + b.patch_count + ' patches, '
+    + b.envelope_count + ' envelopes?\n\nAll patches in that batch go back to unmailed. Only undo a mailing that has NOT gone in the post.')) return;
+  _spMailNotice = null;   // the previous stamp's outcome no longer describes the queue
   const btn = document.getElementById('spUndoMailBtn');
   if (btn) btn.disabled = true;
   setStatus('spPatchesBlocker', 'Undoing batch…', '');
   try {
     // Clear mailed_at + batch_id on all patches in this batch.
-    await sb('PATCH', 'sp_patches?batch_id=eq.' + _spLastBatch.id, {
+    await sb('PATCH', 'sp_patches?batch_id=eq.' + b.id, {
       mailed_at: null,
       batch_id: null
     });
     // Mark batch as undone.
-    await sb('PATCH', 'sp_mail_batches?id=eq.' + _spLastBatch.id, {
+    await sb('PATCH', 'sp_mail_batches?id=eq.' + b.id, {
       is_undone: true,
       undone_at: new Date().toISOString()
     });
-    setStatus('spPatchesBlocker', 'Undone. ' + _spLastBatch.patch_count + ' patches are back in the queue.', 'ok');
+    _spMailNotice = { cls: 'ok', text: 'Undone. ' + b.patch_count + ' patches are back in the queue.' };
     _spNotifyBatch = null;   // the selected batch may be the one just undone → follow the newest
     await spLoadPatches();
   } catch (e) {
     console.error('[patches] undo failed:', e);
-    setStatus('spPatchesBlocker', 'Undo failed: ' + e.message, 'err');
+    _spMailNotice = { cls: 'err', text: 'Undo failed: ' + e.message + ' — reload and check the latest mailing.' };
+    setStatus('spPatchesBlocker', _spMailNotice.text, 'err');
   } finally {
-    if (btn) btn.disabled = false;
+    if (btn) btn.disabled = !_spLastBatch;
   }
 }
 
@@ -26235,8 +27194,9 @@ window.spUndoLastMailing = spUndoLastMailing;
      player kind  → their patches + which mailing contact holds them
    Recipient derivation rules (locked via interview 2026-07-07):
      - contact grouping IS the envelope grouping: spContactKey + the
-       same ENVELOPE_CAPACITY ceil math spMailPatches stamps the batch
-       with — the number in the email always matches what was printed.
+       same spEnvelopePlan spMailPatches stamps the batch with and Print
+       Envelopes prints (3.461) — the number in the email always matches
+       what was printed.
      - contact email: contact_name resolved against the group's team
        rosters first, then any batch-team roster (first+last exact,
        casefolded, never split, never a true global name lookup — the
@@ -26432,8 +27392,7 @@ async function spNotifyBuild() {
   for (const [k, list] of byContact) {
     const teams = [...new Set(list.map(p => spNotifyTeamKey(p.team_number)))].sort();
     const contactName = (list[0].contact_name || '').trim();
-    const weight = list.reduce((s, p) => s + (p.weight || 1), 0);
-    const envelopes = Math.max(1, Math.ceil(weight / ENVELOPE_CAPACITY));
+    const envelopes = spEnvelopePlan(list).length;   // the same plan Print Envelopes prints
 
     /* Player lines: group by member, aggregate patch types with counts. */
     const byMember = new Map();
@@ -26826,47 +27785,95 @@ async function spPatchesForBatch(batchId) {
   if (!batchId) return [];
   return await sbGetAll(
     'sp_patches_v?batch_id=eq.' + batchId
-    + '&select=*&order=team_number.asc,is_slam.asc,sp_type.asc');
+    + '&select=*&order=team_number.asc,is_slam.asc,sp_type.asc,id.asc');
 }
 
-/* Build the envelope ordering for a batch. One envelope per CAPTAIN
-   (mailing contact) — every team that captain runs is combined, so a
-   captain with 4 teams gets 1 envelope instead of 4. A captain whose
-   weighted patch total exceeds ENVELOPE_CAPACITY overflows into extra
-   envelopes. Returns an array of
-   { contact_name, address_line1, ..., teams: [...], patches: [...] }
-   ordered by contact, ready to address and stack slips against. */
-function spBatchEnvelopes(patches) {
+/* ─── Envelope plan (3.461) — THE ONLY envelope packing in Slate ─────────
+   Every envelope number the operator sees or prints comes from here: the
+   patch list, the summary line, the batch's audit row (spMailPatches), Print
+   Envelopes, the Envelopes… list, the slips cover sheet and the notify email.
+   Before 3.461 those were three different formulas (weight-ceil over all
+   unmailed incl. opted-out, weight-ceil over mailable, greedy weight chunks)
+   that only agreed by luck.
+   Rules, in order:
+     1. one envelope group per mailing contact (spContactKey) — unchanged;
+     2. an envelope holds ENVELOPE_CAPACITY PATCHES and a slam is ONE patch
+        (legacy SP Admin rule). Weight-packing (8m/9m = 2, g = 4) sent 4
+        captains in the 2026-10-22 batch a second envelope with one slam in it;
+     3. the fewest envelopes possible: ceil(patches / capacity);
+     4. a player's patches stay together with their slip (one slip per player
+        per captain — spPrintSlips). A slip is split only when that player alone
+        exceeds capacity, or when keeping every slip whole would cost an extra
+        envelope — fewer envelopes wins; the captain receives all of them anyway.
+        The greedy packer split 12 players across envelopes in that batch.
+        How: an exact whole-slip search (spPackWhole), then at most ONE cut slip,
+        then first-fit-decreasing as a last resort (round-2 review found plain FFD
+        cut slips in 49 of 18,889 small cases where a whole packing existed).
+   Returns [{ contact_name, co_name, address…, teams, patches }] ordered by
+   contact, then by each envelope's first team — the order print + list use. */
+function spEnvelopePlan(patches) {
   const byContact = new Map();
-  for (const p of patches) {
+  for (const p of spDedupeById(patches).unique) {   // one envelope slot per patch id
     const k = spContactKey(p);
     if (!byContact.has(k)) byContact.set(k, []);
     byContact.get(k).push(p);
   }
+  // Total order (member + id break ties) so a reprint packs exactly like the stamp did.
+  const cmp = (a, b) => {
+    if (a.team_number !== b.team_number) return a.team_number < b.team_number ? -1 : 1;
+    if (!!a.is_slam !== !!b.is_slam) return a.is_slam ? 1 : -1;
+    const t = String(a.sp_type).localeCompare(String(b.sp_type));
+    if (t) return t;
+    if (a.member_number !== b.member_number) return String(a.member_number) < String(b.member_number) ? -1 : 1;
+    return (a.id || 0) - (b.id || 0);
+  };
   const envelopes = [];
   for (const k of [...byContact.keys()].sort()) {
-    const list = byContact.get(k);
-    list.sort((a, b) => {
-      if (a.team_number !== b.team_number) return a.team_number < b.team_number ? -1 : 1;
-      if (a.is_slam !== b.is_slam) return a.is_slam ? 1 : -1;
-      return a.sp_type.localeCompare(b.sp_type);
-    });
+    const list = byContact.get(k).slice().sort(cmp);
+    const order = new Map(list.map((p, i) => [p, i]));
     const sample = list[0];
-    const teams = [...new Set(list.map(p => p.team_number))].sort();
-    // Envelope packing — split the captain's patches into envelopes of
-    // <= ENVELOPE_CAPACITY weighted units.
-    let acc = [];
-    let accWeight = 0;
-    const chunks = [];
+    // Slips in first-appearance order; a slip bigger than one envelope is cut
+    // into full envelopes first (the only unavoidable split).
+    const slips = new Map();
     for (const p of list) {
-      if (accWeight + p.weight > ENVELOPE_CAPACITY && acc.length) {
-        chunks.push(acc);
-        acc = []; accWeight = 0;
-      }
-      acc.push(p); accWeight += p.weight;
+      if (!slips.has(p.member_number)) slips.set(p.member_number, []);
+      slips.get(p.member_number).push(p);
     }
-    if (acc.length) chunks.push(acc);
-    for (const chunk of chunks) {
+    const pieces = [];
+    for (const s of slips.values()) {
+      for (let i = 0; i < s.length; i += ENVELOPE_CAPACITY) pieces.push(s.slice(i, i + ENVELOPE_CAPACITY));
+    }
+    const nEnv = Math.max(1, Math.ceil(list.length / ENVELOPE_CAPACITY));   // the fewest envelopes possible
+    pieces.sort((a, b) => (b.length - a.length) || (order.get(a[0]) - order.get(b[0])));
+    // 1) Exact: every slip whole in k envelopes, if any arrangement allows it.
+    let bins = spPackWhole(pieces, nEnv, ENVELOPE_CAPACITY);
+    // 2) Otherwise cut ONE slip in two (largest slips tried first).
+    for (let pi = 0; !bins && pi < pieces.length; pi++) {
+      for (let cut = 1; !bins && cut < pieces[pi].length; cut++) {
+        bins = spPackWhole(pieces.filter((_, i) => i !== pi)
+          .concat([pieces[pi].slice(0, cut), pieces[pi].slice(cut)]), nEnv, ENVELOPE_CAPACITY);
+      }
+    }
+    // 3) Fallback: first-fit decreasing, spreading a slip that won't fit over the
+    //    emptiest envelopes. total <= nEnv × capacity, so it always fits in nEnv.
+    if (!bins) {
+      bins = Array.from({ length: nEnv }, () => []);
+      for (const piece of pieces) {
+        const fit = bins.find(b => b.length + piece.length <= ENVELOPE_CAPACITY);
+        if (fit) { fit.push(...piece); continue; }
+        const rest = piece.slice();
+        while (rest.length) {
+          const bin = bins.reduce((m, b) => (b.length < m.length ? b : m), bins[0]);
+          const room = ENVELOPE_CAPACITY - bin.length;
+          if (room <= 0) { bins.push([]); continue; }   // defensive; unreachable by the arithmetic above
+          bin.push(...rest.splice(0, room));
+        }
+      }
+    }
+    const chunks = bins.filter(b => b.length);
+    for (const b of chunks) b.sort((x, y) => order.get(x) - order.get(y));
+    chunks.sort((x, y) => order.get(x[0]) - order.get(y[0]));
+    chunks.forEach((chunk, ci) => {
       envelopes.push({
         contact_name: sample.contact_name,
         /* sp_patches_v COALESCEs override fields and exposes co_name +
@@ -26876,12 +27883,44 @@ function spBatchEnvelopes(patches) {
         address_line1: sample.address_line1,
         address_line2: sample.address_line2,
         city: sample.city, state: sample.state, zip: sample.zip,
-        teams: teams,
+        teams: [...new Set(chunk.map(p => p.team_number))].sort(),   // THIS envelope's teams (the meta line + list)
+        part: ci + 1, parts: chunks.length,   // "envelope 2 of 2" for a multi-envelope captain
         patches: chunk
       });
-    }
+    });
   }
   return envelopes;
+}
+/* Print / list / slips callers keep their name; the plan is the one above. */
+function spBatchEnvelopes(patches) { return spEnvelopePlan(patches); }
+
+/* Exact whole-slip packing for spEnvelopePlan: put every piece (a slip, or part of
+   one) into k envelopes of `cap` patches without cutting any piece. Depth-first over
+   pieces largest-first; envelopes with equal load are interchangeable, so only one
+   of them is tried. A captain has a handful of slips and k <= ~5, so this is tiny —
+   the step budget only guarantees it can never stall the page. Returns k arrays of
+   patches, or null when no whole-piece arrangement exists (or the budget ran out). */
+function spPackWhole(pieces, k, cap) {
+  const idx = pieces.map((_, i) => i).sort((a, b) => (pieces[b].length - pieces[a].length) || (a - b));
+  const load = new Array(k).fill(0), where = new Array(pieces.length);
+  let steps = 0;
+  const place = j => {
+    if (j === idx.length) return true;
+    if (++steps > 50000) return false;
+    const i = idx[j], size = pieces[i].length, tried = new Set();
+    for (let b = 0; b < k; b++) {
+      if (load[b] + size > cap || tried.has(load[b])) continue;
+      tried.add(load[b]);
+      load[b] += size; where[i] = b;
+      if (place(j + 1)) return true;
+      load[b] -= size;
+    }
+    return false;
+  };
+  if (!place(0)) return null;
+  const bins = Array.from({ length: k }, () => []);
+  pieces.forEach((p, i) => bins[where[i]].push(...p));
+  return bins;
 }
 
 /* Print Slips — opens a new window with imposition-laid-out slips. */
@@ -26916,19 +27955,21 @@ async function spPrintSlips() {
   // by (mailing contact, member): a player's slip lists every SP routed
   // to that captain. A player whose patches all go to one captain gets
   // one slip; if their patches route to two captains they get a slip in
-  // each. Ordered by contact then member so the cut-stack maps top-down
-  // to the captain envelopes.
-  const byContact = new Map();
-  for (const p of patches) {
-    const k = spContactKey(p);
-    if (!byContact.has(k)) byContact.set(k, new Map());
-    const mm = byContact.get(k);
-    if (!mm.has(p.member_number)) mm.set(p.member_number, []);
-    mm.get(p.member_number).push(p);
+  // each. Ordered ENVELOPE BY ENVELOPE from spEnvelopePlan (3.461) so the
+  // cut-stack maps top-down to the envelopes themselves — before, the stack
+  // followed contact order and, for a captain with two envelopes, did not run
+  // envelope by envelope.
+  const plan = spEnvelopePlan(patches);
+  const slipOrder = [], slipPatches = new Map();
+  for (const e of plan) for (const p of e.patches) {
+    const k = JSON.stringify([spContactKey(p), p.member_number]);
+    if (!slipPatches.has(k)) { slipPatches.set(k, []); slipOrder.push(k); }
+    slipPatches.get(k).push(p);
   }
   const slipsInOrder = [];
-  for (const k of [...byContact.keys()].sort()) {
-    for (const [mem, ps] of byContact.get(k)) {
+  {
+    for (const k of slipOrder) {
+      const mem = JSON.parse(k)[1], ps = slipPatches.get(k);
       const p = playerByMember[mem];
       slipsInOrder.push({
         member_number: mem,
@@ -26938,7 +27979,10 @@ async function spPrintSlips() {
         /* Fallback for members not found in slate.players — keep the
            report's denormalized name so the slip still gets printed. */
         member_name:   p ? '' : (ps[0].member_name || ''),
-        team_number:   ps[0].team_number,
+        /* Every team this slip's patches came from — a player on an 8-ball and a
+           9-ball team under one captain printed only the first (33 slips in the
+           2026-10-22 batch), so the captain could sort it to the wrong team. */
+        team_number:   [...new Set(ps.map(x => x.team_number))].sort().join(', '),
         sps:           ps        // all this player's patches to this captain
       });
     }
@@ -26959,11 +28003,18 @@ async function spPrintSlips() {
   // Cover-page summary — count of each SP type going out in this mailing.
   const tally = {};
   for (const p of patches) tally[p.sp_type] = (tally[p.sp_type] || 0) + 1;
+  /* Stuffing-table checks travel on the cover sheet (3.461): the on-screen panel is gone by
+     the time slips are being cut. */
+  const roster = _spPreflightRoster && !_spPreflightRoster.error && _spPreflightRoster.sessionId === _b.session_id
+    ? _spPreflightRoster : null;
   const summary = {
     tally:         tally,
     totalPatches:  patches.length,
     slipCount:     N,
-    envelopeCount: spBatchEnvelopes(patches).length
+    envelopeCount: plan.length,
+    checks:        spPreflightActions(spPreflight(patches, roster), 'seal'),
+    checksRan:     !!roster,
+    mismatch:      spPlanMismatchNote(_b, plan.length)
   };
   const html = spBuildSlipsHTML(pages, op, summary);
   spOpenPrintWindow(html, 'Print slips — batch ' + spSelectedBatch().id.slice(0, 8));
@@ -27010,7 +28061,7 @@ function spBuildSlipsHTML(pages, op, summary) {
       +     '<div class="slip-rule"><span>&#10022;</span></div>'
       +     '<div class="slip-for">is recognized for ' + ach + '</div>'
       +     '<div class="slip-meta">Member ' + esc(slip.member_number)
-      +       ' &middot; Team ' + esc(slip.team_number)
+      +       ' &middot; Team' + (String(slip.team_number).includes(',') ? 's ' : ' ') + esc(slip.team_number)
       +       ' &middot; ' + n + ' patch' + (n === 1 ? '' : 'es') + '</div>'
       +   '</div>'
       +   '<div class="slip-issuer">'
@@ -27044,6 +28095,14 @@ function spBuildSlipsHTML(pages, op, summary) {
     +   sm.slipCount + ' slip' + (sm.slipCount === 1 ? '' : 's')
     +   ' &middot; ' + sm.envelopeCount + ' envelope' + (sm.envelopeCount === 1 ? '' : 's')
     + '</div>'
+    /* Check before sealing (3.461) — the pre-flight items, printed where the stuffing happens. */
+    + (sm.mismatch ? '<div class="cover-check"><strong>Reprint warning.</strong> ' + esc(sm.mismatch) + '</div>' : '')
+    + ((sm.checks || []).length
+      ? '<div class="cover-check"><strong>Check before sealing</strong>'
+        + sm.checks.map(a => '<div class="cc-h">' + esc(a.title) + '</div><div class="cc-help">' + esc(a.help) + '</div>'
+          + a.lines.map(t => '<div>• ' + esc(t) + '</div>').join('')).join('')
+        + '</div>'
+      : (sm.checksRan === false ? '<div class="cover-check">Roster checks did not run — open SP Reports → Patches to see them.</div>' : ''))
     + '</div>';
   return [
     '<!doctype html><html><head><meta charset="utf-8"><title>Slips</title>',
@@ -27102,7 +28161,10 @@ function spBuildSlipsHTML(pages, op, summary) {
     '.slip-issuer { flex: 0 0 1.5in; text-align: center; }',
     '.slip-issuer-name { font-size: 12.5pt; font-style: italic; color: #3a2f12; line-height: 1.1; }',
     '.slip-issuer-rule { border-top: 0.75pt solid #6b5a2a; margin: 2.5pt 0 0; }',
-    '.cover { justify-content: flex-start; align-items: center; padding: 1in 0.9in; }',
+    /* 3.463: the cover GROWS past one sheet when the stuffing-table checks are long. A fixed
+       11in cover printed its overflow over the first slip sheet and lost the last checks.
+       Slips still start on a fresh sheet — page-break-after on .page does that. */
+    '.cover { justify-content: flex-start; align-items: center; padding: 1in 0.9in; height: auto; min-height: 11in; }',
     '.cover-title { font-size: 26pt; font-weight: 800; text-align: center; }',
     '.cover-sub { font-size: 12pt; color: #6b7280; font-style: italic; margin: 5pt 0 30pt; }',
     '.cover-table { border-collapse: collapse; font-size: 13pt; min-width: 4.6in; }',
@@ -27111,6 +28173,9 @@ function spBuildSlipsHTML(pages, op, summary) {
     '.cover-table .num { text-align: right; font-family: ui-monospace,Menlo,monospace; }',
     '.cover-table tfoot td { font-weight: 800; font-size: 14pt; border-top: 2px solid #1a1a1a; border-bottom: 0; }',
     '.cover-foot { margin-top: 24pt; font-size: 12pt; color: #4b5563; }',
+    '.cover-check { margin-top: 18pt; max-width: 6.2in; border: 2px solid #b91c1c; border-radius: 6pt; padding: 8pt 12pt; font-size: 10.5pt; color: #1a1a1a; text-align: left; }',
+    '.cover-check .cc-h { font-weight: 700; color: #b91c1c; margin-top: 6pt; }',
+    '.cover-check .cc-help { color: #4b5563; font-size: 9.5pt; margin-bottom: 2pt; }',
     '@media screen { body { background: #f3f3f3; padding: 16px; }',
     '  .page { background: #fff; margin: 0 auto 16px; box-shadow: 0 4px 14px rgba(0,0,0,0.18); } }',
     '</style></head><body>',
@@ -27131,6 +28196,10 @@ async function spPrintEnvelopes(half) {
   if (!patches.length) return;
   const envs = spBatchEnvelopes(patches);
   if (!envs.length) return;
+  /* A reprint that packs differently from the stamp will not match the envelopes already
+     posted — say so and let the operator stop (round-3 review). */
+  const reprintNote = spPlanMismatchNote(_b, envs.length);
+  if (reprintNote && !confirm(reprintNote + ' Print anyway?')) return;
   /* Two buttons feed the same function with half=1 / half=2 so a mailing
      run can be split across two printers. Envelopes are ordered by
      captain (alphabetical) — half 1 is the first chunk, half 2 the
@@ -27163,6 +28232,7 @@ async function spPrintEnvelopes(half) {
    — never in the DB, and they never affect which patches are mailed. */
 let _spEnvList = [];          // envelopes for the open modal, in print order
 let _spEnvListBatchId = null;
+let _spEnvListChecks = '';    // stuffing-table checks + reprint warning for the open batch (3.461)
 function spEnvListKey(e) {
   /* Stable per envelope across reopen: contact + teams + first patch id
      (weight-split envelopes share contact+teams; the first patch id
@@ -27188,6 +28258,16 @@ async function spOpenEnvList() {
     const patches = await spPatchesForBatch(_b.id);
     _spEnvListBatchId = _b.id;
     _spEnvList = spBatchEnvelopes(patches);
+    /* The stuffing-table checks + the reprint warning, at the top of the list (3.461). */
+    const roster = _spPreflightRoster && !_spPreflightRoster.error && _spPreflightRoster.sessionId === _b.session_id
+      ? _spPreflightRoster : null;
+    const acts = spPreflightActions(spPreflight(patches, roster), 'seal');
+    const mismatch = spPlanMismatchNote(_b, _spEnvList.length);
+    _spEnvListChecks = (mismatch ? '<p style="color:#b91c1c;font-size:0.84rem;margin:0 0 6px">' + esc(mismatch) + '</p>' : '')
+      + (!roster ? '<p class="hint" style="margin:0 0 6px">Roster checks did not run — the roster is not loaded.</p>' : '')
+      + acts.map(a => '<div style="border-left:4px solid #b91c1c;background:#fef2f2;border-radius:0 8px 8px 0;padding:6px 10px;margin:0 0 6px;font-size:0.84rem">'
+        + '<strong style="color:#b91c1c">' + esc(a.title) + '</strong><div class="hint">' + esc(a.help) + '</div>'
+        + a.lines.map(t => '<div>' + esc(t) + '</div>').join('') + '</div>').join('');
     document.getElementById('spEnvListFilter').value = '';
     spEnvListRender();
   } catch (err) {
@@ -27221,12 +28301,18 @@ function spEnvListRender() {
     const part = perContact.get(k) > 1 ? ' <span style="color:#6b7280">(' + seen.get(k) + ' of ' + perContact.get(k) + ')</span>' : '';
     return '<label style="display:grid;grid-template-columns:auto 2fr 1.6fr 1fr;gap:10px;align-items:center;padding:6px 4px;border-bottom:1px solid #f3f4f6;font-size:0.9rem;cursor:pointer' + (has ? ';opacity:.55' : '') + '">'
       + '<input type="checkbox" data-i="' + i + '"' + (has ? ' checked' : '') + ' onchange="spEnvListToggle(this)">'
-      + '<div><strong>' + (i + 1) + '.</strong> ' + esc(e.contact_name) + part + (e.co_name ? ' <span style="color:#6b7280">c/o ' + esc(e.co_name) + '</span>' : '') + '</div>'
+      + '<div><strong>' + (i + 1) + '.</strong> ' + esc(e.contact_name) + part + (e.co_name ? ' <span style="color:#6b7280">c/o ' + esc(e.co_name) + '</span>' : '')
+      /* A captain with several envelopes: say whose slips go in THIS one (3.461 —
+         spEnvelopePlan keeps a player's patches together, so names map to envelopes). */
+      + (perContact.get(k) > 1 ? '<div style="color:#6b7280;font-size:0.8rem">slips: '
+          + esc([...new Set(e.patches.map(p => p.member_name || p.member_number))].join(', ')) + '</div>' : '')
+      + '</div>'
       + '<div style="color:#6b7280">' + esc(teamLabel) + '</div>'
       + '<div style="color:#6b7280">' + e.patches.length + ' patch' + (e.patches.length === 1 ? '' : 'es') + '</div>'
       + '</label>';
   }).join('');
-  body.innerHTML = rows || '<p class="hint" style="margin:0">' + (_spEnvList.length ? 'Nothing matches that filter.' : 'This mailing has no envelopes.') + '</p>';
+  body.innerHTML = (_spEnvListChecks || '')
+    + (rows || '<p class="hint" style="margin:0">' + (_spEnvList.length ? 'Nothing matches that filter.' : 'This mailing has no envelopes.') + '</p>');
   const rest = _spEnvList.length - haveCount;
   document.getElementById('spEnvListCount').textContent =
     _spEnvList.length + ' envelope' + (_spEnvList.length === 1 ? '' : 's') + ' · ' + haveCount + ' ticked as on hand · ' + rest + ' to print' + (q ? ' · showing ' + shown : '');
@@ -27251,6 +28337,9 @@ function spEnvListSetAll(on) {
 async function spEnvListPrintRest() {
   const have = spEnvListHave();
   const rest = _spEnvList.filter(e => !have[spEnvListKey(e)]);
+  const listBatch = (_spNotifyBatchList || []).find(b => b.id === _spEnvListBatchId) || null;
+  const reprintNote = spPlanMismatchNote(listBatch, _spEnvList.length);
+  if (reprintNote && !confirm(reprintNote + ' Print these anyway?')) return;
   if (!rest.length) return;
   await spLoadOperatorProfile();
   const html = spBuildEnvelopesHTML(rest, _spOperatorProfile || {});
@@ -27307,6 +28396,7 @@ function spBuildEnvelopesHTML(envs, op) {
         if (e.note)                    bits.push(esc(e.note));
         if (e.teams && e.teams.length) bits.push((e.teams.length > 1 ? 'Teams ' : 'Team ') + esc(e.teams.join(', ')));
         if (e.patches && e.patches.length) bits.push(e.patches.length + ' patch' + (e.patches.length === 1 ? '' : 'es'));
+        if (e.parts > 1)               bits.push('envelope ' + e.part + ' of ' + e.parts);
         return bits.length ? '<div class="meta">' + bits.join(' · ') + '</div>' : '';
       })()
     + '</div>';
