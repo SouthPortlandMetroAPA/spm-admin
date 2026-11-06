@@ -6381,6 +6381,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         @media (max-width:600px){
           #tab-trophycase .tph-item{flex-direction:column;align-items:stretch}
           #tab-trophycase .tph-actions{justify-content:flex-end}
+          #tab-trophycase .form-row > .tph-pick{flex:1 1 100%}
           #tab-trophycase .btn,#tab-trophycase .tph-subtab,#tab-trophycase .tph-sort,#tab-trophycase input[type="text"],#tab-trophycase input[type="number"],#tab-trophycase select,#tab-trophycase textarea{min-height:44px}
           #tab-trophycase .tph-site{line-height:24px}
           #tab-trophycase .tph-remove,#tab-trophycase .tph-reorder button{width:44px;height:44px}
@@ -6486,7 +6487,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
               <div><label for="tphBrkRunnerArea">2nd place league area <span class="tph-optional">(optional)</span></label><select id="tphBrkRunnerArea"><option value="">-- None --</option></select></div>
             </div>
             <div class="form-row">
-              <div>
+              <div class="tph-pick">
                 <label id="tphBrkTrophyPhotoLabel">Champion photo <span class="tph-optional">(1st place)</span></label>
                 <!-- Two buttons on one input. Android opens its gallery only when an input asks for images alone; adding a PDF type sends it to the file browser. -->
                 <div class="tph-file-row">
@@ -6496,7 +6497,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
                 <input type="file" id="tphBrkTrophyFile" class="tph-file-input" accept="image/*">
                 <img id="tphTrophyPreview" class="tph-preview hidden" alt="Champion photo preview">
               </div>
-              <div>
+              <div class="tph-pick">
                 <label id="tphBrkRunnerupPhotoLabel">Runner-up photo <span class="tph-optional">(2nd place, optional)</span></label>
                 <div class="tph-file-row">
                   <label class="tph-file" id="tphRunnerupLabel" for="tphBrkRunnerupFile" data-accept="image/*">Choose photo</label>
@@ -7579,7 +7580,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.470';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.471';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
