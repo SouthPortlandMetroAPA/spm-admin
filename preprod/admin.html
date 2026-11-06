@@ -7555,7 +7555,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.466';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.467';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -8121,12 +8121,15 @@ const PDFJS_URL     = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@' + PDFJS_VERSION
 const PDFJS_WORKER  = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@' + PDFJS_VERSION + '/build/pdf.worker.min.mjs';
 let _pdfJsPromise = null;
 let _pdfJsAttempt = 0;
+/* The next load starts on a fresh pdf.js module. A module that has lost its worker stays broken until the page reloads. */
+function resetPdfJs() { _pdfJsPromise = null; _pdfJsAttempt++; }
 function ensurePdfJs() {
   if (!_pdfJsPromise) {
-    _pdfJsPromise = import(PDFJS_URL + (_pdfJsAttempt ? '?retry=' + _pdfJsAttempt : '')).then(mod => {
-      mod.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
+    const retry = _pdfJsAttempt ? '?retry=' + _pdfJsAttempt : '';   // Chrome remembers a failed import by URL, so a retry needs a new one
+    _pdfJsPromise = import(PDFJS_URL + retry).then(mod => {
+      mod.GlobalWorkerOptions.workerSrc = PDFJS_WORKER + retry;
       return mod;
-    }).catch(e => { _pdfJsPromise = null; _pdfJsAttempt++; throw e; });   // a dropped load can be retried; the query string gets past Chrome remembering a failed import
+    }).catch(e => { resetPdfJs(); throw e; });
   }
   return _pdfJsPromise;
 }
@@ -9240,6 +9243,7 @@ async function checkVersion() {
     if (remote && remote !== APP_VERSION) {
       const rNum = parseFloat(remote), lNum = parseFloat(APP_VERSION);
       if (Number.isFinite(rNum) && Number.isFinite(lNum) && rNum < lNum) return;
+      if (window.slateBulkBusy || slUpdateHeld()) return;   // work may have started while the fetch was on the wire
       _versionMismatch = true;
       document.getElementById('updateAppName').textContent = APP_NAME;
       document.getElementById('updateOverlay').classList.add('shown');
@@ -14493,6 +14497,7 @@ const TPH_SCHEMA = 'trophycase';
 const TPH_BUCKET = 'trophy-case-photos';
 const TPH_REST_TIMEOUT_MS = 30000;
 const TPH_UPLOAD_TIMEOUT_MS = 120000;
+const TPH_PDF_LOAD_TIMEOUT_MS = 60000;
 
 let _tphWired = false, _tphLoadedOnce = false;
 let _tphChallenges = [];   // newest first
@@ -14536,6 +14541,13 @@ async function tphFetch(url, opts, ms, read) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+/* The same promise for anything that isn't a fetch of ours, such as a CDN import: it must not hold the tab frozen forever. */
+function tphWithin(promise, ms, what) {
+  let timer;
+  const limit = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(what + ' timed out after ' + Math.round(ms / 1000) + ' seconds')), ms); });
+  return Promise.race([promise, limit]).finally(() => clearTimeout(timer));
 }
 
 /* The one REST door. Without the profile headers PostgREST looks in Slate's schema and answers 404. */
@@ -14599,9 +14611,12 @@ function tphOkToDiscardFailedSave() {
   return true;
 }
 
+/* An area dropdown's answer: the option chosen, or the area Edit asked for while its option didn't exist yet. */
+function tphAreaValue(id) { const s = tphEl(id); return s.value || s.dataset.want || ''; }
+
 function tphFormState() {
   const v = id => tphEl(id).value;
-  return JSON.stringify([v('tphBrkSl'), v('tphBrkSlMax'), v('tphBrkWinner'), v('tphBrkTeam'), v('tphBrkPlayers'), v('tphBrkRunner'), v('tphBrkRunnerPlayers'), v('tphBrkArea'), v('tphBrkRunnerArea'), v('tphBrkTrophyFile'), v('tphBrkRunnerupFile'),
+  return JSON.stringify([v('tphBrkSl'), v('tphBrkSlMax'), v('tphBrkWinner'), v('tphBrkTeam'), v('tphBrkPlayers'), v('tphBrkRunner'), v('tphBrkRunnerPlayers'), tphAreaValue('tphBrkArea'), tphAreaValue('tphBrkRunnerArea'), v('tphBrkTrophyFile'), v('tphBrkRunnerupFile'),
     _tphPhotos.map(p => p.kind === 'existing' ? p.path : 'new:' + p.file.name)]);
 }
 
@@ -14627,9 +14642,16 @@ function tphBlobToDataUrl(blob) {
 
 /* Every page of a PDF as an image blob, in order. Bracket sheets are dense text and thin lines, so PNG beats JPEG at any quality. */
 async function tphPdfToImagePages(file, maxWidth) {
-  const pdfjsLib = await ensurePdfJs();
-  const buf = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  let pdf;
+  try {
+    const pdfjsLib = await tphWithin(ensurePdfJs(), TPH_PDF_LOAD_TIMEOUT_MS, 'Loading the PDF tools');
+    const buf = await file.arrayBuffer();
+    pdf = await tphWithin(pdfjsLib.getDocument({ data: buf }).promise, TPH_PDF_LOAD_TIMEOUT_MS, 'Opening the PDF');
+  } catch (e) {
+    // pdf.js remembers a dropped worker for the life of its module, so the next pick needs a fresh one. A bad PDF is not a load problem.
+    if (!e || e.name !== 'InvalidPDFException') resetPdfJs();
+    throw e;
+  }
   const blobs = [];
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
@@ -15003,7 +15025,7 @@ async function tphDeleteArea(id) {
   if (!area) return;
   if (!confirm('Delete area "' + area.name + '"? Brackets referencing this area will lose their area link.')) return;
   try {
-    await tphSb('PATCH', 'trophy_brackets?area_id=eq.' + id, { area_id: null });
+    // One call: both foreign keys are ON DELETE SET NULL, so winners' links clear with it, or not at all.
     await tphSb('DELETE', 'trophy_areas?id=eq.' + id);
     tphStatus('Area deleted.', 'ok');
     await tphLoadAreas();
@@ -15028,7 +15050,7 @@ function tphPopulateEventDropdown() {
 function tphPopulateAreaDropdowns() {
   ['tphBrkArea', 'tphBrkRunnerArea'].forEach(id => {
     const sel = tphEl(id);
-    const current = sel.value;
+    const current = tphAreaValue(id);   // Edit may have asked for an area before these options existed
     sel.innerHTML = '<option value="">-- None --</option>' + _tphAreas.map(a =>
       '<option value="' + Number(a.id) + '"' + (String(a.id) === current ? ' selected' : '') + '>' + tphEsc(a.name) + '</option>').join('');
   });
@@ -15145,6 +15167,8 @@ function tphCancelEdit() {
   tphEl('tphBrkEditId').value = '';
   tphEl('tphBrkFormTitle').textContent = 'Add bracket';
   ['tphBrkSl', 'tphBrkSlMax', 'tphBrkWinner', 'tphBrkTeam', 'tphBrkRunner', 'tphBrkPlayers', 'tphBrkRunnerPlayers', 'tphBrkArea', 'tphBrkRunnerArea', 'tphBrkFiles'].forEach(id => { tphEl(id).value = ''; });
+  tphEl('tphBrkArea').dataset.want = '';
+  tphEl('tphBrkRunnerArea').dataset.want = '';
   [['tphBrkTrophyFile', 'tphTrophyLabel', 'tphTrophyPreview'], ['tphBrkRunnerupFile', 'tphRunnerupLabel', 'tphRunnerupPreview']].forEach(([input, label, preview]) => {
     tphEl(input).value = '';
     delete tphEl(input)._tphPdfHighRes;
@@ -15176,8 +15200,11 @@ function tphEditBracket(id) {
   tphEl('tphBrkRunner').value = b.runner_up_name || '';
   tphEl('tphBrkPlayers').value = b.winner_players || '';
   tphEl('tphBrkRunnerPlayers').value = b.runner_up_players || '';
+  // The options may not exist yet: on a slow signal events land first, and setting .value then silently gives ''.
   tphEl('tphBrkArea').value = b.area_id || '';
+  tphEl('tphBrkArea').dataset.want = b.area_id || '';
   tphEl('tphBrkRunnerArea').value = b.runner_up_area_id || '';
+  tphEl('tphBrkRunnerArea').dataset.want = b.runner_up_area_id || '';
   tphEl('tphBrkFiles').value = '';
   [['tphBrkTrophyFile', 'tphTrophyLabel', 'tphTrophyPreview', b.trophy_photo_path], ['tphBrkRunnerupFile', 'tphRunnerupLabel', 'tphRunnerupPreview', b.runner_up_photo_path]].forEach(([input, label, preview, path]) => {
     tphEl(input).value = '';   // pick again to replace
@@ -15211,8 +15238,8 @@ async function tphSaveBracket() {
   const runner = tphEl('tphBrkRunner').value.trim() || null;
   const players = tphEl('tphBrkPlayers').value.trim() || null;
   const runnerPlayers = tphEl('tphBrkRunnerPlayers').value.trim() || null;
-  const areaId = tphEl('tphBrkArea').value || null;
-  const runnerAreaId = tphEl('tphBrkRunnerArea').value || null;
+  const areaId = tphAreaValue('tphBrkArea') || null;
+  const runnerAreaId = tphAreaValue('tphBrkRunnerArea') || null;
   const trophyFile = tphEl('tphBrkTrophyFile').files[0];
   const runnerupFile = tphEl('tphBrkRunnerupFile').files[0];
 
@@ -15359,7 +15386,7 @@ async function tphDeleteBracket(id) {
     await tphSb('DELETE', 'trophy_brackets?id=eq.' + id);
     const arr = Array.isArray(b.bracket_photo_paths) ? b.bracket_photo_paths : [];
     for (const p of [b.trophy_photo_path, b.runner_up_photo_path, ...arr]) await tphDeleteFile(p).catch(() => {});
-    if (tphEl('tphBrkEditId').value === String(id)) tphCancelEdit();
+    if (tphEl('tphBrkEditId').value === String(id)) { _tphFailedSave = false; tphCancelEdit(); }   // a failed save about this winner is moot, and mustn't hold Slate's updates
     tphStatus('Bracket deleted.', 'ok');
     await tphLoadBrackets();
   } catch (e) {
@@ -15405,6 +15432,7 @@ function tphWire() {
   tphEl('tphEvtAdd').addEventListener('click', tphAddEvent);
   tphEl('tphAreaAdd').addEventListener('click', tphAddArea);
   tphEl('tphBrkEvent').addEventListener('change', tphOnEventChange);
+  ['tphBrkArea', 'tphBrkRunnerArea'].forEach(id => tphEl(id).addEventListener('change', e => { e.target.dataset.want = ''; }));   // choosing, even None, is an answer
   tphEl('tphBrkTrophyFile').addEventListener('change', e => tphOnFileSelected(e.target, 'tphTrophyLabel', 'tphTrophyPreview'));
   tphEl('tphBrkRunnerupFile').addEventListener('change', e => tphOnFileSelected(e.target, 'tphRunnerupLabel', 'tphRunnerupPreview'));
   tphEl('tphBrkFiles').addEventListener('change', e => tphOnPhotosAdded(e.target));
