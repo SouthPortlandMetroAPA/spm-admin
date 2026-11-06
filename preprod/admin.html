@@ -7580,7 +7580,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.471';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.472';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -48443,7 +48443,7 @@ window.dzInit = (function () {
       card.className = 'card dz-reveal empty';
       card.innerHTML = '<div class="dz-position">Draw order isn\u2019t complete</div>'
         + '<p class="hint">' + (problem.missing ? plural(problem.missing, 'entry has', 'entries have') + ' no draw position: ' + esc(entries.filter(e => e.status === 'pending' && e.draw_order == null).slice(0, 5).map(fullName).join(', ')) + (problem.missing > 5 ? ' and more' : '') + '. ' : 'Some positions are wrong. ')
-        + 'No names can be called until this is fixed. Finish Lock reshuffles everyone still pending, and anyone listed here joins the draw. If you don\u2019t recognize a name, delete it from the list below instead. Registration stays closed, and skipped names stay skipped.</p>'
+        + 'No names can be called until this is fixed. Finish Lock reshuffles everyone still pending, and anyone listed here joins the draw. If someone listed never registered, delete that row below instead. Registration stays closed, and skipped names stay skipped.</p>'
         + '<div class="dz-draw-actions"><button type="button" class="btn btn-primary" id="dzBtnFinish" data-act="finishLock">Finish Lock</button></div>';
       shownNextId = null;
       return;
@@ -48525,7 +48525,10 @@ window.dzInit = (function () {
     if (!e || _busy) return;
     if (locked && e.draw_order != null) return say('Drawing is locked. Reset first.', 'err');
     const name = fullName(e);
-    if (!confirm('Delete ' + label(name) + '? This cannot be undone.')) return;
+    const warning = locked
+      ? 'Delete ' + label(name) + ' from this draw? This cannot be undone. Only do this if they never registered: a lock that stopped partway leaves real entrants here too, and Finish Lock puts those back in.'
+      : 'Delete ' + label(name) + '? This cannot be undone.';
+    if (!confirm(warning)) return;
     busyOn();
     try {
       /* A drawn entry has a position. The filter stops a stale screen removing an entrant from a running draw. */
@@ -48573,7 +48576,9 @@ window.dzInit = (function () {
       await loadAll();
       if (!locked) throw new Error('registration was reopened on another device');
       if (positionProblem()) throw new Error('the draw order did not save completely');
-      say('Drawing locked: ' + plural(shuffled.length, 'entry', 'entries') + ' randomized.', 'ok');
+      const lateWinner = entries.find(e => e.status === 'won');
+      if (lateWinner) say('Registration is closed, but ' + fullName(lateWinner) + ' was confirmed as the winner on another device during this lock, and was left alone. Check the draw before calling any names.', 'warn');
+      else say('Drawing locked: ' + plural(shuffled.length, 'entry', 'entries') + ' randomized.', 'ok');
     } catch (e) {
       say('Lock failed: ' + e.message + '. Check the screen before calling any names.', 'err');
       await settle();
@@ -48698,21 +48703,46 @@ window.dzInit = (function () {
   }
 
   async function resetDrawing() {
+    if (_busy || btnBusy) return;
+    const btn = $('dzBtnReset');
+    btnBusy = true;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="nwe-spinner"></span>Checking&hellip;';
+    /* This screen can be 30 s old, and the warning has to name a winner confirmed on another device.
+       A read of its own: loadAll drops its rows when a newer read starts, which would leave this checking the old list. */
+    let winners;
+    try {
+      winners = await sbGet('door_prize_entries?status=eq.won&select=*');
+    } catch (e) {
+      uncertain = true;
+      return say('Can\u2019t reach the database, so Reset can\u2019t check for a winner first. Nothing changed. Try again when you have signal.', 'err');
+    } finally {
+      btnBusy = false;
+      btn.textContent = 'Reset Drawing';
+      renderStats();
+    }
+    /* Something else on this device started while the check was out, so its answer is already old. */
     if (_busy) return;
-    /* This screen can be 30 s old, and the warning has to name a winner confirmed on another device. */
-    try { await loadAll(); } catch (e) { uncertain = true; renderStats(); return say('Can\u2019t reach the database, so Reset can\u2019t check for a winner first. Nothing changed. Try again when you have signal.', 'err'); }
-    const winner = entries.find(e => e.status === 'won');
+    const winner = winners[0];
     const msg = winner
       ? 'Reset will clear the current winner, ' + label(fullName(winner)) + ', unlock registration, and wipe all draw order. Are you sure?'
       : 'Reset will unlock registration and clear all draw order and statuses. Entries stay registered. Are you sure?';
-    if (!confirm(msg)) return;
-    const btn = $('dzBtnReset');
+    if (!confirm(msg)) { await settle(); return; }
     btn.disabled = true;
     btn.innerHTML = '<span class="nwe-spinner"></span>Resetting&hellip;';
     btnBusy = true;
     busyOn();
     let cleared = false;
     try {
+      /* The dialog can sit open, and a winner confirmed meanwhile was never named in it. */
+      if (!winner) {
+        const late = await sbGet('door_prize_entries?status=eq.won&select=id&limit=1');
+        if (late.length) {
+          say('A winner was confirmed on another device while this was open, so nothing was reset. Tap Reset Drawing again to see who.', 'err');
+          await settle();
+          return;
+        }
+      }
       const now = new Date().toISOString();
       await sbPatch('door_prize_entries?id=gt.0', { status: 'pending', draw_order: null, updated_at: now });
       cleared = true;
@@ -50335,6 +50365,7 @@ window.nwrInit = (function () {
     const t = ++svyToken;
     if (!eventId) {
       svySurveys = [];
+      svyLoadedFor = null;
       $('nwrSvys').innerHTML = '<tr><td colspan="14" class="hint">Pick an event to view responses.</td></tr>';
       $('nwrSvyMeta').textContent = '';
       return;
