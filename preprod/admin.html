@@ -6320,7 +6320,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <style>
         #tab-trophycase .tph-head{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
         #tab-trophycase .tph-subtabs{display:flex;flex:1 1 240px;border:1px solid var(--border);border-radius:999px;overflow:hidden;background:var(--card)}
-        #tab-trophycase .tph-subtab{flex:1;min-height:40px;border:none;background:transparent;color:var(--muted);font:inherit;font-size:.875rem;font-weight:700;cursor:pointer}
+        #tab-trophycase .tph-subtab{flex:1;min-height:40px;border:none;background:transparent;color:var(--text);font:inherit;font-size:.875rem;font-weight:700;cursor:pointer}
         #tab-trophycase .tph-subtab.active{background:var(--spm-accent);color:#fff}
         #tab-trophycase .tph-site{text-decoration:none;text-align:center}
         #tab-trophycase .tph-view{display:none}
@@ -6330,8 +6330,8 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         #tab-trophycase .tph-narrow{flex:0 1 140px}
         #tab-trophycase textarea{min-height:80px;font-family:inherit;font-size:.9rem;white-space:pre-wrap}
         #tab-trophycase .status-line{position:fixed;left:12px;right:12px;bottom:12px;z-index:2000;max-height:40vh;overflow:auto;margin:0;font-size:.9rem;box-shadow:0 4px 16px rgba(0,0,0,.25);cursor:pointer}
-        #tab-trophycase .status-line.ok{background:#e6f7ec}
-        #tab-trophycase .status-line.err{background:#fdecea}
+        #tab-trophycase .status-line.ok{background:#e6f7ec;color:#0a5c2e}
+        #tab-trophycase .status-line.err{background:#fdecea;color:#8f1d12}
         #tab-trophycase #tphBody[inert]{opacity:.6}
         #tab-trophycase .tph-spinner{display:inline-block;width:16px;height:16px;border:2px solid rgba(0,49,161,.2);border-top-color:var(--spm-accent);border-radius:50%;animation:tph-spin .8s linear infinite;vertical-align:middle;margin-right:6px}
         @keyframes tph-spin{to{transform:rotate(360deg)}}
@@ -14090,6 +14090,7 @@ async function tphUpdateEventSort(id, val) {
     await tphLoadEvents();
   } catch (e) {
     tphStatus('Failed to update sort: ' + e.message, 'err');
+    await tphLoadEvents();   // the field must not keep showing a value that was never saved
   }
 }
 
@@ -14101,6 +14102,7 @@ async function tphToggleEventActive(id, active) {
     if (ev) ev.active = active;
   } catch (e) {
     tphStatus('Failed to toggle active: ' + e.message, 'err');
+    await tphLoadEvents();   // Active decides what players see: the switch must not show a value that was never saved
   }
 }
 
@@ -14110,21 +14112,36 @@ async function tphDeleteEvent(id) {
   const delLabel = tphChallengeLabel(delEv) + ' – ' + delEv.name;
   if (!confirm('Delete event "' + delLabel + '"? This also deletes all its winners and photos, for good.')) return;
   tphSetBusy(true);
+  let failure = null;
+  let winnersGone = [];   // once these rows are gone nothing points at their files, and a retry could never find them again
   try {
-    // Rows first: the public page reads them, so while a row exists its files must too.
-    const brackets = await tphSb('GET', 'trophy_brackets?event_id=eq.' + id + '&select=id,trophy_photo_path,runner_up_photo_path,bracket_photo_paths');
-    if (brackets && brackets.length) {
-      await tphSb('DELETE', 'trophy_brackets?event_id=eq.' + id);
+    try {
+      // Rows first: the public page reads them, so while a row exists its files must too.
+      const brackets = await tphSb('GET', 'trophy_brackets?event_id=eq.' + id + '&select=id,trophy_photo_path,runner_up_photo_path,bracket_photo_paths');
+      if (brackets && brackets.length) {
+        await tphSb('DELETE', 'trophy_brackets?event_id=eq.' + id);
+        winnersGone = brackets;
+      }
+      await tphSb('DELETE', 'trophy_events?id=eq.' + id);
+    } catch (e) {
+      failure = e;
     }
-    await tphSb('DELETE', 'trophy_events?id=eq.' + id);
-    for (const b of (brackets || [])) {
+    for (const b of winnersGone) {
       const arr = Array.isArray(b.bracket_photo_paths) ? b.bracket_photo_paths : [];
       for (const p of [b.trophy_photo_path, b.runner_up_photo_path, ...arr]) await tphDeleteFile(p).catch(() => {});
     }
-    tphStatus('Event deleted.', 'ok');
+    if (!failure) tphStatus('Event deleted.', 'ok');
+    else if (winnersGone.length) tphStatus('Its winners and photos were deleted, but the event was not: ' + failure.message + '. Tap Delete again.', 'err');
+    else tphStatus('Failed to delete event: ' + failure.message, 'err');
     await tphLoadEvents();
-  } catch (e) {
-    tphStatus('Failed to delete event: ' + e.message, 'err');
+    // An event open under Brackets has just gone: its form and list would otherwise stay up, acting on nothing.
+    if (!failure && String(id) === _tphBrkEventShown) {
+      _tphFailedSave = false;
+      _tphBrackets = [];
+      tphEl('tphBrkEvent').value = '';
+      tphCancelEdit();   // what was typed for that event goes with it, or it would hold Slate's updates from a hidden form
+      await tphOnEventChange();
+    }
   } finally {
     tphSetBusy(false);
   }
@@ -14185,6 +14202,7 @@ async function tphUpdateAreaSort(id, val) {
     await tphLoadAreas();
   } catch (e) {
     tphStatus('Failed to update sort: ' + e.message, 'err');
+    await tphLoadAreas();
   }
 }
 
