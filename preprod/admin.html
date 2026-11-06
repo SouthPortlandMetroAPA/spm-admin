@@ -6536,6 +6536,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 #tab-doorprize .nwe-label{font-size:.75rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
 #tab-doorprize .nwe-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 #tab-doorprize .nwe-hint{font-size:.9rem;border-radius:10px;padding:8px 12px;margin-top:12px;color:#7a5a00;background:#fff4d6;border:1px solid #f0dfa3}
+#tab-doorprize .nwe-stale{position:sticky;top:0;z-index:5;margin:0 0 12px;font-weight:700}
 #tab-doorprize .nwe-hint.ok{color:#1b5e20;background:#e8f5e9;border-color:#c8e6c9}
 #tab-doorprize .status-line{position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));z-index:2000;max-height:40vh;overflow:auto;margin:0;font-size:.9rem;box-shadow:0 4px 16px rgba(0,0,0,.25);cursor:pointer}
 #tab-doorprize .status-line.ok{background:#e6f7ec}
@@ -6576,8 +6577,6 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 #tab-doorprize table.nwe-cards td.nwe-right{flex:1 1 100%;text-align:left;white-space:normal}
 #tab-doorprize table.nwe-cards td[colspan]{flex:1 1 100%}
 #tab-doorprize table.nwe-cards td[data-label]::before{content:attr(data-label) ": ";font-size:.75rem;font-weight:700;color:var(--muted);margin-right:4px}
-#tab-doorprize table.nwe-cards td[data-label]::before{content:attr(data-label) ": ";font-size:.75rem;font-weight:700;color:var(--muted);margin-right:4px}
-#tab-doorprize table.nwe-cards td[data-label]::before{content:attr(data-label) ": ";font-size:.75rem;font-weight:700;color:var(--muted);margin-right:4px}
 #tab-doorprize .nwe-cardline{flex:1 1 100%}
 }
 @media (max-width:600px),(pointer:coarse){
@@ -6607,8 +6606,6 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       </style>
       <div id="dzClosed" class="card hidden"></div>
       <div id="dzBody">
-        <div id="dzRevealWrap" class="hidden"><div class="card dz-reveal" id="dzReveal"></div></div>
-        <div id="dzRevealWrap" class="hidden"><div class="card dz-reveal" id="dzReveal"></div></div>
         <div id="dzRevealWrap" class="hidden"><div class="card dz-reveal" id="dzReveal"></div></div>
         <div class="card">
           <div class="nwe-head">
@@ -6657,6 +6654,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 #tab-poolgods .nwe-label{font-size:.75rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
 #tab-poolgods .nwe-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 #tab-poolgods .nwe-hint{font-size:.9rem;border-radius:10px;padding:8px 12px;margin-top:12px;color:#7a5a00;background:#fff4d6;border:1px solid #f0dfa3}
+#tab-poolgods .nwe-stale{position:sticky;top:0;z-index:5;margin:0 0 12px;font-weight:700}
 #tab-poolgods .nwe-hint.ok{color:#1b5e20;background:#e8f5e9;border-color:#c8e6c9}
 #tab-poolgods .status-line{position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));z-index:2000;max-height:40vh;overflow:auto;margin:0;font-size:.9rem;box-shadow:0 4px 16px rgba(0,0,0,.25);cursor:pointer}
 #tab-poolgods .status-line.ok{background:#e6f7ec}
@@ -6696,8 +6694,6 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 #tab-poolgods table.nwe-cards td.nwe-wrap{flex:1 1 100%;order:-1;font-weight:700;min-width:0}
 #tab-poolgods table.nwe-cards td.nwe-right{flex:1 1 100%;text-align:left;white-space:normal}
 #tab-poolgods table.nwe-cards td[colspan]{flex:1 1 100%}
-#tab-poolgods table.nwe-cards td[data-label]::before{content:attr(data-label) ": ";font-size:.75rem;font-weight:700;color:var(--muted);margin-right:4px}
-#tab-poolgods table.nwe-cards td[data-label]::before{content:attr(data-label) ": ";font-size:.75rem;font-weight:700;color:var(--muted);margin-right:4px}
 #tab-poolgods table.nwe-cards td[data-label]::before{content:attr(data-label) ": ";font-size:.75rem;font-weight:700;color:var(--muted);margin-right:4px}
 #tab-poolgods .nwe-cardline{flex:1 1 100%}
 }
@@ -6764,6 +6760,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 #tab-rushraffle .nwe-label{font-size:.75rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
 #tab-rushraffle .nwe-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 #tab-rushraffle .nwe-hint{font-size:.9rem;border-radius:10px;padding:8px 12px;margin-top:12px;color:#7a5a00;background:#fff4d6;border:1px solid #f0dfa3}
+#tab-rushraffle .nwe-stale{position:sticky;top:0;z-index:5;margin:0 0 12px;font-weight:700}
 #tab-rushraffle .nwe-hint.ok{color:#1b5e20;background:#e8f5e9;border-color:#c8e6c9}
 #tab-rushraffle .status-line{position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));z-index:2000;max-height:40vh;overflow:auto;margin:0;font-size:.9rem;box-shadow:0 4px 16px rgba(0,0,0,.25);cursor:pointer}
 #tab-rushraffle .status-line.ok{background:#e6f7ec}
@@ -6803,8 +6800,6 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 #tab-rushraffle table.nwe-cards td.nwe-wrap{flex:1 1 100%;order:-1;font-weight:700;min-width:0}
 #tab-rushraffle table.nwe-cards td.nwe-right{flex:1 1 100%;text-align:left;white-space:normal}
 #tab-rushraffle table.nwe-cards td[colspan]{flex:1 1 100%}
-#tab-rushraffle table.nwe-cards td[data-label]::before{content:attr(data-label) ": ";font-size:.75rem;font-weight:700;color:var(--muted);margin-right:4px}
-#tab-rushraffle table.nwe-cards td[data-label]::before{content:attr(data-label) ": ";font-size:.75rem;font-weight:700;color:var(--muted);margin-right:4px}
 #tab-rushraffle table.nwe-cards td[data-label]::before{content:attr(data-label) ": ";font-size:.75rem;font-weight:700;color:var(--muted);margin-right:4px}
 #tab-rushraffle .nwe-cardline{flex:1 1 100%}
 }
@@ -6935,6 +6930,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 #tab-nwrefs .nwe-label{font-size:.75rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
 #tab-nwrefs .nwe-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 #tab-nwrefs .nwe-hint{font-size:.9rem;border-radius:10px;padding:8px 12px;margin-top:12px;color:#7a5a00;background:#fff4d6;border:1px solid #f0dfa3}
+#tab-nwrefs .nwe-stale{position:sticky;top:0;z-index:5;margin:0 0 12px;font-weight:700}
 #tab-nwrefs .nwe-hint.ok{color:#1b5e20;background:#e8f5e9;border-color:#c8e6c9}
 #tab-nwrefs .status-line{position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));z-index:2000;max-height:40vh;overflow:auto;margin:0;font-size:.9rem;box-shadow:0 4px 16px rgba(0,0,0,.25);cursor:pointer}
 #tab-nwrefs .status-line.ok{background:#e6f7ec}
@@ -6974,8 +6970,6 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 #tab-nwrefs table.nwe-cards td.nwe-wrap{flex:1 1 100%;order:-1;font-weight:700;min-width:0}
 #tab-nwrefs table.nwe-cards td.nwe-right{flex:1 1 100%;text-align:left;white-space:normal}
 #tab-nwrefs table.nwe-cards td[colspan]{flex:1 1 100%}
-#tab-nwrefs table.nwe-cards td[data-label]::before{content:attr(data-label) ": ";font-size:.75rem;font-weight:700;color:var(--muted);margin-right:4px}
-#tab-nwrefs table.nwe-cards td[data-label]::before{content:attr(data-label) ": ";font-size:.75rem;font-weight:700;color:var(--muted);margin-right:4px}
 #tab-nwrefs table.nwe-cards td[data-label]::before{content:attr(data-label) ": ";font-size:.75rem;font-weight:700;color:var(--muted);margin-right:4px}
 #tab-nwrefs .nwe-cardline{flex:1 1 100%}
 }
@@ -7188,6 +7182,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 #tab-coastal .nwe-label{font-size:.75rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
 #tab-coastal .nwe-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 #tab-coastal .nwe-hint{font-size:.9rem;border-radius:10px;padding:8px 12px;margin-top:12px;color:#7a5a00;background:#fff4d6;border:1px solid #f0dfa3}
+#tab-coastal .nwe-stale{position:sticky;top:0;z-index:5;margin:0 0 12px;font-weight:700}
 #tab-coastal .nwe-hint.ok{color:#1b5e20;background:#e8f5e9;border-color:#c8e6c9}
 #tab-coastal .status-line{position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));z-index:2000;max-height:40vh;overflow:auto;margin:0;font-size:.9rem;box-shadow:0 4px 16px rgba(0,0,0,.25);cursor:pointer}
 #tab-coastal .status-line.ok{background:#e6f7ec}
@@ -7227,8 +7222,6 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 #tab-coastal table.nwe-cards td.nwe-wrap{flex:1 1 100%;order:-1;font-weight:700;min-width:0}
 #tab-coastal table.nwe-cards td.nwe-right{flex:1 1 100%;text-align:left;white-space:normal}
 #tab-coastal table.nwe-cards td[colspan]{flex:1 1 100%}
-#tab-coastal table.nwe-cards td[data-label]::before{content:attr(data-label) ": ";font-size:.75rem;font-weight:700;color:var(--muted);margin-right:4px}
-#tab-coastal table.nwe-cards td[data-label]::before{content:attr(data-label) ": ";font-size:.75rem;font-weight:700;color:var(--muted);margin-right:4px}
 #tab-coastal table.nwe-cards td[data-label]::before{content:attr(data-label) ": ";font-size:.75rem;font-weight:700;color:var(--muted);margin-right:4px}
 #tab-coastal .nwe-cardline{flex:1 1 100%}
 }
@@ -7573,7 +7566,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.468';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.469';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -48206,7 +48199,18 @@ window.dzInit = (function () {
   function busyOff() { _busy = Math.max(0, _busy - 1); _epoch++; }
   function isActive() { return $(TAB_ID).classList.contains('active'); }
   /* Polls only while this tab is showing, the page is visible and nothing is running. A control being used in a list is left alone. */
-  let _pollTimer = null, _pollFailing = false, _blurWired = false, _selectWaits = 0;
+  let _pollTimer = null, _blurWired = false, _selectWaits = 0;
+  /* Its own banner, not the status line: an error showing there must stay, and must not hide that the whole screen may be old. */
+  function staleBanner(on) {
+    let b = $(TAB_ID).querySelector('.nwe-stale');
+    if (on && !b) {
+      b = document.createElement('div');
+      b.className = 'nwe-hint nwe-stale';
+      b.textContent = 'Can\u2019t reach the database, so this may be out of date. Still retrying.';
+      $(TAB_ID).prepend(b);
+    }
+    if (b) b.classList.toggle('hidden', !on);
+  }
   function startPoll(fn) {
     if (!_blurWired) {
       /* A dropdown keeps focus after a choice, which would hold off polling until the next tap elsewhere. */
@@ -48223,15 +48227,10 @@ window.dzInit = (function () {
       _selectWaits = 0;
       try {
         await fn();
-        if (_pollFailing) {
-          _pollFailing = false;
-          if ($(STATUS_ID).classList.contains('warn')) say('Back in touch with the database.', 'ok');
-        }
+        staleBanner(false);
       } catch (e) {
-        /* Whatever is on screen stays, because a venue's dead spot shouldn't blank a draw. It just can't pass for current.
-           An error already showing matters more: a failed Lock mustn't be replaced by this. */
-        _pollFailing = true;
-        if (!$(STATUS_ID).classList.contains('err')) say('Can\u2019t reach the database, so this may be out of date. Still retrying.', 'warn');
+        /* Whatever is on screen stays, because a venue's dead spot shouldn't blank a draw. It just can't pass for current. */
+        staleBanner(true);
       }
     }, 30000);
   }
@@ -48427,7 +48426,7 @@ window.dzInit = (function () {
       card.className = 'card dz-reveal empty';
       card.innerHTML = '<div class="dz-position">Draw order isn\u2019t complete</div>'
         + '<p class="hint">' + (problem.missing ? plural(problem.missing, 'entry has', 'entries have') + ' no draw position: ' + esc(entries.filter(e => e.status === 'pending' && e.draw_order == null).slice(0, 5).map(fullName).join(', ')) + (problem.missing > 5 ? ' and more' : '') + '. ' : 'Some positions are wrong. ')
-        + 'No names can be called until this is fixed. Finish Lock reshuffles everyone still pending. Registration stays closed, and skipped names stay skipped.</p>'
+        + 'No names can be called until this is fixed. Finish Lock reshuffles everyone still pending, and anyone listed here joins the draw. If you don\u2019t recognize a name, delete it from the list below instead. Registration stays closed, and skipped names stay skipped.</p>'
         + '<div class="dz-draw-actions"><button type="button" class="btn btn-primary" id="dzBtnFinish" data-act="finishLock">Finish Lock</button></div>';
       shownNextId = null;
       return;
@@ -48486,7 +48485,8 @@ window.dzInit = (function () {
         : '<span class="badge warn">' + esc(e.status) + '</span>';
       let actions = '';
       const id = esc(e.id);
-      if (!locked) actions = '<button type="button" class="btn btn-outline btn-sm" data-act="delete" data-id="' + id + '">Delete</button>';
+      /* Once locked, only a row with no position can go: it may be planted, and otherwise it would have to join the draw. */
+      if (!locked || (e.status === 'pending' && e.draw_order == null)) actions = '<button type="button" class="btn btn-outline btn-sm" data-act="delete" data-id="' + id + '">Delete</button>';
       else if (e.status === 'pending' && !winner && !problem) {
         actions = '<button type="button" class="btn btn-outline btn-sm" data-act="skip" data-id="' + id + '">Skip</button> '
           + '<button type="button" class="btn btn-outline btn-sm" data-act="winner" data-id="' + id + '">Winner</button>';
@@ -48506,7 +48506,7 @@ window.dzInit = (function () {
   async function deleteEntry(id) {
     const e = find(id);
     if (!e || _busy) return;
-    if (locked) return say('Drawing is locked. Reset first.', 'err');
+    if (locked && e.draw_order != null) return say('Drawing is locked. Reset first.', 'err');
     const name = fullName(e);
     if (!confirm('Delete ' + label(name) + '? This cannot be undone.')) return;
     busyOn();
@@ -48551,7 +48551,8 @@ window.dzInit = (function () {
       const everyone = await sbGetAll('door_prize_entries?select=id&order=id.asc');
       const shuffled = cryptoShuffle(everyone);
       const order = shuffled.map((e, idx) => ({ id: e.id, draw_order: idx + 1 }));
-      await inBatches(order, 8, o => sbPatch('door_prize_entries?id=eq.' + o.id, { draw_order: o.draw_order, status: 'pending', updated_at: now }));
+      /* Never over a winner: a slow lock's last writes can land after another device has confirmed one. */
+      await inBatches(order, 8, o => sbPatch('door_prize_entries?id=eq.' + o.id + '&status=neq.won', { draw_order: o.draw_order, status: 'pending', updated_at: now }));
       await loadAll();
       if (!locked) throw new Error('registration was reopened on another device');
       if (positionProblem()) throw new Error('the draw order did not save completely');
@@ -48682,7 +48683,7 @@ window.dzInit = (function () {
   async function resetDrawing() {
     if (_busy) return;
     /* This screen can be 30 s old, and the warning has to name a winner confirmed on another device. */
-    try { await loadAll(); } catch (e) { /* the write below will say so if the signal is gone */ }
+    try { await loadAll(); } catch (e) { uncertain = true; renderStats(); return say('Can\u2019t reach the database, so Reset can\u2019t check for a winner first. Nothing changed. Try again when you have signal.', 'err'); }
     const winner = entries.find(e => e.status === 'won');
     const msg = winner
       ? 'Reset will clear the current winner, ' + label(fullName(winner)) + ', unlock registration, and wipe all draw order. Are you sure?'
@@ -48792,7 +48793,18 @@ window.pgInit = (function () {
   function busyOff() { _busy = Math.max(0, _busy - 1); _epoch++; }
   function isActive() { return $(TAB_ID).classList.contains('active'); }
   /* Polls only while this tab is showing, the page is visible and nothing is running. A control being used in a list is left alone. */
-  let _pollTimer = null, _pollFailing = false, _blurWired = false, _selectWaits = 0;
+  let _pollTimer = null, _blurWired = false, _selectWaits = 0;
+  /* Its own banner, not the status line: an error showing there must stay, and must not hide that the whole screen may be old. */
+  function staleBanner(on) {
+    let b = $(TAB_ID).querySelector('.nwe-stale');
+    if (on && !b) {
+      b = document.createElement('div');
+      b.className = 'nwe-hint nwe-stale';
+      b.textContent = 'Can\u2019t reach the database, so this may be out of date. Still retrying.';
+      $(TAB_ID).prepend(b);
+    }
+    if (b) b.classList.toggle('hidden', !on);
+  }
   function startPoll(fn) {
     if (!_blurWired) {
       /* A dropdown keeps focus after a choice, which would hold off polling until the next tap elsewhere. */
@@ -48809,15 +48821,10 @@ window.pgInit = (function () {
       _selectWaits = 0;
       try {
         await fn();
-        if (_pollFailing) {
-          _pollFailing = false;
-          if ($(STATUS_ID).classList.contains('warn')) say('Back in touch with the database.', 'ok');
-        }
+        staleBanner(false);
       } catch (e) {
-        /* Whatever is on screen stays, because a venue's dead spot shouldn't blank a draw. It just can't pass for current.
-           An error already showing matters more: a failed Lock mustn't be replaced by this. */
-        _pollFailing = true;
-        if (!$(STATUS_ID).classList.contains('err')) say('Can\u2019t reach the database, so this may be out of date. Still retrying.', 'warn');
+        /* Whatever is on screen stays, because a venue's dead spot shouldn't blank a draw. It just can't pass for current. */
+        staleBanner(true);
       }
     }, 30000);
   }
@@ -49080,6 +49087,11 @@ window.pgInit = (function () {
       await loadPlayers();
       /* Each update against what's there now: a zero-row update answers 200. */
       const wrong = updates.filter(u => { const p = find(u.id); return !p || p.team_number !== u.team_number || p.partner_id !== u.partner_id; }).length;
+      if (wrong && !pairProblem() && players.some(p => p.team_number != null)) {
+        /* Another device got there first and its draw is whole. Telling this one to reset would wipe a good draw. */
+        say('Another device drew at the same moment. Its teams stand, so nothing needs resetting.', 'err');
+        return;
+      }
       if (wrong) throw new Error(plural(wrong, 'player was', 'players were') + ' not paired as drawn');
       say('Paired ' + plural(updates.length / 2, 'team', 'teams') + '. The Pool Gods have spoken.', 'ok');
     } catch (e) {
@@ -49196,7 +49208,18 @@ window.rhInit = (function () {
   function busyOff() { _busy = Math.max(0, _busy - 1); _epoch++; }
   function isActive() { return $(TAB_ID).classList.contains('active'); }
   /* Polls only while this tab is showing, the page is visible and nothing is running. A control being used in a list is left alone. */
-  let _pollTimer = null, _pollFailing = false, _blurWired = false, _selectWaits = 0;
+  let _pollTimer = null, _blurWired = false, _selectWaits = 0;
+  /* Its own banner, not the status line: an error showing there must stay, and must not hide that the whole screen may be old. */
+  function staleBanner(on) {
+    let b = $(TAB_ID).querySelector('.nwe-stale');
+    if (on && !b) {
+      b = document.createElement('div');
+      b.className = 'nwe-hint nwe-stale';
+      b.textContent = 'Can\u2019t reach the database, so this may be out of date. Still retrying.';
+      $(TAB_ID).prepend(b);
+    }
+    if (b) b.classList.toggle('hidden', !on);
+  }
   function startPoll(fn) {
     if (!_blurWired) {
       /* A dropdown keeps focus after a choice, which would hold off polling until the next tap elsewhere. */
@@ -49213,15 +49236,10 @@ window.rhInit = (function () {
       _selectWaits = 0;
       try {
         await fn();
-        if (_pollFailing) {
-          _pollFailing = false;
-          if ($(STATUS_ID).classList.contains('warn')) say('Back in touch with the database.', 'ok');
-        }
+        staleBanner(false);
       } catch (e) {
-        /* Whatever is on screen stays, because a venue's dead spot shouldn't blank a draw. It just can't pass for current.
-           An error already showing matters more: a failed Lock mustn't be replaced by this. */
-        _pollFailing = true;
-        if (!$(STATUS_ID).classList.contains('err')) say('Can\u2019t reach the database, so this may be out of date. Still retrying.', 'warn');
+        /* Whatever is on screen stays, because a venue's dead spot shouldn't blank a draw. It just can't pass for current. */
+        staleBanner(true);
       }
     }, 30000);
   }
@@ -49570,6 +49588,7 @@ window.rhInit = (function () {
     drawing = true;
     const reveal = $('rhReveal'), btn = $('rhDrawBtn');
     btn.disabled = true;
+    let picked = false;
     try {
       /* Always refetch: players may have uploaded since this tab last loaded. */
       try {
@@ -49596,10 +49615,17 @@ window.rhInit = (function () {
           + (channel.channel_name ? '<span>Drawn on: <strong>' + esc(channel.channel_name) + '</strong></span>' : '')
           + '<span><strong>' + allSubmissions.length + '</strong> total entries</span>'
         + '</div>'
-        + '<button type="button" class="btn btn-primary" data-act="draw">&#8635; Draw Again</button>';
+        + '<button type="button" class="btn btn-primary" data-act="draw" disabled>&#8635; Draw Again</button>';
+      picked = true;
     } finally {
-      drawing = false;
-      btn.disabled = false;
+      /* A drawn name isn't saved anywhere, so an impatient second tap mustn't replace it the moment it appears. */
+      const ready = () => {
+        drawing = false;
+        btn.disabled = false;
+        const again = reveal.querySelector('button');
+        if (again) again.disabled = false;
+      };
+      if (picked) setTimeout(ready, 1000); else ready();
     }
   }
 
@@ -49724,7 +49750,18 @@ window.nwrInit = (function () {
   function busyOff() { _busy = Math.max(0, _busy - 1); _epoch++; }
   function isActive() { return $(TAB_ID).classList.contains('active'); }
   /* Polls only while this tab is showing, the page is visible and nothing is running. A control being used in a list is left alone. */
-  let _pollTimer = null, _pollFailing = false, _blurWired = false, _selectWaits = 0;
+  let _pollTimer = null, _blurWired = false, _selectWaits = 0;
+  /* Its own banner, not the status line: an error showing there must stay, and must not hide that the whole screen may be old. */
+  function staleBanner(on) {
+    let b = $(TAB_ID).querySelector('.nwe-stale');
+    if (on && !b) {
+      b = document.createElement('div');
+      b.className = 'nwe-hint nwe-stale';
+      b.textContent = 'Can\u2019t reach the database, so this may be out of date. Still retrying.';
+      $(TAB_ID).prepend(b);
+    }
+    if (b) b.classList.toggle('hidden', !on);
+  }
   function startPoll(fn) {
     if (!_blurWired) {
       /* A dropdown keeps focus after a choice, which would hold off polling until the next tap elsewhere. */
@@ -49741,15 +49778,10 @@ window.nwrInit = (function () {
       _selectWaits = 0;
       try {
         await fn();
-        if (_pollFailing) {
-          _pollFailing = false;
-          if ($(STATUS_ID).classList.contains('warn')) say('Back in touch with the database.', 'ok');
-        }
+        staleBanner(false);
       } catch (e) {
-        /* Whatever is on screen stays, because a venue's dead spot shouldn't blank a draw. It just can't pass for current.
-           An error already showing matters more: a failed Lock mustn't be replaced by this. */
-        _pollFailing = true;
-        if (!$(STATUS_ID).classList.contains('err')) say('Can\u2019t reach the database, so this may be out of date. Still retrying.', 'warn');
+        /* Whatever is on screen stays, because a venue's dead spot shouldn't blank a draw. It just can't pass for current. */
+        staleBanner(true);
       }
     }, 30000);
   }
@@ -49873,7 +49905,7 @@ window.nwrInit = (function () {
 
   let allEvents = [], allReferees = [], svySurveys = [];
   let currentEventId = null;
-  let wired = false, closed = false, svyToken = 0;
+  let wired = false, closed = false, svyToken = 0, svyLoadedFor = null;
   const refSort = { col: 'name', dir: 'asc' }, svySort = { col: 'name', dir: 'asc' };
   const refFilter = { active: 'all', cert: [], kind: 'all' }, svyFilter = { responded: 'all', canref: 'all', cert: [] };
 
@@ -49893,7 +49925,7 @@ window.nwrInit = (function () {
   function strList(v) { return (Array.isArray(v) ? v : []).filter(x => x != null).map(String); }
 
   /* ── Events ── */
-  async function loadEvents() {
+  async function refreshEvents() {
     try { await readEvents(); return true; } catch (e) {
       $('nwrCurrent').textContent = 'Could not load events: ' + e.message;
       $('nwrEvents').innerHTML = '<tr><td colspan="5" class="nwe-err">Could not load events: ' + esc(e.message) + '</td></tr>';
@@ -49983,7 +50015,7 @@ window.nwrInit = (function () {
     } finally {
       busyOff();
       btn.disabled = false;
-      await loadEvents();
+      await refreshEvents();
     }
   }
   async function setCurrentEvent() {
@@ -49995,7 +50027,7 @@ window.nwrInit = (function () {
       if (rows.length !== 1) throw new Error('that event no longer exists');
       $('nwrCurrentSel').value = '';
       $('nwrSvyEvent').value = '';
-      await loadEvents();
+      await refreshEvents();
       /* The survey dropdown just moved, so its rows have to follow or an export is mislabeled. */
       await loadSurveys();
     } catch (e) {
@@ -50005,11 +50037,12 @@ window.nwrInit = (function () {
     }
   }
   async function deleteEvent(id) {
-    if (!confirm('Delete this event? All survey responses for it will be removed too.')) return;
+    const ev = allEvents.find(e => String(e.id) === String(id));
+    if (!confirm('Delete ' + (ev ? label(eventLabel(ev)) : 'this event') + '? All survey responses for it will be removed too.')) return;
     busyOn();
     try {
       await sbDelete('nw_challenge_events?id=eq.' + encodeURIComponent(id));
-      await loadEvents();
+      await refreshEvents();
       await loadSurveys();
     } catch (e) {
       alert('Could not delete: ' + e.message);
@@ -50112,7 +50145,9 @@ window.nwrInit = (function () {
     if (await updateRef(id, { notes: next }, 'notes')) renderReferees();
   }
   async function deleteRef(id) {
-    if (!confirm('Delete this referee? Their survey responses will also be removed.')) return;
+    const ref = findRef(id);
+    const who = ref ? ((ref.first_name || '') + ' ' + (ref.last_name || '')).trim() : '';
+    if (!confirm('Delete ' + (who ? label(who) : 'this referee') + '? Their survey responses will also be removed.')) return;
     busyOn();
     try {
       await sbDelete('referees?id=eq.' + encodeURIComponent(id));
@@ -50291,6 +50326,7 @@ window.nwrInit = (function () {
       const rows = await sbGetAll('nw_challenge_ref_surveys?event_id=eq.' + encodeURIComponent(eventId) + '&select=*&order=id.asc');
       if (t !== svyToken) return;
       svySurveys = rows;
+      svyLoadedFor = eventId;
       renderSurveys();
     } catch (e) {
       if (t !== svyToken) return;
@@ -50365,7 +50401,14 @@ window.nwrInit = (function () {
       + '</tr>';
     }).join('');
   }
+  /* After a failed load or a change of event, the rows in memory belong to another event, and the file would be named for this one. */
+  function surveysAreLoaded() {
+    if (svyLoadedFor !== null && String(svyLoadedFor) === String($('nwrSvyEvent').value)) return true;
+    alert('The responses for this event haven\u2019t loaded. Try Refresh first.');
+    return false;
+  }
   function exportSurveys() {
+    if (!surveysAreLoaded()) return;
     const rows = sortRows(getFilteredSurveyRows(), svySort.col, svySort.dir, svyAccessor);
     if (!rows.length) return alert('No survey rows in the current filter to export.');
     const eventId = $('nwrSvyEvent').value;
@@ -50399,7 +50442,7 @@ window.nwrInit = (function () {
   }
 
   async function reloadAll() {
-    await loadEvents();
+    await refreshEvents();
     await loadReferees();
     await loadSurveys();
   }
@@ -50439,7 +50482,7 @@ window.nwrInit = (function () {
       else if (act === 'notes') editNotes(id);
       else if (act === 'deleteRef') deleteRef(id);
       else if (act === 'refreshSurveys') loadSurveys();
-      else if (act === 'copySvyEmails') copyEmails(getFilteredSurveyRows());
+      else if (act === 'copySvyEmails') { if (surveysAreLoaded()) copyEmails(getFilteredSurveyRows()); }
       else if (act === 'exportSvy') exportSurveys();
     });
     panel.addEventListener('change', e => {
@@ -50468,7 +50511,7 @@ window.nwrInit = (function () {
       if (eventId) {
         const t = ++svyToken;
         const rows = await sbGetAll('nw_challenge_ref_surveys?event_id=eq.' + encodeURIComponent(eventId) + '&select=*&order=id.asc');
-        if (t === svyToken) { svySurveys = rows; renderSurveys(); }
+        if (t === svyToken) { svySurveys = rows; svyLoadedFor = eventId; renderSurveys(); }
       }
     });
   };
@@ -50527,7 +50570,18 @@ window.cstInit = (function () {
   function busyOff() { _busy = Math.max(0, _busy - 1); _epoch++; }
   function isActive() { return $(TAB_ID).classList.contains('active'); }
   /* Polls only while this tab is showing, the page is visible and nothing is running. A control being used in a list is left alone. */
-  let _pollTimer = null, _pollFailing = false, _blurWired = false, _selectWaits = 0;
+  let _pollTimer = null, _blurWired = false, _selectWaits = 0;
+  /* Its own banner, not the status line: an error showing there must stay, and must not hide that the whole screen may be old. */
+  function staleBanner(on) {
+    let b = $(TAB_ID).querySelector('.nwe-stale');
+    if (on && !b) {
+      b = document.createElement('div');
+      b.className = 'nwe-hint nwe-stale';
+      b.textContent = 'Can\u2019t reach the database, so this may be out of date. Still retrying.';
+      $(TAB_ID).prepend(b);
+    }
+    if (b) b.classList.toggle('hidden', !on);
+  }
   function startPoll(fn) {
     if (!_blurWired) {
       /* A dropdown keeps focus after a choice, which would hold off polling until the next tap elsewhere. */
@@ -50544,15 +50598,10 @@ window.cstInit = (function () {
       _selectWaits = 0;
       try {
         await fn();
-        if (_pollFailing) {
-          _pollFailing = false;
-          if ($(STATUS_ID).classList.contains('warn')) say('Back in touch with the database.', 'ok');
-        }
+        staleBanner(false);
       } catch (e) {
-        /* Whatever is on screen stays, because a venue's dead spot shouldn't blank a draw. It just can't pass for current.
-           An error already showing matters more: a failed Lock mustn't be replaced by this. */
-        _pollFailing = true;
-        if (!$(STATUS_ID).classList.contains('err')) say('Can\u2019t reach the database, so this may be out of date. Still retrying.', 'warn');
+        /* Whatever is on screen stays, because a venue's dead spot shouldn't blank a draw. It just can't pass for current. */
+        staleBanner(true);
       }
     }, 30000);
   }
@@ -50675,7 +50724,7 @@ window.cstInit = (function () {
   function isPlainFilename(p) { return typeof p === 'string' && /^[A-Za-z0-9._-]+$/.test(p) && p !== '.' && p !== '..'; }
   function photoUrl(p) { return isPlainFilename(p) ? PHOTO_BASE + encodeURIComponent(p) : ''; }
 
-  async function loadBans() {
+  async function readBans() {
     allBans = await sbGetAll('critter_bans?select=*&order=banned_at.desc,id.asc');
     bannedKeys = new Set(allBans.map(b => b.identifier_type + ':' + b.identifier_value));
     renderBans();
@@ -50702,7 +50751,7 @@ window.cstInit = (function () {
     + '</div>').join('');
   }
 
-  async function loadFeed(reset) {
+  async function readFeed(reset) {
     const t = ++feedToken;
     const feed = $('cstFeed');
     if (reset) {
@@ -50718,7 +50767,7 @@ window.cstInit = (function () {
     try {
       if (reset) {
         /* Moderators still need the feed if this read fails, but Banned badges and the banned filter would be wrong, so say so. */
-        try { await loadBans(); }
+        try { await readBans(); }
         catch (e) { say('Could not load the ban list, so Banned badges may be missing: ' + e.message, 'err'); }
       }
       const hiddenFilter = feedFilter === 'all' ? '' : '&hidden=eq.true';
@@ -50786,7 +50835,7 @@ window.cstInit = (function () {
     try {
       const rows = await sbPatch('coastal_critters?id=eq.' + encodeURIComponent(id), { hidden });
       if (rows.length !== 1) say('That post no longer exists.', 'err');
-      await loadFeed(true);
+      await readFeed(true);
     } catch (e) {
       alert('Update failed: ' + e.message);
     } finally {
@@ -50803,11 +50852,11 @@ window.cstInit = (function () {
     busyOn();
     try {
       const rows = await sbDelete('coastal_critters?id=eq.' + encodeURIComponent(id));
-      if (rows.length !== 1) { say('That post was already gone.', 'err'); await loadFeed(true); return; }
+      if (rows.length !== 1) { say('That post was already gone.', 'err'); await readFeed(true); return; }
       const fileNote = await removeFile(p.photo_path);
       if (fileNote) say('Post deleted. ' + fileNote, 'err');
       else say('Post and photo deleted.', 'ok');
-      await loadFeed(true);
+      await readFeed(true);
     } catch (e) {
       alert('Delete failed: ' + e.message);
     } finally {
@@ -50889,11 +50938,11 @@ window.cstInit = (function () {
       const rows = await sbPatch('coastal_critters?id=eq.' + encodeURIComponent(p.id), { hidden: true });
       closeBan();
       if (rows.length !== 1) say('The ban saved, but that post no longer exists.', 'err');
-      await loadFeed(true);
+      await readFeed(true);
     } catch (e) {
       alert((banned ? 'The ban saved, but the post is still showing: ' : 'Ban failed. Check the list to see what changed: ') + e.message);
       if (banned) closeBan();
-      await loadFeed(true);
+      await readFeed(true);
     } finally {
       busyOff();
       btn.disabled = false;
@@ -50913,10 +50962,10 @@ window.cstInit = (function () {
     if (!confirm('Unban this user? They will be able to submit again.\n\nThis removes the ban on:\n' + listed)) return;
     busyOn();
     try {
-      await loadBans();
+      await readBans();
       const wanted = new Set(banIdentifiers(p).map(i => i.type + ':' + i.value));
       await deleteBansById(allBans.filter(b => wanted.has(b.identifier_type + ':' + b.identifier_value)));
-      await loadFeed(true);
+      await readFeed(true);
     } catch (e) {
       alert('Unban failed: ' + e.message);
     } finally {
@@ -50930,7 +50979,7 @@ window.cstInit = (function () {
     busyOn();
     try {
       await deleteBansById(g.ids);
-      await loadFeed(true);
+      await readFeed(true);
     } catch (e) {
       alert('Unban failed: ' + e.message);
     } finally {
@@ -50985,7 +51034,7 @@ window.cstInit = (function () {
   function setFilter(mode) {
     feedFilter = mode;
     document.querySelectorAll('#cstFilters .seg-btn-slate').forEach(x => x.classList.toggle('active', x.dataset.filter === mode));
-    loadFeed(true);
+    readFeed(true);
   }
   /* A paged list isn't reset under someone reading it: a new post offers a refresh instead. */
   async function poll() {
@@ -51012,8 +51061,8 @@ window.cstInit = (function () {
       else if (act === 'deletePost') deletePost(id);
       else if (act === 'downloadNew') downloadPhotos(false);
       else if (act === 'downloadAll') downloadPhotos(true);
-      else if (act === 'more') loadFeed(false);
-      else if (act === 'refresh') loadFeed(true);
+      else if (act === 'more') readFeed(false);
+      else if (act === 'refresh') readFeed(true);
     });
   }
 
@@ -51023,9 +51072,9 @@ window.cstInit = (function () {
       wired = true;
       if (refusedPublicKey('cstClosed', 'cstBody')) { closed = true; return; }
       wire();
-      loadFeed(true);
+      readFeed(true);
     } else if (!_busy && !posts.size) {
-      loadFeed(true);
+      readFeed(true);
     }
     startPoll(poll);
   };
