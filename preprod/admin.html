@@ -6354,6 +6354,9 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         #tab-trophycase .tph-file:hover{border-color:var(--spm-accent);color:var(--text)}
         #tab-trophycase .tph-file.has-file{border-color:var(--spm-accent);color:var(--spm-accent)}
         #tab-trophycase .tph-file-input{display:none}
+        #tab-trophycase .tph-file-row{display:flex;gap:8px}
+        #tab-trophycase .tph-file-row .tph-file{flex:1;min-width:0}
+        #tab-trophycase .tph-file-row .tph-file-pdf{flex:0 0 72px;padding:8px 4px}
         #tab-trophycase .tph-preview{display:block;max-width:120px;max-height:80px;object-fit:cover;border-radius:6px;border:1px solid var(--border);margin-top:8px}
         #tab-trophycase .tph-tiles{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
         #tab-trophycase .tph-tiles:empty{margin-bottom:0}
@@ -6485,22 +6488,32 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             <div class="form-row">
               <div>
                 <label id="tphBrkTrophyPhotoLabel">Champion photo <span class="tph-optional">(1st place)</span></label>
-                <label class="tph-file" id="tphTrophyLabel" for="tphBrkTrophyFile">Choose image or PDF...</label>
-                <input type="file" id="tphBrkTrophyFile" class="tph-file-input" accept="image/*,application/pdf">
+                <!-- Two buttons on one input. Android opens its gallery only when an input asks for images alone; adding a PDF type sends it to the file browser. -->
+                <div class="tph-file-row">
+                  <label class="tph-file" id="tphTrophyLabel" for="tphBrkTrophyFile" data-accept="image/*">Choose photo</label>
+                  <label class="tph-file tph-file-pdf" for="tphBrkTrophyFile" data-accept="application/pdf">PDF</label>
+                </div>
+                <input type="file" id="tphBrkTrophyFile" class="tph-file-input" accept="image/*">
                 <img id="tphTrophyPreview" class="tph-preview hidden" alt="Champion photo preview">
               </div>
               <div>
                 <label id="tphBrkRunnerupPhotoLabel">Runner-up photo <span class="tph-optional">(2nd place, optional)</span></label>
-                <label class="tph-file" id="tphRunnerupLabel" for="tphBrkRunnerupFile">Choose image or PDF...</label>
-                <input type="file" id="tphBrkRunnerupFile" class="tph-file-input" accept="image/*,application/pdf">
+                <div class="tph-file-row">
+                  <label class="tph-file" id="tphRunnerupLabel" for="tphBrkRunnerupFile" data-accept="image/*">Choose photo</label>
+                  <label class="tph-file tph-file-pdf" for="tphBrkRunnerupFile" data-accept="application/pdf">PDF</label>
+                </div>
+                <input type="file" id="tphBrkRunnerupFile" class="tph-file-input" accept="image/*">
                 <img id="tphRunnerupPreview" class="tph-preview hidden" alt="Runner-up photo preview">
               </div>
             </div>
             <div class="tph-field">
               <label>Bracket photos <span class="tph-optional">(one or more; set the order with the arrows)</span></label>
               <div id="tphBrkPhotosList" class="tph-tiles"></div>
-              <label class="tph-file" id="tphBrkAddLabel" for="tphBrkFiles">+ Add bracket photo(s) or PDF</label>
-              <input type="file" id="tphBrkFiles" class="tph-file-input" accept="image/*,application/pdf" multiple>
+              <div class="tph-file-row">
+                <label class="tph-file" id="tphBrkAddLabel" for="tphBrkFiles" data-accept="image/*">+ Add bracket photos</label>
+                <label class="tph-file tph-file-pdf" for="tphBrkFiles" data-accept="application/pdf">+ PDF</label>
+              </div>
+              <input type="file" id="tphBrkFiles" class="tph-file-input" accept="image/*" multiple>
             </div>
             <div class="tph-actions">
               <button type="button" class="btn btn-primary" id="tphBrkSubmit">Save bracket</button>
@@ -7566,7 +7579,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.469';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.470';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -14771,7 +14784,7 @@ async function tphOnFileSelected(input, labelId, previewId) {
   const label = tphEl(labelId), preview = tphEl(previewId);
   const file = input.files && input.files[0];
   if (!file) {
-    label.textContent = 'Choose image or PDF...';
+    label.textContent = 'Choose photo';
     label.classList.remove('has-file');
     preview.classList.add('hidden');
     preview.src = '';
@@ -15183,7 +15196,7 @@ function tphCancelEdit() {
   [['tphBrkTrophyFile', 'tphTrophyLabel', 'tphTrophyPreview'], ['tphBrkRunnerupFile', 'tphRunnerupLabel', 'tphRunnerupPreview']].forEach(([input, label, preview]) => {
     tphEl(input).value = '';
     delete tphEl(input)._tphPdfHighRes;
-    tphEl(label).textContent = 'Choose image or PDF...';
+    tphEl(label).textContent = 'Choose photo';
     tphEl(label).classList.remove('has-file');
     tphEl(preview).classList.add('hidden');
     tphEl(preview).src = '';
@@ -15220,7 +15233,7 @@ function tphEditBracket(id) {
   [['tphBrkTrophyFile', 'tphTrophyLabel', 'tphTrophyPreview', b.trophy_photo_path], ['tphBrkRunnerupFile', 'tphRunnerupLabel', 'tphRunnerupPreview', b.runner_up_photo_path]].forEach(([input, label, preview, path]) => {
     tphEl(input).value = '';   // pick again to replace
     delete tphEl(input)._tphPdfHighRes;
-    tphEl(label).textContent = path ? 'Current photo — pick again to replace' : 'Choose image or PDF...';
+    tphEl(label).textContent = path ? 'Current photo — pick again to replace' : 'Choose photo';
     tphEl(label).classList.toggle('has-file', !!path);
     tphEl(preview).classList.toggle('hidden', !path);
     if (path) tphEl(preview).src = tphPublicUrl(path); else tphEl(preview).src = '';
@@ -15419,6 +15432,9 @@ function tphWire() {
   const root = tphEl('tab-trophycase');
   tphEl('tphStatus').addEventListener('click', () => { tphEl('tphStatus').className = 'status-line'; });
   root.addEventListener('click', e => {
+    // Runs before the label opens its input. The photo button must ask for images alone, or Android skips the gallery.
+    const pick = e.target.closest('label[data-accept]');
+    if (pick) { tphEl(pick.htmlFor).accept = pick.dataset.accept; return; }
     const sub = e.target.closest('[data-tph-view]');
     if (sub) return tphView(sub.dataset.tphView);
     const b = e.target.closest('button[data-act]');
