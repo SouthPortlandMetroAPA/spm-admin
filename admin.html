@@ -1120,6 +1120,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       <button class="tab" data-tab="hostroster">Host Rosters</button>
       <button class="tab" data-tab="skillreviews">Skill Reviews</button>
       <button class="tab" data-tab="sportsmanship">Sportsmanship</button>
+      <button class="tab" data-tab="trophycase">Trophy Case</button>
       <button class="tab" data-tab="ourrack">To-Do</button>
       <button class="tab" data-tab="preshot">PreShot</button>
       <button class="tab" data-tab="cuedrop">CueDrop</button>
@@ -6308,6 +6309,211 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       </div>
     </div>
 
+    <!-- TROPHYCASE-TAB:PANEL:START
+         Trophy Case: admin for the public NW Challenge winners page (repo trophy-case, schema trophycase).
+         Moved here from Apps/TrophyCase/site/admin.html, whose save path was hardened by two critic rounds. Keep that behaviour.
+         Source of this block: tools/claude/trophycase/slate-panel.html, applied by tools/claude/slate/patch-trophycase-tab.mjs.
+         Guards: tools/claude/validate-trophycase.mjs, tools/claude/appcheck/ui-trophycase-slate.mjs.
+         Classes here are tph-* or Slate's own. Never use Slate's top-level tab classes inside this panel: init and switchTab query them document-wide.
+         Every selector below starts with the panel id, so nothing leaks into another tab. -->
+    <div id="tab-trophycase" class="tab-panel">
+      <style>
+        #tab-trophycase .tph-head{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+        #tab-trophycase .tph-subtabs{display:flex;flex:1 1 240px;border:1px solid var(--border);border-radius:999px;overflow:hidden;background:var(--card)}
+        #tab-trophycase .tph-subtab{flex:1;min-height:40px;border:none;background:transparent;color:var(--text);font:inherit;font-size:.875rem;font-weight:700;cursor:pointer}
+        #tab-trophycase .tph-subtab.active{background:var(--spm-accent);color:#fff}
+        #tab-trophycase .tph-site{text-decoration:none;text-align:center}
+        #tab-trophycase .tph-view{display:none}
+        #tab-trophycase .tph-view.active{display:block}
+        #tab-trophycase .tph-field{margin-bottom:12px}
+        #tab-trophycase .tph-optional{font-weight:400;text-transform:none;letter-spacing:0}
+        #tab-trophycase .tph-narrow{flex:0 1 140px}
+        #tab-trophycase textarea{min-height:80px;font-family:inherit;font-size:.9rem;white-space:pre-wrap}
+        #tab-trophycase .status-line{position:fixed;left:12px;right:12px;bottom:12px;z-index:2000;max-height:40vh;overflow:auto;margin:0;font-size:.9rem;box-shadow:0 4px 16px rgba(0,0,0,.25);cursor:pointer}
+        #tab-trophycase .status-line.ok{background:#e6f7ec;color:#0a5c2e}
+        #tab-trophycase .status-line.err{background:#fdecea;color:#8f1d12}
+        #tab-trophycase #tphBody[inert]{opacity:.6}
+        #tab-trophycase .tph-spinner{display:inline-block;width:16px;height:16px;border:2px solid rgba(0,49,161,.2);border-top-color:var(--spm-accent);border-radius:50%;animation:tph-spin .8s linear infinite;vertical-align:middle;margin-right:6px}
+        @keyframes tph-spin{to{transform:rotate(360deg)}}
+        #tab-trophycase .tph-toggle-row{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+        #tab-trophycase .tph-toggle-text{margin:0;cursor:pointer;text-transform:none;letter-spacing:0;font-size:.85rem;font-weight:600;color:var(--text)}
+        #tab-trophycase .tph-toggle{position:relative;display:inline-block;width:44px;height:24px;margin:0;cursor:pointer;flex:0 0 auto}
+        #tab-trophycase .tph-toggle input{position:absolute;opacity:0;width:0;height:0}
+        #tab-trophycase .tph-slider{position:absolute;inset:0;background:#c4c7cc;border-radius:24px;transition:background .2s}
+        #tab-trophycase .tph-slider::before{content:'';position:absolute;left:2px;top:2px;width:20px;height:20px;background:#fff;border-radius:50%;transition:transform .2s}
+        #tab-trophycase .tph-toggle input:checked + .tph-slider{background:var(--spm-accent)}
+        #tab-trophycase .tph-toggle input:checked + .tph-slider::before{transform:translateX(20px)}
+        #tab-trophycase .tph-toggle input:focus-visible + .tph-slider{outline:2px solid var(--spm-accent);outline-offset:2px}
+        #tab-trophycase .tph-sort{width:64px;min-height:32px;padding:4px 6px;text-align:center}
+        #tab-trophycase .tph-file{display:block;padding:8px 16px;border:1.5px dashed var(--border);border-radius:10px;background:#fff;color:var(--muted);cursor:pointer;text-align:center;text-transform:none;letter-spacing:0;font-size:.85rem;font-weight:600;min-height:44px;line-height:26px;overflow-wrap:anywhere}
+        #tab-trophycase .tph-file:hover{border-color:var(--spm-accent);color:var(--text)}
+        #tab-trophycase .tph-file.has-file{border-color:var(--spm-accent);color:var(--spm-accent)}
+        #tab-trophycase .tph-file-input{display:none}
+        #tab-trophycase .tph-preview{display:block;max-width:120px;max-height:80px;object-fit:cover;border-radius:6px;border:1px solid var(--border);margin-top:8px}
+        #tab-trophycase .tph-tiles{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+        #tab-trophycase .tph-tiles:empty{margin-bottom:0}
+        #tab-trophycase .tph-tile{position:relative;width:120px;background:#fff;border:1px solid var(--border);border-radius:8px;overflow:hidden;display:flex;flex-direction:column}
+        #tab-trophycase .tph-tile img{width:100%;height:80px;object-fit:cover;display:block}
+        #tab-trophycase .tph-tile-badge{position:absolute;top:4px;left:4px;background:rgba(0,0,0,.72);color:#fff;font-size:.7rem;font-weight:700;padding:2px 6px;border-radius:4px;line-height:1}
+        #tab-trophycase .tph-tile-badge.new{background:var(--spm-accent)}
+        #tab-trophycase .tph-remove{position:absolute;top:4px;right:4px;width:24px;height:24px;border:none;border-radius:50%;background:rgba(0,0,0,.75);color:#fff;font-size:1rem;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center}
+        #tab-trophycase .tph-remove:hover{background:var(--spm-primary)}
+        #tab-trophycase .tph-reorder{display:flex;justify-content:space-between;padding:4px;border-top:1px solid var(--border)}
+        #tab-trophycase .tph-reorder button{background:transparent;border:1px solid var(--border);color:var(--text);width:28px;height:28px;border-radius:6px;cursor:pointer;font-size:.9rem;padding:0}
+        #tab-trophycase .tph-reorder button:hover:not(:disabled){border-color:var(--spm-accent);color:var(--spm-accent)}
+        #tab-trophycase .tph-reorder button:disabled{opacity:.3;cursor:not-allowed}
+        #tab-trophycase .tph-item{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:12px;border:1px solid var(--border);border-radius:10px;margin-bottom:8px;background:#fff}
+        #tab-trophycase .tph-info{flex:1;min-width:200px;overflow-wrap:anywhere}
+        #tab-trophycase .tph-photos{display:flex;gap:6px;align-items:center}
+        #tab-trophycase .tph-thumb{display:block;width:48px;height:48px}
+        #tab-trophycase .tph-thumb img{width:48px;height:48px;object-fit:cover;border-radius:6px;border:1px solid var(--border);display:block}
+        #tab-trophycase .tph-thumb:hover img{opacity:.8}
+        #tab-trophycase .tph-actions{display:flex;gap:6px;flex-wrap:wrap}
+        #tab-trophycase .tph-small{font-size:.8rem}
+        @media (max-width:600px){
+          #tab-trophycase .tph-item{flex-direction:column;align-items:stretch}
+          #tab-trophycase .tph-actions{justify-content:flex-end}
+          #tab-trophycase .btn,#tab-trophycase .tph-subtab,#tab-trophycase .tph-sort,#tab-trophycase input[type="text"],#tab-trophycase input[type="number"],#tab-trophycase select,#tab-trophycase textarea{min-height:44px}
+          #tab-trophycase .tph-site{line-height:24px}
+          #tab-trophycase .tph-remove,#tab-trophycase .tph-reorder button{width:44px;height:44px}
+          #tab-trophycase .tph-tile{width:112px}
+          #tab-trophycase .tph-reorder{padding:4px 0}
+          #tab-trophycase .tph-toggle{width:44px;height:44px}
+          #tab-trophycase .tph-slider{inset:10px 0}
+        }
+      </style>
+
+      <!-- Status sits outside the frozen body, so a message can always be tapped away. -->
+      <div id="tphStatus" class="status-line" role="status"></div>
+
+      <div id="tphGate" class="card hidden">
+        <h2>Trophy Case</h2>
+        <p class="hint" id="tphGateMsg"></p>
+      </div>
+
+      <div id="tphBody" class="hidden">
+        <div class="tph-head">
+          <div class="tph-subtabs" role="tablist">
+            <button type="button" class="tph-subtab active" data-tph-view="events">Events</button>
+            <button type="button" class="tph-subtab" data-tph-view="areas">Areas</button>
+            <button type="button" class="tph-subtab" data-tph-view="brackets">Brackets</button>
+          </div>
+          <a class="btn btn-outline btn-sm tph-site" href="https://southportlandmetroapa.github.io/trophy-case/" target="_blank" rel="noopener">View site &#8599;</a>
+        </div>
+
+        <!-- ═══════ Events ═══════ -->
+        <div id="tphViewEvents" class="tph-view active">
+          <div class="card">
+            <h2>Add event</h2>
+            <div class="form-row">
+              <div><label for="tphEvtChallenge">Challenge</label><select id="tphEvtChallenge"></select></div>
+              <div><label for="tphEvtName">Event name</label><input type="text" id="tphEvtName" placeholder="e.g. Singles"></div>
+              <div><label for="tphEvtSlug">Slug</label><input type="text" id="tphEvtSlug" placeholder="auto-generated"></div>
+            </div>
+            <div class="tph-toggle-row">
+              <label class="tph-toggle"><input type="checkbox" id="tphEvtHasSl" checked><span class="tph-slider"></span></label>
+              <label class="tph-toggle-text" for="tphEvtHasSl">Has skill levels &mdash; off for Scotch Doubles and team events</label>
+            </div>
+            <button type="button" class="btn btn-primary" id="tphEvtAdd">Add event</button>
+          </div>
+          <div class="card">
+            <h2>Events</h2>
+            <div id="tphEventsLoading" class="hint"><span class="tph-spinner"></span> Loading&hellip;</div>
+            <div class="table-wrap">
+              <table class="table hidden" id="tphEventsTable">
+                <thead><tr><th>Challenge</th><th>Name</th><th>Slug</th><th>Sort</th><th>Active</th><th>SL</th><th></th></tr></thead>
+                <tbody id="tphEventsBody"></tbody>
+              </table>
+            </div>
+            <p id="tphEventsEmpty" class="hint hidden">No events yet.</p>
+          </div>
+        </div>
+
+        <!-- ═══════ Areas ═══════ -->
+        <div id="tphViewAreas" class="tph-view">
+          <div class="card">
+            <h2>Add area</h2>
+            <div class="tph-field"><label for="tphAreaName">Area name</label><input type="text" id="tphAreaName" placeholder="e.g. South Portland"></div>
+            <button type="button" class="btn btn-primary" id="tphAreaAdd">Add area</button>
+          </div>
+          <div class="card">
+            <h2>Areas</h2>
+            <div id="tphAreasLoading" class="hint"><span class="tph-spinner"></span> Loading&hellip;</div>
+            <div class="table-wrap">
+              <table class="table hidden" id="tphAreasTable">
+                <thead><tr><th>Name</th><th>Sort</th><th></th></tr></thead>
+                <tbody id="tphAreasBody"></tbody>
+              </table>
+            </div>
+            <p id="tphAreasEmpty" class="hint hidden">No areas yet.</p>
+          </div>
+        </div>
+
+        <!-- ═══════ Brackets ═══════ -->
+        <div id="tphViewBrackets" class="tph-view">
+          <div class="card">
+            <h2>Brackets</h2>
+            <label for="tphBrkEvent">Event</label>
+            <select id="tphBrkEvent"><option value="">-- Select event --</option></select>
+          </div>
+
+          <div id="tphBrkFormWrap" class="card hidden">
+            <h2 id="tphBrkFormTitle">Add bracket</h2>
+            <input type="hidden" id="tphBrkEditId" value="">
+            <!-- Hidden when the selected event has no skill levels. -->
+            <div class="form-row" id="tphBrkSlRow">
+              <div class="tph-narrow"><label for="tphBrkSl">Skill level</label><input type="number" id="tphBrkSl" min="1" max="9" placeholder="e.g. 2"></div>
+              <div class="tph-narrow"><label for="tphBrkSlMax">SL max <span class="tph-optional">(optional)</span></label><input type="number" id="tphBrkSlMax" min="1" max="9" placeholder="e.g. 3"></div>
+            </div>
+            <!-- Labels switch to team wording for events with no skill levels. -->
+            <div class="form-row">
+              <div><label for="tphBrkWinner" id="tphBrkWinnerLabel">Winner name</label><input type="text" id="tphBrkWinner" placeholder="Player or team display name"></div>
+              <div><label for="tphBrkTeam" id="tphBrkTeamLabel">Team name <span class="tph-optional">(optional)</span></label><input type="text" id="tphBrkTeam" placeholder="Team name for team events"></div>
+            </div>
+            <div class="tph-field"><label for="tphBrkPlayers" id="tphBrkPlayersLabel">Team players <span class="tph-optional">(optional, comma-separated)</span></label><textarea id="tphBrkPlayers" placeholder="Player 1, Player 2, Player 3"></textarea></div>
+            <div class="tph-field"><label for="tphBrkRunner" id="tphBrkRunnerLabel">Runner-up <span class="tph-optional">(optional)</span></label><input type="text" id="tphBrkRunner" placeholder="Runner-up name"></div>
+            <div class="tph-field"><label for="tphBrkRunnerPlayers" id="tphBrkRunnerPlayersLabel">Runner-up players <span class="tph-optional">(optional, comma-separated)</span></label><textarea id="tphBrkRunnerPlayers" placeholder="Player 1, Player 2"></textarea></div>
+            <div class="form-row">
+              <div><label for="tphBrkArea">1st place league area <span class="tph-optional">(optional)</span></label><select id="tphBrkArea"><option value="">-- None --</option></select></div>
+              <div><label for="tphBrkRunnerArea">2nd place league area <span class="tph-optional">(optional)</span></label><select id="tphBrkRunnerArea"><option value="">-- None --</option></select></div>
+            </div>
+            <div class="form-row">
+              <div>
+                <label id="tphBrkTrophyPhotoLabel">Champion photo <span class="tph-optional">(1st place)</span></label>
+                <label class="tph-file" id="tphTrophyLabel" for="tphBrkTrophyFile">Choose image or PDF...</label>
+                <input type="file" id="tphBrkTrophyFile" class="tph-file-input" accept="image/*,application/pdf">
+                <img id="tphTrophyPreview" class="tph-preview hidden" alt="Champion photo preview">
+              </div>
+              <div>
+                <label id="tphBrkRunnerupPhotoLabel">Runner-up photo <span class="tph-optional">(2nd place, optional)</span></label>
+                <label class="tph-file" id="tphRunnerupLabel" for="tphBrkRunnerupFile">Choose image or PDF...</label>
+                <input type="file" id="tphBrkRunnerupFile" class="tph-file-input" accept="image/*,application/pdf">
+                <img id="tphRunnerupPreview" class="tph-preview hidden" alt="Runner-up photo preview">
+              </div>
+            </div>
+            <div class="tph-field">
+              <label>Bracket photos <span class="tph-optional">(one or more; set the order with the arrows)</span></label>
+              <div id="tphBrkPhotosList" class="tph-tiles"></div>
+              <label class="tph-file" id="tphBrkAddLabel" for="tphBrkFiles">+ Add bracket photo(s) or PDF</label>
+              <input type="file" id="tphBrkFiles" class="tph-file-input" accept="image/*,application/pdf" multiple>
+            </div>
+            <div class="tph-actions">
+              <button type="button" class="btn btn-primary" id="tphBrkSubmit">Save bracket</button>
+              <button type="button" class="btn btn-outline" id="tphBrkCancel" style="display:none">Cancel</button>
+            </div>
+          </div>
+
+          <div id="tphBrkListWrap" class="card hidden">
+            <h2 id="tphBrkListTitle">Brackets</h2>
+            <div id="tphBrkLoading" class="hint hidden"><span class="tph-spinner"></span> Loading&hellip;</div>
+            <div id="tphBrkList"></div>
+            <p id="tphBrkEmpty" class="hint hidden">No brackets for this event.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- TROPHYCASE-TAB:PANEL:END -->
+
     <div id="tab-tabsmgr" class="tab-panel">
       <div class="card" style="padding:16px;max-width:640px">
         <h3 style="margin:0 0 2px">Tabs</h3>
@@ -6567,7 +6773,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.464';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.465';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -7132,12 +7338,13 @@ const PDFJS_VERSION = '4.8.69';
 const PDFJS_URL     = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@' + PDFJS_VERSION + '/build/pdf.min.mjs';
 const PDFJS_WORKER  = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@' + PDFJS_VERSION + '/build/pdf.worker.min.mjs';
 let _pdfJsPromise = null;
+let _pdfJsAttempt = 0;
 function ensurePdfJs() {
   if (!_pdfJsPromise) {
-    _pdfJsPromise = import(PDFJS_URL).then(mod => {
+    _pdfJsPromise = import(PDFJS_URL + (_pdfJsAttempt ? '?retry=' + _pdfJsAttempt : '')).then(mod => {
       mod.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
       return mod;
-    });
+    }).catch(e => { _pdfJsPromise = null; _pdfJsAttempt++; throw e; });   // a dropped load can be retried; the query string gets past Chrome remembering a failed import
   }
   return _pdfJsPromise;
 }
@@ -8209,6 +8416,15 @@ function parseTsv(raw) {
    ══════════════════════════════════════════════════════════════════════ */
 let _versionMismatch = false;
 
+/* Per-owner holds on the auto-update reload. A tab with work a reload would destroy pushes a function here that
+   answers true while that work exists. slateBulkBusy stays the bulk sends' own: it is one boolean set and cleared by five
+   of them, so another owner writing it could clear their protection mid-send. A hold that throws doesn't hold, so a bug
+   can't block updates for good. */
+window.slateUpdateHolds = window.slateUpdateHolds || [];
+function slUpdateHeld() {
+  return window.slateUpdateHolds.some(h => { try { return !!h(); } catch (e) { return false; } });
+}
+
 async function checkVersion() {
   if (_versionMismatch) return;
   /* 3.179: never start an update-reload while a long-running bulk
@@ -8218,6 +8434,7 @@ async function checkVersion() {
      (plain window property — TDZ-safe, this code runs before the
      bulk-op `let` declarations lower in the file are initialized). */
   if (window.slateBulkBusy) return;
+  if (slUpdateHeld()) return;
   try {
     // Anon-only fetch — version lookup shouldn't require the admin key.
     // cache:'no-store' so the browser doesn't serve a stale apa_core
@@ -8281,7 +8498,7 @@ function pollForDeploy(targetVersion, _attempt) {
         const servedVersion = m ? m[1] : null;
         /* 3.179 bulk-op guard: keep polling instead of reloading while a
            bulk send owns the page. */
-        if (servedVersion && servedVersion !== APP_VERSION && !window.slateBulkBusy) {
+        if (servedVersion && servedVersion !== APP_VERSION && !window.slateBulkBusy && !slUpdateHeld()) {
           // 3.54 fix: location.reload(true) busts the BROWSER cache but
           // NOT Fastly's edge cache (Cache-Control: max-age=600 on GitHub
           // Pages). The reloaded page would hit the same stale edge copy
@@ -8344,6 +8561,23 @@ function applyAppIdentity() {
   if (footer) footer.textContent = APP_NAME + ' v' + APP_VERSION + ' · ' + APP_PHASE + ' · ' + APP_TAGLINE;
 }
 
+/* Tabs that need none of the startup reads, so a link to one opens before them and one dropped read can't stop it.
+   Add a tab here only if its init reads nothing from loadOperators, loadSessions or the other startup calls. */
+const SL_EARLY_TABS = new Set(['trophycase']);
+const SL_GATE_TIMEOUT_MS = 30000;
+function slDeepLinkTab() {
+  const t = location.hash.slice(1);
+  return SL_EARLY_TABS.has(t) && document.querySelector('.tab[data-tab="' + t + '"]') ? t : null;
+}
+/* A key placed after the # never reaches the page: it lands in the fragment and the gate would just repeat. */
+function slGateHashNote() {
+  const h = location.hash;
+  if (!h) return;
+  document.getElementById('keyGateMsg').textContent = /key=/.test(h)
+    ? 'The key is after the # in this link, so the page can\'t read it. Move ?key=… to before the #.'
+    : 'Open your saved Slate link, or put ?key=… before the # in this one.';
+}
+
 async function init() {
   applyAppIdentity();
 
@@ -8359,16 +8593,27 @@ async function init() {
     if (!document.hidden) checkVersion();
   });
 
-  if (!SB_KEY) { document.getElementById('keyGate').classList.remove('hidden'); return; }
+  if (!SB_KEY) { document.getElementById('keyGate').classList.remove('hidden'); slGateHashNote(); return; }
+  const slGate = (title, html) => {
+    document.getElementById('keyGate').classList.remove('hidden');
+    document.getElementById('keyGateTitle').textContent = title;
+    document.getElementById('keyGateMsg').innerHTML = html;
+  };
   try {
-    const r = await fetch(SB_URL + '/rest/v1/operators?select=id&limit=1', { headers: HEADERS_READ });
+    /* Only a 401 or 403 means a bad key. A dead spot or an outage is not one, and this message once hid a whole app being down. */
+    const ctl = new AbortController();
+    const gateTimer = setTimeout(() => ctl.abort(), SL_GATE_TIMEOUT_MS);
+    let r;
+    try { r = await fetch(SB_URL + '/rest/v1/operators?select=id&limit=1', { headers: HEADERS_READ, signal: ctl.signal }); }
+    finally { clearTimeout(gateTimer); }
+    if (r.status === 401 || r.status === 403) {
+      slGate('Access Denied', '<strong style="color:var(--danger)">Admin key is invalid or expired.</strong><br>Double-check <code>?key=</code>.');
+      return;
+    }
     if (!r.ok) throw new Error('HTTP ' + r.status);
   } catch (e) {
-    const g = document.getElementById('keyGate');
-    g.classList.remove('hidden');
-    document.getElementById('keyGateTitle').textContent = 'Access Denied';
-    document.getElementById('keyGateMsg').innerHTML =
-      '<strong style="color:var(--danger)">Admin key is invalid or expired.</strong><br>Double-check <code>?key=</code>.';
+    const why = e.name === 'AbortError' ? 'it timed out' : esc(e.message);
+    slGate('Can\'t reach the database', '<strong style="color:var(--danger)">Slate couldn\'t reach the database: ' + why + '.</strong><br>Your key was not rejected. Check your signal and reload this page.');
     return;
   }
 
@@ -8383,6 +8628,14 @@ async function init() {
 
   // Wire the PDF drop zone now that its DOM is in place.
   setupDropZone();
+
+  /* admin.html?key=…#trophycase. A link to a tab wins over one you once hid. */
+  const deepTab = slDeepLinkTab();
+  if (deepTab) {
+    const tabPrefs = slTabPrefsLoad();
+    if (tabPrefs.hidden.indexOf(deepTab) >= 0) { tabPrefs.hidden = tabPrefs.hidden.filter(s => s !== deepTab); slTabPrefsSave(tabPrefs); }
+    switchTab(deepTab);
+  }
 
   await loadOperators();
   await loadSessions();
@@ -8402,7 +8655,9 @@ async function init() {
   slTabsApply();
   const savedBtn = savedTab ? document.querySelector('.tab[data-tab="' + savedTab + '"]') : null;
   const savedVisible = savedBtn && !savedBtn.classList.contains('sl-tab-hidden');
-  if (savedTab && /^[a-z]+$/.test(savedTab) && savedVisible) {
+  if (deepTab) {
+    /* Already open since before the startup reads. Entering it again would refetch everything on what may be a weak signal. */
+  } else if (savedTab && /^[a-z]+$/.test(savedTab) && savedVisible) {
     switchTab(savedTab);
   } else if (document.querySelector('.tab.active')?.dataset.tab === 'emailhq') {
     // Email HQ is the default tab (its static `active` class is set, but the
@@ -11818,6 +12073,7 @@ const TAB_LABEL = {
   hostroster:    'Host Rosters',
   skillreviews:  'Skill Reviews',
   sportsmanship: 'Sportsmanship',
+  trophycase:    'Trophy Case',
   ourrack:       'To-Do',
   preshot:       'PreShot',
   cuedrop:       'CueDrop',
@@ -12323,6 +12579,7 @@ function switchTab(name) {
   if (name === 'hostroster') hrInit();
   if (name === 'skillreviews') skInit();
   if (name === 'sportsmanship') fpInit();
+  if (name === 'trophycase') tphInit();
   if (name === 'shortrack') srInit();
   if (name === 'ourrack') orInit();
   if (name === 'preshot') psInit();
@@ -13425,6 +13682,971 @@ async function skDecide(id, outcome) {
   } catch (e) { alert('Could not save: ' + e.message); }
 }
 window.skInit = skInit;
+
+/* TROPHYCASE-TAB:JS:START
+   TROPHY CASE — admin for the public NW Challenge winners page. Moved from Apps/TrophyCase/site/admin.html 0.12.
+   PURPOSE  Challenges are seeded by SQL. This tab manages their events, the league areas, and the winners with their photos.
+   DATA     trophycase.trophy_challenges, trophy_events, trophy_areas, trophy_brackets, and the public bucket trophy-case-photos.
+            Service key only: anon can read and nothing else. Preprod Slate shares this database, so a save here is a real save.
+   DOORS    tphSb is the only REST call, tphUploadImage and tphDeleteFile the only storage calls. All go through tphFetch, which gives up.
+            Slate's sb has no timeout and defaults to schema slate, and its setStatus writes innerHTML, so neither is used here.
+   ORDER    Save: files, then the row, then removing replaced files. The row is what publishes. Delete: the row first, then its files.
+            Both critic rounds on this code found Sev-1s that green checks had passed, so change this only with its failure tests.
+   HOLD     Slate's auto-update would reload the page. tphHasUnsavedWork holds it during a save, a PDF render or an unsaved form.
+            The hold has its own list: slateBulkBusy belongs to the bulk sends, and this tab never writes it.
+   SOURCE   tools/claude/trophycase/slate-tab.js, applied by tools/claude/slate/patch-trophycase-tab.mjs.
+   GUARDS   tools/claude/validate-trophycase.mjs, tools/claude/appcheck/ui-trophycase-slate.mjs, trophycase/SLATE-TAB-PARITY.md.
+   DEPLOY   Slate preprod, then tools/claude/trophycase/SMOKETEST.md, then Apps/shared/promote.sh. */
+const TPH_SCHEMA = 'trophycase';
+const TPH_BUCKET = 'trophy-case-photos';
+const TPH_REST_TIMEOUT_MS = 30000;
+const TPH_UPLOAD_TIMEOUT_MS = 120000;
+
+let _tphWired = false, _tphLoadedOnce = false;
+let _tphChallenges = [];   // newest first
+let _tphEvents = [];
+let _tphAreas = [];
+let _tphBrackets = [];     // brackets of the selected event
+/* The ordered bracket photos being composed, each one of:
+   { kind: 'existing', path } already uploaded
+   { kind: 'new', file, previewUrl, preProcessed } picked, not uploaded; preProcessed skips the resize for PDF renders */
+let _tphPhotos = [];
+let _tphBusy = 0;
+let _tphFailedSave = false;
+let _tphStatusTimer = null;
+let _tphBrkEventShown = '';  // what the dropdown showed, to go back to if a discard is refused
+let _tphBracketsToken = 0;   // only the latest bracket load may render
+let _tphBaseline = null;     // the bracket form as it was last loaded or cleared
+
+function tphEl(id) { return document.getElementById(id); }
+
+/* Escapes all five characters, so a value is safe in text and in a quoted attribute. Slate's esc leaves quotes alone. */
+function tphEsc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+
+function tphJwtRole(j) {
+  try { return JSON.parse(atob(j.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).role || ''; } catch (e) { return ''; }
+}
+
+function tphToSlug(s) {
+  return String(s).toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/-+/g, '-').replace(/^-|-$/g, '');
+}
+
+/* fetch that gives up, including while the body is still arriving. A dead signal can otherwise hang for minutes with the tab frozen behind it. */
+async function tphFetch(url, opts, ms, read) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), ms);
+  try {
+    const r = await fetch(url, { ...opts, signal: ctl.signal });
+    return await read(r);
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error('timed out after ' + Math.round(ms / 1000) + ' seconds');
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/* The one REST door. Without the profile headers PostgREST looks in Slate's schema and answers 404. */
+async function tphSb(method, path, body) {
+  const opts = { method, headers: { ...HEADERS_WRITE, 'Accept-Profile': TPH_SCHEMA, 'Content-Profile': TPH_SCHEMA } };
+  if (body != null && method !== 'GET' && method !== 'DELETE') opts.body = JSON.stringify(body);
+  const res = await tphFetch(SB_URL + '/rest/v1/' + path, opts, TPH_REST_TIMEOUT_MS, async r => ({ ok: r.ok, status: r.status, ct: r.headers.get('content-type') || '', text: await r.text() }));
+  if (!res.ok) throw new Error('Supabase ' + res.status + ': ' + res.text);
+  return res.ct.includes('json') && res.status !== 204 && res.text ? JSON.parse(res.text) : null;
+}
+
+function tphObjectPath(path) { return String(path).split('/').map(encodeURIComponent).join('/'); }
+function tphPublicUrl(path) { return path ? SB_URL + '/storage/v1/object/public/' + TPH_BUCKET + '/' + tphObjectPath(path) : ''; }
+
+/* Upload a blob and return its path. Extension and content type come from the blob, so PNG renders stay PNG. */
+async function tphUploadImage(file, folder, bracketId, type) {
+  const ts = Date.now();
+  const mime = (file && file.type) || 'image/jpeg';
+  const ext = mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg';
+  const path = folder + '/' + bracketId + '_' + type + '_' + ts + '.' + ext;
+  const res = await tphFetch(SB_URL + '/storage/v1/object/' + TPH_BUCKET + '/' + tphObjectPath(path), {
+    method: 'PUT',
+    headers: { Authorization: 'Bearer ' + SB_KEY, 'Content-Type': mime, 'x-upsert': 'true' },
+    body: file
+  }, TPH_UPLOAD_TIMEOUT_MS, async r => ({ ok: r.ok, status: r.status, text: await r.text() }));
+  if (!res.ok) throw new Error('Storage upload ' + res.status + ': ' + res.text);
+  return path;
+}
+
+/* A failure here only leaves a spare file, so callers ignore it. */
+async function tphDeleteFile(path) {
+  if (!path) return;
+  await tphFetch(SB_URL + '/storage/v1/object/' + TPH_BUCKET + '/' + tphObjectPath(path), {
+    method: 'DELETE',
+    headers: { Authorization: 'Bearer ' + SB_KEY }
+  }, TPH_REST_TIMEOUT_MS, async r => r.status);
+}
+
+/* Text, never HTML: a winner's name or a server error lands here, on a page holding the service key. */
+function tphStatus(msg, type) {
+  const el = tphEl('tphStatus');
+  clearTimeout(_tphStatusTimer);   // an older ok timer must not clear this message
+  el.textContent = msg;
+  el.className = 'status-line shown ' + type;
+  if (type === 'ok') _tphStatusTimer = setTimeout(() => { el.className = 'status-line'; }, 4000);
+}
+
+/* Freeze the Trophy Case body while a save, a render or a delete runs. Cancel, Edit, the event dropdown and Delete all act on
+   the form or list a running save is using: tapping Cancel mid-save once published an empty photo list and deleted real files. */
+function tphSetBusy(on) {
+  _tphBusy = Math.max(0, _tphBusy + (on ? 1 : -1));
+  tphEl('tphBody').inert = _tphBusy > 0;
+}
+
+/* A failed save is still in the form until it is retried. Leaving it needs a yes, and leaving clears its advice. */
+function tphOkToDiscardFailedSave() {
+  if (!_tphFailedSave) return true;
+  if (!confirm('Your last save failed and is still in this form. Discard it?')) return false;
+  _tphFailedSave = false;
+  tphEl('tphStatus').className = 'status-line';
+  return true;
+}
+
+function tphFormState() {
+  const v = id => tphEl(id).value;
+  return JSON.stringify([v('tphBrkSl'), v('tphBrkSlMax'), v('tphBrkWinner'), v('tphBrkTeam'), v('tphBrkPlayers'), v('tphBrkRunner'), v('tphBrkRunnerPlayers'), v('tphBrkArea'), v('tphBrkRunnerArea'), v('tphBrkTrophyFile'), v('tphBrkRunnerupFile'),
+    _tphPhotos.map(p => p.kind === 'existing' ? p.path : 'new:' + p.file.name)]);
+}
+
+function tphHasUnsavedWork() {
+  if (_tphBusy > 0 || _tphFailedSave) return true;
+  if (_tphBaseline === null) return false;   // the tab was never opened
+  if (tphEl('tphEvtName').value.trim() || tphEl('tphAreaName').value.trim()) return true;
+  return tphFormState() !== _tphBaseline;
+}
+window.slateUpdateHolds.push(tphHasUnsavedWork);
+
+/* ── Files ── */
+function tphIsPdf(file) { return !!file && (file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '')); }
+
+function tphBlobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = e => resolve(e.target.result);
+    r.onerror = () => reject(new Error('Failed to read file'));
+    r.readAsDataURL(blob);
+  });
+}
+
+/* Every page of a PDF as an image blob, in order. Bracket sheets are dense text and thin lines, so PNG beats JPEG at any quality. */
+async function tphPdfToImagePages(file, maxWidth) {
+  const pdfjsLib = await ensurePdfJs();
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  const blobs = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const scale = maxWidth / page.getViewport({ scale: 1 }).width;
+    const viewport = page.getViewport({ scale });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(viewport.width);
+    canvas.height = Math.ceil(viewport.height);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';   // PDFs can be transparent; bracket sheets read on white
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
+    if (!blob) throw new Error('Canvas toBlob failed on page ' + i);
+    blobs.push(blob);
+  }
+  return blobs;
+}
+
+/* JPEG at 80%, at most 1200 px on the longest side. */
+function tphResizeImage(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX = 1200;
+        let w = img.width, h = img.height;
+        if (w > MAX || h > MAX) {
+          if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
+          else { w = Math.round(w * MAX / h); h = MAX; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        canvas.toBlob(blob => { if (blob) resolve(blob); else reject(new Error('Canvas toBlob failed')); }, 'image/jpeg', 0.8);
+      };
+      img.onerror = () => reject(new Error('Failed to load image'));
+      img.src = e.target.result;
+    };
+    reader.onerror = () => reject(new Error('Failed to read file'));
+    reader.readAsDataURL(file);
+  });
+}
+
+/* ── Bracket-photos composer ── */
+function tphRenderPhotos() {
+  tphEl('tphBrkPhotosList').innerHTML = _tphPhotos.map((p, i) => {
+    const src = p.kind === 'existing' ? tphPublicUrl(p.path) : p.previewUrl;
+    const badge = p.kind === 'new' ? '<span class="tph-tile-badge new">NEW</span>' : '<span class="tph-tile-badge">#' + (i + 1) + '</span>';
+    return '<div class="tph-tile"><img src="' + tphEsc(src) + '" alt="Bracket photo ' + (i + 1) + '">' + badge
+      + '<button type="button" class="tph-remove" title="Remove" aria-label="Remove photo ' + (i + 1) + '" data-act="photo-remove" data-i="' + i + '">&times;</button>'
+      + '<div class="tph-reorder">'
+      + '<button type="button" title="Move left" aria-label="Move photo ' + (i + 1) + ' left" data-act="photo-move" data-i="' + i + '" data-d="-1"' + (i === 0 ? ' disabled' : '') + '>&larr;</button>'
+      + '<button type="button" title="Move right" aria-label="Move photo ' + (i + 1) + ' right" data-act="photo-move" data-i="' + i + '" data-d="1"' + (i === _tphPhotos.length - 1 ? ' disabled' : '') + '>&rarr;</button>'
+      + '</div></div>';
+  }).join('');
+}
+
+/* Each PDF page becomes its own photo, already at upload resolution, so the save skips the resize. */
+async function tphOnPhotosAdded(input) {
+  const files = Array.from(input.files || []);
+  if (!files.length) return;
+  input.value = '';   // so picking the same file again after a remove still fires
+  tphSetBusy(true);   // a render finishing after the form moved on would add pages to the next winner
+  const addLabel = tphEl('tphBrkAddLabel');
+  const origLabel = addLabel.textContent;
+  try {
+    for (const f of files) {
+      if (tphIsPdf(f)) {
+        addLabel.textContent = 'Rendering ' + f.name + '…';
+        const pages = await tphPdfToImagePages(f, 3600);
+        for (let i = 0; i < pages.length; i++) {
+          const base = (f.name || 'document').replace(/\.pdf$/i, '');
+          const pageFile = new File([pages[i]], base + '_p' + (i + 1) + '.png', { type: 'image/png' });
+          _tphPhotos.push({ kind: 'new', file: pageFile, previewUrl: await tphBlobToDataUrl(pages[i]), preProcessed: true });
+        }
+      } else {
+        _tphPhotos.push({ kind: 'new', file: f, previewUrl: await tphBlobToDataUrl(f), preProcessed: false });
+      }
+    }
+  } catch (e) {
+    tphStatus('Failed to add photo(s): ' + e.message, 'err');
+  } finally {
+    addLabel.textContent = origLabel;
+    tphRenderPhotos();
+    tphSetBusy(false);
+  }
+}
+
+function tphRemovePhoto(i) {
+  if (i < 0 || i >= _tphPhotos.length) return;
+  _tphPhotos.splice(i, 1);
+  tphRenderPhotos();
+}
+
+function tphMovePhoto(i, delta) {
+  const j = i + delta;
+  if (i < 0 || j < 0 || i >= _tphPhotos.length || j >= _tphPhotos.length) return;
+  const tmp = _tphPhotos[i]; _tphPhotos[i] = _tphPhotos[j]; _tphPhotos[j] = tmp;
+  tphRenderPhotos();
+}
+
+/* A trophy or runner-up file. A PDF uses page 1, rendered now and cached on the input so the save doesn't render it twice. */
+async function tphOnFileSelected(input, labelId, previewId) {
+  const label = tphEl(labelId), preview = tphEl(previewId);
+  const file = input.files && input.files[0];
+  if (!file) {
+    label.textContent = 'Choose image or PDF...';
+    label.classList.remove('has-file');
+    preview.classList.add('hidden');
+    preview.src = '';
+    delete input._tphPdfHighRes;
+    return;
+  }
+  label.textContent = file.name;
+  label.classList.add('has-file');
+  delete input._tphPdfHighRes;
+  tphSetBusy(true);   // Save during a render would publish without this photo
+  try {
+    if (tphIsPdf(file)) {
+      label.textContent = file.name + ' — rendering PDF…';
+      const pages = await tphPdfToImagePages(file, 2400);
+      input._tphPdfHighRes = pages[0];
+      preview.src = await tphBlobToDataUrl(pages[0]);
+      preview.classList.remove('hidden');
+      label.textContent = file.name + (pages.length > 1 ? ' — ' + pages.length + ' pages, using page 1' : '');
+    } else {
+      preview.src = await tphBlobToDataUrl(file);
+      preview.classList.remove('hidden');
+    }
+  } catch (e) {
+    tphStatus('Could not read file: ' + e.message + '. Pick it again.', 'err');
+    label.textContent = file.name + ' — failed';
+    input.value = '';   // so a failed file can't be saved as if it were fine, and can be picked again
+    delete input._tphPdfHighRes;
+  } finally {
+    tphSetBusy(false);
+  }
+}
+
+/* ── Challenges: seeded by SQL ── */
+function tphAutoSlug() {
+  const name = tphEl('tphEvtName').value;
+  const ch = _tphChallenges.find(c => String(c.id) === tphEl('tphEvtChallenge').value);
+  // Slugs are unique across every Challenge, so a new event's slug starts with its Challenge's.
+  tphEl('tphEvtSlug').value = name.trim() ? (ch ? ch.slug + '-' : '') + tphToSlug(name) : '';
+}
+
+async function tphLoadChallenges() {
+  _tphChallenges = await tphSb('GET', 'trophy_challenges?select=*&order=start_date.desc');
+  const sel = tphEl('tphEvtChallenge');
+  const current = sel.value;
+  sel.innerHTML = _tphChallenges.map(c => '<option value="' + Number(c.id) + '"' + (String(c.id) === current ? ' selected' : '') + '>' + tphEsc(c.short_label) + '</option>').join('');
+}
+
+function tphChallengeLabel(ev) {
+  const ch = _tphChallenges.find(c => c.id === ev.challenge_id);
+  return ch ? ch.short_label : '';
+}
+
+function tphEventsByChallenge() {
+  const rank = new Map(_tphChallenges.map((c, i) => [c.id, i]));
+  return [..._tphEvents].sort((a, b) => rank.get(a.challenge_id) - rank.get(b.challenge_id) || (a.sort_order || 0) - (b.sort_order || 0));
+}
+
+/* ── Events ── */
+async function tphLoadEvents() {
+  const loading = tphEl('tphEventsLoading'), table = tphEl('tphEventsTable'), empty = tphEl('tphEventsEmpty');
+  loading.classList.remove('hidden');
+  table.classList.add('hidden');
+  empty.classList.add('hidden');
+  try {
+    _tphEvents = await tphSb('GET', 'trophy_events?select=*&order=sort_order.asc,name.asc');
+    tphRenderEvents();
+    tphPopulateEventDropdown();
+  } catch (e) {
+    if (_tphEvents.length) tphRenderEvents();   // keep the last good list; never say "no events" after a failed load
+    tphStatus('Failed to load events: ' + e.message, 'err');
+  } finally {
+    loading.classList.add('hidden');
+  }
+}
+
+function tphRenderEvents() {
+  const table = tphEl('tphEventsTable'), empty = tphEl('tphEventsEmpty');
+  if (!_tphEvents.length) {
+    table.classList.add('hidden');
+    empty.classList.remove('hidden');
+    return;
+  }
+  table.classList.remove('hidden');
+  empty.classList.add('hidden');
+  tphEl('tphEventsBody').innerHTML = tphEventsByChallenge().map(ev => {
+    const id = Number(ev.id);
+    return '<tr>'
+      + '<td>' + tphEsc(tphChallengeLabel(ev)) + '</td>'
+      + '<td>' + tphEsc(ev.name) + '</td>'
+      + '<td><code>' + tphEsc(ev.slug) + '</code></td>'
+      + '<td><input type="number" class="tph-sort" aria-label="Sort order" value="' + (Number(ev.sort_order) || 0) + '" data-act="event-sort" data-id="' + id + '"></td>'
+      + '<td><label class="tph-toggle" title="Active"><input type="checkbox" aria-label="Active"' + (ev.active ? ' checked' : '') + ' data-act="event-active" data-id="' + id + '"><span class="tph-slider"></span></label></td>'
+      + '<td><label class="tph-toggle" title="Has skill levels"><input type="checkbox" aria-label="Has skill levels"' + (ev.has_skill_levels !== false ? ' checked' : '') + ' data-act="event-sl" data-id="' + id + '"><span class="tph-slider"></span></label></td>'
+      + '<td><button type="button" class="btn btn-danger btn-sm" data-act="event-delete" data-id="' + id + '">Delete</button></td>'
+      + '</tr>';
+  }).join('');
+}
+
+async function tphAddEvent() {
+  const name = tphEl('tphEvtName').value.trim();
+  const slug = tphEl('tphEvtSlug').value.trim() || tphToSlug(name);
+  const hasSL = tphEl('tphEvtHasSl').checked;
+  const challengeId = Number(tphEl('tphEvtChallenge').value);
+  if (!name || !slug) return tphStatus('Event name and slug are required.', 'err');
+  if (!challengeId) return tphStatus('Pick a challenge for this event.', 'err');
+  try {
+    await tphSb('POST', 'trophy_events', {
+      name, slug,
+      challenge_id: challengeId,
+      sort_order: _tphEvents.filter(e => e.challenge_id === challengeId).length,
+      active: true,
+      has_skill_levels: hasSL
+    });
+    tphEl('tphEvtName').value = '';
+    tphEl('tphEvtSlug').value = '';
+    tphEl('tphEvtHasSl').checked = true;
+    tphStatus('Event added.', 'ok');
+    await tphLoadEvents();
+  } catch (e) {
+    tphStatus('Failed to add event: ' + e.message, 'err');
+  }
+}
+
+async function tphToggleEventHasSL(id, hasSL) {
+  try {
+    await tphSb('PATCH', 'trophy_events?id=eq.' + id, { has_skill_levels: hasSL });
+    tphStatus('Event updated.', 'ok');
+    const ev = _tphEvents.find(e => e.id === id);
+    if (ev) ev.has_skill_levels = hasSL;
+    if (String(id) === tphEl('tphBrkEvent').value) tphApplyEventMode();
+  } catch (e) {
+    tphStatus('Failed to update event: ' + e.message, 'err');
+    await tphLoadEvents();
+  }
+}
+
+async function tphUpdateEventSort(id, val) {
+  try {
+    await tphSb('PATCH', 'trophy_events?id=eq.' + id, { sort_order: parseInt(val, 10) || 0 });
+    tphStatus('Sort order updated.', 'ok');
+    await tphLoadEvents();
+  } catch (e) {
+    tphStatus('Failed to update sort: ' + e.message, 'err');
+    await tphLoadEvents();   // the field must not keep showing a value that was never saved
+  }
+}
+
+async function tphToggleEventActive(id, active) {
+  try {
+    await tphSb('PATCH', 'trophy_events?id=eq.' + id, { active });
+    tphStatus('Event ' + (active ? 'activated' : 'deactivated') + '.', 'ok');
+    const ev = _tphEvents.find(e => e.id === id);
+    if (ev) ev.active = active;
+  } catch (e) {
+    tphStatus('Failed to toggle active: ' + e.message, 'err');
+    await tphLoadEvents();   // Active decides what players see: the switch must not show a value that was never saved
+  }
+}
+
+async function tphDeleteEvent(id) {
+  const delEv = _tphEvents.find(e => e.id === id);
+  if (!delEv) return;
+  const delLabel = tphChallengeLabel(delEv) + ' – ' + delEv.name;
+  if (!confirm('Delete event "' + delLabel + '"? This also deletes all its winners and photos, for good.')) return;
+  tphSetBusy(true);
+  let failure = null;
+  let winnersGone = [];   // once these rows are gone nothing points at their files, and a retry could never find them again
+  try {
+    try {
+      // Rows first: the public page reads them, so while a row exists its files must too.
+      const brackets = await tphSb('GET', 'trophy_brackets?event_id=eq.' + id + '&select=id,trophy_photo_path,runner_up_photo_path,bracket_photo_paths');
+      if (brackets && brackets.length) {
+        await tphSb('DELETE', 'trophy_brackets?event_id=eq.' + id);
+        winnersGone = brackets;
+      }
+      await tphSb('DELETE', 'trophy_events?id=eq.' + id);
+    } catch (e) {
+      failure = e;
+    }
+    for (const b of winnersGone) {
+      const arr = Array.isArray(b.bracket_photo_paths) ? b.bracket_photo_paths : [];
+      for (const p of [b.trophy_photo_path, b.runner_up_photo_path, ...arr]) await tphDeleteFile(p).catch(() => {});
+    }
+    if (!failure) tphStatus('Event deleted.', 'ok');
+    else if (winnersGone.length) tphStatus('Its winners and photos were deleted, but the event was not: ' + failure.message + '. Tap Delete again.', 'err');
+    else tphStatus('Failed to delete event: ' + failure.message, 'err');
+    await tphLoadEvents();
+    // An event open under Brackets has just gone: its form and list would otherwise stay up, acting on nothing.
+    if (!failure && String(id) === _tphBrkEventShown) {
+      _tphFailedSave = false;
+      _tphBrackets = [];
+      tphEl('tphBrkEvent').value = '';
+      tphCancelEdit();   // what was typed for that event goes with it, or it would hold Slate's updates from a hidden form
+      await tphOnEventChange();
+    }
+  } finally {
+    tphSetBusy(false);
+  }
+}
+
+/* ── Areas ── */
+async function tphLoadAreas() {
+  const loading = tphEl('tphAreasLoading'), table = tphEl('tphAreasTable'), empty = tphEl('tphAreasEmpty');
+  loading.classList.remove('hidden');
+  table.classList.add('hidden');
+  empty.classList.add('hidden');
+  try {
+    _tphAreas = await tphSb('GET', 'trophy_areas?select=*&order=sort_order.asc,name.asc');
+    tphRenderAreas();
+    tphPopulateAreaDropdowns();
+  } catch (e) {
+    if (_tphAreas.length) tphRenderAreas();
+    tphStatus('Failed to load areas: ' + e.message, 'err');
+  } finally {
+    loading.classList.add('hidden');
+  }
+}
+
+function tphRenderAreas() {
+  const table = tphEl('tphAreasTable'), empty = tphEl('tphAreasEmpty');
+  if (!_tphAreas.length) {
+    table.classList.add('hidden');
+    empty.classList.remove('hidden');
+    return;
+  }
+  table.classList.remove('hidden');
+  empty.classList.add('hidden');
+  tphEl('tphAreasBody').innerHTML = _tphAreas.map(a => {
+    const id = Number(a.id);
+    return '<tr><td>' + tphEsc(a.name) + '</td>'
+      + '<td><input type="number" class="tph-sort" aria-label="Sort order" value="' + (Number(a.sort_order) || 0) + '" data-act="area-sort" data-id="' + id + '"></td>'
+      + '<td><button type="button" class="btn btn-danger btn-sm" data-act="area-delete" data-id="' + id + '">Delete</button></td></tr>';
+  }).join('');
+}
+
+async function tphAddArea() {
+  const name = tphEl('tphAreaName').value.trim();
+  if (!name) return tphStatus('Area name is required.', 'err');
+  try {
+    await tphSb('POST', 'trophy_areas', { name, sort_order: _tphAreas.length });
+    tphEl('tphAreaName').value = '';
+    tphStatus('Area added.', 'ok');
+    await tphLoadAreas();
+  } catch (e) {
+    tphStatus('Failed to add area: ' + e.message, 'err');
+  }
+}
+
+async function tphUpdateAreaSort(id, val) {
+  try {
+    await tphSb('PATCH', 'trophy_areas?id=eq.' + id, { sort_order: parseInt(val, 10) || 0 });
+    tphStatus('Sort order updated.', 'ok');
+    await tphLoadAreas();
+  } catch (e) {
+    tphStatus('Failed to update sort: ' + e.message, 'err');
+    await tphLoadAreas();
+  }
+}
+
+async function tphDeleteArea(id) {
+  const area = _tphAreas.find(a => a.id === id);
+  if (!area) return;
+  if (!confirm('Delete area "' + area.name + '"? Brackets referencing this area will lose their area link.')) return;
+  try {
+    await tphSb('PATCH', 'trophy_brackets?area_id=eq.' + id, { area_id: null });
+    await tphSb('DELETE', 'trophy_areas?id=eq.' + id);
+    tphStatus('Area deleted.', 'ok');
+    await tphLoadAreas();
+  } catch (e) {
+    tphStatus('Failed to delete area: ' + e.message, 'err');
+  }
+}
+
+/* ── Brackets ── */
+function tphPopulateEventDropdown() {
+  const sel = tphEl('tphBrkEvent');
+  const current = sel.value;
+  // Both Challenges have a "Singles". The label goes first in the option text as well as the
+  // group, so a phone's truncated select can't hide which one it is.
+  sel.innerHTML = '<option value="">-- Select event --</option>' + _tphChallenges.map(c => {
+    const opts = tphEventsByChallenge().filter(ev => ev.challenge_id === c.id).map(ev =>
+      '<option value="' + Number(ev.id) + '"' + (String(ev.id) === current ? ' selected' : '') + '>' + tphEsc(c.short_label) + ' – ' + tphEsc(ev.name) + '</option>').join('');
+    return opts ? '<optgroup label="' + tphEsc(c.short_label) + '">' + opts + '</optgroup>' : '';
+  }).join('');
+}
+
+function tphPopulateAreaDropdowns() {
+  ['tphBrkArea', 'tphBrkRunnerArea'].forEach(id => {
+    const sel = tphEl(id);
+    const current = sel.value;
+    sel.innerHTML = '<option value="">-- None --</option>' + _tphAreas.map(a =>
+      '<option value="' + Number(a.id) + '"' + (String(a.id) === current ? ' selected' : '') + '>' + tphEsc(a.name) + '</option>').join('');
+  });
+}
+
+async function tphOnEventChange() {
+  const eventId = tphEl('tphBrkEvent').value;
+  if (!tphOkToDiscardFailedSave()) {
+    tphEl('tphBrkEvent').value = _tphBrkEventShown;
+    return;
+  }
+  _tphBrkEventShown = eventId;
+  const formWrap = tphEl('tphBrkFormWrap'), listWrap = tphEl('tphBrkListWrap');
+  if (!eventId) {
+    formWrap.classList.add('hidden');
+    listWrap.classList.add('hidden');
+    return;
+  }
+  formWrap.classList.remove('hidden');
+  listWrap.classList.remove('hidden');
+  tphCancelEdit();
+  tphApplyEventMode();
+  await tphLoadBrackets(eventId);
+}
+
+/* Show or hide the SL fields and switch the labels to team wording, for the selected event. Touches no saved value. */
+function tphApplyEventMode() {
+  const ev = _tphEvents.find(e => String(e.id) === tphEl('tphBrkEvent').value);
+  const hasSL = !ev || ev.has_skill_levels !== false;
+  tphEl('tphBrkSlRow').style.display = hasSL ? '' : 'none';
+  if (!hasSL) {
+    // So they don't leak from a previous event
+    tphEl('tphBrkSl').value = '';
+    tphEl('tphBrkSlMax').value = '';
+  }
+  const opt = s => ' <span class="tph-optional">' + s + '</span>';
+  const labels = {
+    tphBrkWinnerLabel: hasSL ? 'Winner name' : 'Winning team name',
+    tphBrkTeamLabel: (hasSL ? 'Team name' : 'Winning team label') + opt('(optional)'),
+    tphBrkPlayersLabel: hasSL ? 'Team players' + opt('(optional, comma-separated)') : 'Winning team players' + opt('(comma-separated)'),
+    tphBrkRunnerLabel: (hasSL ? 'Runner-up' : 'Runner-up team name') + opt('(optional)'),
+    tphBrkRunnerPlayersLabel: hasSL ? 'Runner-up players' + opt('(optional, comma-separated)') : 'Runner-up team players' + opt('(comma-separated)'),
+    tphBrkTrophyPhotoLabel: hasSL ? 'Champion photo' + opt('(1st place)') : 'Winning team photo',
+    tphBrkRunnerupPhotoLabel: hasSL ? 'Runner-up photo' + opt('(2nd place, optional)') : 'Runner-up team photo' + opt('(optional)')
+  };
+  for (const id in labels) tphEl(id).innerHTML = labels[id];
+}
+
+async function tphLoadBrackets(eventId) {
+  if (!eventId) eventId = tphEl('tphBrkEvent').value;
+  if (!eventId) return;
+  // A slower earlier response must not paint another event's winners here: their
+  // Edit and Delete buttons would act on real rows under the wrong heading.
+  const token = ++_tphBracketsToken;
+  const loading = tphEl('tphBrkLoading'), empty = tphEl('tphBrkEmpty'), list = tphEl('tphBrkList');
+  loading.classList.remove('hidden');
+  empty.classList.add('hidden');
+  list.innerHTML = '';
+  try {
+    // The foreign key is named because trophy_brackets has two to trophy_areas. The runner-up's area comes from _tphAreas instead.
+    const rows = await tphSb('GET', 'trophy_brackets?event_id=eq.' + parseInt(eventId, 10) + '&select=*,trophy_areas!trophy_brackets_area_id_fkey(name),trophy_events(slug)&order=skill_level.asc.nullslast,id.asc');
+    if (token !== _tphBracketsToken) return;
+    _tphBrackets = rows;
+    tphRenderBrackets();
+  } catch (e) {
+    if (token !== _tphBracketsToken) return;
+    tphStatus('Failed to load brackets: ' + e.message, 'err');
+  } finally {
+    if (token === _tphBracketsToken) loading.classList.add('hidden');
+  }
+}
+
+function tphRenderBrackets() {
+  const list = tphEl('tphBrkList'), empty = tphEl('tphBrkEmpty');
+  const ev = _tphEvents.find(e => String(e.id) === tphEl('tphBrkEvent').value);
+  tphEl('tphBrkListTitle').textContent = ev ? tphChallengeLabel(ev) + ' – ' + ev.name + ' brackets' : 'Brackets';
+  if (!_tphBrackets.length) {
+    list.innerHTML = '';
+    empty.classList.remove('hidden');
+    return;
+  }
+  empty.classList.add('hidden');
+  const thumb = (url, alt) => url ? '<a class="tph-thumb" href="' + tphEsc(url) + '" target="_blank" rel="noopener" title="' + alt + '"><img src="' + tphEsc(url) + '" alt="' + alt + '"></a>' : '';
+  list.innerHTML = _tphBrackets.map(b => {
+    const id = Number(b.id);
+    const areaName = b.trophy_areas ? b.trophy_areas.name : '';
+    const runnerAreaName = b.runner_up_area_id ? ((_tphAreas.find(a => a.id === b.runner_up_area_id) || {}).name || '') : '';
+    const bracketArr = Array.isArray(b.bracket_photo_paths) ? b.bracket_photo_paths : [];
+    const slBadge = b.skill_level != null
+      ? '<span class="badge gold">SL ' + tphEsc(b.skill_level) + (b.skill_level_max ? '-' + tphEsc(b.skill_level_max) : '') + '</span>'
+      : '<span class="badge muted">TEAM</span>';
+    return '<div class="tph-item">' + slBadge
+      + '<div class="tph-info"><strong>' + tphEsc(b.winner_name) + '</strong>'
+      + (b.winner_team ? ' <span class="hint">— ' + tphEsc(b.winner_team) + '</span>' : '')
+      + (b.runner_up_name ? '<br><span class="hint">vs ' + tphEsc(b.runner_up_name) + '</span>' : '')
+      + (areaName ? '<br>1st: <span class="badge muted">' + tphEsc(areaName) + '</span>' : '')
+      + (runnerAreaName ? ' &nbsp;2nd: <span class="badge muted">' + tphEsc(runnerAreaName) + '</span>' : '')
+      + (b.winner_players ? '<br><span class="hint tph-small">Winners: ' + tphEsc(b.winner_players) + '</span>' : '')
+      + (b.runner_up_players ? '<br><span class="hint tph-small">Runner-up: ' + tphEsc(b.runner_up_players) + '</span>' : '')
+      + '</div><div class="tph-photos">'
+      + thumb(tphPublicUrl(b.trophy_photo_path), 'Champion photo')
+      + thumb(tphPublicUrl(b.runner_up_photo_path), 'Runner-up photo')
+      + thumb(bracketArr.length ? tphPublicUrl(bracketArr[0]) : '', 'First bracket photo')
+      + (bracketArr.length > 1 ? '<span class="badge muted">+' + (bracketArr.length - 1) + '</span>' : '')
+      + '</div><div class="tph-actions">'
+      + '<button type="button" class="btn btn-outline btn-sm" data-act="bracket-edit" data-id="' + id + '">Edit</button>'
+      + '<button type="button" class="btn btn-danger btn-sm" data-act="bracket-delete" data-id="' + id + '">Delete</button>'
+      + '</div></div>';
+  }).join('');
+}
+
+/* Back to an empty Add form. */
+function tphCancelEdit() {
+  tphEl('tphBrkEditId').value = '';
+  tphEl('tphBrkFormTitle').textContent = 'Add bracket';
+  ['tphBrkSl', 'tphBrkSlMax', 'tphBrkWinner', 'tphBrkTeam', 'tphBrkRunner', 'tphBrkPlayers', 'tphBrkRunnerPlayers', 'tphBrkArea', 'tphBrkRunnerArea', 'tphBrkFiles'].forEach(id => { tphEl(id).value = ''; });
+  [['tphBrkTrophyFile', 'tphTrophyLabel', 'tphTrophyPreview'], ['tphBrkRunnerupFile', 'tphRunnerupLabel', 'tphRunnerupPreview']].forEach(([input, label, preview]) => {
+    tphEl(input).value = '';
+    delete tphEl(input)._tphPdfHighRes;
+    tphEl(label).textContent = 'Choose image or PDF...';
+    tphEl(label).classList.remove('has-file');
+    tphEl(preview).classList.add('hidden');
+    tphEl(preview).src = '';
+  });
+  _tphPhotos = [];
+  tphRenderPhotos();
+  tphEl('tphBrkCancel').style.display = 'none';
+  tphEl('tphBrkSubmit').textContent = 'Save bracket';
+  _tphBaseline = tphFormState();
+}
+
+function tphEditBracket(id) {
+  const b = _tphBrackets.find(x => x.id === id);
+  if (!b) return;
+  if (!tphOkToDiscardFailedSave()) return;
+  tphEl('tphBrkEditId').value = b.id;
+  let title = 'Edit bracket';
+  if (b.skill_level != null) title += ' — SL ' + b.skill_level + (b.skill_level_max ? '-' + b.skill_level_max : '');
+  else if (b.winner_name) title += ' — ' + b.winner_name;
+  tphEl('tphBrkFormTitle').textContent = title;
+  tphEl('tphBrkSl').value = b.skill_level || '';
+  tphEl('tphBrkSlMax').value = b.skill_level_max || '';
+  tphEl('tphBrkWinner').value = b.winner_name || '';
+  tphEl('tphBrkTeam').value = b.winner_team || '';
+  tphEl('tphBrkRunner').value = b.runner_up_name || '';
+  tphEl('tphBrkPlayers').value = b.winner_players || '';
+  tphEl('tphBrkRunnerPlayers').value = b.runner_up_players || '';
+  tphEl('tphBrkArea').value = b.area_id || '';
+  tphEl('tphBrkRunnerArea').value = b.runner_up_area_id || '';
+  tphEl('tphBrkFiles').value = '';
+  [['tphBrkTrophyFile', 'tphTrophyLabel', 'tphTrophyPreview', b.trophy_photo_path], ['tphBrkRunnerupFile', 'tphRunnerupLabel', 'tphRunnerupPreview', b.runner_up_photo_path]].forEach(([input, label, preview, path]) => {
+    tphEl(input).value = '';   // pick again to replace
+    delete tphEl(input)._tphPdfHighRes;
+    tphEl(label).textContent = path ? 'Current photo — pick again to replace' : 'Choose image or PDF...';
+    tphEl(label).classList.toggle('has-file', !!path);
+    tphEl(preview).classList.toggle('hidden', !path);
+    if (path) tphEl(preview).src = tphPublicUrl(path); else tphEl(preview).src = '';
+  });
+  _tphPhotos = (Array.isArray(b.bracket_photo_paths) ? b.bracket_photo_paths : []).map(p => ({ kind: 'existing', path: p }));
+  tphRenderPhotos();
+  tphEl('tphBrkCancel').style.display = '';
+  tphEl('tphBrkSubmit').textContent = 'Update bracket';
+  _tphBaseline = tphFormState();
+  tphEl('tphBrkFormWrap').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+async function tphSaveBracket() {
+  const eventId = tphEl('tphBrkEvent').value;
+  if (!eventId) return tphStatus('Select an event first.', 'err');
+  const ev = _tphEvents.find(e => String(e.id) === eventId);
+  const slug = ev ? ev.slug : 'unknown';
+  const hasSL = !ev || ev.has_skill_levels !== false;
+
+  const editId = tphEl('tphBrkEditId').value;
+  const slRaw = parseInt(tphEl('tphBrkSl').value, 10);
+  const sl = hasSL ? (isNaN(slRaw) ? null : slRaw) : null;
+  const slMax = hasSL ? (parseInt(tphEl('tphBrkSlMax').value, 10) || null) : null;
+  const winnerName = tphEl('tphBrkWinner').value.trim();
+  const team = tphEl('tphBrkTeam').value.trim() || null;
+  const runner = tphEl('tphBrkRunner').value.trim() || null;
+  const players = tphEl('tphBrkPlayers').value.trim() || null;
+  const runnerPlayers = tphEl('tphBrkRunnerPlayers').value.trim() || null;
+  const areaId = tphEl('tphBrkArea').value || null;
+  const runnerAreaId = tphEl('tphBrkRunnerArea').value || null;
+  const trophyFile = tphEl('tphBrkTrophyFile').files[0];
+  const runnerupFile = tphEl('tphBrkRunnerupFile').files[0];
+
+  if (!winnerName) return tphStatus(hasSL ? 'Winner name is required.' : 'Winning team name is required.', 'err');
+  if (hasSL && !sl) return tphStatus('Skill level is required for this event.', 'err');
+  if (hasSL && (sl < 1 || sl > 9 || (slMax && (slMax < sl || slMax > 9)))) {
+    return tphStatus('Skill levels run from 1 to 9, and SL Max can\'t be below Skill Level.', 'err');
+  }
+
+  const photos = _tphPhotos.slice();   // a copy: nothing may change this mid-save
+  tphSetBusy(true);
+  const btn = tphEl('tphBrkSubmit');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="tph-spinner"></span> Saving...';
+
+  // Files first, the row last, old files only once the row no longer needs them.
+  // A venue's signal drops mid-save: players must never see a half-saved winner, a
+  // retry must not add a second one, and a failed replacement must leave the old
+  // photo in place. The row is what publishes, so it goes last.
+  const uploaded = [];       // this attempt's new files, removed if the save fails before the row
+  const stale = [];          // files to remove once the row stops pointing at them
+  let rowSent = false;       // past this point the row may have landed even if the call fails
+  // A new winner has no id until the row exists, so its files take their name from the clock.
+  const fileId = editId || ('new' + Date.now());
+  const upload = async (blob, type) => {
+    const path = await tphUploadImage(blob, slug, fileId, type);
+    uploaded.push(path);
+    return path;
+  };
+
+  try {
+    // A save can land even though the phone never hears back. Catch the retry before it posts the same winner twice.
+    if (!editId) {
+      const same = await tphSb('GET', 'trophy_brackets?event_id=eq.' + parseInt(eventId, 10)
+        + '&winner_name=eq.' + encodeURIComponent(winnerName) + '&select=id');
+      if (same && same.length && !confirm('"' + winnerName + '" is already saved on this event. Add them again?')) {
+        _tphFailedSave = false;
+        tphStatus('Nothing added. "' + winnerName + '" was already saved.', 'ok');
+        tphCancelEdit();
+        await tphLoadBrackets(eventId);
+        return;
+      }
+    }
+
+    // Carry forward from the existing row when editing
+    let trophyPath = null;
+    let runnerUpPath = null;
+    let originalBracketPaths = [];
+    if (editId) {
+      const existing = _tphBrackets.find(x => x.id === parseInt(editId, 10));
+      if (existing) {
+        trophyPath = existing.trophy_photo_path;
+        runnerUpPath = existing.runner_up_photo_path;
+        originalBracketPaths = Array.isArray(existing.bracket_photo_paths) ? existing.bracket_photo_paths.slice() : [];
+      }
+    }
+
+    // A PDF's first page was rendered when it was picked; use that blob as it is.
+    if (trophyFile) {
+      const input = tphEl('tphBrkTrophyFile');
+      const blob = input._tphPdfHighRes ? input._tphPdfHighRes : await tphResizeImage(trophyFile);
+      const oldPath = trophyPath;
+      trophyPath = await upload(blob, 'trophy');
+      if (oldPath) stale.push(oldPath);
+    }
+    if (runnerupFile) {
+      const input = tphEl('tphBrkRunnerupFile');
+      const blob = input._tphPdfHighRes ? input._tphPdfHighRes : await tphResizeImage(runnerupFile);
+      const oldPath = runnerUpPath;
+      runnerUpPath = await upload(blob, 'runnerup');
+      if (oldPath) stale.push(oldPath);
+    }
+
+    // In the order chosen, uploading new files and keeping existing paths.
+    const finalBracketPaths = [];
+    for (let i = 0; i < photos.length; i++) {
+      const entry = photos[i];
+      if (entry.kind === 'existing') {
+        finalBracketPaths.push(entry.path);
+      } else {
+        const blob = entry.preProcessed ? entry.file : await tphResizeImage(entry.file);
+        finalBracketPaths.push(await upload(blob, 'bracket' + (i + 1)));
+      }
+    }
+    // Paths the user removed go once the row has stopped pointing at them.
+    stale.push(...originalBracketPaths.filter(p => !finalBracketPaths.includes(p)));
+
+    const fields = {
+      skill_level: sl,
+      skill_level_max: slMax,
+      winner_name: winnerName,
+      winner_team: team,
+      winner_players: players,
+      runner_up_name: runner,
+      runner_up_players: runnerPlayers,
+      area_id: areaId ? parseInt(areaId, 10) : null,
+      runner_up_area_id: runnerAreaId ? parseInt(runnerAreaId, 10) : null,
+      trophy_photo_path: trophyPath,
+      runner_up_photo_path: runnerUpPath,
+      bracket_photo_paths: finalBracketPaths
+    };
+    // Areas that failed to load leave an empty dropdown, and saving that would erase them.
+    if (editId && !_tphAreas.length) {
+      delete fields.area_id;
+      delete fields.runner_up_area_id;
+    }
+    rowSent = true;
+    if (editId) {
+      const saved = await tphSb('PATCH', 'trophy_brackets?id=eq.' + parseInt(editId, 10), { ...fields, updated_at: new Date().toISOString() });
+      if (!saved || !saved.length) throw new Error('that winner no longer exists');
+    } else {
+      await tphSb('POST', 'trophy_brackets', { ...fields, event_id: parseInt(eventId, 10) });
+    }
+
+    // The row is safe. Removing replaced files is housekeeping: a failure only leaves a spare file.
+    for (const p of stale) await tphDeleteFile(p).catch(() => {});
+
+    _tphFailedSave = false;
+    tphStatus(editId ? 'Bracket updated.' : 'Bracket added.', 'ok');
+    tphCancelEdit();
+    await tphLoadBrackets(eventId);
+  } catch (e) {
+    // Before the row was sent, nothing points at this attempt's files. After it, the
+    // row may have landed, so they stay: a spare file costs nothing, a broken photo does.
+    if (!rowSent) for (const p of uploaded) await tphDeleteFile(p).catch(() => {});
+    _tphFailedSave = true;
+    tphStatus("Couldn't save. Check your signal and tap Save again. — " + e.message, 'err');
+  } finally {
+    tphSetBusy(false);
+    btn.disabled = false;
+    btn.textContent = tphEl('tphBrkEditId').value ? 'Update bracket' : 'Save bracket';
+  }
+}
+
+async function tphDeleteBracket(id) {
+  const b = _tphBrackets.find(x => x.id === id);
+  if (!b) return;
+  const ev = _tphEvents.find(e => String(e.id) === tphEl('tphBrkEvent').value);
+  const where = ev ? ' from ' + tphChallengeLabel(ev) + ' – ' + ev.name : '';
+  if (!confirm('Delete winner "' + b.winner_name + '"' + where + '? This also deletes their photos, for good.')) return;
+  tphSetBusy(true);
+  try {
+    // The row first: it's what the public page reads, so while it exists its files must too.
+    await tphSb('DELETE', 'trophy_brackets?id=eq.' + id);
+    const arr = Array.isArray(b.bracket_photo_paths) ? b.bracket_photo_paths : [];
+    for (const p of [b.trophy_photo_path, b.runner_up_photo_path, ...arr]) await tphDeleteFile(p).catch(() => {});
+    if (tphEl('tphBrkEditId').value === String(id)) tphCancelEdit();
+    tphStatus('Bracket deleted.', 'ok');
+    await tphLoadBrackets();
+  } catch (e) {
+    tphStatus('Failed to delete bracket: ' + e.message + '. Nothing was removed.', 'err');
+  } finally {
+    tphSetBusy(false);
+  }
+}
+
+/* ── Wiring: one delegated listener. Row values never go into a handler string, so a name holding a quote can't break or run anything. ── */
+function tphView(name) {
+  document.querySelectorAll('#tab-trophycase .tph-subtab').forEach(b => b.classList.toggle('active', b.dataset.tphView === name));
+  ['events', 'areas', 'brackets'].forEach(v => tphEl('tphView' + v[0].toUpperCase() + v.slice(1)).classList.toggle('active', v === name));
+}
+
+function tphWire() {
+  if (_tphWired) return;
+  _tphWired = true;
+  const root = tphEl('tab-trophycase');
+  tphEl('tphStatus').addEventListener('click', () => { tphEl('tphStatus').className = 'status-line'; });
+  root.addEventListener('click', e => {
+    const sub = e.target.closest('[data-tph-view]');
+    if (sub) return tphView(sub.dataset.tphView);
+    const b = e.target.closest('button[data-act]');
+    if (!b || b.disabled) return;
+    const id = Number(b.dataset.id), i = Number(b.dataset.i);
+    if (b.dataset.act === 'event-delete') tphDeleteEvent(id);
+    if (b.dataset.act === 'area-delete') tphDeleteArea(id);
+    if (b.dataset.act === 'bracket-edit') tphEditBracket(id);
+    if (b.dataset.act === 'bracket-delete') tphDeleteBracket(id);
+    if (b.dataset.act === 'photo-remove') tphRemovePhoto(i);
+    if (b.dataset.act === 'photo-move') tphMovePhoto(i, Number(b.dataset.d));
+  });
+  root.addEventListener('change', e => {
+    const t = e.target, id = Number(t.dataset.id);
+    if (t.dataset.act === 'event-sort') tphUpdateEventSort(id, t.value);
+    if (t.dataset.act === 'event-active') tphToggleEventActive(id, t.checked);
+    if (t.dataset.act === 'event-sl') tphToggleEventHasSL(id, t.checked);
+    if (t.dataset.act === 'area-sort') tphUpdateAreaSort(id, t.value);
+  });
+  tphEl('tphEvtChallenge').addEventListener('change', tphAutoSlug);
+  tphEl('tphEvtName').addEventListener('input', tphAutoSlug);
+  tphEl('tphEvtAdd').addEventListener('click', tphAddEvent);
+  tphEl('tphAreaAdd').addEventListener('click', tphAddArea);
+  tphEl('tphBrkEvent').addEventListener('change', tphOnEventChange);
+  tphEl('tphBrkTrophyFile').addEventListener('change', e => tphOnFileSelected(e.target, 'tphTrophyLabel', 'tphTrophyPreview'));
+  tphEl('tphBrkRunnerupFile').addEventListener('change', e => tphOnFileSelected(e.target, 'tphRunnerupLabel', 'tphRunnerupPreview'));
+  tphEl('tphBrkFiles').addEventListener('change', e => tphOnPhotosAdded(e.target));
+  tphEl('tphBrkSubmit').addEventListener('click', tphSaveBracket);
+  tphEl('tphBrkCancel').addEventListener('click', () => { if (tphOkToDiscardFailedSave()) tphCancelEdit(); });
+}
+
+/* Runs on every entry to the tab. The form is never touched here: a Slate tab stays open for days, so the lists refresh, and a form in progress stays as it is. */
+async function tphInit() {
+  tphWire();
+  // The public key can read, so it may pass Slate's gate, and then every save would fail.
+  if (tphJwtRole(SB_KEY) === 'anon') {
+    tphEl('tphGateMsg').textContent = 'This link has the public key, not the admin key.';
+    tphEl('tphGate').classList.remove('hidden');
+    tphEl('tphBody').classList.add('hidden');
+    return;
+  }
+  tphEl('tphGate').classList.add('hidden');
+  tphEl('tphBody').classList.remove('hidden');
+  if (_tphBaseline === null) _tphBaseline = tphFormState();
+  if (_tphBusy > 0) return;   // a running save owns the lists it reads
+  const reentry = _tphLoadedOnce;
+  _tphLoadedOnce = true;
+  // Challenges first: the events list and the bracket dropdown group by them.
+  try {
+    await tphLoadChallenges();
+  } catch (e) {
+    tphStatus('Failed to load challenges: ' + e.message + '. Reload this page to try again.', 'err');
+  }
+  await Promise.all([tphLoadEvents(), tphLoadAreas()]);
+  if (reentry && tphEl('tphBrkEvent').value) await tphLoadBrackets();
+}
+window.tphInit = tphInit;
+/* TROPHYCASE-TAB:JS:END */
 /* ═══════════════════════════════════════════════════════════════════════
    SPORTSMANSHIP — FairPlay reports (2026-09-18, T1)
    DATA  fairplay.reports + fairplay.report_players (service_role only; the app writes via GAS)
