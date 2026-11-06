@@ -6575,6 +6575,9 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 #tab-doorprize table.nwe-cards td.nwe-wrap{flex:1 1 100%;order:-1;font-weight:700;min-width:0}
 #tab-doorprize table.nwe-cards td.nwe-right{flex:1 1 100%;text-align:left;white-space:normal}
 #tab-doorprize table.nwe-cards td[colspan]{flex:1 1 100%}
+#tab-doorprize table.nwe-cards td[data-label]::before{content:attr(data-label) ": ";font-size:.75rem;font-weight:700;color:var(--muted);margin-right:4px}
+#tab-doorprize table.nwe-cards td[data-label]::before{content:attr(data-label) ": ";font-size:.75rem;font-weight:700;color:var(--muted);margin-right:4px}
+#tab-doorprize table.nwe-cards td[data-label]::before{content:attr(data-label) ": ";font-size:.75rem;font-weight:700;color:var(--muted);margin-right:4px}
 #tab-doorprize .nwe-cardline{flex:1 1 100%}
 }
 @media (max-width:600px),(pointer:coarse){
@@ -6604,6 +6607,9 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
       </style>
       <div id="dzClosed" class="card hidden"></div>
       <div id="dzBody">
+        <div id="dzRevealWrap" class="hidden"><div class="card dz-reveal" id="dzReveal"></div></div>
+        <div id="dzRevealWrap" class="hidden"><div class="card dz-reveal" id="dzReveal"></div></div>
+        <div id="dzRevealWrap" class="hidden"><div class="card dz-reveal" id="dzReveal"></div></div>
         <div class="card">
           <div class="nwe-head">
             <h2>Door Prize Drawing</h2>
@@ -6619,7 +6625,6 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             <button type="button" class="btn btn-danger" id="dzBtnReset" data-act="reset" disabled>Reset Drawing</button>
           </div>
         </div>
-        <div id="dzRevealWrap" class="hidden"><div class="card dz-reveal" id="dzReveal"></div></div>
         <div class="card">
           <h2 id="dzListTitle">Entries</h2>
           <input type="text" class="nwe-search" id="dzSearch" placeholder="Search name or APA#&hellip;" autocomplete="off">
@@ -6691,6 +6696,9 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 #tab-poolgods table.nwe-cards td.nwe-wrap{flex:1 1 100%;order:-1;font-weight:700;min-width:0}
 #tab-poolgods table.nwe-cards td.nwe-right{flex:1 1 100%;text-align:left;white-space:normal}
 #tab-poolgods table.nwe-cards td[colspan]{flex:1 1 100%}
+#tab-poolgods table.nwe-cards td[data-label]::before{content:attr(data-label) ": ";font-size:.75rem;font-weight:700;color:var(--muted);margin-right:4px}
+#tab-poolgods table.nwe-cards td[data-label]::before{content:attr(data-label) ": ";font-size:.75rem;font-weight:700;color:var(--muted);margin-right:4px}
+#tab-poolgods table.nwe-cards td[data-label]::before{content:attr(data-label) ": ";font-size:.75rem;font-weight:700;color:var(--muted);margin-right:4px}
 #tab-poolgods .nwe-cardline{flex:1 1 100%}
 }
 @media (max-width:600px),(pointer:coarse){
@@ -6795,6 +6803,9 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 #tab-rushraffle table.nwe-cards td.nwe-wrap{flex:1 1 100%;order:-1;font-weight:700;min-width:0}
 #tab-rushraffle table.nwe-cards td.nwe-right{flex:1 1 100%;text-align:left;white-space:normal}
 #tab-rushraffle table.nwe-cards td[colspan]{flex:1 1 100%}
+#tab-rushraffle table.nwe-cards td[data-label]::before{content:attr(data-label) ": ";font-size:.75rem;font-weight:700;color:var(--muted);margin-right:4px}
+#tab-rushraffle table.nwe-cards td[data-label]::before{content:attr(data-label) ": ";font-size:.75rem;font-weight:700;color:var(--muted);margin-right:4px}
+#tab-rushraffle table.nwe-cards td[data-label]::before{content:attr(data-label) ": ";font-size:.75rem;font-weight:700;color:var(--muted);margin-right:4px}
 #tab-rushraffle .nwe-cardline{flex:1 1 100%}
 }
 @media (max-width:600px),(pointer:coarse){
@@ -6963,6 +6974,9 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 #tab-nwrefs table.nwe-cards td.nwe-wrap{flex:1 1 100%;order:-1;font-weight:700;min-width:0}
 #tab-nwrefs table.nwe-cards td.nwe-right{flex:1 1 100%;text-align:left;white-space:normal}
 #tab-nwrefs table.nwe-cards td[colspan]{flex:1 1 100%}
+#tab-nwrefs table.nwe-cards td[data-label]::before{content:attr(data-label) ": ";font-size:.75rem;font-weight:700;color:var(--muted);margin-right:4px}
+#tab-nwrefs table.nwe-cards td[data-label]::before{content:attr(data-label) ": ";font-size:.75rem;font-weight:700;color:var(--muted);margin-right:4px}
+#tab-nwrefs table.nwe-cards td[data-label]::before{content:attr(data-label) ": ";font-size:.75rem;font-weight:700;color:var(--muted);margin-right:4px}
 #tab-nwrefs .nwe-cardline{flex:1 1 100%}
 }
 @media (max-width:600px),(pointer:coarse){
@@ -7213,6 +7227,9 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 #tab-coastal table.nwe-cards td.nwe-wrap{flex:1 1 100%;order:-1;font-weight:700;min-width:0}
 #tab-coastal table.nwe-cards td.nwe-right{flex:1 1 100%;text-align:left;white-space:normal}
 #tab-coastal table.nwe-cards td[colspan]{flex:1 1 100%}
+#tab-coastal table.nwe-cards td[data-label]::before{content:attr(data-label) ": ";font-size:.75rem;font-weight:700;color:var(--muted);margin-right:4px}
+#tab-coastal table.nwe-cards td[data-label]::before{content:attr(data-label) ": ";font-size:.75rem;font-weight:700;color:var(--muted);margin-right:4px}
+#tab-coastal table.nwe-cards td[data-label]::before{content:attr(data-label) ": ";font-size:.75rem;font-weight:700;color:var(--muted);margin-right:4px}
 #tab-coastal .nwe-cardline{flex:1 1 100%}
 }
 @media (max-width:600px),(pointer:coarse){
@@ -7226,7 +7243,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 #tab-coastal .status-line{min-height:44px}
 }
 #tab-coastal .cst-post{background:#fff;border:1px solid var(--border);border-radius:12px;margin-bottom:12px;overflow:hidden}
-#tab-coastal .cst-post.is-hidden{opacity:.55}
+#tab-coastal .cst-post.is-hidden .cst-photo,#tab-coastal .cst-post.is-hidden .cst-body{opacity:.55}
 #tab-coastal .cst-post.is-banned{border-color:var(--spm-primary)}
 #tab-coastal .cst-photo{display:block;width:100%;max-height:420px;object-fit:contain;background:#f3f4f6}
 #tab-coastal .cst-body{padding:12px 16px}
@@ -7265,6 +7282,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             <button type="button" class="btn btn-primary btn-sm" id="cstDlNew" data-act="downloadNew">Download New</button>
             <button type="button" class="btn btn-outline btn-sm" id="cstDlAll" data-act="downloadAll">Download All</button>
           </div>
+          <p class="hint" style="margin:8px 0 0">If your browser asks, allow multiple downloads. Download New skips photos already saved from here, so if the browser blocked some, use Download All.</p>
           <div class="hint" id="cstDlStatus" style="margin-top:8px"></div>
         </div>
         <div class="card hidden" id="cstBansPanel">
@@ -7555,7 +7573,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.467';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.468';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -48188,7 +48206,7 @@ window.dzInit = (function () {
   function busyOff() { _busy = Math.max(0, _busy - 1); _epoch++; }
   function isActive() { return $(TAB_ID).classList.contains('active'); }
   /* Polls only while this tab is showing, the page is visible and nothing is running. A control being used in a list is left alone. */
-  let _pollTimer = null, _pollFailing = false, _blurWired = false;
+  let _pollTimer = null, _pollFailing = false, _blurWired = false, _selectWaits = 0;
   function startPoll(fn) {
     if (!_blurWired) {
       /* A dropdown keeps focus after a choice, which would hold off polling until the next tap elsewhere. */
@@ -48199,16 +48217,21 @@ window.dzInit = (function () {
     _pollTimer = setInterval(async () => {
       if (!isActive()) { clearInterval(_pollTimer); _pollTimer = null; return; }
       if (_busy || document.hidden) return;
-      /* Re-rendering would close an open dropdown. */
+      /* Re-rendering would close an open dropdown. One left focused mustn't stop polling for good, so after six ticks it goes ahead. */
       const a = document.activeElement;
-      if (a && a.tagName === 'SELECT' && a.closest('#' + TAB_ID)) return;
+      if (a && a.tagName === 'SELECT' && a.closest('#' + TAB_ID) && ++_selectWaits <= 6) return;
+      _selectWaits = 0;
       try {
         await fn();
-        if (_pollFailing) { _pollFailing = false; say('Back in touch with the database.', 'ok'); }
+        if (_pollFailing) {
+          _pollFailing = false;
+          if ($(STATUS_ID).classList.contains('warn')) say('Back in touch with the database.', 'ok');
+        }
       } catch (e) {
-        /* Whatever is on screen stays, because a venue's dead spot shouldn't blank a draw. It just can't pass for current. */
+        /* Whatever is on screen stays, because a venue's dead spot shouldn't blank a draw. It just can't pass for current.
+           An error already showing matters more: a failed Lock mustn't be replaced by this. */
         _pollFailing = true;
-        say('Can\u2019t reach the database, so this may be out of date. Still retrying.', 'warn');
+        if (!$(STATUS_ID).classList.contains('err')) say('Can\u2019t reach the database, so this may be out of date. Still retrying.', 'warn');
       }
     }, 30000);
   }
@@ -48301,7 +48324,7 @@ window.dzInit = (function () {
   }
 
   let entries = [], locked = false;
-  let wired = false, closed = false, loadToken = 0, btnBusy = false, uncertain = false;
+  let wired = false, closed = false, loadToken = 0, btnBusy = false, uncertain = false, loadedOnce = false;
   let shownNextId = null, armTimer = null;
 
   function fullName(e) { return e.first_name + ' ' + e.last_name; }
@@ -48329,14 +48352,22 @@ window.dzInit = (function () {
     entries = rows;
     locked = state.length ? !!state[0].locked : false;
     uncertain = false;
+    loadedOnce = true;
     renderAll();
   }
   async function reload() {
-    try { await loadAll(); } catch (e) { say('Failed to load: ' + e.message, 'err'); }
+    try { await loadAll(); } catch (e) {
+      say('Failed to load: ' + e.message, 'err');
+      /* "Registered 0" and "Loading" would both be untrue here. The poll keeps trying. */
+      if (!loadedOnce) {
+        $('dzStatTotal').textContent = '\u2014';
+        $('dzList').innerHTML = '<tr><td colspan="5" class="nwe-err">Couldn\u2019t load the entries. This keeps retrying.</td></tr>';
+      }
+    }
   }
   /* After a failed write. Keeps that error on screen, and if the read fails too, says the screen can't be trusted. */
   async function settle() {
-    try { await loadAll(); } catch (e) { uncertain = true; renderStats(); }
+    try { await loadAll(); } catch (e) { uncertain = true; renderAll(); }
   }
   function renderAll() { renderStats(); renderReveal(); renderList(); }
 
@@ -48352,16 +48383,16 @@ window.dzInit = (function () {
     if (!btnBusy) {
       btnLock.textContent = locked ? 'Locked' : 'Lock & Randomize';
       btnLock.disabled = locked || total === 0 || uncertain;
-      btnReset.disabled = !(locked || entries.some(e => e.draw_order != null));
+      btnReset.disabled = !(locked || entries.some(e => e.draw_order != null || e.status !== 'pending'));
     }
     let text, ok = false;
-    if (uncertain) text = 'Can’t confirm the drawing’s state, so this may be out of date. Check your signal. This keeps retrying.';
+    if (uncertain) text = 'Can\u2019t confirm the drawing\u2019s state, so this may be out of date. Check your signal. This keeps retrying.';
     else if (!locked) {
       if (total === 0) text = 'No entries yet. Waiting on registrations.';
-      else { text = plural(total, 'entry', 'entries') + ' ready. Click Lock & Randomize when you’re ready to draw.'; ok = true; }
-    } else if (won > 1) text = won + ' winners are recorded. Don’t announce anyone until this is sorted out: Reset the drawing if needed.';
+      else { text = plural(total, 'entry', 'entries') + ' ready. Use Lock & Randomize when you\u2019re ready to draw.'; ok = true; }
+    } else if (won > 1) text = won + ' winners are recorded. Don\u2019t announce anyone until this is sorted out: Reset the drawing if needed.';
     else if (won === 1) { text = 'Winner confirmed. Drawing complete.'; ok = true; }
-    else if (problem) text = 'The draw order isn’t complete. If another device is locking right now, wait a moment. Otherwise use Finish Lock below.';
+    else if (problem) text = 'The draw order isn\u2019t complete. If another device is locking right now, wait a moment. Otherwise use Finish Lock below.';
     else if (pending === 0) text = 'All entries exhausted without a winner. Reset to run another draw.';
     else { text = 'Drawing live: ' + plural(pending, 'name', 'names') + ' still to call.'; ok = true; }
     hint.className = 'nwe-hint' + (ok ? ' ok' : '');
@@ -48377,7 +48408,7 @@ window.dzInit = (function () {
       card.className = 'card dz-reveal empty';
       card.innerHTML = '<div class="dz-position">' + winners.length + ' winners recorded</div>'
         + winners.map(w => '<div class="dz-apa">' + esc(fullName(w)) + ', #' + esc(w.member_number) + '</div>').join('')
-        + '<p class="hint">Don’t announce anyone. Check with the other device, then Reset the drawing if needed.</p>';
+        + '<p class="hint">Don\u2019t announce anyone. Check with the other device, then Reset the drawing if needed.</p>';
       shownNextId = null;
       return;
     }
@@ -48394,8 +48425,8 @@ window.dzInit = (function () {
     const problem = positionProblem();
     if (problem) {
       card.className = 'card dz-reveal empty';
-      card.innerHTML = '<div class="dz-position">Draw order isn’t complete</div>'
-        + '<p class="hint">' + (problem.missing ? plural(problem.missing, 'entry has', 'entries have') + ' no draw position. ' : 'Some positions are wrong. ')
+      card.innerHTML = '<div class="dz-position">Draw order isn\u2019t complete</div>'
+        + '<p class="hint">' + (problem.missing ? plural(problem.missing, 'entry has', 'entries have') + ' no draw position: ' + esc(entries.filter(e => e.status === 'pending' && e.draw_order == null).slice(0, 5).map(fullName).join(', ')) + (problem.missing > 5 ? ' and more' : '') + '. ' : 'Some positions are wrong. ')
         + 'No names can be called until this is fixed. Finish Lock reshuffles everyone still pending. Registration stays closed, and skipped names stay skipped.</p>'
         + '<div class="dz-draw-actions"><button type="button" class="btn btn-primary" id="dzBtnFinish" data-act="finishLock">Finish Lock</button></div>';
       shownNextId = null;
@@ -48426,9 +48457,10 @@ window.dzInit = (function () {
     if (armTimer) setRevealDisabled(true);
   }
   function setRevealDisabled(on) { document.querySelectorAll('#dzReveal button').forEach(b => { b.disabled = on; }); }
-  function setBusyLabel(act, text) {
+  /* Only when the big card is showing that person: a tap in the list can be about someone else. */
+  function setBusyLabel(act, text, id) {
     const b = document.querySelector('#dzReveal button[data-act="' + act + '"]');
-    if (b) b.innerHTML = '<span class="nwe-spinner"></span>' + text;
+    if (b && (id == null || String(b.dataset.id) === String(id))) b.innerHTML = '<span class="nwe-spinner"></span>' + text;
   }
 
   function renderList() {
@@ -48479,8 +48511,9 @@ window.dzInit = (function () {
     if (!confirm('Delete ' + label(name) + '? This cannot be undone.')) return;
     busyOn();
     try {
-      const rows = await sbDelete('door_prize_entries?id=eq.' + encodeURIComponent(id));
-      if (rows.length !== 1) { say(name + ' was already gone.', 'err'); await settle(); return; }
+      /* A drawn entry has a position. The filter stops a stale screen removing an entrant from a running draw. */
+      const rows = await sbDelete('door_prize_entries?id=eq.' + encodeURIComponent(id) + '&draw_order=is.null');
+      if (rows.length !== 1) { say(name + ' was not deleted: the drawing is locked now, or they\u2019re already gone.', 'err'); await settle(); return; }
       entries = entries.filter(x => x !== e);
       renderAll();
       say('Deleted ' + name + '.', 'ok');
@@ -48554,7 +48587,7 @@ window.dzInit = (function () {
       const now = new Date().toISOString();
       await inBatches(order, 8, o => sbPatch('door_prize_entries?id=eq.' + o.id, { draw_order: o.draw_order, updated_at: now }));
       await loadAll();
-      if (positionProblem()) throw new Error('the draw order still isn’t complete');
+      if (positionProblem()) throw new Error('the draw order still isn\u2019t complete');
       say('Lock finished: ' + plural(order.length, 'name', 'names') + ' still to call.', 'ok');
     } catch (e) {
       say('Finish Lock failed: ' + e.message, 'err');
@@ -48574,14 +48607,14 @@ window.dzInit = (function () {
     if (!confirm('Mark ' + label(name) + ' as the $1200 winner?\n\nThis closes the drawing. Reset if you need to continue.')) return;
     busyOn();
     setRevealDisabled(true);
-    setBusyLabel('winner', 'Confirming&hellip;');
+    setBusyLabel('winner', 'Confirming&hellip;', id);
     try {
       const [already, state] = await Promise.all([
         sbGet('door_prize_entries?status=eq.won&select=id&limit=1'),
         sbGet('door_prize_state?select=locked&limit=1')
       ]);
       if (already.length) {
-        say('Another device already confirmed a winner. Nothing changed.', 'err');
+        say('A winner is already recorded. Nothing changed. Showing the latest.', 'err');
         await settle();
         return;
       }
@@ -48611,7 +48644,6 @@ window.dzInit = (function () {
     } catch (err) {
       say('Failed: ' + err.message, 'err');
       await settle();
-      renderReveal();
     } finally {
       busyOff();
       if (!armTimer) setRevealDisabled(false);
@@ -48624,9 +48656,11 @@ window.dzInit = (function () {
     if (!e || _busy) return;
     busyOn();
     setRevealDisabled(true);
-    if (to === 'skipped') setBusyLabel('skip', 'Skipping&hellip;');
+    if (to === 'skipped') setBusyLabel('skip', 'Skipping&hellip;', id);
     try {
-      const rows = await sbPatch('door_prize_entries?id=eq.' + encodeURIComponent(id) + '&status=eq.' + from, { status: to, updated_at: new Date().toISOString() });
+      /* The position too: after a reset and re-lock elsewhere, a stale tap would skip someone not yet called. */
+      const position = e.draw_order == null ? '' : '&draw_order=eq.' + encodeURIComponent(e.draw_order);
+      const rows = await sbPatch('door_prize_entries?id=eq.' + encodeURIComponent(id) + '&status=eq.' + from + position, { status: to, updated_at: new Date().toISOString() });
       if (rows.length !== 1) {
         say(fullName(e) + ' changed on another device. Showing the latest.', 'err');
         await settle();
@@ -48634,10 +48668,10 @@ window.dzInit = (function () {
       }
       e.status = to;
       renderAll();
+      if (to === 'skipped') say('Skipped ' + fullName(e) + '. Un-skip is in the list below.', 'ok');
     } catch (err) {
       say('Failed: ' + err.message, 'err');
       await settle();
-      renderReveal();
     } finally {
       busyOff();
       /* A new name arms itself after a moment. Anything else is ready now. */
@@ -48647,8 +48681,11 @@ window.dzInit = (function () {
 
   async function resetDrawing() {
     if (_busy) return;
-    const msg = entries.some(e => e.status === 'won')
-      ? 'Reset will clear the current winner, unlock registration, and wipe all draw order. Are you sure?'
+    /* This screen can be 30 s old, and the warning has to name a winner confirmed on another device. */
+    try { await loadAll(); } catch (e) { /* the write below will say so if the signal is gone */ }
+    const winner = entries.find(e => e.status === 'won');
+    const msg = winner
+      ? 'Reset will clear the current winner, ' + label(fullName(winner)) + ', unlock registration, and wipe all draw order. Are you sure?'
       : 'Reset will unlock registration and clear all draw order and statuses. Entries stay registered. Are you sure?';
     if (!confirm(msg)) return;
     const btn = $('dzBtnReset');
@@ -48656,14 +48693,16 @@ window.dzInit = (function () {
     btn.innerHTML = '<span class="nwe-spinner"></span>Resetting&hellip;';
     btnBusy = true;
     busyOn();
+    let cleared = false;
     try {
       const now = new Date().toISOString();
       await sbPatch('door_prize_entries?id=gt.0', { status: 'pending', draw_order: null, updated_at: now });
+      cleared = true;
       await sbPatch('door_prize_state?id=eq.1', { locked: false, updated_at: now });
       await loadAll();
       say('Drawing reset.', 'ok');
     } catch (e) {
-      say('Reset failed: ' + e.message, 'err');
+      say((cleared ? 'The draw order and winner were cleared, but registration may still be closed. Tap Reset Drawing again: ' : 'Reset failed: ') + e.message, 'err');
       await settle();
     } finally {
       busyOff();
@@ -48753,7 +48792,7 @@ window.pgInit = (function () {
   function busyOff() { _busy = Math.max(0, _busy - 1); _epoch++; }
   function isActive() { return $(TAB_ID).classList.contains('active'); }
   /* Polls only while this tab is showing, the page is visible and nothing is running. A control being used in a list is left alone. */
-  let _pollTimer = null, _pollFailing = false, _blurWired = false;
+  let _pollTimer = null, _pollFailing = false, _blurWired = false, _selectWaits = 0;
   function startPoll(fn) {
     if (!_blurWired) {
       /* A dropdown keeps focus after a choice, which would hold off polling until the next tap elsewhere. */
@@ -48764,16 +48803,21 @@ window.pgInit = (function () {
     _pollTimer = setInterval(async () => {
       if (!isActive()) { clearInterval(_pollTimer); _pollTimer = null; return; }
       if (_busy || document.hidden) return;
-      /* Re-rendering would close an open dropdown. */
+      /* Re-rendering would close an open dropdown. One left focused mustn't stop polling for good, so after six ticks it goes ahead. */
       const a = document.activeElement;
-      if (a && a.tagName === 'SELECT' && a.closest('#' + TAB_ID)) return;
+      if (a && a.tagName === 'SELECT' && a.closest('#' + TAB_ID) && ++_selectWaits <= 6) return;
+      _selectWaits = 0;
       try {
         await fn();
-        if (_pollFailing) { _pollFailing = false; say('Back in touch with the database.', 'ok'); }
+        if (_pollFailing) {
+          _pollFailing = false;
+          if ($(STATUS_ID).classList.contains('warn')) say('Back in touch with the database.', 'ok');
+        }
       } catch (e) {
-        /* Whatever is on screen stays, because a venue's dead spot shouldn't blank a draw. It just can't pass for current. */
+        /* Whatever is on screen stays, because a venue's dead spot shouldn't blank a draw. It just can't pass for current.
+           An error already showing matters more: a failed Lock mustn't be replaced by this. */
         _pollFailing = true;
-        say('Can\u2019t reach the database, so this may be out of date. Still retrying.', 'warn');
+        if (!$(STATUS_ID).classList.contains('err')) say('Can\u2019t reach the database, so this may be out of date. Still retrying.', 'warn');
       }
     }, 30000);
   }
@@ -48858,7 +48902,7 @@ window.pgInit = (function () {
   }
 
   let players = [];
-  let wired = false, closed = false, loadToken = 0, btnBusy = false, uncertain = false;
+  let wired = false, closed = false, loadToken = 0, btnBusy = false, uncertain = false, loadedOnce = false;
 
   function fullName(p) { return p.first_name + ' ' + p.last_name; }
 
@@ -48870,11 +48914,19 @@ window.pgInit = (function () {
     if (t !== loadToken || ep !== _epoch) return;
     players = rows;
     uncertain = false;
+    loadedOnce = true;
     renderStats();
     renderPlayers();
   }
   async function reload() {
-    try { await loadPlayers(); } catch (e) { say('Failed to load: ' + e.message, 'err'); }
+    try { await loadPlayers(); } catch (e) {
+      say('Failed to load: ' + e.message, 'err');
+      /* "Registered 0" and "Loading" would both be untrue here. The poll keeps trying. */
+      if (!loadedOnce) {
+        $('pgStatTotal').textContent = '\u2014';
+        $('pgList').innerHTML = '<tr><td colspan="6" class="nwe-err">Couldn\u2019t load the players. This keeps retrying.</td></tr>';
+      }
+    }
   }
   /* After a failed write. Keeps that error on screen, and if the read fails too, says the screen can't be trusted. */
   async function settle() {
@@ -48908,8 +48960,10 @@ window.pgInit = (function () {
     const btnPair = $('pgBtnPair'), btnReset = $('pgBtnReset'), hint = $('pgHint');
     const problem = pairProblem();
     let text, ok = false, ready = false;
-    if (uncertain) text = 'Can’t confirm the latest, so this may be out of date. Check your signal. This keeps retrying.';
-    else if (problem) text = 'The draw isn’t right: ' + (problem.unpaired ? plural(problem.unpaired, 'paid player has', 'paid players have') + ' no team' : 'some teams don’t match up') + '. Hit Reset Draw, then draw again.';
+    if (uncertain) text = 'Can\u2019t confirm the latest, so this may be out of date. Check your signal. This keeps retrying.';
+    else if (problem && (problem.badTeam || problem.badPartner)) text = 'The draw isn\u2019t right: some teams don\u2019t match up. Hit Reset Draw, then draw again.';
+    /* Someone paying after a good draw is ordinary, so this mustn't read as a broken draw. */
+    else if (problem) text = 'Draw is done, ' + plural(teams, 'team', 'teams') + '. ' + plural(problem.unpaired, 'paid player has', 'paid players have') + ' no team: they paid after the draw, or it didn\u2019t finish. Reset Draw if they need to be in it.';
     else if (paired > 0) { text = 'Draw is done, ' + plural(teams, 'team', 'teams') + '. Hit Reset Draw before re-drawing.'; }
     else if (paid < 2) text = 'Need at least 2 paid players to run the draw.';
     else if (paid % 2 !== 0) text = plural(paid, 'paid player', 'paid players') + ', an odd number. Delete one or mark another paid to even it out.';
@@ -48941,9 +48995,9 @@ window.pgInit = (function () {
       return '<tr>'
         + '<td>' + esc(p.member_number) + '</td>'
         + '<td class="nwe-wrap">' + esc(fullName(p)) + '</td>'
-        + '<td><label class="nwe-toggle" title="Toggle paid"><input type="checkbox" data-act="paid" data-id="' + esc(p.id) + '"' + (p.paid ? ' checked' : '') + '><span class="nwe-slider"></span></label></td>'
-        + '<td>' + teamCell + '</td>'
-        + '<td class="nwe-partner">' + partnerCell + '</td>'
+        + '<td data-label="Paid"><label class="nwe-toggle" title="Toggle paid"><input type="checkbox" data-act="paid" data-id="' + esc(p.id) + '"' + (p.paid ? ' checked' : '') + '><span class="nwe-slider"></span></label></td>'
+        + '<td data-label="Team">' + teamCell + '</td>'
+        + '<td class="nwe-partner" data-label="Partner">' + partnerCell + '</td>'
         + '<td class="nwe-right">' + del + '</td>'
       + '</tr>';
     }).join('');
@@ -48952,6 +49006,8 @@ window.pgInit = (function () {
   function find(id) { return players.find(p => String(p.id) === String(id)); }
 
   async function togglePaid(id, paid) {
+    /* A change mid-draw would make its reads old news, and it would pair from the list before the change. Toggles at the desk can still overlap each other. */
+    if (btnBusy) { say('Wait for the draw to finish, then try that again.', 'err'); renderPlayers(); return; }
     busyOn();
     let failed = false;
     try {
@@ -49022,7 +49078,9 @@ window.pgInit = (function () {
       /* Only a player with no team: a second device drawing at the same moment can't overwrite this one silently. */
       await inBatches(updates, 8, u => sbPatch('pool_gods_players?id=eq.' + u.id + '&team_number=is.null', { team_number: u.team_number, partner_id: u.partner_id, updated_at: now }));
       await loadPlayers();
-      if (pairProblem()) throw new Error('the teams did not save correctly');
+      /* Each update against what's there now: a zero-row update answers 200. */
+      const wrong = updates.filter(u => { const p = find(u.id); return !p || p.team_number !== u.team_number || p.partner_id !== u.partner_id; }).length;
+      if (wrong) throw new Error(plural(wrong, 'player was', 'players were') + ' not paired as drawn');
       say('Paired ' + plural(updates.length / 2, 'team', 'teams') + '. The Pool Gods have spoken.', 'ok');
     } catch (e) {
       say('Draw failed: ' + e.message + '. Reset the draw before trying again.', 'err');
@@ -49138,7 +49196,7 @@ window.rhInit = (function () {
   function busyOff() { _busy = Math.max(0, _busy - 1); _epoch++; }
   function isActive() { return $(TAB_ID).classList.contains('active'); }
   /* Polls only while this tab is showing, the page is visible and nothing is running. A control being used in a list is left alone. */
-  let _pollTimer = null, _pollFailing = false, _blurWired = false;
+  let _pollTimer = null, _pollFailing = false, _blurWired = false, _selectWaits = 0;
   function startPoll(fn) {
     if (!_blurWired) {
       /* A dropdown keeps focus after a choice, which would hold off polling until the next tap elsewhere. */
@@ -49149,16 +49207,21 @@ window.rhInit = (function () {
     _pollTimer = setInterval(async () => {
       if (!isActive()) { clearInterval(_pollTimer); _pollTimer = null; return; }
       if (_busy || document.hidden) return;
-      /* Re-rendering would close an open dropdown. */
+      /* Re-rendering would close an open dropdown. One left focused mustn't stop polling for good, so after six ticks it goes ahead. */
       const a = document.activeElement;
-      if (a && a.tagName === 'SELECT' && a.closest('#' + TAB_ID)) return;
+      if (a && a.tagName === 'SELECT' && a.closest('#' + TAB_ID) && ++_selectWaits <= 6) return;
+      _selectWaits = 0;
       try {
         await fn();
-        if (_pollFailing) { _pollFailing = false; say('Back in touch with the database.', 'ok'); }
+        if (_pollFailing) {
+          _pollFailing = false;
+          if ($(STATUS_ID).classList.contains('warn')) say('Back in touch with the database.', 'ok');
+        }
       } catch (e) {
-        /* Whatever is on screen stays, because a venue's dead spot shouldn't blank a draw. It just can't pass for current. */
+        /* Whatever is on screen stays, because a venue's dead spot shouldn't blank a draw. It just can't pass for current.
+           An error already showing matters more: a failed Lock mustn't be replaced by this. */
         _pollFailing = true;
-        say('Can\u2019t reach the database, so this may be out of date. Still retrying.', 'warn');
+        if (!$(STATUS_ID).classList.contains('err')) say('Can\u2019t reach the database, so this may be out of date. Still retrying.', 'warn');
       }
     }, 30000);
   }
@@ -49308,7 +49371,10 @@ window.rhInit = (function () {
 
   async function loadPlayers() {
     try {
-      allPlayers = await sbGetAll('raffle_players?select=*&order=last_name.asc,first_name.asc,id.asc');
+      const ep = _epoch;
+      const rows = await sbGetAll('raffle_players?select=*&order=last_name.asc,first_name.asc,id.asc');
+      if (ep !== _epoch) return;
+      allPlayers = rows;
       renderPlayers();
     } catch (e) { errorRow('rhPlayers', 4, e); }
   }
@@ -49371,7 +49437,11 @@ window.rhInit = (function () {
 
   async function loadChannels() {
     try {
-      allChannels = await sbGetAll('raffle_channels?select=*&order=sort_order.asc,channel_name.asc,id.asc');
+      const ep = _epoch;
+      const rows = await sbGetAll('raffle_channels?select=*&order=sort_order.asc,channel_name.asc,id.asc');
+      /* A write that began since this read did makes these rows old news: a switch would repaint wrong, and the count wouldn't notice. */
+      if (ep !== _epoch) return;
+      allChannels = rows;
       renderChannels();
       populateFilter();
     } catch (e) { errorRow('rhChannels', 5, e); }
@@ -49401,10 +49471,13 @@ window.rhInit = (function () {
     sel.value = allChannels.some(c => String(c.id) === cur) ? cur : '';
   }
   async function addChannel() {
+    if (_busy) return;
     const name = $('rhChName').value.trim(), url = $('rhChUrl').value.trim();
     if (!name || !url) return say('Both fields are required.', 'err');
     const maxSort = allChannels.reduce((m, c) => Math.max(m, c.sort_order || 0), 0);
     busyOn();
+    const addBtn = document.querySelector('#' + TAB_ID + ' [data-act="addChannel"]');
+    addBtn.disabled = true;
     try {
       await sbPost('raffle_channels', [{ channel_name: name, channel_url: url, active: true, sort_order: maxSort + 1 }]);
       say('Channel added.', 'ok');
@@ -49415,6 +49488,7 @@ window.rhInit = (function () {
       say('Failed: ' + e.message, 'err');
     } finally {
       busyOff();
+      addBtn.disabled = false;
     }
   }
   async function toggleChannel(id, active) {
@@ -49449,7 +49523,7 @@ window.rhInit = (function () {
       renderPlayers();
       say('Deleted the channel and its submissions.', 'ok');
     } catch (e) {
-      alert((entriesGone ? 'Its submissions were deleted, but the channel was not: ' : 'Delete failed, nothing was removed: ') + e.message);
+      alert((entriesGone ? 'Its submissions were deleted, but the channel was not: ' : 'Delete failed. Check the list to see what was removed: ') + e.message);
       await reloadAll();
     } finally {
       busyOff();
@@ -49650,7 +49724,7 @@ window.nwrInit = (function () {
   function busyOff() { _busy = Math.max(0, _busy - 1); _epoch++; }
   function isActive() { return $(TAB_ID).classList.contains('active'); }
   /* Polls only while this tab is showing, the page is visible and nothing is running. A control being used in a list is left alone. */
-  let _pollTimer = null, _pollFailing = false, _blurWired = false;
+  let _pollTimer = null, _pollFailing = false, _blurWired = false, _selectWaits = 0;
   function startPoll(fn) {
     if (!_blurWired) {
       /* A dropdown keeps focus after a choice, which would hold off polling until the next tap elsewhere. */
@@ -49661,16 +49735,21 @@ window.nwrInit = (function () {
     _pollTimer = setInterval(async () => {
       if (!isActive()) { clearInterval(_pollTimer); _pollTimer = null; return; }
       if (_busy || document.hidden) return;
-      /* Re-rendering would close an open dropdown. */
+      /* Re-rendering would close an open dropdown. One left focused mustn't stop polling for good, so after six ticks it goes ahead. */
       const a = document.activeElement;
-      if (a && a.tagName === 'SELECT' && a.closest('#' + TAB_ID)) return;
+      if (a && a.tagName === 'SELECT' && a.closest('#' + TAB_ID) && ++_selectWaits <= 6) return;
+      _selectWaits = 0;
       try {
         await fn();
-        if (_pollFailing) { _pollFailing = false; say('Back in touch with the database.', 'ok'); }
+        if (_pollFailing) {
+          _pollFailing = false;
+          if ($(STATUS_ID).classList.contains('warn')) say('Back in touch with the database.', 'ok');
+        }
       } catch (e) {
-        /* Whatever is on screen stays, because a venue's dead spot shouldn't blank a draw. It just can't pass for current. */
+        /* Whatever is on screen stays, because a venue's dead spot shouldn't blank a draw. It just can't pass for current.
+           An error already showing matters more: a failed Lock mustn't be replaced by this. */
         _pollFailing = true;
-        say('Can\u2019t reach the database, so this may be out of date. Still retrying.', 'warn');
+        if (!$(STATUS_ID).classList.contains('err')) say('Can\u2019t reach the database, so this may be out of date. Still retrying.', 'warn');
       }
     }, 30000);
   }
@@ -49917,6 +49996,8 @@ window.nwrInit = (function () {
       $('nwrCurrentSel').value = '';
       $('nwrSvyEvent').value = '';
       await loadEvents();
+      /* The survey dropdown just moved, so its rows have to follow or an export is mislabeled. */
+      await loadSurveys();
     } catch (e) {
       alert('Could not set current: ' + e.message);
     } finally {
@@ -49999,9 +50080,9 @@ window.nwrInit = (function () {
         + '<td>' + esc(ref.member_number || '') + '</td>'
         + '<td class="nwe-wrap">' + esc(ref.email || '') + '</td>'
         + '<td>' + esc(ref.phone || '') + '</td>'
-        + '<td><select class="nwr-cert" data-act="cert" data-id="' + id + '">' + certs + '</select></td>'
+        + '<td data-label="Cert"><select class="nwr-cert" data-act="cert" data-id="' + id + '">' + certs + '</select></td>'
         + '<td><label class="nwe-checkline"><input type="checkbox" data-act="active" data-id="' + id + '"' + (ref.active ? ' checked' : '') + '> Active</label></td>'
-        + '<td><button type="button" class="btn btn-outline btn-sm" data-act="notes" data-id="' + id + '">' + (ref.notes ? 'Edit' : 'Add') + '</button></td>'
+        + '<td data-label="Notes"><button type="button" class="btn btn-outline btn-sm" data-act="notes" data-id="' + id + '">' + (ref.notes ? 'Edit' : 'Add') + '</button></td>'
         + '<td><button type="button" class="btn btn-danger btn-sm" data-act="deleteRef" data-id="' + id + '">Delete</button></td>'
       + '</tr>';
     }).join('');
@@ -50446,7 +50527,7 @@ window.cstInit = (function () {
   function busyOff() { _busy = Math.max(0, _busy - 1); _epoch++; }
   function isActive() { return $(TAB_ID).classList.contains('active'); }
   /* Polls only while this tab is showing, the page is visible and nothing is running. A control being used in a list is left alone. */
-  let _pollTimer = null, _pollFailing = false, _blurWired = false;
+  let _pollTimer = null, _pollFailing = false, _blurWired = false, _selectWaits = 0;
   function startPoll(fn) {
     if (!_blurWired) {
       /* A dropdown keeps focus after a choice, which would hold off polling until the next tap elsewhere. */
@@ -50457,16 +50538,21 @@ window.cstInit = (function () {
     _pollTimer = setInterval(async () => {
       if (!isActive()) { clearInterval(_pollTimer); _pollTimer = null; return; }
       if (_busy || document.hidden) return;
-      /* Re-rendering would close an open dropdown. */
+      /* Re-rendering would close an open dropdown. One left focused mustn't stop polling for good, so after six ticks it goes ahead. */
       const a = document.activeElement;
-      if (a && a.tagName === 'SELECT' && a.closest('#' + TAB_ID)) return;
+      if (a && a.tagName === 'SELECT' && a.closest('#' + TAB_ID) && ++_selectWaits <= 6) return;
+      _selectWaits = 0;
       try {
         await fn();
-        if (_pollFailing) { _pollFailing = false; say('Back in touch with the database.', 'ok'); }
+        if (_pollFailing) {
+          _pollFailing = false;
+          if ($(STATUS_ID).classList.contains('warn')) say('Back in touch with the database.', 'ok');
+        }
       } catch (e) {
-        /* Whatever is on screen stays, because a venue's dead spot shouldn't blank a draw. It just can't pass for current. */
+        /* Whatever is on screen stays, because a venue's dead spot shouldn't blank a draw. It just can't pass for current.
+           An error already showing matters more: a failed Lock mustn't be replaced by this. */
         _pollFailing = true;
-        say('Can\u2019t reach the database, so this may be out of date. Still retrying.', 'warn');
+        if (!$(STATUS_ID).classList.contains('err')) say('Can\u2019t reach the database, so this may be out of date. Still retrying.', 'warn');
       }
     }, 30000);
   }
@@ -50625,6 +50711,7 @@ window.cstInit = (function () {
       feed.innerHTML = '';
       $('cstEmpty').classList.add('hidden');
       $('cstNewPosts').classList.add('hidden');
+      $('cstNewPosts').textContent = 'New posts: tap to refresh';
     }
     $('cstLoading').classList.remove('hidden');
     $('cstMore').classList.add('hidden');
@@ -50653,6 +50740,8 @@ window.cstInit = (function () {
       err.style.position = 'static';
       err.textContent = 'Could not load the feed: ' + e.message;
       feed.appendChild(err);
+      $('cstNewPosts').textContent = 'Tap to try again';
+      $('cstNewPosts').classList.remove('hidden');
     } finally {
       if (t === feedToken) $('cstLoading').classList.add('hidden');
     }
@@ -50802,8 +50891,9 @@ window.cstInit = (function () {
       if (rows.length !== 1) say('The ban saved, but that post no longer exists.', 'err');
       await loadFeed(true);
     } catch (e) {
-      alert((banned ? 'The ban saved, but the post is still showing: ' : 'Ban failed, nothing changed: ') + e.message);
-      if (banned) { closeBan(); await loadFeed(true); }
+      alert((banned ? 'The ban saved, but the post is still showing: ' : 'Ban failed. Check the list to see what changed: ') + e.message);
+      if (banned) closeBan();
+      await loadFeed(true);
     } finally {
       busyOff();
       btn.disabled = false;
@@ -50934,7 +51024,7 @@ window.cstInit = (function () {
       if (refusedPublicKey('cstClosed', 'cstBody')) { closed = true; return; }
       wire();
       loadFeed(true);
-    } else if (!_busy && !$('cstFeed').children.length) {
+    } else if (!_busy && !posts.size) {
       loadFeed(true);
     }
     startPoll(poll);
