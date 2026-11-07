@@ -6345,6 +6345,9 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
         #tab-trophycase .tph-toggle input:checked + .tph-slider::before{transform:translateX(20px)}
         #tab-trophycase .tph-toggle input:focus-visible + .tph-slider{outline:2px solid var(--spm-accent);outline-offset:2px}
         #tab-trophycase .tph-sort{width:64px;min-height:32px;padding:4px 6px;text-align:center}
+        /* The two area dropdowns stack below ~500 px, so a phone shows a whole "Eastside Seattle APA (#983)", not half of it. */
+        #tab-trophycase .tph-area-row > *{flex-basis:240px}
+        #tab-trophycase .tph-league{width:84px}
         #tab-trophycase .tph-file{display:block;padding:8px 16px;border:1.5px dashed var(--border);border-radius:10px;background:#fff;color:var(--muted);cursor:pointer;text-align:center;text-transform:none;letter-spacing:0;font-size:.85rem;font-weight:600;min-height:44px;line-height:26px;overflow-wrap:anywhere}
         #tab-trophycase .tph-file:hover{border-color:var(--spm-accent);color:var(--text)}
         #tab-trophycase .tph-file.has-file{border-color:var(--spm-accent);color:var(--spm-accent)}
@@ -6445,7 +6448,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             <div id="tphAreasLoading" class="hint"><span class="tph-spinner"></span> Loading&hellip;</div>
             <div class="table-wrap">
               <table class="table hidden" id="tphAreasTable">
-                <thead><tr><th>Name</th><th>Sort</th><th></th></tr></thead>
+                <thead><tr><th>Name</th><th>League ID</th><th>Sort</th><th></th></tr></thead>
                 <tbody id="tphAreasBody"></tbody>
               </table>
             </div>
@@ -6477,7 +6480,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
             <div class="tph-field"><label for="tphBrkPlayers" id="tphBrkPlayersLabel">Team players <span class="tph-optional">(optional, comma-separated)</span></label><textarea id="tphBrkPlayers" placeholder="Player 1, Player 2, Player 3"></textarea></div>
             <div class="tph-field"><label for="tphBrkRunner" id="tphBrkRunnerLabel">Runner-up <span class="tph-optional">(optional)</span></label><input type="text" id="tphBrkRunner" placeholder="Runner-up name"></div>
             <div class="tph-field"><label for="tphBrkRunnerPlayers" id="tphBrkRunnerPlayersLabel">Runner-up players <span class="tph-optional">(optional, comma-separated)</span></label><textarea id="tphBrkRunnerPlayers" placeholder="Player 1, Player 2"></textarea></div>
-            <div class="form-row">
+            <div class="form-row tph-area-row">
               <div><label for="tphBrkArea">1st place league area <span class="tph-optional">(optional)</span></label><select id="tphBrkArea"><option value="">-- None --</option></select></div>
               <div><label for="tphBrkRunnerArea">2nd place league area <span class="tph-optional">(optional)</span></label><select id="tphBrkRunnerArea"><option value="">-- None --</option></select></div>
             </div>
@@ -6787,7 +6790,7 @@ tr.ehq-team-row.expanded + tr.ehq-player-detail { display: table-row; }
 const APP_NAME_BASE = 'Slate';
 const IS_PREPROD    = /\/preprod\//.test(location.pathname);
 const APP_NAME      = IS_PREPROD ? APP_NAME_BASE + '-preprod' : APP_NAME_BASE;
-const APP_VERSION = '3.468';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
+const APP_VERSION = '3.469';  // matches apa_core.apps.Slate (or Slate-preprod under /preprod/)
 const APP_PHASE   = 'Phase 1';
 const APP_TAGLINE = 'Supabase-backed';   // suffix on the footer line
 
@@ -14212,7 +14215,9 @@ function tphRenderAreas() {
   empty.classList.add('hidden');
   tphEl('tphAreasBody').innerHTML = _tphAreas.map(a => {
     const id = Number(a.id);
+    // League ID is a text field, not type="number": a number field reports "abc" as empty, which would read as "clear it".
     return '<tr><td>' + tphEsc(a.name) + '</td>'
+      + '<td><input type="text" inputmode="numeric" class="tph-sort tph-league" aria-label="League ID for ' + tphEsc(a.name) + '" placeholder="&mdash;" value="' + (a.apa_league_id ? Number(a.apa_league_id) : '') + '" data-act="area-league" data-id="' + id + '"></td>'
       + '<td><input type="number" class="tph-sort" aria-label="Sort order" value="' + (Number(a.sort_order) || 0) + '" data-act="area-sort" data-id="' + id + '"></td>'
       + '<td><button type="button" class="btn btn-danger btn-sm" data-act="area-delete" data-id="' + id + '">Delete</button></td></tr>';
   }).join('');
@@ -14239,6 +14244,38 @@ async function tphUpdateAreaSort(id, val) {
   } catch (e) {
     tphStatus('Failed to update sort: ' + e.message, 'err');
     await tphLoadAreas();
+  }
+}
+
+/* League ID (trophy_areas.apa_league_id, e.g. Pierce County APA = 985): 1–6 digits, or blank to clear. Anything else is refused
+   with a message and the field goes back to what is saved. The database refuses a duplicate or 0 too, whoever writes it. */
+async function tphUpdateAreaLeague(id, val) {
+  const area = _tphAreas.find(a => a.id === id);
+  if (!area) return;
+  const v = String(val).trim(), had = area.apa_league_id == null ? null : Number(area.apa_league_id);
+  if (v !== '' && !/^[1-9][0-9]{0,5}$/.test(v)) {
+    tphStatus('League ID must be a whole number like 985, or blank. Nothing was saved.', 'err');
+    return tphRenderAreas();
+  }
+  const next = v === '' ? null : Number(v);
+  if (next === had) return tphRenderAreas();
+  const dup = next != null && _tphAreas.find(a => a.id !== id && Number(a.apa_league_id) === next);
+  if (dup) {
+    tphStatus('League ID ' + next + ' is already on ' + dup.name + '. Nothing was saved.', 'err');
+    return tphRenderAreas();
+  }
+  let clash = false;   // the database's unique constraint caught what a stale list could not; name the holder once the list is fresh
+  try {
+    await tphSb('PATCH', 'trophy_areas?id=eq.' + id, { apa_league_id: next });
+    tphStatus(next == null ? 'League ID cleared.' : 'League ID saved.', 'ok');
+  } catch (e) {
+    clash = /23505|duplicate key/i.test(e.message);
+    if (!clash) tphStatus('Failed to save league ID: ' + e.message, 'err');
+  }
+  await tphLoadAreas();
+  if (clash) {
+    const holder = _tphAreas.find(a => a.id !== id && Number(a.apa_league_id) === next);
+    tphStatus('League ID ' + next + ' is already on ' + (holder ? holder.name : 'another area') + '. Nothing was saved.', 'err');
   }
 }
 
@@ -14273,8 +14310,9 @@ function tphPopulateAreaDropdowns() {
   ['tphBrkArea', 'tphBrkRunnerArea'].forEach(id => {
     const sel = tphEl(id);
     const current = tphAreaValue(id);   // Edit may have asked for an area before these options existed
+    // The value stays the area's id; only the label carries the League ID, as "Pierce County APA (#985)".
     sel.innerHTML = '<option value="">-- None --</option>' + _tphAreas.map(a =>
-      '<option value="' + Number(a.id) + '"' + (String(a.id) === current ? ' selected' : '') + '>' + tphEsc(a.name) + '</option>').join('');
+      '<option value="' + Number(a.id) + '"' + (String(a.id) === current ? ' selected' : '') + '>' + tphEsc(a.name) + (a.apa_league_id ? ' (#' + Number(a.apa_league_id) + ')' : '') + '</option>').join('');
   });
 }
 
@@ -14651,6 +14689,7 @@ function tphWire() {
     if (t.dataset.act === 'event-active') tphToggleEventActive(id, t.checked);
     if (t.dataset.act === 'event-sl') tphToggleEventHasSL(id, t.checked);
     if (t.dataset.act === 'area-sort') tphUpdateAreaSort(id, t.value);
+    if (t.dataset.act === 'area-league') tphUpdateAreaLeague(id, t.value);
   });
   tphEl('tphEvtChallenge').addEventListener('change', tphAutoSlug);
   tphEl('tphEvtName').addEventListener('input', tphAutoSlug);
